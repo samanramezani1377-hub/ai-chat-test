@@ -3,7 +3,7 @@ package com.woogit.aicore.actions
 import com.woogit.aicore.domain.Action
 import com.woogit.aicore.domain.ActionRegistry
 
-class DefaultActionRegistry : ActionRegistry, ActionRegistryFacade {
+class DefaultActionRegistry : ActionRegistry {
     private val actions = linkedMapOf<String, Action<Any, Any>>()
     private val categoriesByAction = linkedMapOf<String, String>()
 
@@ -20,5 +20,5 @@ class DefaultActionRegistry : ActionRegistry, ActionRegistryFacade {
     override fun find(actionId: String): Action<Any, Any>? = actions[actionId]
 
     @Synchronized
-    override fun categories(): Set<String> = categoriesByAction.values.toSet()
+    fun categories(): Set<String> = categoriesByAction.values.toSet()
 }
