@@ -44,8 +44,8 @@
 - [x] 29. Recovery / Failure Strategy
 
 ### 30. Platform / Release / CI Acceptance
-حداقل نسخه Android، ABIهای پشتیبانی‌شده، Runtime/Model Compatibility و شرایط Release چه باشند؟ همچنین برای هر تغییر چه تست‌هایی باید در CI اجرا شوند و Definition of Done دقیقاً چه مواردی را شامل شود؟
-- [ ] 30. Platform / Release / CI Acceptance
+**تصمیم نهایی:** Platform، ABI و محدودیت‌های Runtime/Model بر اساس نیاز و قابلیت واقعی پروژه تعیین شوند و عدد ثابت غیرضروری از ابتدا تحمیل نشود. یک Compatibility Contract مرکزی وجود داشته باشد. CI پایه از همین حالا شامل Build، Unit Tests، Integration Tests، Architecture Checks، Static Analysis/Lint و Package/Validation باشد. تست‌های سخت‌گیرانه Action و Recovery از نظر طراحی و زیرساخت آماده باشند، اما فعلاً Release Gate اجباری نباشند. پس از رسیدن پروژه به آخرین سطح آمادگی و تأیید کیفیت خود اپ توسط مالک پروژه، این تست‌ها به Hard Gateهای CI/Release تبدیل شوند. Definition of Done شامل Implementation، Build، تست‌های مرتبط، CI، Architecture Compliance، Documentation، Compatibility و در موارد مرتبط Migration Readiness باشد.
+- [x] 30. Platform / Release / CI Acceptance
 
 ## روش ادامه
-پس از پاسخ به سؤالات ۲۱ تا ۳۰، هر تصمیم به سند تخصصی مربوط به خودش منتقل می‌شود و سپس Question Bank فقط وضعیت پاسخ‌گویی را ثبت خواهد کرد.
+تمام سؤالات ۲۱ تا ۳۰ پاسخ داده و تصمیم‌گیری شده‌اند. تصمیم‌های نهایی در اسناد تخصصی مربوط به خود نیز ثبت شده‌اند.
