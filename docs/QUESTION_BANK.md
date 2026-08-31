@@ -62,7 +62,9 @@
 
 فهرست Actionها و Metadata آن‌ها چگونه نگهداری شود؟ آیا هر Action باید Schema، Version، Permission، Risk Level، Confirmation Policy، Executor و Verifier مخصوص خود را در یک Registry مرکزی داشته باشد؟ اضافه‌کردن Action جدید دقیقاً چگونه انجام شود؟
 
-- [ ] 27. Action Registry
+**تصمیم نهایی:** گزینه C. معماری Actionها به‌صورت `Registry + Adapter Architecture` باشد. `ActionRegistry` مرجع مرکزی تعریف و کشف Actionهاست و Executor نیست. Actionها داخل خود Registry به‌صورت دسته‌بندی‌شده سازمان‌دهی شوند و هر Category بتواند در آینده Executor/Adapterهای بیشتری داشته باشد. بنابراین می‌توان Category جدید، Action جدید، Executor جدید یا Adapter محیط اجرا اضافه کرد بدون اینکه AI Core یا UI بازنویسی شوند. هر Action Contract و Metadata مستقل خود را دارد و اجرای واقعی از مسیر Adapter/Executor و سپس Verifier انجام می‌شود. این ساختار برای انتقال به WooGit نیز مناسب است، چون Action Contract می‌تواند ثابت بماند و Adapter/Executor محیط جدید اضافه یا جایگزین شود.
+
+- [x] 27. Action Registry
 
 ### 28. WooGit Integration Contract
 
