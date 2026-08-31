@@ -4,21 +4,53 @@
 
 این repository یک محیط آزمایشی برای بررسی فنی اجرای هوش مصنوعی کاملاً Local روی Android است؛ نه محصول نهایی.
 
-هدف اصلی این است که قبل از انتقال قابلیت Local AI به **WooGit**، بتوانیم اجرای مدل، Chat فارسی، Streaming، Performance، Agent، Actionهای واقعی، Verification و یک **AI Workspace** را روی دستگاه واقعی آزمایش و ارزیابی کنیم.
+هدف اصلی این است که قبل از انتقال قابلیت Local AI به **WooGit**، اجرای مدل، Chat فارسی، Streaming، Performance، Agent، Actionهای واقعی، Verification و یک **AI Workspace** روی دستگاه واقعی آزمایش و ارزیابی شوند.
 
 ## فهرست مستندات
 
-این README نمای کلی پروژه است و جزئیات تصمیم‌ها در مستندات زیر نگهداری می‌شوند:
+README نقشه کلی پروژه است. جزئیات هر بخش در سند تخصصی خودش نگهداری می‌شود:
 
 | سند | موضوع |
 |---|---|
-| [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md) | Specification اصلی و تصمیم‌های نهایی Prototype، Chat، Inference، Agent، Action Protocol، Safety، Performance، Network و مسیر مهاجرت به WooGit |
-| [`ACTION_EXECUTION_VERIFICATION.md`](docs/ACTION_EXECUTION_VERIFICATION.md) | اثبات اجرای واقعی Action، Executor، Verifier، Before/After و جلوگیری از Success جعلی |
-| [`AI_WORKSPACE.md`](docs/AI_WORKSPACE.md) | طراحی AI Workspace / میز کار، Preview، تعامل کاربر و ارتباط آن با Core و Action System |
-| [`PERFORMANCE_METRICS.md`](docs/PERFORMANCE_METRICS.md) | Metricهای کامل Performance، Network، History، Export و تنظیم مستقل Visibility |
-| [`QUESTION_BANK.md`](docs/QUESTION_BANK.md) | Question Bank و وضعیت تصمیم‌های پروژه |
+| [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md) | Specification اصلی و تصمیم‌های نهایی Prototype |
+| [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) | معماری Core/UI، مرزبندی لایه‌ها، Adapterها و مسیر معماری WooGit |
+| [`ACTION_PROTOCOL.md`](docs/ACTION_PROTOCOL.md) | قرارداد ActionRequest/ToolResult، Schema، Lifecycle و Errorها |
+| [`ACTION_EXECUTION_VERIFICATION.md`](docs/ACTION_EXECUTION_VERIFICATION.md) | اجرای واقعی Action، Executor، Verifier و شواهد Before/After |
+| [`TASK_STATE_MACHINE.md`](docs/TASK_STATE_MACHINE.md) | State Machine مربوط به Task، Agent، Execution و Cancellation |
+| [`SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) | Permission، Confirmation، Risk Level و مرز اعتماد Actionها |
+| [`DATA_AND_PRIVACY.md`](docs/DATA_AND_PRIVACY.md) | مرز داده Local، Network، Storage، Logging و Privacy |
+| [`AI_WORKSPACE.md`](docs/AI_WORKSPACE.md) | طراحی AI Workspace / میز کار و تعامل آن با Core و Action System |
+| [`PERFORMANCE_METRICS.md`](docs/PERFORMANCE_METRICS.md) | Performance، Network، History، Export و Visibility مستقل Metricها |
+| [`TEST_MATRIX.md`](docs/TEST_MATRIX.md) | ماتریس تست، سناریوهای موفق/ناموفق و Benchmark Protocol |
+| [`IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | مسیر مرحله‌ای تبدیل Specification به پیاده‌سازی و سپس مهاجرت به WooGit |
+| [`QUESTION_BANK.md`](docs/QUESTION_BANK.md) | Question Bank و تصمیم‌های ثبت‌شده پروژه |
+
+### ترتیب پیشنهادی مطالعه
+
+```text
+README
+  ↓
+PROTOTYPE_SPEC
+  ↓
+ARCHITECTURE
+  ├── ACTION_PROTOCOL
+  ├── TASK_STATE_MACHINE
+  └── SECURITY_MODEL
+  ↓
+ACTION_EXECUTION_VERIFICATION
+  ↓
+AI_WORKSPACE
+  ↓
+PERFORMANCE_METRICS + DATA_AND_PRIVACY
+  ↓
+TEST_MATRIX
+  ↓
+IMPLEMENTATION_PLAN
+```
 
 **مرجع اصلی تصمیم‌های فنی:** [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md)
+
+---
 
 ## 1. هدف پروژه
 
@@ -41,7 +73,9 @@
 
 این پروژه عمداً یک Prototype است و نباید بدون نیاز به هدف اصلی پیچیده شود.
 
-جزئیات کامل: [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md)
+جزئیات: [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md)
+
+---
 
 ## 2. مدل Baseline
 
@@ -54,7 +88,11 @@
 - مدل داخل APK قرار نمی‌گیرد.
 - کاربر مدل را به‌صورت فایل جداگانه Import می‌کند.
 
-Qwen3-1.7B فعلاً Baseline Prototype است و انتخاب آن قطعی برای محصول نهایی نیست. معماری باید امکان تعویض مدل و در آینده استفاده از مدل‌های بزرگ‌تر را بدون بازطراحی اساسی UI و Core فراهم کند.
+Qwen3-1.7B فعلاً Baseline Prototype است و انتخاب قطعی محصول نهایی نیست. معماری باید امکان تعویض مدل و Runtime را بدون بازطراحی اساسی UI و Core فراهم کند.
+
+جزئیات مدل و Prototype: [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md)
+
+---
 
 ## 3. معماری کلان
 
@@ -79,25 +117,34 @@ Qwen3-1.7B فعلاً Baseline Prototype است و انتخاب آن قطعی ب
                     UI / Workspace
 ```
 
-AI Core باید مسئول منطق Local AI، Model Management، Inference، Agent، Action Protocol، Executor، Verification و Performance/Observability باشد؛ UI فقط مصرف‌کننده این قابلیت‌ها و نمایش‌دهنده State/Result واقعی باشد.
+AI Core باید مسئول منطق Local AI، Model Management، Inference، Agent، Action Protocol، Executor، Verification و Performance/Observability باشد؛ UI فقط مصرف‌کننده قابلیت‌ها و نمایش‌دهنده State/Result واقعی باشد.
 
 ### چرا Core از UI جداست؟
 
 - Chat تنها مصرف‌کننده AI نیست.
 - قابلیت‌هایی مانند «بازنویسی توضیحات با AI» باید بتوانند مستقیماً از Core استفاده کنند.
-- Chat و UI باید Operationهای مشترک داشته باشند و منطق AI را دوباره پیاده‌سازی نکنند.
+- Chat و UI باید Operationهای مشترک داشته باشند.
 - تعویض مدل، Quantization یا Runtime نباید UI را مجبور به بازنویسی کند.
-- UI جدید نباید باعث کپی‌شدن Agent یا Inference شود.
 - Core باید مستقل تست و Regression شود.
 - مهاجرت به WooGit باید استخراج Core باشد، نه کپی کل اپ.
 
-جزئیات کامل معماری و مسیر مهاجرت: [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md)
+جزئیات: [`ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+
+---
 
 ## 4. Model Management
 
-کاربر باید بتواند Model Import، Validate، Load و Unload کند، مدل‌های Import‌شده را ببیند و وضعیت مدل را مشاهده کند.
+کاربر باید بتواند Model را:
+
+- Import کند.
+- Validate کند.
+- Load کند.
+- Unload کند.
+- مشاهده و مدیریت کند.
 
 مدل نباید در کد hardcode شود و مسیر فایل باید با Android Storage Access Framework مدیریت شود.
+
+---
 
 ## 5. Local Chat
 
@@ -111,6 +158,10 @@ AI Core باید مسئول منطق Local AI، Model Management، Inference، A
 - وضعیت مدل و Generation قابل مشاهده باشد.
 
 برای Inference نباید وابستگی اجباری به Cloud یا API خارجی وجود داشته باشد.
+
+جزئیات: [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md)
+
+---
 
 ## 6. Inference Settings
 
@@ -130,7 +181,9 @@ AI Core باید مسئول منطق Local AI، Model Management، Inference، A
 - Context Length
 - Structured Output / Grammar در صورت پشتیبانی واقعی Runtime
 
-تنظیمی که Runtime واقعاً اعمال نمی‌کند نباید در UI به‌عنوان قابلیت فعال نمایش داده شود.
+هر تنظیمی فقط زمانی باید در UI فعال معرفی شود که Runtime واقعاً آن را اعمال کند.
+
+---
 
 ## 7. Agent
 
@@ -158,7 +211,11 @@ Agent
 Final Answer
 ```
 
-Agent باید Multi-Step باشد و Maximum Agent Steps توسط کاربر قابل تنظیم باشد؛ هیچ مقدار عددی ثابت یا پیش‌فرض اجباری برای آن تعریف نمی‌شود. Runtime می‌تواند Hard Safety Limit مستقل برای جلوگیری از Loop غیرعادی داشته باشد.
+Agent باید Multi-Step باشد و Maximum Agent Steps توسط کاربر قابل تنظیم باشد. هیچ عدد ثابت اجباری به‌عنوان تنظیم کاربر تعریف نمی‌شود. Runtime می‌تواند Hard Safety Limit مستقل برای جلوگیری از Loop غیرعادی داشته باشد.
+
+جزئیات State: [`TASK_STATE_MACHINE.md`](docs/TASK_STATE_MACHINE.md)
+
+---
 
 ## 8. Actionهای Prototype
 
@@ -172,9 +229,13 @@ Agent باید Multi-Step باشد و Maximum Agent Steps توسط کاربر ق
 - `get_performance_stats`
 - `delete_file`
 
-`delete_file` نیازمند تأیید اجباری کاربر است.
+`delete_file` نیازمند Confirmation اجباری کاربر است.
 
 Web Search، HTTP Request و Actionهای وابسته به Cloud فعلاً خارج از Prototype هستند.
+
+قرارداد Actionها: [`ACTION_PROTOCOL.md`](docs/ACTION_PROTOCOL.md)
+
+---
 
 ## 9. Action واقعی و Verification
 
@@ -183,8 +244,6 @@ Web Search، HTTP Request و Actionهای وابسته به Cloud فعلاً خ�
 **Executor انجام می‌دهد → Verifier ثابت می‌کند → Agent نتیجه را تفسیر می‌کند → UI شواهد را نشان می‌دهد.**
 
 برای Actionهای State-changing در صورت امکان وضعیت Before و After بررسی می‌شود.
-
-مثلاً:
 
 ```text
 BEFORE
@@ -209,7 +268,9 @@ VERIFIED ✓
 
 اگر Verification شکست بخورد، Agent نباید موفقیت را اعلام کند.
 
-جزئیات کامل: [`ACTION_EXECUTION_VERIFICATION.md`](docs/ACTION_EXECUTION_VERIFICATION.md)
+جزئیات: [`ACTION_EXECUTION_VERIFICATION.md`](docs/ACTION_EXECUTION_VERIFICATION.md)
+
+---
 
 ## 10. Action Debug / Test Panel
 
@@ -226,6 +287,8 @@ VERIFIED ✓
 هدف این است که کاربر بتواند با مشاهده شواهد واقعی تشخیص دهد Action واقعاً اجرا شده یا فقط مدل ادعای اجرای آن را کرده است.
 
 جزئیات: [`ACTION_EXECUTION_VERIFICATION.md`](docs/ACTION_EXECUTION_VERIFICATION.md)
+
+---
 
 ## 11. AI Workspace — میز کار
 
@@ -246,9 +309,81 @@ Workspace **اجراکننده Action نیست**. اجرای واقعی از م�
 
 در آینده در WooGit می‌تواند برای تغییر قیمت، نمایش Before/After، بازنویسی توضیحات، تولید عنوان، اصلاح محتوا و سایر AI Operations استفاده شود.
 
-جزئیات کامل: [`AI_WORKSPACE.md`](docs/AI_WORKSPACE.md)
+جزئیات: [`AI_WORKSPACE.md`](docs/AI_WORKSPACE.md)
 
-## 12. Performance & Observability
+---
+
+## 12. Task State Machine
+
+Stateهای اصلی Task:
+
+```text
+IDLE
+ ↓
+PLANNING
+ ↓
+WAITING_FOR_CONFIRMATION
+ ↓
+EXECUTING
+ ↓
+VERIFYING
+ ↓
+COMPLETED
+```
+
+و حالت‌های پایانی/خطا:
+
+```text
+FAILED
+CANCELLED
+BLOCKED
+TIMEOUT
+STEP_LIMIT_REACHED
+```
+
+Stop Generation، Cancel Task و Cancellation یک Action درحال اجرا مفاهیم جدا هستند و باید State واقعی نمایش داده شود.
+
+جزئیات: [`TASK_STATE_MACHINE.md`](docs/TASK_STATE_MACHINE.md)
+
+---
+
+## 13. Security Model
+
+هر Action باید از نظر امنیتی مشخص کند:
+
+- Risk Level
+- Read Only / State-changing
+- Permission
+- Confirmation
+- Reversible بودن در صورت وجود
+
+**Permission** تعیین می‌کند Action اصولاً مجاز است یا نه.
+
+**Confirmation** تعیین می‌کند Action مجاز، قبل از اجرای واقعی نیاز به تأیید کاربر دارد یا نه.
+
+مسیر اعتماد:
+
+```text
+Model Output
+   ↓ untrusted
+Parser
+   ↓
+Validator
+   ↓
+Permission
+   ↓
+Confirmation
+   ↓
+Executor
+   ↓
+Verifier
+```
+
+جزئیات: [`SECURITY_MODEL.md`](docs/SECURITY_MODEL.md)
+
+---
+
+## 14. Performance & Observability
 
 Metricهای واقعی باید اندازه‌گیری شوند؛ Metric صوری، تخمینی یا Mock مجاز نیست.
 
@@ -284,7 +419,7 @@ Metricهای واقعی باید اندازه‌گیری شوند؛ Metric صو�
 ### Network
 
 - Network Request/Connectionهای واقعی
-- Network Usage در حد اطلاعاتی که Android/Runtime واقعاً ارائه می‌کند
+- Network Usage در حد اطلاعاتی که Android/Runtime ارائه می‌کند
 
 ### History / Reporting
 
@@ -294,7 +429,9 @@ Metricهای واقعی باید اندازه‌گیری شوند؛ Metric صو�
 
 جزئیات: [`PERFORMANCE_METRICS.md`](docs/PERFORMANCE_METRICS.md)
 
-## 13. Visibility قابل تنظیم
+---
+
+## 15. Visibility قابل تنظیم
 
 تمام Metricها باید اندازه‌گیری شوند، اما نمایش هر Metric باید **کاملاً مستقل** قابل روشن/خاموش‌شدن باشد.
 
@@ -304,23 +441,89 @@ Metricهای واقعی باید اندازه‌گیری شوند؛ Metric صو�
 const val SHOW_CPU = false
 ```
 
-باید فقط نمایش CPU را خاموش کند؛ Measurement نباید غیرفعال شود.
+این تغییر باید فقط نمایش CPU را خاموش کند؛ Measurement نباید غیرفعال شود.
 
-اگر Metric واقعاً قابل اندازه‌گیری نباشد، `Unavailable` نمایش داده شود یا بر اساس Visibility همان Metric مخفی شود؛ مقدار ساختگی مجاز نیست.
+اگر Metric واقعاً قابل اندازه‌گیری نباشد، مقدار ساختگی مجاز نیست و باید `Unavailable` یا رفتار Visibility تعریف‌شده نمایش داده شود.
 
 جزئیات: [`PERFORMANCE_METRICS.md`](docs/PERFORMANCE_METRICS.md)
 
-## 14. Network & Offline
+---
 
-- تمام Network Usage اپ باید واقعاً مانیتور شود.
-- Network Request/Connectionهای واقعی و میزان مصرف شبکه، در حد اطلاعاتی که Android/Runtime ارائه می‌کند، ثبت شوند.
+## 16. Network & Offline
+
+- Network Usage واقعی مانیتور شود.
+- Network Request/Connectionهای واقعی و مصرف شبکه، در حد اطلاعاتی که Android/Runtime ارائه می‌کند، ثبت شوند.
 - Network information در Performance/Debug قابل مشاهده باشد.
 - Offline با قطع واقعی اینترنت تست می‌شود.
 - Firewall، DNS، Fresh Install و سناریوهای پیچیده خارج از Requirement هستند.
 
-جزئیات: [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md) و [`PERFORMANCE_METRICS.md`](docs/PERFORMANCE_METRICS.md)
+مرز داده و Privacy: [`DATA_AND_PRIVACY.md`](docs/DATA_AND_PRIVACY.md)
 
-## 15. مهاجرت به WooGit
+Metricهای Network: [`PERFORMANCE_METRICS.md`](docs/PERFORMANCE_METRICS.md)
+
+---
+
+## 17. Data & Privacy Boundary
+
+اصل پروژه Local-first است:
+
+```text
+DEVICE
+├── Model Files
+├── Chat / Context
+├── Workspace State
+├── Action Logs
+├── Performance Metrics
+└── Tool Results
+        ↓
+      AI Core
+```
+
+Inference و داده‌های موردنیاز آن باید Local باشند و وابستگی اجباری به Cloud وجود نداشته باشد.
+
+هر قابلیت Network آینده باید مشخص کند چه داده‌ای، به کجا و برای چه هدفی ارسال می‌شود و آیا قابل خاموش‌کردن است یا نه.
+
+Logهای Debug نباید بدون نیاز Secrets، credentialها یا داده حساس را ذخیره کنند.
+
+جزئیات: [`DATA_AND_PRIVACY.md`](docs/DATA_AND_PRIVACY.md)
+
+---
+
+## 18. Test Matrix
+
+تست‌ها باید هم مسیر موفق و هم مسیر شکست را پوشش دهند.
+
+مهم‌ترین سناریوها:
+
+- Import و Validate مدل
+- Chat فارسی
+- Stop Generation
+- Action موفق
+- JSON نامعتبر
+- Action ناشناخته
+- Permission denied
+- Confirmation rejected
+- Execution failure
+- Verification failure
+- Multi-step Agent
+- Retry
+- Step Limit
+- Cancellation
+- Workspace evidence
+- Before/After
+- Performance metrics
+- Offline
+- Network usage
+- Persistence
+- Export
+
+هیچ تستی نباید فقط بر اساس Final Answer مدل موفق اعلام شود.
+
+جزئیات: [`TEST_MATRIX.md`](docs/TEST_MATRIX.md)
+
+---
+
+## 19. مهاجرت به WooGit
 
 هدف، انتقال کل `ai-chat-test` به WooGit نیست.
 
@@ -371,17 +574,25 @@ Preview
 Accept / Edit / Reject
 ```
 
-هم Chat و هم UI باید بتوانند از Operationهای مشترک استفاده کنند. برای عملیات حساس مانند تغییر قیمت، Validation و در صورت نیاز Preview/Confirmation لازم است.
+هم Chat و هم UI باید بتوانند از Operationهای مشترک استفاده کنند.
 
-جزئیات معماری مهاجرت: [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md) و [`AI_WORKSPACE.md`](docs/AI_WORKSPACE.md)
+برای عملیات حساس مانند تغییر قیمت، Validation و در صورت نیاز Preview/Confirmation لازم است.
 
-## 16. تصمیم درباره انتقال
+جزئیات معماری: [`ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+
+جزئیات Workspace: [`AI_WORKSPACE.md`](docs/AI_WORKSPACE.md)
+
+---
+
+## 20. تصمیم درباره انتقال
 
 برای Prototype هیچ Threshold یا امتیاز عددی از پیش تعیین‌شده‌ای برای اعلام موفقیت یا انتقال وجود ندارد.
 
 Prototype باید شواهد واقعی ارائه کند و **تصمیم نهایی درباره کیفیت Prototype و مناسب بودن انتقال به WooGit با کاربر است**.
 
-## 17. تست‌های پایه
+---
+
+## 21. تست‌های پایه
 
 ### Chat فارسی
 
@@ -411,7 +622,37 @@ Prototype باید شواهد واقعی ارائه کند و **تصمیم نه�
 
 این تست در Prototype صرفاً تبدیل دستور طبیعی به درخواست ساختاریافته را بررسی می‌کند و اتصال واقعی WooCommerce فعلاً لازم نیست.
 
-## 18. محدوده خارج از Prototype
+---
+
+## 22. Implementation Plan
+
+مسیر پیشنهادی پیاده‌سازی:
+
+```text
+Foundation
+   ↓
+Chat
+   ↓
+Action System
+   ↓
+Agent
+   ↓
+Workspace
+   ↓
+Observability
+   ↓
+QA
+   ↓
+WooGit extraction
+```
+
+هر Phase باید Build/CI سالم، قابلیت واقعی، تست مسیر خطا، Trace/Result قابل مشاهده و مستندات به‌روز داشته باشد.
+
+جزئیات: [`IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)
+
+---
+
+## 23. محدوده خارج از Prototype
 
 فعلاً خارج از محدوده:
 
@@ -428,7 +669,9 @@ Prototype باید شواهد واقعی ارائه کند و **تصمیم نه�
 - Autonomous Background Agent
 - تعداد زیاد Tool
 
-## 19. اصول توسعه
+---
+
+## 24. اصول توسعه
 
 هر تغییر باید:
 
@@ -437,9 +680,12 @@ Prototype باید شواهد واقعی ارائه کند و **تصمیم نه�
 3. قابلیت قبلی را بدون دلیل حذف نکند.
 4. نتیجه واقعی تست را گزارش کند.
 5. Mock یا گزارش جعلی ایجاد نکند.
-6. با Specification و مستندات پروژه سازگار باشد.
+6. با Specification و Contractهای پروژه سازگار باشد.
+7. مستندات مربوطه را هم‌زمان به‌روز نگه دارد.
 
-## 20. وضعیت
+---
+
+## 25. وضعیت
 
 **Baseline Model:** Qwen3-1.7B  
 **Format:** GGUF  
@@ -449,4 +695,4 @@ Prototype باید شواهد واقعی ارائه کند و **تصمیم نه�
 **Architecture Direction:** AI Core جدا از UI + Chat + AI Workspace + Action Verification  
 **Future Target:** امکان انتقال کنترل‌شده AI Core به WooGit
 
-برای جزئیات اجرایی و تصمیم‌های کامل، از [`docs/PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md) شروع کنید.
+برای شروع مطالعه از [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md) استفاده کنید؛ سپس معماری و Contractهای اجرایی را بخوانید.
