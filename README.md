@@ -1,115 +1,166 @@
 # AI Chat Test
 
-## هدف پروژه
+> **Prototype / Technical Feasibility Test برای Local AI روی Android و Agent قابل‌اعتماد**
 
-این repository یک **Prototype / Technical Feasibility Test** برای اجرای هوش مصنوعی کاملاً Local روی Android است.
+این repository یک محیط آزمایشی برای بررسی فنی اجرای هوش مصنوعی کاملاً Local روی Android است؛ نه محصول نهایی.
 
-هدف این پروژه ساخت محصول نهایی نیست. هدف این است که قبل از اضافه کردن قابلیت Local AI به پروژه **WooGit**، از نظر فنی بررسی کنیم که اجرای یک مدل زبانی روی گوشی، چت فارسی، Streaming، و یک Agent ساده با Tool/Action تا چه حد عملی و قابل اتکا است.
+هدف اصلی این است که قبل از انتقال قابلیت Local AI به **WooGit**، بتوانیم اجرای مدل، Chat فارسی، Streaming، Performance، Agent، Actionهای واقعی، Verification و یک **AI Workspace** را روی دستگاه واقعی آزمایش و ارزیابی کنیم.
 
-## تصمیم فعلی مدل
+## فهرست مستندات
 
-مدل پایه انتخاب‌شده برای Prototype:
+این README نمای کلی پروژه است و جزئیات تصمیم‌ها در مستندات زیر نگهداری می‌شوند:
+
+| سند | موضوع |
+|---|---|
+| [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md) | Specification اصلی و تصمیم‌های نهایی Prototype، Chat، Inference، Agent، Action Protocol، Safety، Performance، Network و مسیر مهاجرت به WooGit |
+| [`ACTION_EXECUTION_VERIFICATION.md`](docs/ACTION_EXECUTION_VERIFICATION.md) | اثبات اجرای واقعی Action، Executor، Verifier، Before/After و جلوگیری از Success جعلی |
+| [`AI_WORKSPACE.md`](docs/AI_WORKSPACE.md) | طراحی AI Workspace / میز کار، Preview، تعامل کاربر و ارتباط آن با Core و Action System |
+| [`PERFORMANCE_METRICS.md`](docs/PERFORMANCE_METRICS.md) | Metricهای کامل Performance، Network، History، Export و تنظیم مستقل Visibility |
+| [`QUESTION_BANK.md`](docs/QUESTION_BANK.md) | Question Bank و وضعیت تصمیم‌های پروژه |
+
+**مرجع اصلی تصمیم‌های فنی:** [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md)
+
+## 1. هدف پروژه
+
+پروژه باید مشخص کند Local AI روی Android تا چه حد برای استفاده آینده در WooGit عملی و قابل‌اتکا است.
+
+تمرکز Prototype:
+
+- اجرای Local Model
+- Chat فارسی
+- Streaming واقعی
+- Stop Generation
+- تنظیمات Inference
+- Agent واقعی
+- Actionهای واقعی
+- Action Verification
+- Performance Monitoring
+- Network Monitoring و Offline
+- AI Workspace
+- آماده‌سازی معماری برای مهاجرت به WooGit
+
+این پروژه عمداً یک Prototype است و نباید بدون نیاز به هدف اصلی پیچیده شود.
+
+جزئیات کامل: [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md)
+
+## 2. مدل Baseline
+
+مدل پایه فعلی:
 
 - **Qwen3-1.7B**
-- فرمت: **GGUF**
-- Quantization اولیه: **Q4_K_M**
-- Runtime پیشنهادی: **llama.cpp**
+- Format: **GGUF**
+- Initial Quantization: **Q4_K_M**
+- Runtime: **llama.cpp**
 - مدل داخل APK قرار نمی‌گیرد.
-- مدل به‌صورت فایل جداگانه توسط کاربر Import می‌شود.
+- کاربر مدل را به‌صورت فایل جداگانه Import می‌کند.
 
-### چرا Qwen3-1.7B؟
+Qwen3-1.7B فعلاً Baseline Prototype است و انتخاب آن قطعی برای محصول نهایی نیست. معماری باید امکان تعویض مدل و در آینده استفاده از مدل‌های بزرگ‌تر را بدون بازطراحی اساسی UI و Core فراهم کند.
 
-در تست کیفی اولیه، Qwen3-0.6B برای هدف پروژه ضعیف بود؛ حتی در چت آزاد فارسی کیفیت موردنیاز را ارائه نکرد. در مقابل، Qwen3-1.7B در چت آزاد فارسی قابل قبول‌تر بود و در تست Agent نیز توانست Action مناسب و پارامترهای آن را تولید کند.
+## 3. معماری کلان
 
-نمونه خروجی موفق Agent:
-
-```json
-{
-  "tool": "create_file",
-  "file_name": "test.txt",
-  "content": "Hello World"
-}
-```
-
-پس فعلاً Qwen3-1.7B به‌عنوان **Baseline Model** انتخاب شده است.
-
-> این انتخاب برای Prototype است و پس از تست واقعی روی Android می‌تواند تغییر کند. در آینده باید امکان Import مدل‌های بزرگ‌تر، مانند Qwen3-4B، بدون بازطراحی اساسی اپ وجود داشته باشد.
-
-## معماری هدف
-
-معماری عمداً ساده نگه داشته می‌شود:
+اصل مهم معماری این است که **AI Core از UI جدا باشد**.
 
 ```text
-Android UI
-   │
-   ├── ModelManager
-   │      └── Import / Validate / Load / Unload
-   │
-   ├── AIEngine
-   │      └── llama.cpp / GGUF
-   │
-   └── AgentManager
-          ├── AgentParser
-          └── ActionExecutor
+                         AI CORE
+                            │
+              ┌─────────────┴─────────────┐
+              ↓                           ↓
+            Chat                      Workspace
+              ↓                           ↓
+           Agent                  AI UI Operations
+              └─────────────┬─────────────┘
+                            ↓
+                      Action System
+                            ↓
+                   Executor + Verifier
+                            ↓
+                       Real Result
+                            ↓
+                    UI / Workspace
 ```
 
-## قابلیت‌های Prototype
+AI Core باید مسئول منطق Local AI، Model Management، Inference، Agent، Action Protocol، Executor، Verification و Performance/Observability باشد؛ UI فقط مصرف‌کننده این قابلیت‌ها و نمایش‌دهنده State/Result واقعی باشد.
 
-### 1. Import Model
+### چرا Core از UI جداست؟
 
-کاربر بتواند فایل `.gguf` را از طریق Android Storage Access Framework انتخاب و وارد برنامه کند.
+- Chat تنها مصرف‌کننده AI نیست.
+- قابلیت‌هایی مانند «بازنویسی توضیحات با AI» باید بتوانند مستقیماً از Core استفاده کنند.
+- Chat و UI باید Operationهای مشترک داشته باشند و منطق AI را دوباره پیاده‌سازی نکنند.
+- تعویض مدل، Quantization یا Runtime نباید UI را مجبور به بازنویسی کند.
+- UI جدید نباید باعث کپی‌شدن Agent یا Inference شود.
+- Core باید مستقل تست و Regression شود.
+- مهاجرت به WooGit باید استخراج Core باشد، نه کپی کل اپ.
 
-مدل باید خارج از APK نگهداری شود.
+جزئیات کامل معماری و مسیر مهاجرت: [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md)
 
-از مسیرهای hardcoded مانند `/Android/data/...` استفاده نشود؛ مسیر و دسترسی فایل باید با APIهای استاندارد Android مدیریت شود.
+## 4. Model Management
 
-### 2. Model Management
+کاربر باید بتواند Model Import، Validate، Load و Unload کند، مدل‌های Import‌شده را ببیند و وضعیت مدل را مشاهده کند.
 
-حداقل عملیات:
+مدل نباید در کد hardcode شود و مسیر فایل باید با Android Storage Access Framework مدیریت شود.
 
-- Import model
-- Validate model
-- Load model
-- Unload model
-- نمایش مدل‌های Import‌شده
-- نمایش وضعیت مدل
+## 5. Local Chat
 
-نام مدل نباید در تمام کد hardcode شود؛ مدل باید قابل تعویض باشد.
+پس از Load مدل:
 
-### 3. Local Chat
+- پیام کاربر دریافت شود.
+- Inference کاملاً روی دستگاه اجرا شود.
+- پاسخ به‌صورت Streaming واقعی نمایش داده شود.
+- Generation واقعاً قابل Stop باشد.
+- خطاهای واقعی نمایش داده شوند.
+- وضعیت مدل و Generation قابل مشاهده باشد.
 
-اپ باید بتواند پس از Load مدل:
+برای Inference نباید وابستگی اجباری به Cloud یا API خارجی وجود داشته باشد.
 
-- پیام کاربر را دریافت کند.
-- Inference را کاملاً روی دستگاه اجرا کند.
-- خروجی را به‌صورت Streaming نمایش دهد.
-- Generation را متوقف کند.
+## 6. Inference Settings
 
-هیچ API یا سرویس Cloud برای Inference استفاده نشود.
+### Basic
 
-### 4. Agent / Action Test
+- Temperature
+- Max Tokens / Max New Tokens
 
-مدل باید بتواند در صورت نیاز یک Action ساختاریافته درخواست کند.
+### Advanced
 
-چرخه هدف:
+- Top-K
+- Top-P
+- Min-P
+- Repeat Penalty
+- Seed
+- Stop Sequences
+- Context Length
+- Structured Output / Grammar در صورت پشتیبانی واقعی Runtime
+
+تنظیمی که Runtime واقعاً اعمال نمی‌کند نباید در UI به‌عنوان قابلیت فعال نمایش داده شود.
+
+## 7. Agent
+
+Agent باید واقعی باشد و صرفاً شبیه‌سازی UI نباشد.
 
 ```text
 User Request
      ↓
-LLM
+Model
      ↓
-Action / Tool Request
+Action Request
+     ↓
+Parser / Validator
      ↓
 ActionExecutor
      ↓
-Tool Result
+Real Execution
      ↓
-LLM
+ActionVerifier
+     ↓
+Verified Tool Result
+     ↓
+Agent
      ↓
 Final Answer
 ```
 
-Actionهای نسخه اول:
+Agent باید Multi-Step باشد و Maximum Agent Steps توسط کاربر قابل تنظیم باشد؛ هیچ مقدار عددی ثابت یا پیش‌فرض اجباری برای آن تعریف نمی‌شود. Runtime می‌تواند Hard Safety Limit مستقل برای جلوگیری از Loop غیرعادی داشته باشد.
+
+## 8. Actionهای Prototype
 
 - `calculate`
 - `create_file`
@@ -121,65 +172,85 @@ Actionهای نسخه اول:
 - `get_performance_stats`
 - `delete_file`
 
-`delete_file` نیازمند تأیید اجباری کاربر است. Web Search، HTTP Request و Actionهای وابسته به Cloud فعلاً خارج از Prototype هستند.
+`delete_file` نیازمند تأیید اجباری کاربر است.
 
-مدل نباید مستقیماً APIهای Android را صدا بزند. فقط درخواست ساختاریافته تولید می‌کند و اپ تصمیم می‌گیرد چه Actionی اجرا شود.
+Web Search، HTTP Request و Actionهای وابسته به Cloud فعلاً خارج از Prototype هستند.
 
-### 5. Agent Safety Rules
+## 9. Action واقعی و Verification
 
-- Action ناشناخته اجرا نشود.
-- مدل نباید قبل از اجرای واقعی Action ادعای `success` کند.
-- نتیجه Tool فقط پس از اجرای واقعی Action به مدل برگردانده شود.
-- Agent باید Multi-Step باشد و Maximum Agent Steps توسط کاربر قابل تنظیم است.
-- هیچ مقدار عددی ثابت یا پیش‌فرض اجباری برای Maximum Agent Steps تعریف نمی‌شود.
-- Runtime می‌تواند یک Hard Safety Limit مستقل برای جلوگیری از Loop بی‌نهایت یا اجرای غیرعادی داشته باشد؛ این Safety Limit جایگزین تنظیم کاربر نیست.
-- Tool result و final answer از هم تفکیک شوند.
-- Actionهای حساس نیازمند تأیید کاربر هستند.
+مدل نباید صرفاً بگوید Action انجام شده است. اجرای واقعی باید قابل اثبات باشد.
 
-## تست‌های پایه
+**Executor انجام می‌دهد → Verifier ثابت می‌کند → Agent نتیجه را تفسیر می‌کند → UI شواهد را نشان می‌دهد.**
 
-### Chat فارسی
+برای Actionهای State-changing در صورت امکان وضعیت Before و After بررسی می‌شود.
+
+مثلاً:
 
 ```text
-سلام، خودت را معرفی کن و بگو چه کارهایی می‌توانی انجام بدهی.
+BEFORE
+exists: false
+
+ACTION
+create_file
+file: test.txt
+
+EXECUTOR
+✓ completed
+
+VERIFICATION
+✓ file exists
+✓ content matches
+
+AFTER
+exists: true
+
+VERIFIED ✓
 ```
 
-### محاسبه
+اگر Verification شکست بخورد، Agent نباید موفقیت را اعلام کند.
 
-```text
-125 × 37 چند می‌شود؟
-```
+جزئیات کامل: [`ACTION_EXECUTION_VERIFICATION.md`](docs/ACTION_EXECUTION_VERIFICATION.md)
 
-### Action
+## 10. Action Debug / Test Panel
 
-```text
-یک فایل متنی با نام test.txt بساز و داخل آن دقیقاً عبارت Hello World را قرار بده.
-```
+برای هر اجرای Action حداقل این موارد باید قابل مشاهده باشند:
 
-### Tool Result
+1. Action Request
+2. پارامترهای ورودی
+3. نتیجه واقعی Executor
+4. نتیجه Verification
+5. Final Answer
 
-پس از اجرای واقعی Action، نتیجه‌ای مانند زیر به مدل داده شود:
+در صورت امکان Before/After State نیز نمایش داده شود.
 
-```json
-{
-  "success": true,
-  "file_name": "test.txt"
-}
-```
+هدف این است که کاربر بتواند با مشاهده شواهد واقعی تشخیص دهد Action واقعاً اجرا شده یا فقط مدل ادعای اجرای آن را کرده است.
 
-سپس مدل باید یک پاسخ نهایی کوتاه تولید کند.
+جزئیات: [`ACTION_EXECUTION_VERIFICATION.md`](docs/ACTION_EXECUTION_VERIFICATION.md)
 
-### WooCommerce-style Action
+## 11. AI Workspace — میز کار
 
-```text
-یک محصول جدید ایجاد کن با عنوان «تشک طبی فنری»، قیمت ۵ میلیون تومان، موجودی ۱۲ عدد و وضعیت پیش‌نویس.
-```
+Prototype باید علاوه بر Chat یک **AI Workspace** داشته باشد.
 
-هدف این تست بررسی تبدیل دستور طبیعی به درخواست ساختاریافته است؛ فعلاً هیچ اتصال واقعی به WooCommerce لازم نیست.
+Workspace فضای کاری قابل مشاهده و تعاملی برای:
 
-## Performance و Observability
+- نتایج Action
+- Tool Result
+- Verification
+- خروجی‌های چندمرحله‌ای Agent
+- فایل‌ها و داده‌های مورد استفاده
+- Preview
+- تأیید یا رد عملیات
+- Before / After
 
-همه Metricهای Performance باید با مقدار واقعی اندازه‌گیری شوند و هیچ Metric صوری، تخمینی یا Mock مجاز نیست.
+Workspace **اجراکننده Action نیست**. اجرای واقعی از مسیر Core → Operation → Executor → Verifier انجام می‌شود.
+
+در آینده در WooGit می‌تواند برای تغییر قیمت، نمایش Before/After، بازنویسی توضیحات، تولید عنوان، اصلاح محتوا و سایر AI Operations استفاده شود.
+
+جزئیات کامل: [`AI_WORKSPACE.md`](docs/AI_WORKSPACE.md)
+
+## 12. Performance & Observability
+
+Metricهای واقعی باید اندازه‌گیری شوند؛ Metric صوری، تخمینی یا Mock مجاز نیست.
 
 ### Inference
 
@@ -199,132 +270,183 @@ Actionهای نسخه اول:
 
 - RAM
 - CPU
-- GPU/NPU در صورت دسترسی و اندازه‌گیری واقعی
+- GPU/NPU در صورت دسترسی واقعی
 - Backend
 
 ### Agent
 
 - Total Agent Time
 - Step Count
-- Action Time برای هر Action
+- Action Time
 - Retry Count
 - Error Count
 
+### Network
+
+- Network Request/Connectionهای واقعی
+- Network Usage در حد اطلاعاتی که Android/Runtime واقعاً ارائه می‌کند
+
 ### History / Reporting
 
-- ذخیره نتایج تست‌های قبلی
+- ذخیره نتایج قبلی
 - مقایسه Performance
 - Export گزارش
 
-هر Metric باید Visibility مستقل داشته باشد. تغییر Visibility فقط نمایش همان Metric را تغییر دهد و Measurement را غیرفعال نکند. تنظیمات Visibility در یک محل مرکزی نگهداری شوند تا برای مخفی/نمایان کردن هر Metric فقط یک تغییر کوچک لازم باشد.
+جزئیات: [`PERFORMANCE_METRICS.md`](docs/PERFORMANCE_METRICS.md)
 
-اگر Metric توسط Runtime یا دستگاه قابل اندازه‌گیری واقعی نباشد، `Unavailable` نمایش داده شود یا طبق Visibility همان Metric مخفی شود؛ مقدار ساختگی مجاز نیست.
+## 13. Visibility قابل تنظیم
 
-جزئیات کامل Performance در `docs/PERFORMANCE_METRICS.md` قرار دارد.
+تمام Metricها باید اندازه‌گیری شوند، اما نمایش هر Metric باید **کاملاً مستقل** قابل روشن/خاموش‌شدن باشد.
 
-## Network Monitoring & Offline
+مثلاً:
 
-- تمام Network Usage اپ باید به‌صورت واقعی مانیتور شود.
-- Network Request/Connectionهای واقعی و میزان مصرف شبکه، در حد اطلاعاتی که Android/Runtime واقعاً ارائه می‌کند، ثبت شوند.
-- اطلاعات شبکه در Performance/Debug قابل مشاهده باشند.
-- تست Offline واقعی با قطع اینترنت انجام می‌شود.
-- Firewall، DNS، Fresh Install و سناریوهای پیچیده جزو Requirement نیستند.
-- هیچ مقدار ساختگی برای Network Usage مجاز نیست.
-
-## معیار موفقیت فعلی
-
-Prototype باید بتواند روی یک Android واقعی این زنجیره را به‌صورت واقعی اجرا کند:
-
-```text
-Import Qwen3-1.7B GGUF
-        ↓
-Load locally
-        ↓
-Chat
-        ↓
-Streaming inference
-        ↓
-Agent action request
-        ↓
-Tool execution
-        ↓
-Tool result
-        ↓
-Final answer
+```kotlin
+const val SHOW_CPU = false
 ```
 
-و در حالت Offline نیز کار کند.
+باید فقط نمایش CPU را خاموش کند؛ Measurement نباید غیرفعال شود.
 
-## محدودیت‌های فعلی
+اگر Metric واقعاً قابل اندازه‌گیری نباشد، `Unavailable` نمایش داده شود یا بر اساس Visibility همان Metric مخفی شود؛ مقدار ساختگی مجاز نیست.
 
-فعلاً این موارد خارج از محدوده Prototype هستند:
+جزئیات: [`PERFORMANCE_METRICS.md`](docs/PERFORMANCE_METRICS.md)
+
+## 14. Network & Offline
+
+- تمام Network Usage اپ باید واقعاً مانیتور شود.
+- Network Request/Connectionهای واقعی و میزان مصرف شبکه، در حد اطلاعاتی که Android/Runtime ارائه می‌کند، ثبت شوند.
+- Network information در Performance/Debug قابل مشاهده باشد.
+- Offline با قطع واقعی اینترنت تست می‌شود.
+- Firewall، DNS، Fresh Install و سناریوهای پیچیده خارج از Requirement هستند.
+
+جزئیات: [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md) و [`PERFORMANCE_METRICS.md`](docs/PERFORMANCE_METRICS.md)
+
+## 15. مهاجرت به WooGit
+
+هدف، انتقال کل `ai-chat-test` به WooGit نیست.
+
+```text
+ai-chat-test
+      │
+      ↓
+  AI Core
+      │
+ ┌────┴─────┐
+ ↓          ↓
+ai-chat-test WooGit
+ Test       Production
+Harness
+```
+
+AI Core باید بتواند در WooGit به‌عنوان ماژول/Library مستقل مصرف شود.
+
+### Chat
+
+```text
+Chat
+ ↓
+Agent
+ ↓
+WooGit Operation
+ ↓
+Executor
+ ↓
+Verifier
+ ↓
+Real Result
+```
+
+### UI AI Operation
+
+```text
+Product Editor
+ ↓
+[✨ بازنویسی با AI]
+ ↓
+AI Core
+ ↓
+rewrite_description
+ ↓
+Preview
+ ↓
+Accept / Edit / Reject
+```
+
+هم Chat و هم UI باید بتوانند از Operationهای مشترک استفاده کنند. برای عملیات حساس مانند تغییر قیمت، Validation و در صورت نیاز Preview/Confirmation لازم است.
+
+جزئیات معماری مهاجرت: [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md) و [`AI_WORKSPACE.md`](docs/AI_WORKSPACE.md)
+
+## 16. تصمیم درباره انتقال
+
+برای Prototype هیچ Threshold یا امتیاز عددی از پیش تعیین‌شده‌ای برای اعلام موفقیت یا انتقال وجود ندارد.
+
+Prototype باید شواهد واقعی ارائه کند و **تصمیم نهایی درباره کیفیت Prototype و مناسب بودن انتقال به WooGit با کاربر است**.
+
+## 17. تست‌های پایه
+
+### Chat فارسی
+
+```text
+سلام، خودت را معرفی کن و بگو چه کارهایی می‌توانی انجام بدهی.
+```
+
+### محاسبه
+
+```text
+125 × 37 چند می‌شود؟
+```
+
+### Action
+
+```text
+یک فایل متنی با نام test.txt بساز و داخل آن دقیقاً عبارت Hello World را قرار بده.
+```
+
+در این تست علاوه بر Final Answer، اجرای واقعی و Verification باید در Debug/Workspace قابل مشاهده باشد.
+
+### WooCommerce-style Action
+
+```text
+یک محصول جدید ایجاد کن با عنوان «تشک طبی فنری»، قیمت ۵ میلیون تومان، موجودی ۱۲ عدد و وضعیت پیش‌نویس.
+```
+
+این تست در Prototype صرفاً تبدیل دستور طبیعی به درخواست ساختاریافته را بررسی می‌کند و اتصال واقعی WooCommerce فعلاً لازم نیست.
+
+## 18. محدوده خارج از Prototype
+
+فعلاً خارج از محدوده:
 
 - Cloud AI
 - API خارجی
 - Multi-agent
 - RAG
-- Vector database
+- Vector Database
 - Voice
-- Image generation
+- Image Generation
 - حساب کاربری
 - Marketplace مدل
 - سیستم Plugin پیچیده
-- Autonomous background agent
+- Autonomous Background Agent
 - تعداد زیاد Tool
 
-## مسیر توسعه
-
-### Phase 1 — Local Inference
-
-1. Android project setup
-2. llama.cpp integration
-3. GGUF model import
-4. Model validation
-5. Model loading
-6. Local inference
-7. Streaming
-8. Stop generation
-
-### Phase 2 — Agent
-
-1. Action schema
-2. Agent parser
-3. Action executor
-4. Tool result
-5. Multi-Step Agent با Maximum Agent Steps قابل تنظیم توسط کاربر
-6. نمایش وضعیت Agent در UI
-
-### Phase 3 — Performance
-
-1. تست روی گوشی واقعی
-2. اندازه‌گیری tok/s
-3. اندازه‌گیری Load Time
-4. بررسی RAM
-5. بررسی Context
-6. بررسی پایداری
-7. مانیتورینگ Network Usage
-
-### Phase 4 — تصمیم برای WooGit
-
-پس از تکمیل تست، بر اساس کیفیت، سرعت، RAM، حجم مدل و پایداری تصمیم می‌گیریم که آیا قابلیت Local AI Agent ارزش انتقال به **WooGit** را دارد یا خیر.
-
-## اصل مهم توسعه
-
-این پروژه یک آزمایش فنی است. از پیچیده‌سازی غیرضروری خودداری شود.
+## 19. اصول توسعه
 
 هر تغییر باید:
 
 1. با هدف Prototype مرتبط باشد.
-2. Build پروژه را خراب نکند.
-3. قابلیت‌های قبلی را بدون دلیل حذف نکند.
+2. Build را خراب نکند.
+3. قابلیت قبلی را بدون دلیل حذف نکند.
 4. نتیجه واقعی تست را گزارش کند.
-5. از Mock یا گزارش جعلی عملکرد استفاده نکند.
+5. Mock یا گزارش جعلی ایجاد نکند.
+6. با Specification و مستندات پروژه سازگار باشد.
 
-## وضعیت فعلی
+## 20. وضعیت
 
 **Baseline Model:** Qwen3-1.7B  
 **Format:** GGUF  
 **Initial Quantization:** Q4_K_M  
 **Runtime:** llama.cpp  
 **Purpose:** Android Local AI + Agent Feasibility Test  
-**Next milestone:** اجرای واقعی Qwen3-1.7B روی Android و اندازه‌گیری عملکرد
+**Architecture Direction:** AI Core جدا از UI + Chat + AI Workspace + Action Verification  
+**Future Target:** امکان انتقال کنترل‌شده AI Core به WooGit
+
+برای جزئیات اجرایی و تصمیم‌های کامل، از [`docs/PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md) شروع کنید.
