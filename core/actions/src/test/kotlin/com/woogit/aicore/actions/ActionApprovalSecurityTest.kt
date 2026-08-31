@@ -22,8 +22,8 @@ class ActionApprovalSecurityTest {
 
         val approved = controller.approve(prepared.executionId)
         assertEquals(ApprovalDecision.Approved, approved.decision)
-        val result = lifecycle.executeApproved(prepared.executionId, Verifier<Any> {
-            VerificationResult(true, "ok")
+        val result = lifecycle.executeApproved(prepared.executionId, object : Verifier<Any> {
+            override fun verify(output: Any): VerificationResult = VerificationResult(true, "ok")
         })
 
         assertIs<ActionExecutionState.Completed>(result)
