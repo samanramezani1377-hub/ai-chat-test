@@ -43,11 +43,11 @@ class ActionLifecycle(
     private val capabilityProvider: CapabilityProvider,
     private val checkpointStore: ActionCheckpointStore,
     private val approvalPolicy: ActionApprovalPolicy = DefaultActionApprovalPolicy(),
-    private val traceSink: ActionTraceSink? = null
+    private val traceSink: ActionTraceSink? = null,
+    private val errorLogSink: ActionErrorLogSink? = null
 ) {
-    private suspend fun trace(id: String, type: ActionTraceType, message: String? = null) {
-        traceSink?.record(ActionTraceEvent(id, type, message))
-    }
+    private suspend fun trace(id: String, type: ActionTraceType, message: String? = null) = traceSink?.record(ActionTraceEvent(id, type, message))
+    private suspend fun logError(executionId: String?, actionId: String?, raw: String, userMessage: String) = errorLogSink?.record(ActionErrorLog(executionId, actionId, userMessage, raw))
 
     suspend fun prepare(actionId: String, input: Any): PreparedAction {
         val action = registry.find(actionId) ?: error("Action not found: $actionId")
@@ -60,7 +60,11 @@ class ActionLifecycle(
     fun requiresApproval(prepared: PreparedAction) = approvalPolicy.requiresApproval(prepared.risk)
 
     suspend fun validate(prepared: PreparedAction, capability: String?): PreparedAction {
-        if (capability != null && !capabilityProvider.supports(capability)) error("Required capability is unavailable: $capability")
+        if (capability != null && !capabilityProvider.supports(capability)) {
+            val raw = "Required capability is unavailable: $capability"
+            logError(prepared.executionId, prepared.actionId, raw, "قابلیت موردنیاز برای اجرای عملیات در دسترس نیست.")
+            error(raw)
+        }
         val state = if (requiresApproval(prepared)) ActionExecutionState.AwaitingApproval else ActionExecutionState.Approved
         return prepared.copy(state = state).also {
             checkpointStore.save(it)
@@ -84,18 +88,34 @@ class ActionLifecycle(
     }
 
     suspend fun executeApproved(executionId: String, verifier: Verifier<Any>): ActionExecutionState {
-        val prepared = checkpointStore.get(executionId) ?: return ActionExecutionState.Failed("Prepared action not found: $executionId")
-        if (prepared.state != ActionExecutionState.Approved) return ActionExecutionState.Failed("Action is not approved for execution")
-        val action = registry.find(prepared.actionId) ?: return ActionExecutionState.Failed("Action not found: ${prepared.actionId}")
+        val prepared = checkpointStore.get(executionId)
+        if (prepared == null) {
+            val raw = "Prepared action not found: $executionId"
+            logError(executionId, null, raw, "عملیات آماده‌شده پیدا نشد.")
+            return ActionExecutionState.Failed(raw)
+        }
+        if (prepared.state != ActionExecutionState.Approved) {
+            val raw = "Action is not approved for execution"
+            logError(executionId, prepared.actionId, raw, "این عملیات برای اجرا تأیید نشده است.")
+            return ActionExecutionState.Failed(raw)
+        }
+        val action = registry.find(prepared.actionId)
+        if (action == null) {
+            val raw = "Action not found: ${prepared.actionId}"
+            logError(executionId, prepared.actionId, raw, "عملیات موردنظر پیدا نشد.")
+            return ActionExecutionState.Failed(raw)
+        }
         return try {
             checkpointStore.save(prepared.copy(state = ActionExecutionState.Executing))
             trace(executionId, ActionTraceType.EXECUTION_STARTED, prepared.actionId)
             val result = action.execute(prepared.input)
             val verification = verifier.verify(result)
             if (!verification.success) {
-                val failed = ActionExecutionState.Failed(verification.evidence ?: "Action verification failed")
+                val raw = verification.evidence ?: "Action verification failed"
+                val failed = ActionExecutionState.Failed(raw)
                 checkpointStore.save(prepared.copy(state = failed))
-                trace(executionId, ActionTraceType.VERIFICATION_FAILED, failed.message)
+                trace(executionId, ActionTraceType.VERIFICATION_FAILED, raw)
+                logError(executionId, prepared.actionId, raw, "اجرای عملیات انجام شد، اما نتیجه قابل تأیید نبود.")
                 return failed
             }
             val completed = ActionExecutionState.Completed(verification)
@@ -103,9 +123,11 @@ class ActionLifecycle(
             trace(executionId, ActionTraceType.EXECUTION_COMPLETED)
             completed
         } catch (t: Throwable) {
-            val failed = ActionExecutionState.Failed(t.message ?: t::class.simpleName.orEmpty())
+            val raw = t.message ?: t::class.simpleName.orEmpty()
+            val failed = ActionExecutionState.Failed(raw)
             checkpointStore.save(prepared.copy(state = failed))
-            trace(executionId, ActionTraceType.EXECUTION_FAILED, failed.message)
+            trace(executionId, ActionTraceType.EXECUTION_FAILED, raw)
+            logError(executionId, prepared.actionId, raw, "اجرای عملیات با خطا مواجه شد.")
             failed
         }
     }
