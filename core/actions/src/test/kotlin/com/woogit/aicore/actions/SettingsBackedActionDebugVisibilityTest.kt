@@ -11,10 +11,13 @@ class SettingsBackedActionDebugVisibilityTest {
     @Test
     fun visibilityReadsAndWritesCentralSettings() = runBlocking {
         val store = InMemoryCoreSettingsStore(CoreSettings(showFullErrorDetails = true))
-        val visibility = SettingsBackedActionDebugVisibility(store)
+        val visibility = SettingsBackedActionDebugVisibility(
+            initialSettings = store.get(),
+            settingsStore = store
+        )
 
         assertTrue(visibility.fullErrorDetailsVisible)
-        visibility.fullErrorDetailsVisible = false
+        visibility.setFullErrorDetailsVisible(false)
         assertFalse(visibility.fullErrorDetailsVisible)
         assertFalse(store.get().showFullErrorDetails)
     }
