@@ -2,7 +2,6 @@ package com.woogit.aicore.actions
 
 import com.woogit.aicore.domain.ActionRegistry
 import com.woogit.aicore.domain.CapabilityProvider
-import com.woogit.aicore.domain.VerificationResult
 import com.woogit.aicore.domain.Verifier
 import java.util.UUID
 
@@ -11,7 +10,7 @@ sealed interface ActionExecutionState {
     data object AwaitingApproval : ActionExecutionState
     data object Approved : ActionExecutionState
     data object Executing : ActionExecutionState
-    data class Completed(val verification: VerificationResult) : ActionExecutionState
+    data class Completed(val verification: com.woogit.aicore.domain.VerificationResult) : ActionExecutionState
     data class Failed(val message: String) : ActionExecutionState
     data object Rejected : ActionExecutionState
 }
@@ -76,6 +75,11 @@ class ActionLifecycle(
             checkpointStore.save(prepared.copy(state = ActionExecutionState.Executing))
             val result = action.execute(prepared.input)
             val verification = verifier.verify(result)
+            if (!verification.success) {
+                val failed = ActionExecutionState.Failed(verification.evidence ?: "Action verification failed")
+                checkpointStore.save(prepared.copy(state = failed))
+                return failed
+            }
             val completed = ActionExecutionState.Completed(verification)
             checkpointStore.save(prepared.copy(state = completed))
             completed
