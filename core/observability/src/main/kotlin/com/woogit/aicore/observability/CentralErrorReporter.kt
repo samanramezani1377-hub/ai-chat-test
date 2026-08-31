@@ -7,11 +7,13 @@ interface CentralErrorReporter {
 class InMemoryCentralErrorReporter : CentralErrorReporter {
     private val reports = mutableListOf<ErrorReport>()
 
-    @Synchronized
     override suspend fun report(error: ErrorReport) {
-        reports += error
+        synchronized(reports) {
+            reports += error
+        }
     }
 
-    @Synchronized
-    fun all(): List<ErrorReport> = reports.toList()
+    fun all(): List<ErrorReport> = synchronized(reports) {
+        reports.toList()
+    }
 }
