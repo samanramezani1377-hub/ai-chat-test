@@ -21,11 +21,12 @@ data class GenerationRequest(
 )
 
 data class GenerationResult(
-    val inputTokens: Long?,
-    val outputTokens: Long?,
-    val firstTokenTimeMs: Long?,
-    val generationTimeMs: Long?,
-    val stopped: Boolean
+    val text: String,
+    val inputTokens: Long? = null,
+    val outputTokens: Long? = null,
+    val firstTokenTimeMs: Long? = null,
+    val generationTimeMs: Long? = null,
+    val stopped: Boolean = false
 )
 
 data class ChatMessage(val role: Role, val content: String) {
@@ -33,8 +34,8 @@ data class ChatMessage(val role: Role, val content: String) {
 }
 
 data class InferenceSettings(
-    val temperature: Double,
-    val maxNewTokens: Int,
+    val temperature: Double = 0.7,
+    val maxNewTokens: Int = 512,
     val topK: Int? = null,
     val topP: Double? = null,
     val minP: Double? = null,
