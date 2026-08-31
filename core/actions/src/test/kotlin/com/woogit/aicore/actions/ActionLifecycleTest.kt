@@ -21,9 +21,7 @@ class ActionLifecycleTest {
         val validated = lifecycle.validate(prepared, null)
 
         assertTrue(lifecycle.requiresApproval(validated))
-        assertIs<ActionExecutionState.Failed>(
-            lifecycle.executeApproved("missing-approval", TestVerifier)
-        )
+        assertIs<ActionExecutionState.Failed>(lifecycle.executeApproved(prepared.executionId, TestVerifier))
     }
 
     @Test
@@ -33,6 +31,9 @@ class ActionLifecycleTest {
         val lifecycle = ActionLifecycle(TestRegistry(action), TestCapabilities, checkpoint)
         val prepared = lifecycle.prepare("change-price", "100")
         lifecycle.validate(prepared, null)
+        val approved = lifecycle.approve(prepared.executionId)
+        assertEquals(ActionExecutionState.Approved, approved.state)
+
         val result = lifecycle.executeApproved(prepared.executionId, TestVerifier)
 
         assertIs<ActionExecutionState.Completed>(result)
@@ -40,13 +41,41 @@ class ActionLifecycleTest {
         assertEquals(VerificationResult(true, "verified"), (result as ActionExecutionState.Completed).verification)
     }
 
+    @Test
+    fun rejectedActionCannotExecute() = kotlinx.coroutines.test.runTest {
+        val checkpoint = InMemoryActionCheckpointStore()
+        val action = TestAction("change-price", RiskLevel.SENSITIVE)
+        val lifecycle = ActionLifecycle(TestRegistry(action), TestCapabilities, checkpoint)
+        val prepared = lifecycle.prepare("change-price", "100")
+        lifecycle.validate(prepared, null)
+        val rejected = lifecycle.reject(prepared)
+        assertIs<ActionExecutionState.Rejected>(rejected.state)
+        assertIs<ActionExecutionState.Failed>(lifecycle.executeApproved(prepared.executionId, TestVerifier))
+        assertEquals(null, action.lastInput)
+    }
+
+    @Test
+    fun completedActionCannotExecuteAgain() = kotlinx.coroutines.test.runTest {
+        val checkpoint = InMemoryActionCheckpointStore()
+        val action = TestAction("change-price", RiskLevel.SENSITIVE)
+        val lifecycle = ActionLifecycle(TestRegistry(action), TestCapabilities, checkpoint)
+        val prepared = lifecycle.prepare("change-price", "100")
+        lifecycle.validate(prepared, null)
+        lifecycle.approve(prepared.executionId)
+        assertIs<ActionExecutionState.Completed>(lifecycle.executeApproved(prepared.executionId, TestVerifier))
+        assertIs<ActionExecutionState.Failed>(lifecycle.executeApproved(prepared.executionId, TestVerifier))
+        assertEquals(1, action.calls)
+    }
+
     private class TestAction(
         override val id: String,
         override val risk: RiskLevel
     ) : Action<Any, Any> {
         var lastInput: Any? = null
+        var calls = 0
         override suspend fun execute(input: Any): Any {
             lastInput = input
+            calls++
             return input
         }
     }
