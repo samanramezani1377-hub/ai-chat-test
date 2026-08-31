@@ -46,7 +46,9 @@
 
 کدام داده‌ها باید ذخیره شوند و Lifecycle هرکدام چیست؟ برای Model Metadata، Chat History، Performance History، Workspace State، Action/Verification Logs و Exportها چه Storage و چه رفتار Delete/Clear در نظر گرفته شود؟
 
-- [ ] 25. Persistence Schema
+**تصمیم نهایی:** گزینه C. Storage به‌صورت ترکیبی باشد: داده‌های اصلی و وضعیت واقعی برنامه در Persistent Storage نگهداری شوند (Conversation، Task، Workspace State، Action و Verification)، در حالی که Debug/Error Logs و Runtime Cache Lifecycle و Retention جدا داشته باشند. پاک‌سازی Log یا Cache نباید Conversation، Task یا Verification را حذف یا خراب کند. Retention لاگ‌ها باید قابل تنظیم باشد و معماری نباید به یک عدد ثابت وابسته شود. Storage implementation نیز پشت Repository/Storage Contract قرار گیرد تا Core به Database یا فایل‌سیستم خاص وابسته نباشد.
+
+- [x] 25. Persistence Schema
 
 ### 26. Configuration
 
