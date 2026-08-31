@@ -31,6 +31,10 @@
 - Retry Count
 - Error Count
 
+### Network
+- Network Request/Connectionهای واقعی
+- Network Usage در حد اطلاعاتی که Android/Runtime واقعاً ارائه می‌کند
+
 ### History
 - ذخیره نتایج تست‌های قبلی
 - مقایسه Performance
@@ -61,6 +65,7 @@ object PerformanceVisibility {
     const val SHOW_ACTION_TIME = true
     const val SHOW_RETRY_COUNT = true
     const val SHOW_ERROR_COUNT = true
+    const val SHOW_NETWORK_USAGE = true
 }
 ```
 
@@ -92,6 +97,7 @@ Performance Snapshot
   ├── ram
   ├── cpu
   ├── backend
+  ├── networkUsage
   └── agent metrics
        ↓
 Visibility Configuration
@@ -116,6 +122,10 @@ Unavailable
 ```
 
 نمایش داده شود یا بر اساس Visibility همان Metric مخفی شود؛ مقدار ساختگی نباید جایگزین آن شود.
+
+## Network / Offline
+
+تمام Network Usage اپ باید به‌صورت واقعی مانیتور شود. Network Request/Connectionهای واقعی و میزان مصرف شبکه، در حد اطلاعاتی که Android/Runtime واقعاً ارائه می‌کند، ثبت شوند. تست Offline واقعی با قطع اینترنت انجام می‌شود. Firewall، DNS، Fresh Install و سناریوهای پیچیده جزو Requirement نیستند.
 
 ## Performance History
 
