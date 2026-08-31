@@ -2,7 +2,7 @@
 
 ## Purpose
 
-تعریف معماری مرجع پروژه AI Chat Test و مرزبندی روشن بین UI، AI Core، Agent، Action System، Executor، Verifier، Workspace و لایه‌های ذخیره‌سازی/Observability.
+تعریف معماری مرجع پروژه AI Chat Test و مرزبندی روشن بین UI، AI Core، Agent، Action System، Executor، Verifier، Workspace، Storage و Observability.
 
 ## High-level
 
@@ -10,7 +10,7 @@
 UI
 ├── Chat
 ├── Settings
-├── Debug/Test Panel
+├── Error Center / Debug Panel
 └── AI Workspace
         │
         ↓
@@ -20,7 +20,7 @@ UI
         ├── Context / Conversation
         ├── Agent
         ├── Action Protocol
-        └── Observability
+        └── Central Observability / Logging
                 ↓
           Action System
           ├── Permission
@@ -35,7 +35,15 @@ UI
 
 UI نباید منطق مدل، Agent یا Action را دوباره پیاده‌سازی کند. هر UI جدید باید از API/Contractهای Core استفاده کند.
 
-این تصمیم برای Chat، Workspace و قابلیت‌های آینده WooGit مانند بازنویسی توضیحات و تغییر قیمت الزام‌آور است.
+این تصمیم برای Chat، Workspace، Error Center و قابلیت‌های آینده WooGit مانند بازنویسی توضیحات و تغییر قیمت الزام‌آور است.
+
+## Central Observability
+
+Logging و Error Handling باید در هسته مرکزی مدیریت شوند. Componentها Error/Event تولید می‌کنند اما ثبت استاندارد، Correlation، Persistence/Retention و ساخت Error Report توسط Central Observability انجام می‌شود.
+
+یک خطا می‌تواند هم‌زمان یک پیام فارسی و کاربرپسند در همان محل رخداد و یک Raw Machine Error/Trace در Error Center داشته باشد. Error Center باید امکان مشاهده خطاهای ثبت‌شده و Copy یک Error Report کامل برای ارسال به Agent/Developer را فراهم کند.
+
+UI مالک Logging نیست؛ فقط Event/Error را Subscribe یا Query می‌کند. جزئیات کامل این Contract در `OBSERVABILITY_AND_ERROR_CENTER.md` تعریف شده است.
 
 ## Runtime independence — Decision 21
 
@@ -84,6 +92,7 @@ Runtime مدل، Storage، Android APIs و در آینده WooGit باید پش�
 - Core مالک State منطقی Task و Inference است.
 - Action System مالک Lifecycle اجرای Action است.
 - Verifier مالک نتیجه Verification است.
+- Central Observability مالک Event/Error Contract و Correlation است.
 - Workspace فقط State/Result را نمایش می‌دهد و Interaction را به Core برمی‌گرداند.
 - UI نباید State دامنه را با یک State مستقل و متناقض کپی کند.
 
