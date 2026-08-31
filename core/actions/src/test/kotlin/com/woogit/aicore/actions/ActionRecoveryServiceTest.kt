@@ -1,41 +1,25 @@
 package com.woogit.aicore.actions
 
-import com.woogit.aicore.domain.Action
-import com.woogit.aicore.domain.ActionRegistry
-import com.woogit.aicore.domain.CapabilityProvider
-import com.woogit.aicore.domain.RiskLevel
-import com.woogit.aicore.domain.VerificationResult
-import com.woogit.aicore.domain.Verifier
 import kotlin.test.Test
 import kotlin.test.assertIs
 
 class ActionRecoveryServiceTest {
     @Test
-    fun failedExecutionCanBeExplicitlyDismissedButNotSilentlyRetried() = kotlinx.coroutines.test.runTest {
-        val lifecycle = ActionLifecycle(Registry, Capabilities, InMemoryActionCheckpointStore())
-        val prepared = lifecycle.prepare("write", "value")
-        lifecycle.validate(prepared, null)
-        lifecycle.approve(prepared.executionId)
-        val failed = lifecycle.executeApproved(prepared.executionId, Verifier<Any> {
-            VerificationResult(false, "mismatch")
+    fun failedExecutionRequiresVerificationBeforeRecovery() = kotlinx.coroutines.test.runTest {
+        val checkpoints = InMemoryActionCheckpointStore()
+        val execution = PreparedAction(actionId = "write", input = "value", risk = com.woogit.aicore.domain.RiskLevel.SENSITIVE, state = ActionExecutionState.Failed("mismatch"))
+        checkpoints.save(execution)
+        val recovery = ActionRecovery(checkpoints, object : ActionStateVerifier {
+            override suspend fun inspect(executionId: String): RecoveryDecision = RecoveryDecision.RequiresVerification
         })
-        assertIs<ActionExecutionState.Failed>(failed)
-
-        val recovery = ActionRecoveryService(InMemoryActionCheckpointStore())
-        // Recovery is intentionally only a boundary here; it cannot manufacture a retry authorization.
-        assertIs<RecoveryDecision.Retry>(RecoveryDecision.Retry)
-        assertIs<RecoveryDecision.Dismiss>(RecoveryDecision.Dismiss)
+        assertIs<RecoveryDecision.RequiresVerification>(recovery.recover(execution.executionId))
     }
 
-    private object Registry : ActionRegistry {
-        private val action = object : Action<Any, Any> {
-            override val id = "write"
-            override val risk = RiskLevel.SENSITIVE
-            override suspend fun execute(input: Any): Any = input
-        }
-        override fun register(category: String, action: Action<Any, Any>) = Unit
-        override fun find(actionId: String) = action.takeIf { it.id == actionId }
-        override fun categories() = setOf("test")
+    @Test
+    fun missingCheckpointRequiresUserIntervention() = kotlinx.coroutines.test.runTest {
+        val recovery = ActionRecovery(InMemoryActionCheckpointStore(), object : ActionStateVerifier {
+            override suspend fun inspect(executionId: String): RecoveryDecision = RecoveryDecision.SafeToRetry
+        })
+        assertIs<RecoveryDecision.RequiresUserIntervention>(recovery.recover("missing"))
     }
-    private object Capabilities : CapabilityProvider { override fun supports(capability: String) = true }
 }
