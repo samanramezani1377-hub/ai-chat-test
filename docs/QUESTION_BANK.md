@@ -21,7 +21,7 @@
 - [x] 13. فرمت ارتباط مدل با Actionها چه باشد؟
 - [x] 14. اولین Actionهای قابل اجرا کدام باشند؟
 - [x] 15. Agent چند مرحله اجازه اجرای Action داشته باشد؟
-- [ ] 16. در صورت خطای Action چه اتفاقی بیفتد؟
+- [x] 16. در صورت خطای Action چه اتفاقی بیفتد؟
 - [ ] 17. چه اطلاعات Performance اندازه‌گیری شود؟
 - [ ] 18. تست کاملاً Offline چگونه تأیید شود؟
 - [ ] 19. معیار موفقیت Prototype چیست؟
@@ -29,188 +29,131 @@
 
 ## پاسخ‌ها
 
+### 16 — در صورت خطای Action چه اتفاقی بیفتد؟
+**وضعیت:** تصمیم ثبت شد
+
+**پاسخ:**
+
+خطای Action باید به‌صورت واقعی و ساختاریافته از Executor به Agent برگردد. Agent باید بتواند خطا را بررسی کرده و در صورت امکان مسیر دیگری را انتخاب کند، اما Retry و ادامه اجرا باید محدود و قابل‌کنترل باشند.
+
+**رفتار اصلی:**
+
+1. خطای واقعی Executor به Agent برگردد.
+2. Agent خطا را دریافت کند و بتواند بر اساس آن تصمیم بعدی بگیرد.
+3. خطاهای قابل Retry با فیلد `retryable` مشخص شوند.
+4. برای خطاهای قابل Retry حداکثر **۲ Retry برای همان Action** مجاز باشد.
+5. خطاهای غیرقابل Retry نباید به‌صورت خودکار تکرار شوند.
+6. Agent بتواند به‌جای Retry، در صورت امکان یک Action جایگزین انتخاب کند.
+7. تمام خطاها در Agent Debug Log ثبت شوند.
+8. خطای Parser قبل از Executor مدیریت شود و Action اجرا نشود.
+9. Action حساسی که کاربر اجرای آن را رد کرده است، نباید خودکار Retry شود.
+10. Maximum Agent Steps سؤال ۱۵ همچنان Hard Limit اصلی باشد.
+11. بعد از رسیدن به Step Limit، Action جدید اجرا نشود.
+12. Agent هرگز نباید موفقیت Action شکست‌خورده را جعل کند.
+13. اگر خطا باعث ناقص‌ماندن کار شود، Final Answer باید این موضوع را صادقانه اعلام کند.
+
+**ساختار پیشنهادی خطای Tool:**
+
+```json
+{
+  "type": "tool_result",
+  "action": "read_file",
+  "success": false,
+  "error": {
+    "code": "FILE_NOT_FOUND",
+    "message": "File does not exist",
+    "retryable": false
+  }
+}
+```
+
+برای خطای موقتی:
+
+```json
+{
+  "type": "tool_result",
+  "action": "create_file",
+  "success": false,
+  "error": {
+    "code": "TEMPORARY_IO_ERROR",
+    "message": "Temporary I/O failure",
+    "retryable": true
+  }
+}
+```
+
+**Retry:**
+
+Retry باید از Step Limit جدا باشد. هر اجرای واقعی Action یک Agent Step مصرف می‌کند و هر Action حداکثر ۲ Retry مجاز دارد؛ Retry نیز اجرای واقعی Action است و بنابراین Step Budget را مصرف می‌کند.
+
+**Parser Error:**
+
+اگر مدل JSON نامعتبر تولید کند یا Schema را رعایت نکند، Executor نباید اجرا شود. Agent می‌تواند یک فرصت محدود برای اصلاح Action Request داشته باشد، ولی خروجی نامعتبر نباید مستقیماً اجرا شود.
+
+**Confirmation Error:**
+
+اگر Action حساس نیاز به تأیید داشته باشد و کاربر آن را رد کند، Action باید `Cancelled/Rejected` تلقی شود و Agent نباید همان Action را خودکار Retry کند.
+
+**Step Limit:**
+
+اگر Agent به Maximum Agent Steps قابل تنظیم کاربر برسد، Action بعدی Block می‌شود؛ حتی اگر مدل آن را درخواست کرده باشد. در این وضعیت موفقیت جعلی ممنوع است.
+
+**مثال تصمیم‌گیری Agent:**
+
+```text
+read_file("test.txt")
+        ↓
+FILE_NOT_FOUND
+        ↓
+Agent receives real Tool Result
+        ↓
+list_files()
+        ↓
+["test1.txt", "notes.txt"]
+        ↓
+Agent determines test.txt does not exist
+        ↓
+Final Answer: فایل test.txt پیدا نشد.
+```
+
+**تصمیم نهایی:**
+
+مدیریت خطا به‌صورت **Agent-aware** انتخاب شد: خطای واقعی و ساختاریافته → تصمیم Agent → Retry محدود یا Action جایگزین در صورت امکان → ثبت کامل در Debug Log. حداکثر ۲ Retry برای هر Action، Hard Step Limit قابل تنظیم، عدم Retry خودکار برای خطاهای غیرقابل Retry یا Action ردشده و ممنوعیت کامل جعل موفقیت.
+
 ### 15 — Agent چند مرحله اجازه اجرای Action داشته باشد؟
 **وضعیت:** تصمیم ثبت شد
 
 **پاسخ:**
 
-Agent باید از **Multi-Step Execution** پشتیبانی کند و برای جلوگیری از Loop بی‌نهایت، مصرف بی‌دلیل منابع و اجرای کنترل‌نشده Actionها، یک **Hard Step Limit** داشته باشد.
-
-مقدار پیش‌فرض پیشنهادی و مورد توافق: **۵ Step**.
-
-اما این مقدار باید **توسط خود کاربر قابل تنظیم** باشد.
-
-**رفتار تنظیمات:**
-
-- مقدار پیش‌فرض: 5
-- کاربر می‌تواند Maximum Agent Steps را از UI تغییر دهد.
-- مقدار انتخابی کاربر باید واقعاً توسط Agent Runtime اعمال شود.
-- تنظیمات باید در بخش مناسب Agent/Advanced قابل مشاهده و تغییر باشند.
-- مقدار تنظیم‌شده باید در Agent Debug Mode نیز نمایش داده شود؛ مثلاً `Step 2 / 5`.
-- UI نباید اجازه مقدار نامعتبر یا بدون محدودیت واقعی را بدهد.
-- یک حد بالای امن Runtime باید وجود داشته باشد تا کاربر نتواند با تنظیم UI عملاً Agent را بدون محدودیت کند.
-
-**نمونه UI:**
-
-```text
-Agent Settings
-
-Maximum Agent Steps
-[ 5 ]
-
-Agent Debug Mode
-[ ON ]
-```
-
-**نمونه اجرای چندمرحله‌ای:**
-
-```text
-Step 1 / 5 → list_files
-Step 2 / 5 → read_file
-Step 3 / 5 → calculate
-Step 4 / 5 → create_file
-Step 5 / 5 → read_file
-```
-
-اگر Agent در هر مرحله قبل از رسیدن به Limit به Final Answer برسد، اجرا طبیعی تمام می‌شود.
-
-**رسیدن به Limit:**
-
-اگر Agent به Maximum Agent Steps برسد، Action بعدی نباید اجرا شود.
-
-مثلاً:
-
-```text
-Step 5 / 5
-        ↓
-MAX_STEPS_REACHED
-        ↓
-Action #6 = BLOCKED
-```
-
-در Debug Mode باید مشخص شود که اجرای Action بعدی به دلیل Step Limit مسدود شده است.
-
-اگر کار هنوز کامل نشده باشد، Agent نباید موفقیت را جعل کند. باید وضعیت ناقص/متوقف‌شده را به کاربر اعلام کند.
-
-**جلوگیری از Loop:**
-
-- Step Limit سخت و واقعی است.
-- هر اجرای واقعی Action یک Step مصرف می‌کند.
-- Actionهای نامعتبر نباید Step معتبر محسوب شوند و نباید به Executor برسند.
-- پس از رسیدن به Limit، هیچ Action جدیدی اجرا نمی‌شود.
-- Agent نباید امکان Loop بی‌نهایت داشته باشد.
-
-**تصمیم نهایی:**
-
-Multi-Step Agent با **Maximum Agent Steps قابل تنظیم توسط کاربر** انتخاب شد؛ مقدار پیش‌فرض ۵ است و Runtime باید یک سقف امن مستقل نیز داشته باشد. رسیدن به سقف باعث Block شدن Action بعدی می‌شود و جعل موفقیت ممنوع است.
+Agent باید از Multi-Step Execution پشتیبانی کند و Maximum Agent Steps قابل تنظیم توسط کاربر باشد. مقدار پیش‌فرض ۵ Step است و Runtime باید یک سقف امن مستقل نیز داشته باشد. رسیدن به سقف باعث Block شدن Action بعدی می‌شود و جعل موفقیت ممنوع است.
 
 ### 14 — اولین Actionهای قابل اجرا کدام باشند؟
 **وضعیت:** تصمیم ثبت شد
 
 **پاسخ:**
 
-Actionهای نسخه اول:
-
-**ضروری:**
-- `calculate`
-- `create_file`
-- `read_file`
-- `list_files`
-- `get_time`
-- `get_device_info`
-- `get_model_info`
-- `get_performance_stats`
-
-**Safety Test:**
-- `delete_file` با تأیید اجباری کاربر
-
-**فعلاً خارج از Prototype:**
-- Web Search
-- HTTP Request
-- Internet Tools
-- Actionهای وابسته به Cloud
-
-همه Actionها باید واقعی باشند و Mock یا موفقیت جعلی ممنوع است.
+Actionهای نسخه اول: `calculate`، `create_file`، `read_file`، `list_files`، `get_time`، `get_device_info`، `get_model_info`، `get_performance_stats` و `delete_file` با تأیید اجباری کاربر. Web Search، HTTP Request و Actionهای وابسته به Cloud فعلاً خارج از Prototype هستند.
 
 ### 13 — فرمت ارتباط مدل با Actionها چه باشد؟
 **وضعیت:** تصمیم ثبت شد
 
 **پاسخ:**
 
-ارتباط مدل با Actionها باید با **JSON ساختاریافته و Schema مشخص** انجام شود. مدل نباید برای درخواست اجرای Action از متن آزاد استفاده کند.
-
-ساختار اصلی Action Request:
-
-```json
-{
-  "type": "action",
-  "action": {
-    "name": "calculate",
-    "arguments": {
-      "expression": "125 * 37"
-    }
-  }
-}
-```
-
-ساختار Final Answer:
-
-```json
-{
-  "type": "final",
-  "content": "حاصل ۱۲۵ × ۳۷ برابر با ۴۶۲۵ است."
-}
-```
-
-ساختار Tool Result:
-
-```json
-{
-  "type": "tool_result",
-  "action": "calculate",
-  "success": true,
-  "result": "4625"
-}
-```
-
-ساختار خطای Tool Result نیز باید نتیجه واقعی Executor را منتقل کند.
-
-**الزامات Parser:**
-
-- JSON معتبر باشد.
-- `type` معتبر باشد.
-- Action در فهرست Actionهای مجاز باشد.
-- `arguments` مطابق Schema همان Action اعتبارسنجی شود.
-- Action نامعتبر یا ناقص به Executor ارسال نشود.
-- Parser بر اساس حدس، خروجی خراب را به Action معتبر تبدیل نکند.
-
-**زنجیره:**
-
-`LLM → JSON Action Request → Parser → Schema Validation → Permission/Confirmation → Executor → Tool Result → LLM → Final Answer`
-
-Structured Output / Grammar در صورت پشتیبانی واقعی Runtime استفاده شود و Mock ممنوع است.
+ارتباط مدل با Actionها باید با JSON ساختاریافته و Schema مشخص انجام شود. انواع اصلی `action`، `tool_result` و `final` هستند و Parser باید قبل از Executor اعتبارسنجی کامل انجام دهد. Structured Output / Grammar فقط در صورت پشتیبانی واقعی Runtime استفاده شود.
 
 ### 12 — Agent در Prototype دقیقاً چه کاری انجام دهد؟
 **وضعیت:** تصمیم ثبت شد
 
 **پاسخ:**
 
-Agent باید یک Agent واقعی و قابل ارزیابی باشد؛ نه صرفاً یک Chat با عنوان Agent. باید نیاز به Action را تشخیص دهد، Action مناسب را انتخاب کند، درخواست ساختاریافته تولید کند، Parser آن را اعتبارسنجی کند، Executor آن را واقعاً اجرا کند، Tool Result واقعی را دریافت کند و Final Answer را بر اساس نتیجه واقعی تولید کند.
-
-قابلیت‌ها شامل Multi-Step Execution، تأیید کاربر برای Actionهای حساس، Agent Debug Mode، انتقال خطای واقعی، عدم جعل موفقیت، اجرای Local و عدم استفاده از Mock هستند.
+Agent باید یک Agent واقعی و قابل ارزیابی باشد؛ تشخیص نیاز به Action، انتخاب Action، تولید درخواست ساختاریافته، Parser، Executor واقعی، Tool Result واقعی، Final Answer، Multi-Step، Confirmation برای Actionهای حساس، Debug Mode و عدم جعل موفقیت از الزامات هستند.
 
 ### 11 — چه تنظیمات Inference در UI نمایش داده شود؟
 **وضعیت:** تصمیم ثبت شد
 
 **پاسخ:**
 
-تنظیمات Inference در دو سطح Basic و Advanced ارائه شوند.
-
-**Basic:** Temperature، Max Tokens / Max New Tokens
-
-**Advanced:** Top-K، Top-P، Min-P، Repeat Penalty، Seed، Stop Sequences، Context Length و Structured Output / Grammar در صورت پشتیبانی واقعی Runtime.
-
-تنظیمات بدون اثر واقعی در Runtime نباید نمایش داده شوند.
+تنظیمات Inference در دو سطح Basic و Advanced ارائه شوند. Basic شامل Temperature و Max Tokens / Max New Tokens است. Advanced شامل Top-K، Top-P، Min-P، Repeat Penalty، Seed، Stop Sequences، Context Length و Structured Output / Grammar در صورت پشتیبانی واقعی Runtime است. تنظیمات بدون اثر واقعی در Runtime نباید نمایش داده شوند.
 
 ### 09 — Streaming پاسخ
 **وضعیت:** تصمیم ثبت شد
