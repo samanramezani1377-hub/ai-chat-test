@@ -17,15 +17,25 @@
 | [`TASK_STATE_MACHINE.md`](docs/TASK_STATE_MACHINE.md) | State Machine Task/Agent/Execution |
 | [`RECOVERY_FAILURE.md`](docs/RECOVERY_FAILURE.md) | Checkpoint، Recovery، Idempotency و Verification |
 | [`OBSERVABILITY_AND_ERROR_CENTER.md`](docs/OBSERVABILITY_AND_ERROR_CENTER.md) | Central Logging، Error Center و گزارش قابل ارسال به Agent |
+| [`ERROR_REPORT_SCHEMA.md`](docs/ERROR_REPORT_SCHEMA.md) | Contract استاندارد ErrorReport |
 | [`SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) | Permission، Confirmation و Risk |
 | [`DATA_AND_PRIVACY.md`](docs/DATA_AND_PRIVACY.md) | Data Boundary، Logging و Privacy |
 | [`AI_WORKSPACE.md`](docs/AI_WORKSPACE.md) | میز کار تعاملی AI |
 | [`PERFORMANCE_METRICS.md`](docs/PERFORMANCE_METRICS.md) | Performance و Network Monitoring |
+| [`SETTINGS_CORE.md`](docs/SETTINGS_CORE.md) | Central Settings Core، Versioning و Migration |
 | [`WOOGIT_INTEGRATION.md`](docs/WOOGIT_INTEGRATION.md) | WooGit Adapter + Capability Contract |
 | [`PLATFORM_RELEASE_CI.md`](docs/PLATFORM_RELEASE_CI.md) | Platform، Compatibility و CI |
 | [`TEST_MATRIX.md`](docs/TEST_MATRIX.md) | ماتریس تست و Benchmark |
 | [`IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | برنامه پیاده‌سازی و مهاجرت |
+| [`TRACEABILITY.md`](docs/TRACEABILITY.md) | نگاشت Contractها به Module/Package |
+| [`CONTRACT_INDEX.md`](docs/CONTRACT_INDEX.md) | فهرست مرجع تمام Contractها |
+| [`DEPENDENCY_RULES.md`](docs/DEPENDENCY_RULES.md) | قوانین وابستگی بین لایه‌ها |
+| [`DATA_FLOW_LIFECYCLE.md`](docs/DATA_FLOW_LIFECYCLE.md) | جریان کامل داده و Lifecycle |
+| [`FAILURE_MATRIX.md`](docs/FAILURE_MATRIX.md) | ماتریس Failure / Recovery / Verification |
+| [`MIGRATION_MAPPING.md`](docs/MIGRATION_MAPPING.md) | نگاشت Prototype به WooGit |
+| [`ACCEPTANCE_CRITERIA.md`](docs/ACCEPTANCE_CRITERIA.md) | معیارهای پذیرش و آمادگی انتقال |
 | [`QUESTION_BANK.md`](docs/QUESTION_BANK.md) | سؤالات و تصمیم‌های ثبت‌شده |
+| [`DOCUMENTATION_READINESS.md`](docs/DOCUMENTATION_READINESS.md) | وضعیت آمادگی مستندات |
 
 ## معماری اصلی
 
@@ -112,7 +122,7 @@ Raw Machine Error / Trace / Logs در Error Center
 
 Secret، credential، token و داده حساس غیرضروری باید قبل از نمایش یا Copy Redact شوند.
 
-جزئیات: [`OBSERVABILITY_AND_ERROR_CENTER.md`](docs/OBSERVABILITY_AND_ERROR_CENTER.md)
+جزئیات: [`OBSERVABILITY_AND_ERROR_CENTER.md`](docs/OBSERVABILITY_AND_ERROR_CENTER.md) و [`ERROR_REPORT_SCHEMA.md`](docs/ERROR_REPORT_SCHEMA.md)
 
 ## Recovery
 
