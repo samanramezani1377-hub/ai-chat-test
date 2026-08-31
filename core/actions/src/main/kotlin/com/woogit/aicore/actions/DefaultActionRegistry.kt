@@ -3,7 +3,7 @@ package com.woogit.aicore.actions
 import com.woogit.aicore.domain.Action
 import com.woogit.aicore.domain.ActionRegistry
 
-class DefaultActionRegistry : ActionRegistry {
+class DefaultActionRegistry : ActionRegistry, ActionRegistryFacade {
     private val actions = linkedMapOf<String, Action<Any, Any>>()
     private val categoriesByAction = linkedMapOf<String, String>()
 
