@@ -13,11 +13,13 @@ interface CoreSettingsStore {
 class InMemoryCoreSettingsStore(initial: CoreSettings = CoreSettings()) : CoreSettingsStore {
     private var settings = initial
 
-    @Synchronized
-    override suspend fun get(): CoreSettings = settings
+    override suspend fun get(): CoreSettings = synchronized(this) {
+        settings
+    }
 
-    @Synchronized
     override suspend fun update(settings: CoreSettings) {
-        this.settings = settings
+        synchronized(this) {
+            this.settings = settings
+        }
     }
 }
