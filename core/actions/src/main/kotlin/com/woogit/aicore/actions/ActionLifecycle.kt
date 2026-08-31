@@ -89,4 +89,17 @@ class ActionLifecycle(
             failed
         }
     }
+
+    suspend fun retryFailed(
+        executionId: String,
+        verifier: Verifier<Any>
+    ): ActionExecutionState {
+        val failed = checkpointStore.get(executionId) ?: return ActionExecutionState.Failed("Prepared action not found: $executionId")
+        if (failed.state !is ActionExecutionState.Failed) return ActionExecutionState.Failed("Only failed executions can be retried")
+        // Every retry returns to the same approval gate for sensitive actions.
+        val reset = failed.copy(state = if (requiresApproval(failed)) ActionExecutionState.AwaitingApproval else ActionExecutionState.Approved)
+        checkpointStore.save(reset)
+        return if (reset.state == ActionExecutionState.Approved) executeApproved(executionId, verifier)
+        else reset.state
+    }
 }
