@@ -141,21 +141,6 @@ Agent باید Multi-Step باشد.
 - موفقیت Action شکست‌خورده هرگز جعل نشود.
 - اگر کار ناقص بماند، Final Answer باید صادقانه آن را اعلام کند.
 
-نمونه Tool Error:
-
-```json
-{
-  "type": "tool_result",
-  "action": "read_file",
-  "success": false,
-  "error": {
-    "code": "FILE_NOT_FOUND",
-    "message": "File does not exist",
-    "retryable": false
-  }
-}
-```
-
 ## 8. Debug & Agent Observability
 
 قابلیت‌های توافق‌شده:
@@ -211,21 +196,6 @@ Agent باید Multi-Step باشد.
 
 اندازه‌گیری و نمایش از هم مستقل باشند. همه Metricها اندازه‌گیری می‌شوند، اما نمایش هر Metric باید مستقل و قابل تنظیم باشد. Visibility هر Metric باید با یک تغییر بسیار کوچک در یک محل مرکزی کد قابل روشن/خاموش شدن باشد.
 
-برای نمونه:
-
-```kotlin
-const val SHOW_FIRST_TOKEN_TIME = true
-const val SHOW_INPUT_TOKENS = true
-const val SHOW_OUTPUT_TOKENS = true
-const val SHOW_TOKENS_PER_SECOND = true
-const val SHOW_CONTEXT_USAGE = true
-const val SHOW_RAM = true
-const val SHOW_CPU = true
-const val SHOW_GPU_NPU = true
-const val SHOW_AGENT_TIME = true
-const val SHOW_ACTION_TIME = true
-```
-
 خاموش‌کردن Visibility یک Metric نباید اندازه‌گیری آن را غیرفعال کند.
 
 هر Metric باید از Runtime/Android و مسیر واقعی اندازه‌گیری شود. اگر اندازه‌گیری یک Metric واقعاً ممکن نباشد، `Unavailable` نمایش داده شود و مقدار تخمینی یا ساختگی مجاز نیست.
@@ -243,7 +213,23 @@ const val SHOW_ACTION_TIME = true
 - تست‌های اضافی مانند Firewall، DNS و Fresh Install جزو Requirement نیستند.
 - هیچ مقدار ساختگی برای Network Usage مجاز نیست.
 
-## 11. اصول عمومی Prototype
+## 11. معیار موفقیت Prototype — سؤال 19
+
+هیچ Threshold، امتیاز، حداقل/حداکثر عددی یا معیار خودکار برای اعلام موفقیت Prototype تعریف نمی‌شود.
+
+Prototype باید قابلیت‌ها و Metricهای واقعی موردنیاز را اجرا و ارائه کند. ارزیابی نهایی کیفیت، سرعت، مصرف منابع، پایداری، کیفیت فارسی، عملکرد Agent و Offline بودن **شخصاً توسط کاربر انجام می‌شود**.
+
+سیستم نباید به‌صورت خودکار اعلام کند که Prototype موفق یا ناموفق شده است.
+
+## 12. تصمیم انتقال به WooGit — سؤال 20
+
+هیچ شرط، Threshold، امتیاز یا معیار عددی از پیش تعیین‌شده‌ای برای انتقال Local AI به WooGit تعریف نمی‌شود.
+
+Prototype نتایج و شواهد واقعی را ارائه می‌کند و **تصمیم نهایی درباره مناسب بودن و انتقال Local AI به WooGit کاملاً با کاربر است**.
+
+در صورت تصمیم به انتقال، معماری، قرارداد Actionها، Agent، Model Management، Performance Monitoring و تجربه فنی Prototype به‌عنوان مرجع مهاجرت استفاده می‌شوند.
+
+## 13. اصول عمومی Prototype
 
 - رفتار Mock یا جعلی در مسیرهای اصلی مجاز نیست.
 - هر موفقیت یا شکست باید بر اساس نتیجه واقعی Runtime/Executor باشد.
