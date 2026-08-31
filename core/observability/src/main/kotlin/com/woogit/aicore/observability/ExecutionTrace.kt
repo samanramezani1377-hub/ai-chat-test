@@ -37,12 +37,13 @@ interface ExecutionTraceStore {
 class InMemoryExecutionTraceStore : ExecutionTraceStore {
     private val events = mutableListOf<ExecutionTraceEvent>()
 
-    @Synchronized
     override suspend fun append(event: ExecutionTraceEvent) {
-        events += event
+        synchronized(events) {
+            events += event
+        }
     }
 
-    @Synchronized
-    override suspend fun forExecution(executionId: String): List<ExecutionTraceEvent> =
+    override suspend fun forExecution(executionId: String): List<ExecutionTraceEvent> = synchronized(events) {
         events.filter { it.executionId == executionId }
+    }
 }
