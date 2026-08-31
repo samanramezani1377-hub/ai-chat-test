@@ -7,7 +7,7 @@
 | 21 | AI Core مستقل از Runtime + Runtime Adapter Contract | Architecture / Runtime Contract |
 | 22 | Context ترکیبی با Recent Messages قابل تنظیم، Summary، Persistent Task Context و Workspace Context | Architecture / Context |
 | 23 | Workspace تعاملی ولی غیر Executor؛ Sensitive Action با Preview/Snapshot و Final Approval | AI Workspace / Action Protocol |
-| 24 | نمایش Eventهای مهم در Workspace و ثبت کامل Event/Error در توسعه | Observability |
+| 24 | نمایش Eventهای مهم در Workspace و ثبت کامل Event/Error در توسعه + Central Error Center | Observability / Error Center |
 | 25 | Persistent Storage ترکیبی + Lifecycle جدا برای Log/Cache | Persistence |
 | 26 | Central Settings Core + Domain-specific settings + Versioning/Migration | Settings / Architecture |
 | 27 | Action Registry + Adapter؛ دسته‌بندی داخلی و Executorهای قابل توسعه زیر هر Category | Action Registry |
@@ -25,5 +25,8 @@
 - Actionها از طریق Registry و Contractهای machine-readable مدیریت می‌شوند.
 - Adapter محیط اجرا را از Core جدا می‌کند و Capabilityها مشخص می‌کنند محیط فعلی چه Actionهایی را پشتیبانی می‌کند.
 - Recovery باید State واقعی را حفظ کند و از اجرای دوباره ناخواسته جلوگیری کند.
+- **تمام Error/Eventهای فنی باید از Central Logging/Observability عبور کنند.** خطا در محل رخداد با پیام فارسی و قابل فهم نمایش داده شود و همان Error در Error Center با Raw Machine Error و Trace/Log مرتبط قابل مشاهده باشد.
+- **Error Center باید دکمه Copy Error Report داشته باشد** تا کاربر بتواند گزارش استاندارد شامل شناسه‌ها، Component، Error Code، خطای فارسی، خطای خام، Trace و وضعیت Execution/Verification را برای Agent/Developer ارسال کند.
+- Secretها، credentialها، tokenها و داده حساس غیرضروری قبل از ذخیره/نمایش/Copy باید Redact شوند.
 - CI از ابتدا باید مسیر Release نهایی را آماده کند، اما تست‌های سخت‌گیرانه Action/Recovery تا آخرین سطح آمادگی و تأیید کیفیت اپ توسط مالک پروژه Hard Gate نمی‌شوند.
 - تمام تصمیم‌ها باید در مستندات تخصصی خود منعکس شوند و README فقط نقشه و نقطه ورود مستندات باشد.
