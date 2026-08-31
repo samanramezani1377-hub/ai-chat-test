@@ -17,7 +17,9 @@ class ActionTraceTest {
         val prepared = lifecycle.prepare("write", "value")
         lifecycle.validate(prepared, null)
         lifecycle.approve(prepared.executionId)
-        lifecycle.executeApproved(prepared.executionId, Verifier<Any> { VerificationResult(true, "verified") })
+        lifecycle.executeApproved(prepared.executionId, object : Verifier<Any> {
+            override fun verify(output: Any): VerificationResult = VerificationResult(true, "verified")
+        })
 
         assertEquals(
             listOf(
