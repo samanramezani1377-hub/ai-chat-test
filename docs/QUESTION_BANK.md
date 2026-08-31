@@ -30,7 +30,9 @@
 
 `AI Workspace` دقیقاً چه ساختار داده‌ای از Core دریافت کند؟ برای نمایش Chat، Action، Tool Result، Verification، Before/After، Preview و Confirmation چه نوع `WorkspaceItem` یا Eventهایی لازم است؟
 
-- [ ] 23. Workspace Data Contract
+**تصمیم نهایی:** Workspace طبق گزینه B تعاملی باشد، اما Executor نباشد. Workspace می‌تواند وضعیت Task، Goal، Current Subject، Actionها، Resultها، Verification، Preview، Before/After، Confirmation، Error، File و Artifact را نمایش دهد و Interactionهایی مانند Approve، Reject، Retry، Cancel و Undo را دریافت کند؛ اما این Interactionها فقط Command/Intent به AI Core می‌فرستند و اجرای واقعی همیشه از مسیر Core و Action System انجام می‌شود. برای Actionهای حساس، Workflow شامل آماده‌سازی توسط AI، Preview/Snapshot، انتظار برای `Final Approval` و سپس Execution واقعی است. تأیید نهایی قبل از Execution واقعی انجام می‌شود، نه به معنی اجازه‌ای مبهم برای اینکه AI بعداً تصمیم بگیرد چه کاری انجام دهد. Approval به معنی Success نیست و موفقیت فقط پس از Execution و Verification مستقل اعلام می‌شود. Approval باید به Snapshot مشخص متصل باشد و اگر State واقعی قبل از Execution تغییر کرده باشد، اجرای کورکورانه ممنوع و نیازمند Validate/Prepare و در صورت لزوم تأیید نهایی جدید است.
+
+- [x] 23. Workspace Data Contract
 
 ### 24. Event و Trace
 
