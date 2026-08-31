@@ -22,7 +22,9 @@
 
 تاریخچه Chat و Context چگونه مدیریت شود؟ چه چیزی وارد Context مدل شود، Context Window چگونه کنترل شود، و در زمان پرشدن Context چه رفتاری داشته باشیم (حذف، خلاصه‌سازی، شروع Context جدید یا ترکیب این روش‌ها)؟
 
-- [ ] 22. Conversation / Context Contract
+**تصمیم نهایی:** سیستم Context ترکیبی باشد و از چهار بخش اصلی تشکیل شود: System Context، Persistent Task Context، Conversation Summary، Recent Messages و Workspace Context. تعداد Recent Messages مقدار پیش‌فرض دارد اما باید توسط کاربر قابل تنظیم باشد و عدد ثابتی در معماری فرض نشود. پیام‌های قدیمی‌تر به Summary تبدیل می‌شوند. Persistent Task Context هدف، کار فعلی، Intent کاربر و اطلاعات مهم را مستقل از تاریخچه نگه می‌دارد. Workspace نیز به‌عنوان Context قابل Query/Select در اختیار Core/Agent قرار می‌گیرد و لازم نیست کل داده Workspace کورکورانه داخل Prompt قرار گیرد. Context هر درخواست از Source of Truth ساخته می‌شود تا Prompt به‌صورت بی‌نهایت رشد نکند.
+
+- [x] 22. Conversation / Context Contract
 
 ### 23. Workspace Data Contract
 
