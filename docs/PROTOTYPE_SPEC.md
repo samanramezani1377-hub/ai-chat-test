@@ -112,13 +112,12 @@ Web Search، HTTP Request و Actionهای وابسته به Cloud فعلاً خ�
 
 Agent باید Multi-Step باشد.
 
+- **هیچ مقدار عددی ثابت یا پیش‌فرض اجباری برای Maximum Agent Steps تعریف نمی‌شود.**
 - Maximum Agent Steps توسط کاربر قابل تنظیم است.
-- مقدار پیش‌فرض: 5 Step
-- Runtime باید یک سقف امن مستقل نیز داشته باشد.
-- رسیدن به Maximum Agent Steps باعث Block شدن Action بعدی می‌شود.
+- رسیدن به Limit انتخاب‌شده توسط کاربر باعث Block شدن Action بعدی می‌شود.
+- Runtime می‌تواند یک Hard Safety Limit مستقل برای جلوگیری از Loop بی‌نهایت یا اجرای غیرعادی داشته باشد؛ این Safety Limit جایگزین تنظیم کاربر نیست.
 - جعل موفقیت پس از رسیدن به Limit ممنوع است.
-
-هر اجرای واقعی Action یک Agent Step مصرف می‌کند.
+- هر اجرای واقعی Action یک Agent Step مصرف می‌کند.
 
 ## 7. Action Error Handling
 
@@ -131,7 +130,7 @@ Agent باید Multi-Step باشد.
 - خطای واقعی Executor به Agent برگردد.
 - خطا ساختاریافته باشد.
 - خطاهای قابل Retry با `retryable` مشخص شوند.
-- هر Action حداکثر 2 Retry داشته باشد.
+- Retry باید محدود باشد و تعداد آن توسط سیاست Retry سیستم کنترل شود.
 - Retry نیز اجرای واقعی Action است و Step Budget را مصرف می‌کند.
 - خطای غیرقابل Retry خودکار تکرار نشود.
 - Agent در صورت امکان بتواند Action جایگزین انتخاب کند.
