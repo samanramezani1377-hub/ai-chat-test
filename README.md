@@ -35,7 +35,8 @@
 UI
 ├── Chat
 ├── Settings
-├── Error Center / Debug
+├── Error Center
+├── Technical Error Panel (hideable)
 └── AI Workspace
         ↓
      AI Core
@@ -48,7 +49,8 @@ UI
    Action System
    ├── Permission
    ├── Validation
-   ├── Executor / Adapter
+   ├── Capability Check
+   ├── Adapter / Executor
    └── Verifier
 ```
 
@@ -70,7 +72,13 @@ System Context
 
 ## Action و تأیید
 
-Actionها در Registry مرکزی دسته‌بندی می‌شوند و هر Category قابلیت اضافه‌کردن Executor/Adapterهای بیشتر را دارد.
+Actionها در Registry مرکزی دسته‌بندی می‌شوند و هر Category قابلیت اضافه‌کردن Executor/Adapterهای بیشتر را دارد. Capability Check پیش از Execution مشخص می‌کند محیط فعلی قابلیت لازم را دارد.
+
+مسیر مرجع:
+
+```text
+Action Registry → Action Contract → Capability Check → Adapter / Executor → Verifier
+```
 
 برای Action حساس:
 
@@ -100,6 +108,8 @@ Raw Machine Error / Trace / Logs در Error Center
 
 همچنین یک دکمه **Copy Error Report** وجود دارد تا گزارش استاندارد شامل اطلاعات فنی لازم در Clipboard قرار گیرد و کاربر بتواند آن را برای Agent یا Developer ارسال کند.
 
+پنل نمایش کامل خطاهای فنی و Raw Machine Error یک بخش مستقل و **قابل مخفی‌سازی بدون حذف** است. در آینده می‌توان آن را با تغییر Visibility/Feature Flag از UI مخفی کرد، در حالی که Logging Core، Error Store و Error Report همچنان فعال می‌مانند و پنل در Developer/Debug Mode دوباره قابل نمایش است.
+
 Secret، credential، token و داده حساس غیرضروری باید قبل از نمایش یا Copy Redact شوند.
 
 جزئیات: [`OBSERVABILITY_AND_ERROR_CENTER.md`](docs/OBSERVABILITY_AND_ERROR_CENTER.md)
@@ -117,6 +127,10 @@ Crash یا Restart نباید باعث اجرای دوباره کورکوران�
 ## WooGit Migration
 
 مهاجرت به WooGit با `Adapter + Capability Contract` انجام می‌شود. AI Core مستقیماً به WooGit وابسته نیست و Action Contractها بین Prototype و WooGit قابل استفاده مجدد هستند.
+
+```text
+AI Core → Action Registry → Capability Check → WooGit Adapter → WooGit API/Service → Verifier
+```
 
 ## CI و Release
 
