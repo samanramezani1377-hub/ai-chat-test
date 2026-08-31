@@ -4,14 +4,16 @@
 
 معماری Actionها به‌صورت **Registry + Adapter Architecture** باشد.
 
-`ActionRegistry` مرجع مرکزی تعریف و کشف Actionها است، اما خودش Executor نیست. هر Action یک Contract و Metadata مشخص دارد و اجرای واقعی از طریق Executor/Adapter مربوط به آن انجام می‌شود.
+`ActionRegistry` مرجع مرکزی تعریف و کشف Actionها است، اما خودش Executor نیست. هر Action یک Contract و Metadata مشخص دارد و اجرای واقعی از مسیر Action System و Adapter/Executor مربوط به محیط اجرا انجام می‌شود.
 
 ```text
 AI Core
   ↓
+Action Registry
+  ↓
 Action Contract
   ↓
-Action Registry
+Capability Check
   ↓
 Adapter / Executor
   ↓
@@ -52,7 +54,7 @@ Product
 └── FutureProductExecutor
 ```
 
-بنابراین یک Action می‌تواند Contract واحدی داشته باشد و Adapter/Executor متناسب با محیط اجرا انتخاب شود.
+هر Action Contract می‌تواند توسط Adapter/Executor متناسب با Environment اجرا شود. Capability Check باید قبل از Execution مشخص کند محیط فعلی قابلیت لازم را دارد.
 
 ## Action Metadata
 
@@ -69,6 +71,7 @@ Product
 - confirmation policy
 - executor/adapter reference
 - verifier reference
+- capability requirements
 
 Actionهای حساس باید از Confirmation Policy مصوب استفاده کنند و Approval نباید مستقیماً Executor را از UI فعال کند؛ مسیر اجرای واقعی از Action System/Core عبور می‌کند.
 
@@ -80,6 +83,7 @@ Actionهای حساس باید از Confirmation Policy مصوب استفاده 
 2. Category جدید اضافه کرد.
 3. Executor جدید زیر یک Category اضافه کرد.
 4. Adapter محیط اجرا را تغییر داد.
-5. Verifier متفاوت اضافه کرد.
+5. Capability جدید اضافه کرد.
+6. Verifier متفاوت اضافه کرد.
 
 بدون اینکه UI یا AI Core برای هر تغییر بازنویسی شود.
