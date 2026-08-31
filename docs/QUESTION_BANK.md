@@ -20,7 +20,7 @@
 - [x] 12. Agent در Prototype دقیقاً چه کاری انجام دهد؟
 - [x] 13. فرمت ارتباط مدل با Actionها چه باشد؟
 - [x] 14. اولین Actionهای قابل اجرا کدام باشند؟
-- [ ] 15. Agent چند مرحله اجازه اجرای Action داشته باشد؟
+- [x] 15. Agent چند مرحله اجازه اجرای Action داشته باشد؟
 - [ ] 16. در صورت خطای Action چه اتفاقی بیفتد؟
 - [ ] 17. چه اطلاعات Performance اندازه‌گیری شود؟
 - [ ] 18. تست کاملاً Offline چگونه تأیید شود؟
@@ -29,58 +29,108 @@
 
 ## پاسخ‌ها
 
+### 15 — Agent چند مرحله اجازه اجرای Action داشته باشد؟
+**وضعیت:** تصمیم ثبت شد
+
+**پاسخ:**
+
+Agent باید از **Multi-Step Execution** پشتیبانی کند و برای جلوگیری از Loop بی‌نهایت، مصرف بی‌دلیل منابع و اجرای کنترل‌نشده Actionها، یک **Hard Step Limit** داشته باشد.
+
+مقدار پیش‌فرض پیشنهادی و مورد توافق: **۵ Step**.
+
+اما این مقدار باید **توسط خود کاربر قابل تنظیم** باشد.
+
+**رفتار تنظیمات:**
+
+- مقدار پیش‌فرض: 5
+- کاربر می‌تواند Maximum Agent Steps را از UI تغییر دهد.
+- مقدار انتخابی کاربر باید واقعاً توسط Agent Runtime اعمال شود.
+- تنظیمات باید در بخش مناسب Agent/Advanced قابل مشاهده و تغییر باشند.
+- مقدار تنظیم‌شده باید در Agent Debug Mode نیز نمایش داده شود؛ مثلاً `Step 2 / 5`.
+- UI نباید اجازه مقدار نامعتبر یا بدون محدودیت واقعی را بدهد.
+- یک حد بالای امن Runtime باید وجود داشته باشد تا کاربر نتواند با تنظیم UI عملاً Agent را بدون محدودیت کند.
+
+**نمونه UI:**
+
+```text
+Agent Settings
+
+Maximum Agent Steps
+[ 5 ]
+
+Agent Debug Mode
+[ ON ]
+```
+
+**نمونه اجرای چندمرحله‌ای:**
+
+```text
+Step 1 / 5 → list_files
+Step 2 / 5 → read_file
+Step 3 / 5 → calculate
+Step 4 / 5 → create_file
+Step 5 / 5 → read_file
+```
+
+اگر Agent در هر مرحله قبل از رسیدن به Limit به Final Answer برسد، اجرا طبیعی تمام می‌شود.
+
+**رسیدن به Limit:**
+
+اگر Agent به Maximum Agent Steps برسد، Action بعدی نباید اجرا شود.
+
+مثلاً:
+
+```text
+Step 5 / 5
+        ↓
+MAX_STEPS_REACHED
+        ↓
+Action #6 = BLOCKED
+```
+
+در Debug Mode باید مشخص شود که اجرای Action بعدی به دلیل Step Limit مسدود شده است.
+
+اگر کار هنوز کامل نشده باشد، Agent نباید موفقیت را جعل کند. باید وضعیت ناقص/متوقف‌شده را به کاربر اعلام کند.
+
+**جلوگیری از Loop:**
+
+- Step Limit سخت و واقعی است.
+- هر اجرای واقعی Action یک Step مصرف می‌کند.
+- Actionهای نامعتبر نباید Step معتبر محسوب شوند و نباید به Executor برسند.
+- پس از رسیدن به Limit، هیچ Action جدیدی اجرا نمی‌شود.
+- Agent نباید امکان Loop بی‌نهایت داشته باشد.
+
+**تصمیم نهایی:**
+
+Multi-Step Agent با **Maximum Agent Steps قابل تنظیم توسط کاربر** انتخاب شد؛ مقدار پیش‌فرض ۵ است و Runtime باید یک سقف امن مستقل نیز داشته باشد. رسیدن به سقف باعث Block شدن Action بعدی می‌شود و جعل موفقیت ممنوع است.
+
 ### 14 — اولین Actionهای قابل اجرا کدام باشند؟
 **وضعیت:** تصمیم ثبت شد
 
 **پاسخ:**
 
-برای نسخه اول Prototype، مجموعه Actionها باید کوچک، کنترل‌شده، واقعی و کاملاً Local باشند تا قابلیت Agent بدون وابستگی به سرویس‌های خارجی قابل ارزیابی باشد.
+Actionهای نسخه اول:
 
-**Actionهای مورد توافق:**
+**ضروری:**
+- `calculate`
+- `create_file`
+- `read_file`
+- `list_files`
+- `get_time`
+- `get_device_info`
+- `get_model_info`
+- `get_performance_stats`
 
-### Safe Actions
+**Safety Test:**
+- `delete_file` با تأیید اجباری کاربر
 
-1. `calculate` — انجام محاسبات و برگرداندن نتیجه واقعی.
-2. `read_file` — خواندن محتوای یک فایل مجاز.
-3. `list_files` — فهرست‌کردن فایل‌های فضای کاری مجاز.
-4. `get_time` — دریافت زمان واقعی دستگاه.
-5. `get_device_info` — دریافت اطلاعات غیرحساس و مجاز دستگاه.
-6. `get_model_info` — دریافت اطلاعات واقعی مدل و Runtime فعال.
-7. `get_performance_stats` — دریافت آمار واقعی Performance مربوط به Generation.
-
-### Side Effect Action
-
-8. `create_file` — ایجاد واقعی فایل با محتوای مشخص‌شده توسط کاربر/Agent. نتیجه باید از اجرای واقعی Executor به دست آید.
-
-### Sensitive Action
-
-9. `delete_file` — حذف واقعی فایل، اما فقط پس از تأیید صریح کاربر. این Action برای تست Safety و Confirmation نیز استفاده می‌شود.
-
-**نمونه چندمرحله‌ای مورد انتظار:**
-
-برای درخواست «یک فایل result.txt بساز و نتیجه 125 × 37 را داخل آن قرار بده»، Agent می‌تواند ابتدا `calculate` را اجرا کند، نتیجه واقعی را دریافت کند، سپس با استفاده از همان نتیجه `create_file` را اجرا کند و در پایان پاسخ نهایی را تولید کند.
-
-**Actionهای شبکه‌ای فعلاً خارج از Prototype هستند:**
-
+**فعلاً خارج از Prototype:**
 - Web Search
 - HTTP Request
-- Fetch URL
-- سایر Actionهای وابسته به Internet یا Cloud
+- Internet Tools
+- Actionهای وابسته به Cloud
 
-این محدودیت با تصمیم اجرای کاملاً Offline Prototype سازگار است.
-
-**الزامات همه Actionها:**
-
-- هر Action باید Executor واقعی داشته باشد.
-- هر Action باید Schema و Arguments مشخص داشته باشد.
-- Tool Result باید نتیجه واقعی اجرای Action باشد.
-- موفقیت Action بدون اجرای واقعی نباید اعلام شود.
-- Action نامعتبر نباید اجرا شود.
-- Actionهای حساس باید قبل از اجرا تأیید کاربر داشته باشند.
-- Mock برای شبیه‌سازی اجرای موفق یا نتیجه Action ممنوع است.
-- Actionها نباید وابستگی اجباری به اینترنت داشته باشند.
-
-**تصمیم نهایی:** `calculate`, `create_file`, `read_file`, `list_files`, `get_time`, `get_device_info`, `get_model_info`, `get_performance_stats` و `delete_file` با تأیید اجباری کاربر انتخاب شدند.
+همه Actionها باید واقعی باشند و Mock یا موفقیت جعلی ممنوع است.
 
 ### 13 — فرمت ارتباط مدل با Actionها چه باشد؟
 **وضعیت:** تصمیم ثبت شد
@@ -123,145 +173,65 @@
 }
 ```
 
-ساختار خطای Tool Result نیز باید نتیجه واقعی Executor را منتقل کند:
-
-```json
-{
-  "type": "tool_result",
-  "action": "calculate",
-  "success": false,
-  "error": "..."
-}
-```
+ساختار خطای Tool Result نیز باید نتیجه واقعی Executor را منتقل کند.
 
 **الزامات Parser:**
 
-- JSON باید معتبر باشد.
-- `type` باید یکی از انواع مجاز باشد.
-- نام Action باید در فهرست Actionهای مجاز وجود داشته باشد.
-- `arguments` باید مطابق Schema همان Action اعتبارسنجی شود.
-- Action نامعتبر یا ناقص نباید به Executor ارسال شود.
-- Parser نباید بر اساس حدس، خروجی خراب مدل را به یک Action معتبر تبدیل کند، خصوصاً برای Actionهای حساس.
+- JSON معتبر باشد.
+- `type` معتبر باشد.
+- Action در فهرست Actionهای مجاز باشد.
+- `arguments` مطابق Schema همان Action اعتبارسنجی شود.
+- Action نامعتبر یا ناقص به Executor ارسال نشود.
+- Parser بر اساس حدس، خروجی خراب را به Action معتبر تبدیل نکند.
 
-**زنجیره مورد توافق:**
+**زنجیره:**
 
-`LLM → JSON Action Request → Parser → Schema Validation → Permission/Confirmation → Executor`
+`LLM → JSON Action Request → Parser → Schema Validation → Permission/Confirmation → Executor → Tool Result → LLM → Final Answer`
 
-و بعد از اجرای واقعی:
-
-`Executor → Tool Result → LLM → Final Answer`
-
-**Structured Output / Grammar:**
-
-در صورت پشتیبانی واقعی Runtime، Structured Output یا Grammar برای محدودکردن خروجی مدل به Schema مجاز استفاده شود. اگر Runtime از آن پشتیبانی نکند، نباید به‌صورت صوری یا Mock پیاده‌سازی شود.
-
-**اصول ایمنی:**
-
-- مدل مستقیماً Action را اجرا نمی‌کند.
-- Parser تنها ورودی معتبر را به Executor می‌دهد.
-- نتیجه Tool باید از اجرای واقعی Executor حاصل شود.
-- Tool Result نباید توسط مدل یا UI جعل شود.
-- Action حساس بدون تأیید کاربر اجرا نمی‌شود.
-- خروجی نامعتبر مدل نباید با حدس به Action تبدیل شود.
+Structured Output / Grammar در صورت پشتیبانی واقعی Runtime استفاده شود و Mock ممنوع است.
 
 ### 12 — Agent در Prototype دقیقاً چه کاری انجام دهد؟
 **وضعیت:** تصمیم ثبت شد
 
 **پاسخ:**
 
-Agent در Prototype باید یک Agent واقعی و قابل ارزیابی باشد، نه صرفاً یک Chat با عنوان Agent. Agent باید بتواند نیاز به اجرای Action را از درخواست کاربر تشخیص دهد، Action مناسب را انتخاب کند، درخواست ساختاریافته تولید کند، آن درخواست توسط Parser اعتبارسنجی شود، Action توسط Executor به‌صورت واقعی اجرا شود، نتیجه واقعی Tool را دریافت کند و بر اساس آن پاسخ نهایی تولید کند.
+Agent باید یک Agent واقعی و قابل ارزیابی باشد؛ نه صرفاً یک Chat با عنوان Agent. باید نیاز به Action را تشخیص دهد، Action مناسب را انتخاب کند، درخواست ساختاریافته تولید کند، Parser آن را اعتبارسنجی کند، Executor آن را واقعاً اجرا کند، Tool Result واقعی را دریافت کند و Final Answer را بر اساس نتیجه واقعی تولید کند.
 
-**قابلیت‌های مورد توافق:**
+قابلیت‌ها شامل Multi-Step Execution، تأیید کاربر برای Actionهای حساس، Agent Debug Mode، انتقال خطای واقعی، عدم جعل موفقیت، اجرای Local و عدم استفاده از Mock هستند.
 
-- تشخیص اینکه چه زمانی Action لازم است.
-- انتخاب Action مناسب.
-- تولید Action Request ساختاریافته.
-- اعتبارسنجی Action Request توسط Parser.
-- اجرای واقعی Action توسط Executor.
-- دریافت Tool Result واقعی.
-- تولید Final Answer بر اساس نتیجه واقعی Action.
-- امکان اجرای چند Action متوالی در صورت نیاز.
-- درخواست تأیید کاربر قبل از اجرای Actionهای حساس.
-- نمایش تمام مراحل در Agent Debug Mode.
-- انتقال شکست واقعی Action به مدل.
-- عدم اعلام موفقیت بدون اجرای واقعی Action.
-- اجرای کاملاً Local و عدم وابستگی Agent به اینترنت.
-- استفاده نکردن از Mock برای شبیه‌سازی موفقیت یا نتیجه Action.
-
-**زنجیره اجرای مورد انتظار:**
-
-`User → LLM → Action Request → Parser → Executor → Tool Result → LLM → Final Answer`
-
-**رفتار در خطا:**
-
-اگر Executor نتیجه‌ای مانند `success=false` و خطای واقعی برگرداند، مدل نباید موفقیت را جعل کند و باید پاسخ نهایی را بر اساس شکست واقعی Action تولید کند.
-
-**Actionهای حساس:**
-
-برای Actionهای حساس، قبل از اجرا باید از کاربر تأیید گرفته شود و Action نباید بدون اجازه اجرا شود.
-
-**Agent Loop:**
-
-Agent باید امکان اجرای چند مرحله‌ای داشته باشد، اما تعداد مراحل در سؤال ۱۵ به‌صورت جداگانه تعیین خواهد شد. Agent نباید بدون محدودیت وارد Loop شود.
-
-**محدودیت‌های معماری:**
-
-- مدل مستقیماً Android API را اجرا نمی‌کند.
-- مدل مستقیماً Executor را دور نمی‌زند.
-- Tool Result نباید توسط مدل یا UI جعل شود.
-- Action حساس بدون تأیید کاربر اجرا نمی‌شود.
-- Agent به اینترنت وابسته نیست.
-- Mock برای موفقیت یا نتیجه Action ممنوع است.
-
-### 11 — تنظیمات Inference در UI
+### 11 — چه تنظیمات Inference در UI نمایش داده شود؟
 **وضعیت:** تصمیم ثبت شد
 
 **پاسخ:**
 
-تنظیمات Inference باید در دو سطح **Basic** و **Advanced** در UI ارائه شوند. UI باید فقط تنظیماتی را نمایش دهد که Runtime واقعاً پشتیبانی و اعمال می‌کند؛ نمایش تنظیمات صوری یا بدون اثر ممنوع است.
+تنظیمات Inference در دو سطح Basic و Advanced ارائه شوند.
 
-**Basic:**
-- Temperature
-- Max Tokens / Max New Tokens
+**Basic:** Temperature، Max Tokens / Max New Tokens
 
-**Advanced:**
-- Top-K
-- Top-P
-- Min-P
-- Repeat Penalty
-- Seed
-- Stop Sequences
-- Context Length
-- Structured Output / Grammar در صورت پشتیبانی واقعی Runtime
+**Advanced:** Top-K، Top-P، Min-P، Repeat Penalty، Seed، Stop Sequences، Context Length و Structured Output / Grammar در صورت پشتیبانی واقعی Runtime.
 
-مقادیر اعمال‌شده باید با تنظیمات واقعی Runtime هماهنگ باشند و امکان مشاهده تنظیمات فعلی Inference نیز وجود داشته باشد.
+تنظیمات بدون اثر واقعی در Runtime نباید نمایش داده شوند.
 
 ### 09 — Streaming پاسخ
 **وضعیت:** تصمیم ثبت شد
 
 **پاسخ:**
 
-بله، **Streaming واقعی پاسخ الزامی است**.
-
-پاسخ مدل باید هنگام Generation به‌صورت تدریجی از Runtime دریافت و در UI نمایش داده شود. Streaming باید امکان اندازه‌گیری First Token Time و Generation Speed را فراهم کند و با Stop Generation سازگار باشد.
+Streaming واقعی پاسخ الزامی است و باید امکان اندازه‌گیری First Token Time و Generation Speed را فراهم کند و با Stop Generation سازگار باشد.
 
 ### 10 — Stop Generation
 **وضعیت:** تصمیم ثبت شد
 
 **پاسخ:**
 
-بله، **Stop Generation الزامی است**. توقف باید در سطح واقعی Runtime انجام شود و صرفاً متوقف‌کردن نمایش متن در UI نباشد.
-
-متن تولیدشده تا لحظه توقف باید حفظ شود و پاسخ با وضعیت **Stopped** علامت‌گذاری شود. متن ناقص نباید به‌عنوان پاسخ کامل نمایش داده شود.
+Stop Generation الزامی است و باید در سطح واقعی Runtime انجام شود. متن تولیدشده تا لحظه توقف حفظ و با وضعیت Stopped علامت‌گذاری شود.
 
 ### 08 — حداقل قابلیت‌های Chat
 **وضعیت:** تصمیم ثبت شد
 
 **پاسخ:**
 
-برای Prototype، بخش Chat باید علاوه بر قابلیت‌های پایه، امکانات لازم برای تست دقیق مدل، Inference و Agent را نیز داشته باشد.
-
-**قابلیت‌های ۱ تا ۲۰ مورد توافق قرار گرفتند:**
+قابلیت‌های ۱ تا ۲۰ مورد توافق قرار گرفتند:
 
 1. ارسال پیام
 2. دریافت پاسخ مدل
@@ -286,10 +256,10 @@ Agent باید امکان اجرای چند مرحله‌ای داشته باش�
 
 **قابلیت‌های Debug و Agent مورد توافق:**
 
-33. نمایش Raw Model Output برای بررسی خروجی خام مدل
-34. Agent Debug Mode برای نمایش مسیر کامل اجرای Agent، شامل Model → Action Request → Parser → Executor → Tool Result → Final Answer
+33. نمایش Raw Model Output
+34. Agent Debug Mode برای نمایش Model → Action Request → Parser → Executor → Tool Result → Final Answer
 35. درخواست تأیید کاربر قبل از اجرای Actionهای حساس
-36. ثبت Action Log برای Actionهای اجراشده
-37. نمایش Tool Result به‌صورت جدا از پاسخ نهایی AI
+36. ثبت Action Log
+37. نمایش Tool Result جدا از پاسخ نهایی AI
 
-این قابلیت‌ها باید به‌صورت واقعی پیاده‌سازی شوند و در Prototype قابلیت‌های Mock یا رفتار جعلی وجود نداشته باشد.
+این قابلیت‌ها باید واقعی باشند و Mock یا رفتار جعلی وجود نداشته باشد.
