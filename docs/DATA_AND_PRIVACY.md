@@ -12,6 +12,7 @@ DEVICE
 ├── Chat / Context
 ├── Workspace State
 ├── Action Logs
+├── Error Reports
 ├── Performance Metrics
 └── Tool Results
         ↓
@@ -40,17 +41,20 @@ Network Monitoring باید مصرف واقعی Network را ثبت کند. وج
 - Performance History
 - Workspace data
 - Action/Verification logs
+- Error Logs / Error Reports
 - Exported reports
 
 برای هر مورد باید retention و delete behavior مشخص شود.
 
-## Logging
+## Logging و Error Center
 
-Logهای Debug نباید به‌صورت پیش‌فرض Secrets، credentialها یا داده حساس غیرضروری را ذخیره کنند.
+تمام Error/Eventهای فنی از Central Logging/Observability عبور می‌کنند. کاربر می‌تواند خطای فارسی و قابل فهم را در محل رخداد ببیند و جزئیات Raw Machine Error/Trace را در Error Center مشاهده کند. Error Center همچنین امکان Copy یک Error Report برای ارسال به Agent/Developer را فراهم می‌کند.
+
+Debug Logs و Error Reports نباید به‌صورت پیش‌فرض Secrets، credentialها، tokenها یا داده حساس غیرضروری را ذخیره یا Copy کنند. قبل از نمایش/Copy، اطلاعات حساس باید Redact شوند.
 
 ## User control
 
-کاربر باید بتواند داده‌های محلی مربوط به History/Logs را در محدوده قابلیت‌های واقعی اپ پاک کند.
+کاربر باید بتواند داده‌های محلی مربوط به History/Logs/Error Reports را در محدوده قابلیت‌های واقعی اپ مدیریت یا پاک کند.
 
 ## Future WooGit
 
