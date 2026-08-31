@@ -47,6 +47,28 @@ Runtime / Model / Agent / Action / Storage / Network
 
 نمایش فنی می‌تواند در حالت جزئیات/بازشونده باشد تا رابط کاربر عادی شلوغ نشود.
 
+## Development Error Panel — Hideable, Not Removable
+
+بخش مربوط به **نمایش کامل خطاهای فنی و Raw Machine Error** باید از ابتدا به‌صورت یک Component/Feature مستقل و قابل کنترل معماری شود تا در آینده بتوان آن را با **حداقل تغییر** مخفی یا از رابط کاربری خارج کرد، بدون اینکه Logging Core، Error Storage، Error Contract، Error Report یا قابلیت ثبت خطا حذف یا تغییر اساسی داده شود.
+
+مخفی‌کردن این بخش فقط یک تغییر در Presentation/Visibility باشد، نه حذف سیستم Error و Logging. داده‌های خطا و گزارش‌های فنی همچنان توسط هسته مرکزی ثبت و نگهداری شوند و در صورت فعال‌بودن Debug/Developer Mode یا نیاز توسعه‌دهنده دوباره قابل مشاهده باشند.
+
+به‌صورت مفهومی:
+
+```text
+Central Logging Core
+        ↓
+Error Store / Error Report
+        ↓
+   ┌────┴─────┐
+   ↓          ↓
+Normal UI   Full Technical Error Panel
+               ↑
+        Visibility / Feature Flag
+```
+
+بنابراین UI نباید به وجود دائمی این پنل فنی وابسته باشد و حذف/مخفی‌سازی آن در آینده نباید نیازمند تغییر در Core یا حذف قابلیت Logging باشد.
+
 ## Copy for Agent
 
 در Error Center یک دکمه مشخص برای **کپی گزارش خطا** وجود داشته باشد.
