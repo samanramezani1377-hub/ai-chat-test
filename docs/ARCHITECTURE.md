@@ -2,7 +2,7 @@
 
 ## Purpose
 
-تعریف معماری مرجع پروژه AI Chat Test و مرزبندی روشن بین UI، AI Core، Agent، Action System، Executor، Verifier، Workspace، Storage و Observability.
+تعریف معماری مرجع پروژه AI Chat Test و مرزبندی روشن بین UI، AI Core، Agent، Action System، Executor، Adapter، Verifier، Workspace، Storage و Observability.
 
 ## High-level
 
@@ -10,7 +10,8 @@
 UI
 ├── Chat
 ├── Settings
-├── Error Center / Debug Panel
+├── Error Center
+├── Technical Error Panel (hideable)
 └── AI Workspace
         │
         ↓
@@ -20,15 +21,15 @@ UI
         ├── Context / Conversation
         ├── Agent
         ├── Action Protocol
+        ├── Action Registry
         └── Central Observability / Logging
                 ↓
           Action System
           ├── Permission
           ├── Validation
-          ├── Executor
+          ├── Capability Check
+          ├── Adapter / Executor
           └── Verifier
-                ↓
-           Real Runtime
 ```
 
 ## Core/UI boundary
@@ -43,7 +44,11 @@ Logging و Error Handling باید در هسته مرکزی مدیریت شون�
 
 یک خطا می‌تواند هم‌زمان یک پیام فارسی و کاربرپسند در همان محل رخداد و یک Raw Machine Error/Trace در Error Center داشته باشد. Error Center باید امکان مشاهده خطاهای ثبت‌شده و Copy یک Error Report کامل برای ارسال به Agent/Developer را فراهم کند.
 
-UI مالک Logging نیست؛ فقط Event/Error را Subscribe یا Query می‌کند. جزئیات کامل این Contract در `OBSERVABILITY_AND_ERROR_CENTER.md` تعریف شده است.
+UI مالک Logging نیست؛ فقط Event/Error را Subscribe یا Query می‌کند.
+
+پنل نمایش کامل خطاهای فنی و Raw Machine Error یک Presentation Feature مستقل و Hideable است. مخفی‌شدن آن نباید Logging Core، Error Store، Error Contract یا Error Report را حذف یا تغییر اساسی دهد؛ کنترل Visibility باید در لایه Presentation/Feature Flag انجام شود.
+
+جزئیات این Contract در `OBSERVABILITY_AND_ERROR_CENTER.md` تعریف شده است.
 
 ## Runtime independence — Decision 21
 
@@ -83,9 +88,25 @@ Recent Messages تعداد پیش‌فرض دارد اما مقدار آن یک 
 
 Context هر درخواست از Source of Truth ساخته می‌شود و نباید با اضافه‌کردن بی‌نهایت متن به یک Prompt دائمی رشد کند.
 
-## Adapters
+## Action / Adapter / Capability Contract
 
-Runtime مدل، Storage، Android APIs و در آینده WooGit باید پشت Adapter/Port قرار گیرند تا Core به یک implementation خاص وابسته نشود.
+مسیر مرجع اجرای Action این است:
+
+```text
+ActionRegistry
+      ↓
+Action Contract
+      ↓
+Capability Check
+      ↓
+Adapter / Executor
+      ↓
+Verifier
+```
+
+`ActionRegistry` مرجع تعریف و کشف Action است و Executor نیست. Actionها در Categoryهای قابل توسعه سازمان‌دهی می‌شوند و هر Category می‌تواند Executorهای متعدد داشته باشد.
+
+Capability Contract مشخص می‌کند Runtime/Environment فعلی کدام Action یا Capability را پشتیبانی می‌کند. Adapter محیط اجرا را از Core جدا می‌کند. این قرارداد برای Test Adapter، WooGit Adapter و Adapterهای آینده یکسان است.
 
 ## State ownership
 
@@ -103,11 +124,13 @@ WooGit UI
    ↓
 AI Core
    ↓
-WooGit Operations
+Action Registry
    ↓
-Executor
+Capability Check
    ↓
-WooCommerce / App Services
+WooGit Adapter
+   ↓
+WooGit API / Service
    ↓
 Verifier
 ```
