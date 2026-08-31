@@ -38,7 +38,9 @@
 
 یک اجرای Agent یا Action چگونه از ابتدا تا انتها Trace شود؟ چه `eventId`، `taskId`، `actionId`، timestamp، state و metadataهایی لازم است و چه چیزی باید در Debug Log یا Workspace قابل مشاهده باشد؟
 
-- [ ] 24. Event / Trace Schema
+**تصمیم نهایی:** گزینه B. در Workspace عادی فقط Eventهای مهم و قابل فهم نمایش داده شوند تا محیط کار شلوغ نشود. در عین حال در مرحله توسعه، تمام Eventهای داخلی و جزئی و همچنین جزئیات کامل خطاها در Debug/Error Logs ثبت شوند. هر Event باید قابل ردیابی با `eventId`، `taskId` و در صورت مرتبط بودن `actionId` باشد و لاگ خطا حداقل component، error code، message، timestamp و metadata فنی مرتبط را نگه دارد. بنابراین نمایش کاربر ساده است، اما هیچ اطلاعات لازم برای توسعه و عیب‌یابی از دست نمی‌رود.
+
+- [x] 24. Event / Trace Schema
 
 ### 25. Persistence و ذخیره‌سازی
 
