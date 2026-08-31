@@ -34,8 +34,10 @@ interface ActionCheckpointStore {
 }
 class InMemoryActionCheckpointStore : ActionCheckpointStore {
     private val values = mutableMapOf<String, PreparedAction>()
-    @Synchronized override suspend fun save(action: PreparedAction) { values[action.executionId] = action }
-    @Synchronized override suspend fun get(executionId: String): PreparedAction? = values[executionId]
+    override suspend fun save(action: PreparedAction) {
+        synchronized(values) { values[action.executionId] = action }
+    }
+    override suspend fun get(executionId: String): PreparedAction? = synchronized(values) { values[executionId] }
 }
 
 class ActionLifecycle(
