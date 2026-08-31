@@ -1,9 +1,11 @@
 package com.woogit.aicore.actions
 
 import com.woogit.aicore.domain.Action
+import com.woogit.aicore.domain.ActionRegistry
 import com.woogit.aicore.domain.CapabilityProvider
 import com.woogit.aicore.domain.VerificationResult
 import com.woogit.aicore.domain.Verifier
+import java.util.UUID
 
 sealed interface ActionExecutionState {
     data object Prepared : ActionExecutionState
@@ -15,6 +17,7 @@ sealed interface ActionExecutionState {
 }
 
 data class PreparedAction(
+    val executionId: String = UUID.randomUUID().toString(),
     val actionId: String,
     val input: Any,
     val risk: com.woogit.aicore.domain.RiskLevel,
@@ -30,43 +33,76 @@ class DefaultActionApprovalPolicy : ActionApprovalPolicy {
         risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE
 }
 
+interface ActionCheckpointStore {
+    suspend fun save(action: PreparedAction)
+    suspend fun get(executionId: String): PreparedAction?
+}
+
+class InMemoryActionCheckpointStore : ActionCheckpointStore {
+    private val values = mutableMapOf<String, PreparedAction>()
+
+    @Synchronized
+    override suspend fun save(action: PreparedAction) { values[action.executionId] = action }
+
+    @Synchronized
+    override suspend fun get(executionId: String): PreparedAction? = values[executionId]
+}
+
 class ActionLifecycle(
-    private val registry: ActionRegistryFacade,
+    private val registry: ActionRegistry,
     private val capabilityProvider: CapabilityProvider,
+    private val checkpointStore: ActionCheckpointStore,
     private val approvalPolicy: ActionApprovalPolicy = DefaultActionApprovalPolicy()
 ) {
     suspend fun prepare(actionId: String, input: Any): PreparedAction {
-        val action = registry.find(actionId)
-            ?: error("Action not found: $actionId")
-        return PreparedAction(action.id, input, action.risk)
+        val action = registry.find(actionId) ?: error("Action not found: $actionId")
+        return PreparedAction(actionId = action.id, input = input, risk = action.risk).also {
+            checkpointStore.save(it)
+        }
     }
 
     fun requiresApproval(prepared: PreparedAction): Boolean =
         approvalPolicy.requiresApproval(prepared.risk)
 
-    fun validate(prepared: PreparedAction, capability: String?): PreparedAction {
+    suspend fun validate(prepared: PreparedAction, capability: String?): PreparedAction {
         if (capability != null && !capabilityProvider.supports(capability)) {
             error("Required capability is unavailable: $capability")
         }
-        return prepared.copy(state = ActionExecutionState.AwaitingApproval)
+        val validated = prepared.copy(state = ActionExecutionState.AwaitingApproval)
+        checkpointStore.save(validated)
+        return validated
     }
 
-    suspend fun execute(
-        prepared: PreparedAction,
+    suspend fun reject(prepared: PreparedAction): PreparedAction {
+        val rejected = prepared.copy(state = ActionExecutionState.Rejected)
+        checkpointStore.save(rejected)
+        return rejected
+    }
+
+    suspend fun executeApproved(
+        executionId: String,
         verifier: Verifier<Any>
     ): ActionExecutionState {
+        val prepared = checkpointStore.get(executionId)
+            ?: return ActionExecutionState.Failed("Prepared action not found: $executionId")
+        if (prepared.state != ActionExecutionState.AwaitingApproval) {
+            return ActionExecutionState.Failed("Action is not awaiting final approval")
+        }
+
         val action = registry.find(prepared.actionId)
             ?: return ActionExecutionState.Failed("Action not found: ${prepared.actionId}")
         return try {
+            val executing = prepared.copy(state = ActionExecutionState.Executing)
+            checkpointStore.save(executing)
             val result = action.execute(prepared.input)
             val verification = verifier.verify(result)
-            ActionExecutionState.Completed(verification)
+            val completed = ActionExecutionState.Completed(verification)
+            checkpointStore.save(executing.copy(state = completed))
+            completed
         } catch (t: Throwable) {
-            ActionExecutionState.Failed(t.message ?: t::class.simpleName.orEmpty())
+            val failed = ActionExecutionState.Failed(t.message ?: t::class.simpleName.orEmpty())
+            checkpointStore.save(prepared.copy(state = failed))
+            failed
         }
     }
-}
-
-interface ActionRegistryFacade {
-    fun find(actionId: String): Action<Any, Any>?
 }
