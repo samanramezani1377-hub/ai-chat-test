@@ -4,16 +4,16 @@
 
 برای مهاجرت نهایی به WooGit، اتصال AI Core به WooGit به‌صورت **Adapter + Capability Contract** انجام شود.
 
-AI Core نباید مستقیماً به API، Service یا implementation داخلی WooGit وابسته باشد. Core فقط Action Contract و Capability Contract را می‌شناسد و Adapter محیط اجرا مسئول نگاشت آن‌ها به عملیات واقعی است.
+AI Core نباید مستقیماً به API، Service یا implementation داخلی WooGit وابسته باشد. Core فقط Action Contract، Action Registry و Capability Contract را می‌شناسد و Adapter محیط اجرا مسئول نگاشت آن‌ها به عملیات واقعی است.
 
 ```text
 AI Core
   ↓
-Action Contract
-  ↓
 Action Registry
   ↓
-Capability Contract
+Action Contract
+  ↓
+Capability Contract / Check
   ↓
 WooGit Adapter
   ↓
@@ -24,7 +24,7 @@ WooCommerce
 
 ## Capabilities
 
-هر Adapter باید بتواند قابلیت‌های قابل پشتیبانی خود را اعلام کند. Core قبل از اجرای Action می‌تواند بررسی کند که محیط فعلی آن Capability را پشتیبانی می‌کند یا خیر.
+هر Adapter باید بتواند قابلیت‌های قابل پشتیبانی خود را اعلام کند. Core قبل از Execution بررسی می‌کند که محیط فعلی Capability موردنیاز Action را پشتیبانی می‌کند یا خیر.
 
 نمونه:
 
@@ -43,9 +43,9 @@ Prototype می‌تواند Adapter آزمایشی داشته باشد و WooGit
 ```text
                  AI Core
                     │
-             Action Contract
-                    │
               Action Registry
+                    │
+             Capability Check
                     │
         ┌───────────┼───────────┐
         ↓           ↓           ↓
@@ -76,7 +76,7 @@ Result
 
 ## Migration Principle
 
-هدف این Contract این است که انتقال از Prototype به WooGit عمدتاً با جایگزینی/افزودن Adapter و Capability Mapping انجام شود و نیاز به تغییر در AI Core، UI و Action Contract حداقل باشد.
+هدف این Contract این است که انتقال از Prototype به WooGit عمدتاً با افزودن/جایگزینی Adapter و Capability Mapping انجام شود و نیاز به تغییر در AI Core، UI و Action Contract حداقل باشد.
 
 Action عمومی مانند `change_product_price` در Core مستقل می‌ماند و WooGit Adapter آن را به Operation واقعی WooGit نگاشت می‌کند.
 
