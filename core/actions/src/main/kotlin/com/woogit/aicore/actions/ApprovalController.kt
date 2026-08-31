@@ -12,27 +12,19 @@ data class ApprovalResult(
     val state: ActionExecutionState
 )
 
-class ApprovalController(
-    private val checkpoints: ActionCheckpointStore
-) {
-    suspend fun approve(executionId: String): ApprovalResult = decide(executionId, ApprovalDecision.Approved)
+class ApprovalController(private val lifecycle: ActionLifecycle) {
+    suspend fun approve(executionId: String): ApprovalResult = try {
+        val prepared = lifecycle.approve(executionId)
+        ApprovalResult(executionId, ApprovalDecision.Approved, prepared.state)
+    } catch (t: Throwable) {
+        ApprovalResult(executionId, ApprovalDecision.Approved, ActionExecutionState.Failed(t.message ?: "Approval failed"))
+    }
 
-    suspend fun reject(executionId: String): ApprovalResult = decide(executionId, ApprovalDecision.Rejected)
-
-    private suspend fun decide(executionId: String, decision: ApprovalDecision): ApprovalResult {
-        val prepared = checkpoints.get(executionId)
-            ?: return ApprovalResult(executionId, decision, ActionExecutionState.Failed("Prepared action not found: $executionId"))
-
-        if (prepared.state != ActionExecutionState.AwaitingApproval) {
-            return ApprovalResult(executionId, decision, ActionExecutionState.Failed("Action is not awaiting final approval"))
-        }
-
-        val state = when (decision) {
-            ApprovalDecision.Approved -> ActionExecutionState.AwaitingApproval
-            ApprovalDecision.Rejected -> ActionExecutionState.Rejected
-        }
-        val updated = prepared.copy(state = state)
-        checkpoints.save(updated)
-        return ApprovalResult(executionId, decision, state)
+    suspend fun reject(executionId: String): ApprovalResult = try {
+        val prepared = lifecycle.approve(executionId)
+        val rejected = lifecycle.reject(prepared)
+        ApprovalResult(executionId, ApprovalDecision.Rejected, rejected.state)
+    } catch (t: Throwable) {
+        ApprovalResult(executionId, ApprovalDecision.Rejected, ActionExecutionState.Failed(t.message ?: "Rejection failed"))
     }
 }
