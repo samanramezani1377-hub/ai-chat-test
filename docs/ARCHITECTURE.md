@@ -55,6 +55,26 @@ Contract باید عملیات عمومی مانند Load/Unload، Generate/Stre
 
 تعویض Runtime باید بدون بازطراحی Chat، Agent یا UI امکان‌پذیر باشد. Adapter نباید برای هر Token یک لایه پردازش سنگین یا تبدیل غیرضروری ایجاد کند؛ Streaming باید مستقیماً و با کمترین overhead عملی منتقل شود.
 
+## Conversation / Context — Decision 22
+
+Context ترکیبی و از Source of Truth ساخته می‌شود. اجزای Context عبارت‌اند از:
+
+```text
+System Context
+      +
+Persistent Task Context
+      +
+Conversation Summary
+      +
+Recent Messages (user-configurable count)
+      +
+Workspace Context (query/select as needed)
+```
+
+Recent Messages تعداد پیش‌فرض دارد اما مقدار آن یک عدد معماری ثابت نیست و باید توسط کاربر قابل تنظیم باشد. پیام‌های قدیمی‌تر در Summary فشرده می‌شوند. Persistent Task Context هدف، کار فعلی، Intent کاربر و اطلاعات مهم را مستقل از Chat History نگه می‌دارد. Workspace نیز یک منبع Context مستقل است و Core/Agent فقط بخش مرتبط را انتخاب می‌کند تا کل Workspace بی‌دلیل وارد Prompt نشود.
+
+Context هر درخواست از Source of Truth ساخته می‌شود و نباید با اضافه‌کردن بی‌نهایت متن به یک Prompt دائمی رشد کند.
+
 ## Adapters
 
 Runtime مدل، Storage، Android APIs و در آینده WooGit باید پشت Adapter/Port قرار گیرند تا Core به یک implementation خاص وابسته نشود.
