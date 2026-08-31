@@ -70,7 +70,9 @@
 
 AI Core هنگام انتقال به WooGit دقیقاً با چه Interface یا Contractی با Operationهای WooGit ارتباط برقرار کند؟ چگونه Actionهای عمومی Prototype به Operationهای واقعی WooGit مانند تغییر قیمت، تغییر توضیحات و مدیریت محصول نگاشت شوند؟
 
-- [ ] 28. WooGit Integration Contract
+**تصمیم نهایی:** گزینه C. اتصال به WooGit به‌صورت `Adapter + Capability Contract` باشد. AI Core مستقیماً به API یا implementation داخلی WooGit وابسته نباشد و فقط Action Contract و Capability Contract را بشناسد. WooGit Adapter مسئول نگاشت Actionهای عمومی به عملیات واقعی WooGit باشد و قابلیت‌های پشتیبانی‌شده را اعلام کند. Prototype نیز بتواند Test Adapter داشته باشد و Adapterهای آینده بدون تغییر Core اضافه شوند. برای Actionهای حساس، چرخه `Prepare → Preview/Snapshot → Validate → Final Approval → Execute → Verify → Result` حفظ شود و Approval فقط اجازه اجرای همان عملیات آماده‌شده باشد، نه اجازه‌ای برای تصمیم‌گیری مجدد AI. این ساختار مهاجرت به WooGit را عمدتاً به Adapter و Capability Mapping محدود می‌کند و Action Contract، UI و AI Core را مستقل نگه می‌دارد.
+
+- [x] 28. WooGit Integration Contract
 
 ### 29. Recovery و Failure Handling
 
