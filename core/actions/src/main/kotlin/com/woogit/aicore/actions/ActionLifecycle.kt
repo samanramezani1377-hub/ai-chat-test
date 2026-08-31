@@ -24,16 +24,14 @@ data class PreparedAction(
 )
 
 interface ActionApprovalPolicy { fun requiresApproval(risk: com.woogit.aicore.domain.RiskLevel): Boolean }
-
 class DefaultActionApprovalPolicy : ActionApprovalPolicy {
-    override fun requiresApproval(risk: com.woogit.aicore.domain.RiskLevel): Boolean = risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE
+    override fun requiresApproval(risk: com.woogit.aicore.domain.RiskLevel) = risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE
 }
 
 interface ActionCheckpointStore {
     suspend fun save(action: PreparedAction)
     suspend fun get(executionId: String): PreparedAction?
 }
-
 class InMemoryActionCheckpointStore : ActionCheckpointStore {
     private val values = mutableMapOf<String, PreparedAction>()
     @Synchronized override suspend fun save(action: PreparedAction) { values[action.executionId] = action }
@@ -44,28 +42,46 @@ class ActionLifecycle(
     private val registry: ActionRegistry,
     private val capabilityProvider: CapabilityProvider,
     private val checkpointStore: ActionCheckpointStore,
-    private val approvalPolicy: ActionApprovalPolicy = DefaultActionApprovalPolicy()
+    private val approvalPolicy: ActionApprovalPolicy = DefaultActionApprovalPolicy(),
+    private val traceSink: ActionTraceSink? = null
 ) {
-    suspend fun prepare(actionId: String, input: Any): PreparedAction {
-        val action = registry.find(actionId) ?: error("Action not found: $actionId")
-        return PreparedAction(actionId = action.id, input = input, risk = action.risk).also(checkpointStore::save)
+    private suspend fun trace(id: String, type: ActionTraceType, message: String? = null) {
+        traceSink?.record(ActionTraceEvent(id, type, message))
     }
 
-    fun requiresApproval(prepared: PreparedAction): Boolean = approvalPolicy.requiresApproval(prepared.risk)
+    suspend fun prepare(actionId: String, input: Any): PreparedAction {
+        val action = registry.find(actionId) ?: error("Action not found: $actionId")
+        return PreparedAction(actionId = action.id, input = input, risk = action.risk).also {
+            checkpointStore.save(it)
+            trace(it.executionId, ActionTraceType.PREPARED, it.actionId)
+        }
+    }
+
+    fun requiresApproval(prepared: PreparedAction) = approvalPolicy.requiresApproval(prepared.risk)
 
     suspend fun validate(prepared: PreparedAction, capability: String?): PreparedAction {
         if (capability != null && !capabilityProvider.supports(capability)) error("Required capability is unavailable: $capability")
         val state = if (requiresApproval(prepared)) ActionExecutionState.AwaitingApproval else ActionExecutionState.Approved
-        return prepared.copy(state = state).also(checkpointStore::save)
+        return prepared.copy(state = state).also {
+            checkpointStore.save(it)
+            trace(it.executionId, ActionTraceType.VALIDATED, capability)
+            if (state == ActionExecutionState.AwaitingApproval) trace(it.executionId, ActionTraceType.APPROVAL_REQUESTED)
+        }
     }
 
     suspend fun approve(executionId: String): PreparedAction {
         val prepared = checkpointStore.get(executionId) ?: error("Prepared action not found: $executionId")
         require(prepared.state == ActionExecutionState.AwaitingApproval) { "Action is not awaiting final approval" }
-        return prepared.copy(state = ActionExecutionState.Approved).also(checkpointStore::save)
+        return prepared.copy(state = ActionExecutionState.Approved).also {
+            checkpointStore.save(it)
+            trace(executionId, ActionTraceType.APPROVED)
+        }
     }
 
-    suspend fun reject(prepared: PreparedAction): PreparedAction = prepared.copy(state = ActionExecutionState.Rejected).also(checkpointStore::save)
+    suspend fun reject(prepared: PreparedAction): PreparedAction = prepared.copy(state = ActionExecutionState.Rejected).also {
+        checkpointStore.save(it)
+        trace(it.executionId, ActionTraceType.REJECTED)
+    }
 
     suspend fun executeApproved(executionId: String, verifier: Verifier<Any>): ActionExecutionState {
         val prepared = checkpointStore.get(executionId) ?: return ActionExecutionState.Failed("Prepared action not found: $executionId")
@@ -73,33 +89,33 @@ class ActionLifecycle(
         val action = registry.find(prepared.actionId) ?: return ActionExecutionState.Failed("Action not found: ${prepared.actionId}")
         return try {
             checkpointStore.save(prepared.copy(state = ActionExecutionState.Executing))
+            trace(executionId, ActionTraceType.EXECUTION_STARTED, prepared.actionId)
             val result = action.execute(prepared.input)
             val verification = verifier.verify(result)
             if (!verification.success) {
                 val failed = ActionExecutionState.Failed(verification.evidence ?: "Action verification failed")
                 checkpointStore.save(prepared.copy(state = failed))
+                trace(executionId, ActionTraceType.VERIFICATION_FAILED, failed.message)
                 return failed
             }
             val completed = ActionExecutionState.Completed(verification)
             checkpointStore.save(prepared.copy(state = completed))
+            trace(executionId, ActionTraceType.EXECUTION_COMPLETED)
             completed
         } catch (t: Throwable) {
             val failed = ActionExecutionState.Failed(t.message ?: t::class.simpleName.orEmpty())
             checkpointStore.save(prepared.copy(state = failed))
+            trace(executionId, ActionTraceType.EXECUTION_FAILED, failed.message)
             failed
         }
     }
 
-    suspend fun retryFailed(
-        executionId: String,
-        verifier: Verifier<Any>
-    ): ActionExecutionState {
+    suspend fun retryFailed(executionId: String, verifier: Verifier<Any>): ActionExecutionState {
         val failed = checkpointStore.get(executionId) ?: return ActionExecutionState.Failed("Prepared action not found: $executionId")
         if (failed.state !is ActionExecutionState.Failed) return ActionExecutionState.Failed("Only failed executions can be retried")
-        // Every retry returns to the same approval gate for sensitive actions.
+        trace(executionId, ActionTraceType.RETRY_REQUESTED)
         val reset = failed.copy(state = if (requiresApproval(failed)) ActionExecutionState.AwaitingApproval else ActionExecutionState.Approved)
         checkpointStore.save(reset)
-        return if (reset.state == ActionExecutionState.Approved) executeApproved(executionId, verifier)
-        else reset.state
+        return if (reset.state == ActionExecutionState.Approved) executeApproved(executionId, verifier) else reset.state
     }
 }
