@@ -54,7 +54,9 @@
 
 تمام تنظیمات کاربر دقیقاً چه چیزهایی باشند و چگونه ذخیره و اعمال شوند؟ آیا تنظیمات Model، Inference، Agent، Visibility، Network/Debug و Workspace باید از هم مستقل باشند و تغییر هرکدام بدون تغییر بقیه ممکن باشد؟
 
-- [ ] 26. Configuration Schema
+**تصمیم نهایی:** گزینه C. یک **Central Settings Core** هسته مرکزی مدیریت تنظیمات باشد. تنظیمات از نظر Domain به بخش‌های مستقل مانند Model، Inference، Context، Agent، Workspace، Logs/Debug و Performance تقسیم شوند؛ اما همه از طریق Settings Core مدیریت شوند. `SettingsRepository` مسئول Storage، Versioning و Migration باشد. هر تنظیم مستقل قابل تغییر باشد و Defaultها در Schema/Settings Provider متمرکز تعریف شوند، نه به‌صورت پراکنده در منطق برنامه. Default مقدار اولیه است و نباید به محدودیت اجباری تبدیل شود؛ مقادیر کاربر باید تا محدوده‌ای که Runtime/Device واقعاً پشتیبانی می‌کند قابل تنظیم باشند. این ساختار باید Migration به WooGit را نیز آسان کند؛ داده‌های Settings نسخه‌بندی و قابل تبدیل باشند و Core به UI یا Storage خاص وابسته نباشد.
+
+- [x] 26. Configuration Schema
 
 ### 27. Action Registry
 
