@@ -32,4 +32,14 @@ Runtime
 
 Backend واقعی باید پشت Adapter قرار گیرد. UI مستقیماً Runtime Backend را صدا نمی‌زند.
 
-ارجاع: [Architecture](01-architecture.md)، [Model Domain](03-model-domain.md)، [Resources](12-resources.md)
+## ارجاعات
+
+- [Architecture](01-architecture.md)
+- [Model Domain](03-model-domain.md)
+- [Activation](05-activation.md)
+- [Concurrency & Cancellation](08-concurrency.md)
+- [Errors](09-errors.md)
+- [Capabilities](11-capabilities.md)
+- [Resources](12-resources.md)
+- [Testing](14-testing.md)
+- [UI Integration](15-ui-integration.md)
