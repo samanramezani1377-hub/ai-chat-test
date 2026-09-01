@@ -92,9 +92,6 @@ class AgentSession(
                     ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis())
                 )
             }
-            if (steps >= maxActionSteps && maxActionSteps > 0) {
-                eventSink(AgentEvent.Failed("Agent action step limit reached"))
-            }
             eventSink(AgentEvent.Completed)
             AgentSessionResult.Reply(result, plan, actionResult)
         } catch (t: Throwable) {
@@ -119,7 +116,7 @@ data class ActionExecutionOutcome(
         append(",\"data\":")
         append(data?.let { "\"${it.replace("\\", "\\\\").replace("\"", "\\\"")}\"" } ?: "null")
         append(",\"error\":")
-        append(errorCode?.let { "\"${it.replace("\\", "\\\"")}\"" } ?: "null")
+        append(errorCode?.let { "\"${it.replace("\\", "\\\\").replace("\"", "\\\"")}\"" } ?: "null")
         append("}")
     }
 }
