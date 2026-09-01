@@ -10,8 +10,6 @@ import com.woogit.aicore.domain.ModelResult
 import com.woogit.aicore.domain.ModelState
 import com.woogit.aicore.domain.RuntimeCompatibility
 import com.woogit.aicore.domain.ValidationStatus
-import java.nio.file.Files
-import java.util.concurrent.atomic.AtomicReference
 
 /** Coordinates import, persistence and activation without exposing UI concerns. */
 class LocalModelService(
@@ -19,7 +17,8 @@ class LocalModelService(
     private val repository: ModelRepository,
     private val runtime: RuntimeAdapter
 ) : ModelLifecycleManager {
-    private val activeId = AtomicReference<String?>(null)
+    private val activationLock = Any()
+    private var activeId: String? = null
 
     suspend fun importModel(source: java.nio.file.Path): ModelResult<ModelDescriptor> {
         val imported = importer.import(source)
@@ -28,9 +27,9 @@ class LocalModelService(
             is ModelResult.Failure -> return imported
         }
         return when (val registered = repository.register(model)) {
-            is ModelResult.Success -> registered.let { ModelResult.Success(model) }
+            is ModelResult.Success -> ModelResult.Success(model)
             is ModelResult.Failure -> {
-                Files.deleteIfExists(model.path)
+                java.nio.file.Files.deleteIfExists(model.path)
                 registered
             }
         }
@@ -40,25 +39,25 @@ class LocalModelService(
 
     suspend fun getModel(id: String): ModelResult<ModelDescriptor?> = repository.get(id)
 
-    override suspend fun activate(id: String): ModelResult<ModelDescriptor> {
+    override suspend fun activate(id: String): ModelResult<ModelDescriptor> = synchronized(activationLock) {
         val model = when (val result = repository.get(id)) {
             is ModelResult.Success -> result.value
-            is ModelResult.Failure -> return result
-        } ?: return ModelResult.Failure(ModelError.InvalidModel("Model is not registered"))
+            is ModelResult.Failure -> return@synchronized result
+        } ?: return@synchronized ModelResult.Failure(ModelError.InvalidModel("Model is not registered"))
 
         if (model.format != ModelFormat.GGUF || model.validation != ValidationStatus.VALID) {
-            return ModelResult.Failure(ModelError.InvalidModel("Model is not valid for activation"))
+            return@synchronized ModelResult.Failure(ModelError.InvalidModel("Model is not valid for activation"))
         }
 
-        val previous = activeId.get()
-        return try {
+        try {
+            // Runtime.load is the single transition point. A concrete runtime must replace
+            // its previous loaded model atomically or fail without reporting success.
             runtime.load(model)
-            repository.setActive(id)
-            activeId.set(id)
-            if (previous != null && previous != id) {
-                // The concrete runtime owns unloading semantics; activation is serialized here.
-                runtime.unload()
+            when (val persisted = repository.setActive(id)) {
+                is ModelResult.Success -> Unit
+                is ModelResult.Failure -> return@synchronized persisted.toModelFailure()
             }
+            activeId = id
             ModelResult.Success(model.copy(
                 state = ModelState.ACTIVE,
                 runtimeCompatibility = RuntimeCompatibility(true, null)
@@ -70,11 +69,14 @@ class LocalModelService(
         }
     }
 
-    override suspend fun deactivate(): ModelResult<Unit> {
-        return try {
+    override suspend fun deactivate(): ModelResult<Unit> = synchronized(activationLock) {
+        try {
             runtime.unload()
-            repository.setActive(null)
-            activeId.set(null)
+            when (val persisted = repository.setActive(null)) {
+                is ModelResult.Success -> Unit
+                is ModelResult.Failure -> return@synchronized persisted
+            }
+            activeId = null
             ModelResult.Success(Unit)
         } catch (t: Throwable) {
             ModelResult.Failure(ModelError.LoadFailed("Unable to deactivate model", t))
@@ -82,4 +84,6 @@ class LocalModelService(
     }
 
     override suspend fun unload(): ModelResult<Unit> = deactivate()
+
+    private fun <T> ModelResult.Failure.toModelFailure(): ModelResult<T> = ModelResult.Failure(error)
 }
