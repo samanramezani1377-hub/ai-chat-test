@@ -4,6 +4,8 @@ import com.woogit.aicore.domain.ChatMessage
 import com.woogit.aicore.domain.GenerationRequest
 import com.woogit.aicore.domain.GenerationResult
 import com.woogit.aicore.domain.ModelDescriptor
+import com.woogit.aicore.domain.ModelError
+import com.woogit.aicore.domain.ModelResult
 import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeAdapter
 import dev.ffmpegkit.llama.Llama
@@ -12,13 +14,7 @@ import dev.ffmpegkit.llama.LlamaModel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
-/**
- * Real Android RuntimeAdapter backed by the llama.cpp AAR.
- *
- * The selected free AAR exposes full completion rather than token Flow streaming, so
- * this adapter emits the completed response through the existing callback as one chunk.
- * It is intentionally not presented as incremental streaming.
- */
+/** Real Android RuntimeAdapter backed by the llama.cpp AAR. */
 class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 4096,
     private val defaultThreads: Int = 4,
@@ -27,15 +23,25 @@ class LlamaCppAndroidRuntimeAdapter(
     private var loadedModel: LlamaModel? = null
 
     override suspend fun load(model: ModelDescriptor) {
+        loadResult(model).let { result ->
+            if (result is ModelResult.Failure) {
+                throw RuntimeFailure(result.error)
+            }
+        }
+    }
+
+    suspend fun loadResult(model: ModelDescriptor): ModelResult<Unit> {
         currentCoroutineContext().ensureActive()
         unload()
 
         val file = model.path.toFile()
-        require(file.isFile && file.canRead()) {
-            "Model file cannot be read: ${file.absolutePath}"
+        if (!file.isFile || !file.canRead()) {
+            return ModelResult.Failure(
+                ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}")
+            )
         }
 
-        try {
+        return try {
             loadedModel = Llama.loadModel(
                 modelPath = file.absolutePath,
                 config = LlamaConfig(
@@ -46,11 +52,10 @@ class LlamaCppAndroidRuntimeAdapter(
                     gpuLayers = gpuLayers.coerceAtLeast(0),
                 ),
             )
-        } catch (t: OutOfMemoryError) {
-            throw t
+            ModelResult.Success(Unit)
         } catch (t: Throwable) {
             loadedModel = null
-            throw IllegalStateException("Unable to load GGUF model", t)
+            ModelResult.Failure(RuntimeErrorMapper.loadFailure(t, file.absolutePath))
         }
     }
 
@@ -63,9 +68,19 @@ class LlamaCppAndroidRuntimeAdapter(
         request: GenerationRequest,
         onToken: suspend (String) -> Unit,
     ): GenerationResult {
+        return when (val result = generateResult(request, onToken)) {
+            is ModelResult.Success -> result.value
+            is ModelResult.Failure -> throw RuntimeFailure(result.error)
+        }
+    }
+
+    suspend fun generateResult(
+        request: GenerationRequest,
+        onToken: suspend (String) -> Unit,
+    ): ModelResult<GenerationResult> {
         currentCoroutineContext().ensureActive()
         val model = loadedModel
-            ?: throw IllegalStateException("No local model is loaded")
+            ?: return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
 
         val systemPrompt = request.messages
             .firstOrNull { it.role == ChatMessage.Role.SYSTEM }
@@ -83,11 +98,11 @@ class LlamaCppAndroidRuntimeAdapter(
                 }
             }
 
-        require(prompt.isNotBlank()) {
-            "Generation request contains no user/tool content"
+        if (prompt.isBlank()) {
+            return ModelResult.Failure(ModelError.Inference("Generation request contains no user/tool content"))
         }
 
-        try {
+        return try {
             val startedAt = System.nanoTime()
             val result = Llama.complete(
                 model = model,
@@ -102,25 +117,22 @@ class LlamaCppAndroidRuntimeAdapter(
             }
             if (text.isNotEmpty()) onToken(text)
 
-            return GenerationResult(
-                text = text,
-                outputTokens = result.tokensGenerated.toLong(),
-                firstTokenTimeMs = result.promptEvalTimeMs,
-                generationTimeMs = result.generateTimeMs.takeIf { it > 0 }
-                    ?: ((System.nanoTime() - startedAt) / 1_000_000),
-                stopped = false,
+            ModelResult.Success(
+                GenerationResult(
+                    text = text,
+                    outputTokens = result.tokensGenerated.toLong(),
+                    firstTokenTimeMs = result.promptEvalTimeMs,
+                    generationTimeMs = result.generateTimeMs.takeIf { it > 0 }
+                        ?: ((System.nanoTime() - startedAt) / 1_000_000),
+                    stopped = false,
+                )
             )
-        } catch (t: OutOfMemoryError) {
-            throw t
         } catch (t: Throwable) {
-            throw IllegalStateException("Local model inference failed", t)
+            ModelResult.Failure(RuntimeErrorMapper.inferenceFailure(t))
         }
     }
 
     override suspend fun stopGeneration() {
-        // The selected free AAR does not expose a native mid-generation interrupt API.
-        // We still honor coroutine cancellation at the adapter boundary. A true native
-        // stop will require a streaming/interrupt-capable binding in a later runtime.
         currentCoroutineContext().ensureActive()
     }
 
@@ -129,4 +141,6 @@ class LlamaCppAndroidRuntimeAdapter(
         version = "b9878",
         backend = "CPU/NEON",
     )
+
+    private class RuntimeFailure(val error: ModelError) : IllegalStateException(error.message)
 }
