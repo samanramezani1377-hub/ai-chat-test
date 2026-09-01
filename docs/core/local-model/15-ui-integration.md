@@ -1,17 +1,17 @@
 # 15 — UI Integration Contract
 
-این تنها بخشی است که Backend را به UI متصل می‌کند. خود Backend مستقل از UI باقی می‌ماند.
+این تنها مرز رسمی اتصال Backend مدل محلی به UI است. Backend از UI مستقل می‌ماند.
 
 ```text
 UI Integration
 ├── Commands
-│   ├── Import Model
-│   ├── Inspect
-│   ├── Validate
-│   ├── Activate
-│   ├── Deactivate
-│   ├── Unload
-│   └── Delete
+│   ├── import model
+│   ├── inspect
+│   ├── validate
+│   ├── activate
+│   ├── deactivate
+│   ├── unload
+│   └── delete
 ├── Model List
 │   ├── list
 │   ├── descriptor
@@ -69,29 +69,52 @@ UI Integration
     ├── traceId
     ├── errorCode
     ├── error details
-    └── navigation target
+    └── navigation target for the same execution/trace
 ```
 
 ## جریان اتصال
 
 ```text
-Settings → AI → Model
-        ↓
-Import Model
-        ↓
-Android File Picker
-        ↓
-URI
-        ↓
-Backend Import
-        ↓
-Result + State + Execution/Trace
-        ↓
-UI
+UI Settings / AI Model Area
+          ↓
+     Import Model
+          ↓
+   Android File Picker
+          ↓
+         URI
+          ↓
+   Backend Model Import
+          ↓
+ Result + State + IDs + Trace
+          ↓
+        UI State
 ```
 
-UI نباید Parser یا Runtime را مستقیماً اجرا کند.
+## قانون Diagnostics
 
-هر تغییر Backend که چیزی به UI اضافه/حذف/تغییر می‌دهد باید همین سند را همزمان به‌روزرسانی کند.
+اگر یک Action در Backend Trace داشته باشد، UI باید بتواند با `executionId` یا `traceId` مستقیماً به گزارش همان Execution در بخش عیب‌یابی برسد. UI نباید گزارش مستقل و جداگانه‌ای برای همان Execution بسازد.
 
-ارجاع UI: `docs/ui/UI_TREE.md`, `docs/ui/SCREENS.md`, `docs/ui/LOCAL_MODEL_IMPORT_UI.md`
+## ارجاعات
+
+### Backend
+
+- [Architecture](01-architecture.md)
+- [Model Management](02-model-management.md)
+- [Model Domain](03-model-domain.md)
+- [Runtime](04-runtime.md)
+- [Activation](05-activation.md)
+- [Operations](07-operations.md)
+- [Errors](09-errors.md)
+- [Observability](10-observability.md)
+- [Capabilities](11-capabilities.md)
+- [Resources](12-resources.md)
+- [Testing](14-testing.md)
+- [Definition of Done](16-definition-of-done.md)
+
+### UI
+
+- `docs/ui/UI_TREE.md`
+- `docs/ui/SCREENS.md`
+- `docs/ui/LOCAL_MODEL_IMPORT_UI.md`
+
+هر تغییر در Contract باید ابتدا این سند را به‌روزرسانی کند و سپس ارجاعات UI بررسی شوند.
