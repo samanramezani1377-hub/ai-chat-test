@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -65,6 +66,7 @@ private fun AppRoot(container: AppContainer) {
     var destination by remember { mutableStateOf(Destination.CHAT) }
     var sidebarOpen by remember { mutableStateOf(false) }
     var quickMenuOpen by remember { mutableStateOf(false) }
+    var runtimeDetailsOpen by remember { mutableStateOf(false) }
     var messages by remember { mutableStateOf(emptyList<UiMessage>()) }
     var composer by remember { mutableStateOf("") }
     var generating by remember { mutableStateOf(false) }
@@ -75,8 +77,8 @@ private fun AppRoot(container: AppContainer) {
     var conversations by remember { mutableStateOf<List<ConversationRecord>>(emptyList()) }
     var current by remember { mutableStateOf<ConversationRecord?>(null) }
     var deleted by remember { mutableStateOf<DeletedConversation?>(null) }
-    var showRename by remember { mutableStateOf(false) }
-    var recentLimit by remember { mutableIntStateOf(6) }
+    var renameTarget by remember { mutableStateOf<ConversationRecord?>(null) }
+    var recentLimit by remember { mutableIntStateOf(5) }
     var execution by remember { mutableStateOf<ExecutionState?>(null) }
     val scope = rememberCoroutineScope()
     val manager = container.modelManager
@@ -118,7 +120,7 @@ private fun AppRoot(container: AppContainer) {
     LaunchedEffect(Unit) {
         if (manager != null) withContext(Dispatchers.Default) { manager.restoreActive() }
         refreshModels()
-        val records = history.recent(6)
+        val records = history.recent(recentLimit)
         val record = records.firstOrNull() ?: history.create("گفت‌وگوی جدید")
         loadConversation(record)
     }
@@ -151,13 +153,7 @@ private fun AppRoot(container: AppContainer) {
         generating = true
         runtimeStatus = "در حال تولید"
         diagnostic = null
-        execution = ExecutionState(
-            id = UUID.randomUUID().toString(),
-            action = "تولید پاسخ",
-            status = "در حال تولید",
-            startedAt = System.currentTimeMillis(),
-            requestPreview = text,
-        )
+        execution = ExecutionState(UUID.randomUUID().toString(), "تولید پاسخ", "در حال تولید", System.currentTimeMillis(), requestPreview = text)
         scope.launch(Dispatchers.Default) {
             val now = System.currentTimeMillis()
             history.append(record.id, ConversationMessage(userId, ConversationMessage.Role.USER, text, now), now)
@@ -175,11 +171,7 @@ private fun AppRoot(container: AppContainer) {
                         val answer = UiMessage(ChatMessage.Role.ASSISTANT, result.value.text, assistantId)
                         messages = messages + answer
                         val finished = System.currentTimeMillis()
-                        execution = execution?.copy(
-                            status = "انجام شد",
-                            finishedAt = finished,
-                            resultPreview = answer.text.take(240),
-                        )
+                        execution = execution?.copy(status = "انجام شد", finishedAt = finished, resultPreview = answer.text.take(240))
                         scope.launch(Dispatchers.Default) {
                             history.append(record.id, ConversationMessage(assistantId, ConversationMessage.Role.ASSISTANT, answer.text, finished), finished)
                             val updated = history.recent(recentLimit).firstOrNull { it.id == record.id }
@@ -234,13 +226,26 @@ private fun AppRoot(container: AppContainer) {
             val removed = history.delete(record.id) ?: return@launch
             val replacement = if (current?.id == removed.id) history.recent(1).firstOrNull() else null
             withContext(Dispatchers.Main) {
-                if (replacement != null) scope.launch(Dispatchers.Default) { loadConversation(replacement) }
-                else if (current?.id == removed.id) {
+                if (replacement != null) {
+                    scope.launch(Dispatchers.Default) { loadConversation(replacement) }
+                } else if (current?.id == removed.id) {
                     current = null
                     messages = emptyList()
                 }
                 conversations = history.recent(recentLimit)
                 deleted = DeletedConversation(removed)
+            }
+        }
+    }
+
+    fun restoreDeleted(record: ConversationRecord) {
+        scope.launch(Dispatchers.Default) {
+            if (history.restore(record)) {
+                loadConversation(record)
+                withContext(Dispatchers.Main) {
+                    conversations = history.recent(recentLimit)
+                    deleted = null
+                }
             }
         }
     }
@@ -256,19 +261,13 @@ private fun AppRoot(container: AppContainer) {
                             model = activeModel,
                             onDestination = { destination = it; quickMenuOpen = false },
                             onQuick = { quickMenuOpen = !quickMenuOpen },
-                            onSidebar = { sidebarOpen = true },
+                            onSidebar = { quickMenuOpen = false; sidebarOpen = true },
+                            onRuntime = { runtimeDetailsOpen = true },
                         )
                         Box(Modifier.weight(1f).fillMaxWidth()) {
                             when (destination) {
-                                Destination.CHAT -> ChatPage(
-                                    messages, composer, generating,
-                                    onComposer = { composer = it },
-                                    onSend = ::send,
-                                    onStop = ::stop,
-                                    execution = execution,
-                                    onWorkspace = { destination = Destination.WORK },
-                                )
-                                Destination.WORK -> WorkspacePage(execution, activeModel, onDiagnostics = { destination = Destination.DIAGNOSTICS })
+                                Destination.CHAT -> ChatPage(messages, composer, generating, { composer = it }, ::send, ::stop, execution) { destination = Destination.WORK }
+                                Destination.WORK -> WorkspacePage(execution, activeModel) { destination = Destination.DIAGNOSTICS }
                                 Destination.DIAGNOSTICS -> DiagnosticsPage(diagnostic, execution)
                                 Destination.SETTINGS -> SettingsScreen(
                                     models, activeModel, diagnostic,
@@ -291,20 +290,17 @@ private fun AppRoot(container: AppContainer) {
                         onDestination = { destination = it; sidebarOpen = false },
                         onNew = ::createConversation,
                         onOpen = ::openConversation,
-                        onRename = { showRename = true },
+                        onRename = { renameTarget = it },
                         onDelete = ::deleteConversation,
                         onMore = { recentLimit += 5; refreshHistory() },
                         canShowMore = conversations.size >= recentLimit,
                     )
                     deleted?.let { item ->
                         UndoBar(
-                            onUndo = {
-                                scope.launch(Dispatchers.Default) {
-                                    if (history.restore(item.record)) {
-                                        loadConversation(item.record)
-                                        withContext(Dispatchers.Main) { deleted = null }
-                                    }
-                                }
+                            onUndo = { restoreDeleted(item.record) },
+                            onDismiss = {
+                                scope.launch(Dispatchers.Default) { history.purge(item.record.id) }
+                                deleted = null
                             },
                             onExpire = {
                                 scope.launch(Dispatchers.Default) { history.purge(item.record.id) }
@@ -312,50 +308,52 @@ private fun AppRoot(container: AppContainer) {
                             },
                         )
                     }
-                    if (showRename) {
-                        RenameDialog(current?.title.orEmpty(), { showRename = false }) { title ->
-                            val id = current?.id ?: return@RenameDialog
-                            scope.launch(Dispatchers.Default) {
-                                history.rename(id, title, System.currentTimeMillis())
-                                val updated = history.recent(recentLimit).firstOrNull { it.id == id }
-                                withContext(Dispatchers.Main) {
-                                    if (updated != null) current = updated
-                                    conversations = history.recent(recentLimit)
-                                    showRename = false
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
+    }
+
+    if (renameTarget != null) {
+        val target = renameTarget!!
+        RenameDialog(target.title, { renameTarget = null }) { title ->
+            scope.launch(Dispatchers.Default) {
+                history.rename(target.id, title, System.currentTimeMillis())
+                val updated = history.recent(recentLimit).firstOrNull { it.id == target.id }
+                withContext(Dispatchers.Main) {
+                    if (updated?.id == current?.id) current = updated
+                    conversations = history.recent(recentLimit)
+                    renameTarget = null
+                }
+            }
+        }
+    }
+
+    if (runtimeDetailsOpen) {
+        RuntimeDetailsDialog(
+            status = runtimeStatus,
+            model = activeModel,
+            runtimeName = container.modelRuntime.runtimeInfo().name,
+            runtimeVersion = container.modelRuntime.runtimeInfo().version,
+            backend = container.modelRuntime.runtimeInfo().backend,
+            onDismiss = { runtimeDetailsOpen = false },
+        )
     }
 }
 
 @Composable
 private fun AppTheme(content: @Composable () -> Unit) {
     val colors = lightColorScheme(
-        primary = Color(0xFF376A9A),
-        onPrimary = Color.White,
-        primaryContainer = Color(0xFFDCEEFF),
-        onPrimaryContainer = Color(0xFF102A43),
-        background = Color(0xFFF7F9FC),
-        surface = Color(0xFFFDFEFF),
-        surfaceVariant = Color(0xFFEAF0F6),
-        onSurface = Color(0xFF18212B),
-        onSurfaceVariant = Color(0xFF5E6B78),
+        primary = Color(0xFF376A9A), onPrimary = Color.White,
+        primaryContainer = Color(0xFFDCEEFF), onPrimaryContainer = Color(0xFF102A43),
+        background = Color(0xFFF7F9FC), surface = Color(0xFFFDFEFF), surfaceVariant = Color(0xFFEAF0F6),
+        onSurface = Color(0xFF18212B), onSurfaceVariant = Color(0xFF5E6B78),
     )
     MaterialTheme(colorScheme = colors, shapes = Shapes(large = RoundedCornerShape(20.dp), extraLarge = RoundedCornerShape(28.dp)), content = content)
 }
 
 @Composable
-private fun AppHeader(destination: Destination, status: String, model: ModelDescriptor?, onDestination: (Destination) -> Unit, onQuick: () -> Unit, onSidebar: () -> Unit) {
-    Surface(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-        shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = .92f),
-        tonalElevation = 1.dp,
-    ) {
+private fun AppHeader(destination: Destination, status: String, model: ModelDescriptor?, onDestination: (Destination) -> Unit, onQuick: () -> Unit, onSidebar: () -> Unit, onRuntime: () -> Unit) {
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .92f), tonalElevation = 1.dp) {
         Row(Modifier.fillMaxWidth().heightIn(min = 68.dp).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 HeaderNav("گفت‌وگو", destination == Destination.CHAT) { onDestination(Destination.CHAT) }
@@ -363,9 +361,11 @@ private fun AppHeader(destination: Destination, status: String, model: ModelDesc
                 IconButton(onClick = onQuick, modifier = Modifier.size(48.dp).semantics { contentDescription = "منوی سریع" }) { Icon(Icons.Default.MoreVert, "منوی سریع") }
             }
             Spacer(Modifier.weight(1f))
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("● $status", style = MaterialTheme.typography.labelLarge)
-                Text(model?.displayName ?: "مدل محلی", style = MaterialTheme.typography.labelSmall)
+            TextButton(onClick = onRuntime, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "جزئیات وضعیت Runtime" }) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("● $status", style = MaterialTheme.typography.labelLarge)
+                    Text(model?.displayName ?: "مدل محلی", style = MaterialTheme.typography.labelSmall)
+                }
             }
             Spacer(Modifier.weight(1f))
             IconButton(onClick = onSidebar, modifier = Modifier.size(48.dp).semantics { contentDescription = "باز کردن نوار کناری" }) { Icon(Icons.Default.Menu, "باز کردن نوار کناری") }
@@ -383,16 +383,16 @@ private fun AppHeader(destination: Destination, status: String, model: ModelDesc
 @Composable private fun QuickMenu(onDiagnostics: () -> Unit, onSettings: () -> Unit) {
     Surface(Modifier.padding(top = 82.dp, start = 12.dp).width(190.dp), shape = RoundedCornerShape(18.dp), tonalElevation = 6.dp) {
         Column(Modifier.padding(8.dp)) {
-            TextButton(onClick = onDiagnostics, Modifier.fillMaxWidth()) { Icon(Icons.Default.BugReport, null); Spacer(Modifier.width(8.dp)); Text("لاگ") }
-            TextButton(onClick = onSettings, Modifier.fillMaxWidth()) { Icon(Icons.Default.Settings, null); Spacer(Modifier.width(8.dp)); Text("تنظیمات") }
+            TextButton(onClick = onDiagnostics, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Default.BugReport, null); Spacer(Modifier.width(8.dp)); Text("لاگ") }
+            TextButton(onClick = onSettings, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Default.Settings, null); Spacer(Modifier.width(8.dp)); Text("تنظیمات") }
         }
     }
 }
 
 @Composable
-private fun Sidebar(current: ConversationRecord?, conversations: List<ConversationRecord>, destination: Destination, onClose: () -> Unit, onDestination: (Destination) -> Unit, onNew: () -> Unit, onOpen: (ConversationRecord) -> Unit, onRename: () -> Unit, onDelete: (ConversationRecord) -> Unit, onMore: () -> Unit, canShowMore: Boolean) {
+private fun Sidebar(current: ConversationRecord?, conversations: List<ConversationRecord>, destination: Destination, onClose: () -> Unit, onDestination: (Destination) -> Unit, onNew: () -> Unit, onOpen: (ConversationRecord) -> Unit, onRename: (ConversationRecord) -> Unit, onDelete: (ConversationRecord) -> Unit, onMore: () -> Unit, canShowMore: Boolean) {
     Box(Modifier.fillMaxSize()) {
-        Spacer(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .24f)).clickable { onClose() })
+        Spacer(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .24f)).clickable(onClick = onClose))
         Surface(Modifier.fillMaxHeight().fillMaxWidth(.88f).align(Alignment.CenterEnd), shape = RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp), tonalElevation = 8.dp) {
             LazyColumn(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 item { Text("منو", style = MaterialTheme.typography.headlineSmall); Spacer(Modifier.height(8.dp)) }
@@ -405,7 +405,9 @@ private fun Sidebar(current: ConversationRecord?, conversations: List<Conversati
                 item { SideNav("درباره برنامه", destination == Destination.ABOUT) { onDestination(Destination.ABOUT) } }
                 item { SectionLabel("اخیر") }
                 if (conversations.isEmpty()) item { Text("گفت‌وگوی ذخیره‌شده‌ای وجود ندارد.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                items(conversations, key = { it.id }) { record -> RecentConversation(record, record.id == current?.id, onOpen = { onOpen(record) }, onRename = onRename, onDelete = { onDelete(record) }) }
+                items(conversations, key = { it.id }) { record ->
+                    RecentConversation(record, record.id == current?.id, onOpen = { onOpen(record) }, onRename = { onRename(record) }, onDelete = { onDelete(record) })
+                }
                 if (canShowMore) item { TextButton(onClick = onMore, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("مشاهده بیشتر") } }
                 item { OutlinedButton(onClick = onClose, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("بستن") } }
             }
@@ -423,41 +425,74 @@ private fun Sidebar(current: ConversationRecord?, conversations: List<Conversati
 private fun RecentConversation(record: ConversationRecord, active: Boolean, onOpen: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     val time = remember(record.updatedAtEpochMs) { DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(record.updatedAtEpochMs)) }
-    Column {
-        Surface(Modifier.fillMaxWidth().clickable(onClick = onOpen), shape = RoundedCornerShape(16.dp), color = if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .55f) else Color.Transparent) {
-            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Box(Modifier.fillMaxWidth()) {
+        Surface(
+            Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = { menu = true }).semantics { contentDescription = "گفت‌وگو ${record.title}. برای گزینه‌ها لمس طولانی کنید." },
+            shape = RoundedCornerShape(16.dp),
+            color = if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .55f) else Color.Transparent,
+        ) {
+            Row(Modifier.padding(12.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("●", color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
                 Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) { Text(record.title, maxLines = 1); Text("${record.messageCount} پیام", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Column(Modifier.weight(1f)) {
+                    Text(record.title, maxLines = 1)
+                    Text("${record.messageCount} پیام", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        TextButton(onClick = { menu = !menu }, Modifier.align(Alignment.End).heightIn(min = 40.dp)) { Text("گزینه‌ها") }
-        if (menu) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = { menu = false; onOpen() }) { Text("باز کردن") }
-            TextButton(onClick = { menu = false; onRename() }) { Text("تغییر نام") }
-            TextButton(onClick = { menu = false; onDelete() }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("حذف") }
+        TextButton(onClick = { menu = !menu }, Modifier.align(Alignment.TopEnd).heightIn(min = 48.dp).semantics { contentDescription = "گزینه‌های ${record.title}" }) { Text("گزینه‌ها") }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(text = { Text("باز کردن") }, onClick = { menu = false; onOpen() })
+            DropdownMenuItem(text = { Text("تغییر نام") }, onClick = { menu = false; onRename() })
+            DropdownMenuItem(text = { Text("حذف", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; onDelete() })
         }
     }
 }
 
-@Composable private fun UndoBar(onUndo: () -> Unit, onExpire: () -> Unit) {
+@Composable
+private fun UndoBar(onUndo: () -> Unit, onDismiss: () -> Unit, onExpire: () -> Unit) {
     var remaining by remember { mutableIntStateOf(10) }
-    LaunchedEffect(Unit) { while (remaining > 0) { delay(1000); remaining-- }; onExpire() }
-    Surface(Modifier.fillMaxWidth().padding(12.dp), shape = RoundedCornerShape(18.dp), tonalElevation = 6.dp) {
-        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("گفت‌وگو حذف شد", Modifier.weight(1f)); TextButton(onClick = onUndo) { Text("بازگردانی") }; Text("$remaining ثانیه")
+    LaunchedEffect(Unit) {
+        while (remaining > 0) { delay(1000); remaining-- }
+        onExpire()
+    }
+    Box(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.BottomCenter) {
+        Surface(Modifier.fillMaxWidth().widthIn(max = 620.dp), shape = RoundedCornerShape(18.dp), tonalElevation = 6.dp) {
+            Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("گفت‌وگو حذف شد", Modifier.weight(1f))
+                TextButton(onClick = onUndo, Modifier.heightIn(min = 48.dp)) { Text("بازگردانی") }
+                Text("$remaining ثانیه", style = MaterialTheme.typography.labelMedium)
+                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp).semantics { contentDescription = "بستن پیام حذف" }) { Icon(Icons.Default.Close, "بستن") }
+            }
         }
     }
 }
 
 @Composable private fun RenameDialog(initial: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var value by remember(initial) { mutableStateOf(initial) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("تغییر نام گفت‌وگو") }, text = { TextField(value, { value = it }, singleLine = true, label = { Text("عنوان") }) }, confirmButton = { TextButton(onClick = { onConfirm(value.trim()) }, enabled = value.isNotBlank()) { Text("ذخیره") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("انصراف") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("تغییر نام گفت‌وگو") }, text = { TextField(value, { value = it }, singleLine = true, label = { Text("عنوان") }) }, confirmButton = { TextButton(onClick = { onConfirm(value.trim()) }, enabled = value.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text("ذخیره") } }, dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("انصراف") } })
 }
 
 @Composable
-private fun ChatPage(messages: List<UiMessage>, composer: String, generating: Boolean, onComposer: (String) -> Unit, onSend: () -> Unit, onStop: () -> Unit, execution: ExecutionState?, onWorkspace: () -> Unit) {
+private fun RuntimeDetailsDialog(status: String, model: ModelDescriptor?, runtimeName: String, runtimeVersion: String, backend: String?, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("وضعیت Runtime") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("وضعیت: $status")
+                Text("مدل: ${model?.displayName ?: "مدلی فعال نیست"}")
+                Text("Runtime: $runtimeName")
+                Text("نسخه: $runtimeVersion")
+                Text("Backend: ${backend ?: "ارائه نشده"}")
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("بستن") } },
+    )
+}
+
+@Composable private fun ChatPage(messages: List<UiMessage>, composer: String, generating: Boolean, onComposer: (String) -> Unit, onSend: () -> Unit, onStop: () -> Unit, execution: ExecutionState?, onWorkspace: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             if (messages.isEmpty()) item { Column(Modifier.fillMaxWidth().padding(top = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text("گفت‌وگو", style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(6.dp)); Text("پیام خود را بنویسید و گفتگو را شروع کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
@@ -467,9 +502,9 @@ private fun ChatPage(messages: List<UiMessage>, composer: String, generating: Bo
         }
         Surface(Modifier.fillMaxWidth().padding(bottom = 12.dp), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), tonalElevation = 2.dp) {
             Row(Modifier.padding(8.dp), verticalAlignment = Alignment.Bottom) {
-                TextField(composer, onComposer, Modifier.weight(1f), placeholder = { Text("پیام خود را بنویسید…") }, maxLines = 6, supportingText = { if (generating) Text("در حال تولید؛ برای توقف از دکمه توقف استفاده کنید.") })
+                TextField(composer, onComposer, Modifier.weight(1f), placeholder = { Text("پیام خود را بنویسید…") }, maxLines = 6)
                 Spacer(Modifier.width(8.dp))
-                FilledIconButton(onClick = if (generating) onStop else onSend, enabled = generating || composer.isNotBlank(), modifier = Modifier.size(48.dp)) { Icon(if (generating) Icons.Default.Stop else Icons.Default.Send, if (generating) "توقف تولید" else "ارسال پیام") }
+                FilledIconButton(onClick = if (generating) onStop else onSend, enabled = generating || composer.isNotBlank(), modifier = Modifier.size(48.dp).semantics { contentDescription = if (generating) "توقف تولید" else "ارسال پیام" }) { Icon(if (generating) Icons.Default.Stop else Icons.Default.Send, if (generating) "توقف تولید" else "ارسال پیام") }
             }
         }
     }
@@ -488,25 +523,22 @@ private fun ChatPage(messages: List<UiMessage>, composer: String, generating: Bo
     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) { Text("آخرین عملیات: ${execution.action}", style = MaterialTheme.typography.titleSmall); Text("${execution.status} · ${durationText(execution)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            TextButton(onClick = onWorkspace) { Text("مشاهده جزئیات") }
+            TextButton(onClick = onWorkspace, Modifier.heightIn(min = 48.dp)) { Text("مشاهده جزئیات") }
         }
     }
 }
 
-@Composable
-private fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, onDiagnostics: () -> Unit) {
+@Composable private fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, onDiagnostics: () -> Unit) {
     var expanded by remember(execution?.id) { mutableStateOf(false) }
     SimplePage("فضای کار") {
         Text("خلاصه اجرای جاری", style = MaterialTheme.typography.titleLarge)
-        if (execution == null) Text("اجرای فعالی ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        else {
+        if (execution == null) Text("اجرای فعالی ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant) else {
             Text(execution.action, style = MaterialTheme.typography.titleMedium)
             Text(execution.status)
             Text("مدل: ${model?.displayName ?: "مدل محلی"}", style = MaterialTheme.typography.bodySmall)
             Text("شناسه Execution: ${execution.id}", style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(4.dp))
             Text("Timeline مرکزی", style = MaterialTheme.typography.titleLarge)
-            Surface(Modifier.fillMaxWidth().clickable { expanded = !expanded }, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f)) {
+            Surface(Modifier.fillMaxWidth().clickable { expanded = !expanded }.semantics { contentDescription = "جزئیات اجرای ${execution.action}" }, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f)) {
                 Column(Modifier.padding(14.dp)) {
                     Text("● ${execution.action}", style = MaterialTheme.typography.titleMedium)
                     Text("${execution.status} · ${durationText(execution)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -518,7 +550,7 @@ private fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, o
                         ExpandLayer("Preview / Result") { Text(execution.resultPreview ?: "نتیجه‌ای ثبت نشده است.", style = MaterialTheme.typography.bodySmall) }
                         ExpandLayer("Verification / Evidence") { Text("Evidence برای این Event ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         ExpandLayer("Recovery") { Text(execution.error ?: "بازیابی لازم نیست.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        TextButton(onClick = onDiagnostics, Modifier.fillMaxWidth()) { Text("مشاهده جزئیات → عیب‌یابی") }
+                        TextButton(onClick = onDiagnostics, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("مشاهده جزئیات → عیب‌یابی") }
                     }
                 }
             }
@@ -531,7 +563,7 @@ private fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, o
 @Composable private fun ExpandLayer(title: String, content: @Composable ColumnScope.() -> Unit) {
     var open by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-        TextButton(onClick = { open = !open }, Modifier.fillMaxWidth(), contentPadding = PaddingValues(8.dp)) { Text(if (open) "▲ $title" else "▼ $title", Modifier.fillMaxWidth()) }
+        TextButton(onClick = { open = !open }, Modifier.fillMaxWidth().heightIn(min = 48.dp), contentPadding = PaddingValues(8.dp)) { Text(if (open) "▲ $title" else "▼ $title", Modifier.fillMaxWidth()) }
         if (open) Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp), content = content)
     }
 }
@@ -546,17 +578,16 @@ private fun durationText(execution: ExecutionState): String {
         Text("خطاها", style = MaterialTheme.typography.titleLarge)
         if (error == null) Text("خطایی برای نمایش ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant) else Text(error, color = MaterialTheme.colorScheme.error)
         Text("گزارش Execution / Trace", style = MaterialTheme.typography.titleLarge)
-        if (execution == null) Text("Execution ثبت‌شده‌ای وجود ندارد.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        else {
+        if (execution == null) Text("Execution ثبت‌شده‌ای وجود ندارد.", color = MaterialTheme.colorScheme.onSurfaceVariant) else {
             Text("Execution: ${execution.id}", style = MaterialTheme.typography.bodySmall)
             Text("Action: ${execution.action}")
             Text("وضعیت: ${execution.status}")
             Text("شروع: ${DateFormat.getDateTimeInstance().format(Date(execution.startedAt))}", style = MaterialTheme.typography.bodySmall)
             execution.finishedAt?.let { Text("پایان: ${DateFormat.getDateTimeInstance().format(Date(it))}", style = MaterialTheme.typography.bodySmall) }
             execution.error?.let { Text("Error: $it", color = MaterialTheme.colorScheme.error) }
-            Text("Trace", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
+            Text("Trace", style = MaterialTheme.typography.titleMedium)
             Text("جزئیات Trace فقط از Execution واقعی نمایش داده می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Verification", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
+            Text("Verification", style = MaterialTheme.typography.titleMedium)
             Text("Verification ثبت‌شده‌ای برای این Execution وجود ندارد.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text("عملکرد", style = MaterialTheme.typography.titleLarge)
