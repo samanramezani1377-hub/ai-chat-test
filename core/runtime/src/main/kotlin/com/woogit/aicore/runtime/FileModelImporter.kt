@@ -13,34 +13,45 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.UUID
 
-/** Imports a user-selected model into managed storage using the real file and GGUF inspector. */
+/** Imports a user-selected model into managed storage after real GGUF inspection and validation. */
 class FileModelImporter(
     private val storageDirectory: Path,
-    private val inspector: GgufInspector = GgufInspector()
+    private val inspector: GgufInspector = GgufInspector(),
+    private val validator: GgufModelValidator = GgufModelValidator()
 ) : ModelImporter {
     override suspend fun import(source: Path): ModelResult<ModelDescriptor> {
         if (!Files.isRegularFile(source) || !Files.isReadable(source)) {
             return ModelResult.Failure(ModelError.FileAccess("Selected model file cannot be read"))
         }
+
         return try {
             Files.createDirectories(storageDirectory)
-            val inspectionResult = inspector.inspect(source)
-            val inspection = when (inspectionResult) {
-                is ModelResult.Success -> inspectionResult.value
-                is ModelResult.Failure -> return inspectionResult
+
+            val inspection = when (val result = inspector.inspect(source)) {
+                is ModelResult.Success -> result.value
+                is ModelResult.Failure -> return result
             }
+
             if (inspection.format != ModelFormat.GGUF) {
                 return ModelResult.Failure(ModelError.UnsupportedFormat("Only GGUF models are supported"))
+            }
+
+            when (val validation = validator.validate(inspection)) {
+                is ModelResult.Success -> Unit
+                is ModelResult.Failure -> return validation
             }
 
             val id = UUID.randomUUID().toString()
             val target = storageDirectory.resolve("$id.gguf")
             Files.copy(source, target, StandardCopyOption.COPY_ATTRIBUTES)
+
             try {
                 val storedSize = Files.size(target)
                 if (storedSize != inspection.sizeBytes) {
+                    Files.deleteIfExists(target)
                     return ModelResult.Failure(ModelError.Storage("Imported model size changed during copy"))
                 }
+
                 ModelResult.Success(
                     ModelDescriptor(
                         id = id,
@@ -53,7 +64,7 @@ class FileModelImporter(
                         validation = ValidationStatus.VALID,
                         runtimeCompatibility = RuntimeCompatibility(
                             supported = false,
-                            reason = "Runtime compatibility is established when a concrete runtime is configured"
+                            reason = "Runtime compatibility is established by the concrete runtime adapter"
                         ),
                         state = ModelState.READY
                     )
