@@ -40,7 +40,8 @@ UI Integration
 │   ├── status
 │   ├── loading state
 │   ├── runtime info
-│   └── capabilities
+│   ├── capabilities
+│   └── response delivery mode
 ├── Reactive State
 │   ├── models
 │   ├── currentModel
@@ -71,6 +72,12 @@ UI Integration
     ├── error details
     └── navigation target for the same execution/trace
 ```
+
+## Runtime response delivery
+
+نسخه فعلی Android Runtime از `dev.ffmpegkit-maintained:llama-android:0.1.1` استفاده می‌کند. این AAR در نسخه Free خروجی کامل تولید می‌کند و Streaming Token/Flow ارائه نمی‌دهد؛ بنابراین Backend فعلاً یک `onToken` callback با کل متن نهایی ارسال می‌کند. UI نباید این را به‌عنوان Streaming تدریجی نمایش دهد.
+
+قرارداد UI از ابتدا `response delivery mode` را نگه می‌دارد تا با جایگزینی Adapter با یک Runtime دارای Streaming واقعی، UI بدون تغییر معماری بتواند حالت Token Streaming را مصرف کند.
 
 ## جریان اتصال
 
@@ -103,11 +110,14 @@ UI Settings / AI Model Area
 - [Model Domain](03-model-domain.md)
 - [Runtime](04-runtime.md)
 - [Activation](05-activation.md)
+- [Storage](06-storage.md)
 - [Operations](07-operations.md)
+- [Concurrency & Cancellation](08-concurrency.md)
 - [Errors](09-errors.md)
 - [Observability](10-observability.md)
 - [Capabilities](11-capabilities.md)
 - [Resources](12-resources.md)
+- [Security](13-security.md)
 - [Testing](14-testing.md)
 - [Definition of Done](16-definition-of-done.md)
 
