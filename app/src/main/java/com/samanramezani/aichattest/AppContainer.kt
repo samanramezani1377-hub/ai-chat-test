@@ -71,8 +71,14 @@ class AppContainer(context: Context? = null) {
     }
     private val checkpointStore = InMemoryActionCheckpointStore()
     private val lifecycle = ActionLifecycle(actionRegistry, capabilityProvider, checkpointStore, retryPolicy = DefaultActionRetryPolicy(2))
-    private val verifier = Verifier<Any> { result -> com.woogit.aicore.domain.VerificationResult(true, result.toString()) }
+    private val verifier = Verifier<Any> { result -> verifyActionResult(result) }
     private val coordinator = ActionPlanCoordinator(lifecycle, ProtocolActionIntentPlanner())
+
+    private fun verifyActionResult(result: Any): com.woogit.aicore.domain.VerificationResult {
+        val evidence = result.toString()
+        if (evidence.isBlank()) return com.woogit.aicore.domain.VerificationResult(false, "Action returned an empty result")
+        return com.woogit.aicore.domain.VerificationResult(true, evidence)
+    }
 
     private fun executionOutcome(state: ActionExecutionState): ActionExecutionOutcome = when (state) {
         is ActionExecutionState.Completed -> ActionExecutionOutcome(true, state.verification.success, state.verification.evidence ?: "Action completed", state.verification.evidence)
@@ -84,12 +90,14 @@ class AppContainer(context: Context? = null) {
         executionOutcome(lifecycle.executeApproved(plan.prepared.executionId, verifier))
     }
 
-    fun approveAndExecute(executionId: String): ActionExecutionOutcome = runCatching {
-        executionOutcome(lifecycle.approve(executionId).let { lifecycle.executeApproved(it.executionId, verifier) })
+    suspend fun approveAndExecute(executionId: String): ActionExecutionOutcome = runCatching {
+        val approved = lifecycle.approve(executionId)
+        executionOutcome(lifecycle.executeApproved(approved.executionId, verifier))
     }.getOrElse { ActionExecutionOutcome(false, false, it.message ?: "Approval failed", errorCode = "APPROVAL_FAILED") }
 
-    fun reject(executionId: String): Boolean = runCatching {
+    suspend fun reject(executionId: String): Boolean = runCatching {
         val prepared = lifecycle.checkpoint(executionId)
+        check(prepared.state == ActionExecutionState.AwaitingApproval) { "Action is not awaiting approval" }
         lifecycle.reject(prepared)
         true
     }.getOrDefault(false)
