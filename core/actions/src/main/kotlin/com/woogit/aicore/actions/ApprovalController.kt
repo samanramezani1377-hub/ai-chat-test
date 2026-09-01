@@ -21,7 +21,8 @@ class ApprovalController(private val lifecycle: ActionLifecycle) {
     }
 
     suspend fun reject(executionId: String): ApprovalResult = try {
-        val prepared = lifecycle.approve(executionId)
+        val prepared = lifecycle.checkpoint(executionId)
+        require(prepared.state == ActionExecutionState.AwaitingApproval) { "Action is not awaiting final approval" }
         val rejected = lifecycle.reject(prepared)
         ApprovalResult(executionId, ApprovalDecision.Rejected, rejected.state)
     } catch (t: Throwable) {
