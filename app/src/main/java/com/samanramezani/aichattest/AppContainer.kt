@@ -3,6 +3,7 @@ package com.samanramezani.aichattest
 import android.content.Context
 import android.os.Build
 import com.woogit.aicore.actions.ActionExecutionService
+import com.woogit.aicore.actions.ActionExecutionState
 import com.woogit.aicore.actions.ActionLifecycle
 import com.woogit.aicore.actions.ApprovalController
 import com.woogit.aicore.actions.DefaultActionRegistry
@@ -24,6 +25,7 @@ import com.woogit.aicore.conversation.DefaultContextProvider
 import com.woogit.aicore.conversation.InMemoryConversationHistoryRepository
 import com.woogit.aicore.domain.ActionRegistry
 import com.woogit.aicore.domain.CapabilityProvider
+import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.ModelResult
 import com.woogit.aicore.domain.Verifier
 import com.woogit.aicore.runtime.RuntimeAdapter
@@ -35,11 +37,7 @@ class AppContainer(context: Context? = null) {
     private val appContext = context?.applicationContext
 
     val modelRuntime: RuntimeAdapter = LlamaCppAndroidRuntimeAdapter()
-
-    val conversationHistory: ConversationHistoryRepository = appContext?.let {
-        AndroidConversationHistoryRepository(it)
-    } ?: InMemoryConversationHistoryRepository()
-
+    val conversationHistory: ConversationHistoryRepository = appContext?.let { AndroidConversationHistoryRepository(it) } ?: InMemoryConversationHistoryRepository()
     val modelManager: AndroidModelManager? = appContext?.let {
         val directory = it.filesDir.toPath().resolve("models")
         Files.createDirectories(directory)
@@ -54,9 +52,7 @@ class AppContainer(context: Context? = null) {
             registry.registerProviderActions(
                 modelInfo = {
                     when (val active = modelManager?.activeModel()) {
-                        is ModelResult.Success -> active.value?.let {
-                            "name=${it.displayName}, quantization=${it.quantization}, sizeBytes=${it.sizeBytes}"
-                        } ?: "no-active-model"
+                        is ModelResult.Success -> active.value?.let { "name=${it.displayName}, quantization=${it.quantization}, sizeBytes=${it.sizeBytes}" } ?: "no-active-model"
                         is ModelResult.Failure -> "unavailable: ${active.error.message}"
                         null -> "no-model-manager"
                     }
@@ -65,9 +61,7 @@ class AppContainer(context: Context? = null) {
                     val info = modelRuntime.runtimeInfo()
                     "runtime=${info.name}, backend=${info.backend ?: "unknown"}"
                 },
-                deviceInfo = {
-                    "manufacturer=${Build.MANUFACTURER}, model=${Build.MODEL}, sdk=${Build.VERSION.SDK_INT}"
-                },
+                deviceInfo = { "manufacturer=${Build.MANUFACTURER}, model=${Build.MODEL}, sdk=${Build.VERSION.SDK_INT}" },
             )
         }
     }
@@ -76,46 +70,35 @@ class AppContainer(context: Context? = null) {
         override fun supports(capability: String): Boolean = capability in setOf("filesystem", "runtime", "device", "utility")
     }
     private val checkpointStore = InMemoryActionCheckpointStore()
-    private val lifecycle = ActionLifecycle(
-        registry = actionRegistry,
-        capabilityProvider = capabilityProvider,
-        checkpointStore = checkpointStore,
-        retryPolicy = DefaultActionRetryPolicy(2),
-    )
-    private val verifier = Verifier<Any> { result ->
-        com.woogit.aicore.domain.VerificationResult(true, result.toString())
-    }
+    private val lifecycle = ActionLifecycle(actionRegistry, capabilityProvider, checkpointStore, retryPolicy = DefaultActionRetryPolicy(2))
+    private val verifier = Verifier<Any> { result -> com.woogit.aicore.domain.VerificationResult(true, result.toString()) }
     private val coordinator = ActionPlanCoordinator(lifecycle, ProtocolActionIntentPlanner())
-    private val actionExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan ->
-        val execution = lifecycle.executeApproved(plan.prepared.executionId, verifier)
-        when (execution) {
-            is com.woogit.aicore.actions.ActionExecutionState.Completed -> ActionExecutionOutcome(
-                success = true,
-                verified = execution.verification.success,
-                message = execution.verification.evidence ?: "Action completed",
-                data = execution.verification.evidence,
-            )
-            is com.woogit.aicore.actions.ActionExecutionState.Failed -> ActionExecutionOutcome(
-                success = false,
-                verified = false,
-                message = execution.message,
-                errorCode = "ACTION_FAILED",
-            )
-            else -> ActionExecutionOutcome(false, false, "Action was not executed", errorCode = "NOT_EXECUTED")
-        }
+
+    private fun executionOutcome(state: ActionExecutionState): ActionExecutionOutcome = when (state) {
+        is ActionExecutionState.Completed -> ActionExecutionOutcome(true, state.verification.success, state.verification.evidence ?: "Action completed", state.verification.evidence)
+        is ActionExecutionState.Failed -> ActionExecutionOutcome(false, false, state.message, errorCode = "ACTION_FAILED")
+        else -> ActionExecutionOutcome(false, false, "Action was not executed", errorCode = "NOT_EXECUTED")
     }
 
-    fun createAgentSession(
-        conversationId: String,
-        eventSink: suspend (AgentEvent) -> Unit = {},
-    ): AgentSession? {
+    private val actionExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan ->
+        executionOutcome(lifecycle.executeApproved(plan.prepared.executionId, verifier))
+    }
+
+    fun approveAndExecute(executionId: String): ActionExecutionOutcome = runCatching {
+        executionOutcome(lifecycle.approve(executionId).let { lifecycle.executeApproved(it.executionId, verifier) })
+    }.getOrElse { ActionExecutionOutcome(false, false, it.message ?: "Approval failed", errorCode = "APPROVAL_FAILED") }
+
+    fun reject(executionId: String): Boolean = runCatching {
+        val prepared = lifecycle.checkpoint(executionId)
+        lifecycle.reject(prepared)
+        true
+    }.getOrDefault(false)
+
+    fun createAgentSession(conversationId: String, eventSink: suspend (AgentEvent) -> Unit = {}): AgentSession? {
         if (appContext == null || modelManager == null) return null
         val store = HistoryConversationStore(conversationHistory, conversationId)
         return AgentSession(
-            orchestrator = AgentOrchestrator(
-                contextProvider = DefaultContextProvider(store),
-                runtime = modelRuntime,
-            ),
+            orchestrator = AgentOrchestrator(contextProvider = DefaultContextProvider(store), runtime = modelRuntime),
             conversationStore = store,
             actionPlanCoordinator = coordinator,
             actionExecutor = actionExecutor,
@@ -126,20 +109,9 @@ class AppContainer(context: Context? = null) {
     val actionExecutionService = ActionExecutionService(lifecycle, ApprovalController(lifecycle))
 }
 
-/** Adapts the durable conversation repository to the agent's ConversationStore contract. */
-private class HistoryConversationStore(
-    private val repository: ConversationHistoryRepository,
-    private val conversationId: String,
-) : ConversationStore {
-    override suspend fun append(message: ConversationMessage) {
-        check(repository.append(conversationId, message, message.timestampEpochMs)) {
-            "Conversation does not exist: $conversationId"
-        }
-    }
-
+private class HistoryConversationStore(private val repository: ConversationHistoryRepository, private val conversationId: String) : ConversationStore {
+    override suspend fun append(message: ConversationMessage) { check(repository.append(conversationId, message, message.timestampEpochMs)) { "Conversation does not exist: $conversationId" } }
     override suspend fun recent(limit: Int): List<ConversationMessage> = repository.messages(conversationId).takeLast(limit)
-
     override suspend fun summary(): String? = null
-
     override suspend fun replaceSummary(summary: String) = Unit
 }
