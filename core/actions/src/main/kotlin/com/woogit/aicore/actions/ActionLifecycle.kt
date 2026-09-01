@@ -21,7 +21,6 @@ data class PreparedAction(
     val input: Any,
     val risk: com.woogit.aicore.domain.RiskLevel,
     val state: ActionExecutionState = ActionExecutionState.Prepared,
-    /** Number of retry attempts already consumed for this prepared execution. */
     val retryCount: Int = 0
 )
 
@@ -30,11 +29,7 @@ class DefaultActionApprovalPolicy : ActionApprovalPolicy {
     override fun requiresApproval(risk: com.woogit.aicore.domain.RiskLevel) = risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE
 }
 
-/** Explicit retry budget prevents an indefinitely failing action from looping forever. */
-interface ActionRetryPolicy {
-    fun maxRetries(action: PreparedAction): Int
-}
-
+interface ActionRetryPolicy { fun maxRetries(action: PreparedAction): Int }
 class DefaultActionRetryPolicy(private val defaultMaxRetries: Int = 2) : ActionRetryPolicy {
     init { require(defaultMaxRetries >= 0) { "defaultMaxRetries must be non-negative" } }
     override fun maxRetries(action: PreparedAction): Int = defaultMaxRetries
@@ -46,9 +41,7 @@ interface ActionCheckpointStore {
 }
 class InMemoryActionCheckpointStore : ActionCheckpointStore {
     private val values = mutableMapOf<String, PreparedAction>()
-    override suspend fun save(action: PreparedAction) {
-        synchronized(values) { values[action.executionId] = action }
-    }
+    override suspend fun save(action: PreparedAction) { synchronized(values) { values[action.executionId] = action } }
     override suspend fun get(executionId: String): PreparedAction? = synchronized(values) { values[executionId] }
 }
 
@@ -66,10 +59,7 @@ class ActionLifecycle(
 
     suspend fun prepare(actionId: String, input: Any): PreparedAction {
         val action = registry.find(actionId) ?: error("Action not found: $actionId")
-        return PreparedAction(actionId = action.id, input = input, risk = action.risk).also {
-            checkpointStore.save(it)
-            trace(it.executionId, ActionTraceType.PREPARED, it.actionId)
-        }
+        return PreparedAction(actionId = action.id, input = input, risk = action.risk).also { checkpointStore.save(it); trace(it.executionId, ActionTraceType.PREPARED, it.actionId) }
     }
 
     fun requiresApproval(prepared: PreparedAction) = approvalPolicy.requiresApproval(prepared.risk)
@@ -81,45 +71,23 @@ class ActionLifecycle(
             error(raw)
         }
         val state = if (requiresApproval(prepared)) ActionExecutionState.AwaitingApproval else ActionExecutionState.Approved
-        return prepared.copy(state = state).also {
-            checkpointStore.save(it)
-            trace(it.executionId, ActionTraceType.VALIDATED, capability)
-            if (state == ActionExecutionState.AwaitingApproval) trace(it.executionId, ActionTraceType.APPROVAL_REQUESTED)
-        }
+        return prepared.copy(state = state).also { checkpointStore.save(it); trace(it.executionId, ActionTraceType.VALIDATED, capability); if (state == ActionExecutionState.AwaitingApproval) trace(it.executionId, ActionTraceType.APPROVAL_REQUESTED) }
     }
+
+    suspend fun checkpoint(executionId: String): PreparedAction = checkpointStore.get(executionId) ?: error("Prepared action not found: $executionId")
 
     suspend fun approve(executionId: String): PreparedAction {
-        val prepared = checkpointStore.get(executionId) ?: error("Prepared action not found: $executionId")
+        val prepared = checkpoint(executionId)
         require(prepared.state == ActionExecutionState.AwaitingApproval) { "Action is not awaiting final approval" }
-        return prepared.copy(state = ActionExecutionState.Approved).also {
-            checkpointStore.save(it)
-            trace(executionId, ActionTraceType.APPROVED)
-        }
+        return prepared.copy(state = ActionExecutionState.Approved).also { checkpointStore.save(it); trace(executionId, ActionTraceType.APPROVED) }
     }
 
-    suspend fun reject(prepared: PreparedAction): PreparedAction = prepared.copy(state = ActionExecutionState.Rejected).also {
-        checkpointStore.save(it)
-        trace(it.executionId, ActionTraceType.REJECTED)
-    }
+    suspend fun reject(prepared: PreparedAction): PreparedAction = prepared.copy(state = ActionExecutionState.Rejected).also { checkpointStore.save(it); trace(it.executionId, ActionTraceType.REJECTED) }
 
     suspend fun executeApproved(executionId: String, verifier: Verifier<Any>): ActionExecutionState {
-        val prepared = checkpointStore.get(executionId)
-        if (prepared == null) {
-            val raw = "Prepared action not found: $executionId"
-            logError(executionId, null, raw, "عملیات آماده‌شده پیدا نشد.")
-            return ActionExecutionState.Failed(raw)
-        }
-        if (prepared.state != ActionExecutionState.Approved) {
-            val raw = "Action is not approved for execution"
-            logError(executionId, prepared.actionId, raw, "این عملیات برای اجرا تأیید نشده است.")
-            return ActionExecutionState.Failed(raw)
-        }
-        val action = registry.find(prepared.actionId)
-        if (action == null) {
-            val raw = "Action not found: ${prepared.actionId}"
-            logError(executionId, prepared.actionId, raw, "عملیات موردنظر پیدا نشد.")
-            return ActionExecutionState.Failed(raw)
-        }
+        val prepared = checkpointStore.get(executionId) ?: return ActionExecutionState.Failed("Prepared action not found: $executionId")
+        if (prepared.state != ActionExecutionState.Approved) return ActionExecutionState.Failed("Action is not approved for execution")
+        val action = registry.find(prepared.actionId) ?: return ActionExecutionState.Failed("Action not found: ${prepared.actionId}")
         return try {
             checkpointStore.save(prepared.copy(state = ActionExecutionState.Executing))
             trace(executionId, ActionTraceType.EXECUTION_STARTED, prepared.actionId)
@@ -127,11 +95,10 @@ class ActionLifecycle(
             val verification = verifier.verify(result)
             if (!verification.success) {
                 val raw = verification.evidence ?: "Action verification failed"
-                val failed = ActionExecutionState.Failed(raw)
-                checkpointStore.save(prepared.copy(state = failed))
+                checkpointStore.save(prepared.copy(state = ActionExecutionState.Failed(raw)))
                 trace(executionId, ActionTraceType.VERIFICATION_FAILED, raw)
                 logError(executionId, prepared.actionId, raw, "اجرای عملیات انجام شد، اما نتیجه قابل تأیید نبود.")
-                return failed
+                return ActionExecutionState.Failed(raw)
             }
             val completed = ActionExecutionState.Completed(verification)
             checkpointStore.save(prepared.copy(state = completed))
@@ -139,34 +106,20 @@ class ActionLifecycle(
             completed
         } catch (t: Throwable) {
             val raw = t.message ?: t::class.simpleName.orEmpty()
-            val failed = ActionExecutionState.Failed(raw)
-            checkpointStore.save(prepared.copy(state = failed))
+            checkpointStore.save(prepared.copy(state = ActionExecutionState.Failed(raw)))
             trace(executionId, ActionTraceType.EXECUTION_FAILED, raw)
             logError(executionId, prepared.actionId, raw, "اجرای عملیات با خطا مواجه شد.")
-            failed
+            ActionExecutionState.Failed(raw)
         }
     }
 
     suspend fun retryFailed(executionId: String, verifier: Verifier<Any>): ActionExecutionState {
-        val failed = checkpointStore.get(executionId)
-            ?: return ActionExecutionState.Failed("Prepared action not found: $executionId")
-        if (failed.state !is ActionExecutionState.Failed) {
-            return ActionExecutionState.Failed("Only failed executions can be retried")
-        }
-
+        val failed = checkpoint(executionId)
+        if (failed.state !is ActionExecutionState.Failed) return ActionExecutionState.Failed("Only failed executions can be retried")
         val maxRetries = retryPolicy.maxRetries(failed).coerceAtLeast(0)
-        if (failed.retryCount >= maxRetries) {
-            val raw = "Retry limit reached: $maxRetries"
-            logError(executionId, failed.actionId, raw, "تعداد تلاش مجدد این عملیات به سقف مجاز رسیده است.")
-            trace(executionId, ActionTraceType.RETRY_REJECTED, raw)
-            return ActionExecutionState.Failed(raw)
-        }
-
+        if (failed.retryCount >= maxRetries) return ActionExecutionState.Failed("Retry limit reached: $maxRetries")
         trace(executionId, ActionTraceType.RETRY_REQUESTED, "attempt=${failed.retryCount + 1}/$maxRetries")
-        val reset = failed.copy(
-            state = if (requiresApproval(failed)) ActionExecutionState.AwaitingApproval else ActionExecutionState.Approved,
-            retryCount = failed.retryCount + 1
-        )
+        val reset = failed.copy(state = if (requiresApproval(failed)) ActionExecutionState.AwaitingApproval else ActionExecutionState.Approved, retryCount = failed.retryCount + 1)
         checkpointStore.save(reset)
         return if (reset.state == ActionExecutionState.Approved) executeApproved(executionId, verifier) else reset.state
     }
