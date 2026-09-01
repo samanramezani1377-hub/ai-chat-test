@@ -6,6 +6,7 @@ import com.woogit.aicore.actions.ActionExecutionService
 import com.woogit.aicore.actions.ActionExecutionState
 import com.woogit.aicore.actions.ActionLifecycle
 import com.woogit.aicore.actions.ApprovalController
+import com.woogit.aicore.actions.BuiltinActionVerifier
 import com.woogit.aicore.actions.DefaultActionRegistry
 import com.woogit.aicore.actions.DefaultActionRetryPolicy
 import com.woogit.aicore.actions.InMemoryActionCheckpointStore
@@ -35,6 +36,7 @@ import java.nio.file.Files
 /** Application composition root. Implementations are wired here, never inside UI screens. */
 class AppContainer(context: Context? = null) {
     private val appContext = context?.applicationContext
+    private val workspaceRoot = appContext?.filesDir?.toPath()?.resolve("workspace")
 
     val modelRuntime: RuntimeAdapter = LlamaCppAndroidRuntimeAdapter()
     val conversationHistory: ConversationHistoryRepository = appContext?.let { AndroidConversationHistoryRepository(it) } ?: InMemoryConversationHistoryRepository()
@@ -45,10 +47,9 @@ class AppContainer(context: Context? = null) {
     }
 
     val actionRegistry: ActionRegistry = DefaultActionRegistry().also { registry ->
-        if (appContext != null) {
-            val workspace = appContext.filesDir.toPath().resolve("workspace")
-            Files.createDirectories(workspace)
-            registry.registerBuiltinFileActions(workspace)
+        if (workspaceRoot != null) {
+            Files.createDirectories(workspaceRoot)
+            registry.registerBuiltinFileActions(workspaceRoot)
             registry.registerProviderActions(
                 modelInfo = {
                     when (val active = modelManager?.activeModel()) {
@@ -69,16 +70,20 @@ class AppContainer(context: Context? = null) {
     private val capabilityProvider: CapabilityProvider = object : CapabilityProvider {
         override fun supports(capability: String): Boolean = capability in setOf("filesystem", "runtime", "device", "utility")
     }
-    private val checkpointStore = InMemoryActionCheckpointStore()
-    private val lifecycle = ActionLifecycle(actionRegistry, capabilityProvider, checkpointStore, retryPolicy = DefaultActionRetryPolicy(2))
-    private val verifier = Verifier<Any> { result -> verifyActionResult(result) }
-    private val coordinator = ActionPlanCoordinator(lifecycle, ProtocolActionIntentPlanner())
 
-    private fun verifyActionResult(result: Any): com.woogit.aicore.domain.VerificationResult {
-        val evidence = result.toString()
-        if (evidence.isBlank()) return com.woogit.aicore.domain.VerificationResult(false, "Action returned an empty result")
-        return com.woogit.aicore.domain.VerificationResult(true, evidence)
+    private val checkpointStore = appContext?.let { AndroidActionCheckpointStore(it) } ?: InMemoryActionCheckpointStore()
+    private val verifier = Verifier<Any> { result ->
+        if (result.toString().isBlank()) com.woogit.aicore.domain.VerificationResult(false, "Action returned an empty result")
+        else com.woogit.aicore.domain.VerificationResult(true, result.toString())
     }
+    private val lifecycle = ActionLifecycle(
+        actionRegistry,
+        capabilityProvider,
+        checkpointStore,
+        retryPolicy = DefaultActionRetryPolicy(2),
+        actionResultVerifier = workspaceRoot?.let { BuiltinActionVerifier(it) },
+    )
+    private val coordinator = ActionPlanCoordinator(lifecycle, ProtocolActionIntentPlanner())
 
     private fun executionOutcome(state: ActionExecutionState): ActionExecutionOutcome = when (state) {
         is ActionExecutionState.Completed -> ActionExecutionOutcome(true, state.verification.success, state.verification.evidence ?: "Action completed", state.verification.evidence)
@@ -87,12 +92,12 @@ class AppContainer(context: Context? = null) {
     }
 
     private val actionExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan ->
-        executionOutcome(lifecycle.executeApproved(plan.prepared.executionId, verifier))
+        lifecycle.executeApproved(plan.prepared.executionId, verifier).let(::executionOutcome)
     }
 
     suspend fun approveAndExecute(executionId: String): ActionExecutionOutcome = runCatching {
         val approved = lifecycle.approve(executionId)
-        executionOutcome(lifecycle.executeApproved(approved.executionId, verifier))
+        lifecycle.executeApproved(approved.executionId, verifier).let(::executionOutcome)
     }.getOrElse { ActionExecutionOutcome(false, false, it.message ?: "Approval failed", errorCode = "APPROVAL_FAILED") }
 
     suspend fun reject(executionId: String): Boolean = runCatching {
