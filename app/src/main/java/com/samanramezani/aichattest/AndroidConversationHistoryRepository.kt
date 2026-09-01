@@ -2,11 +2,12 @@ package com.samanramezani.aichattest
 
 import android.content.Context
 import com.woogit.aicore.conversation.ConversationHistoryRepository
+import com.woogit.aicore.conversation.ConversationMessage
 import com.woogit.aicore.conversation.ConversationRecord
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Durable Android implementation for conversation metadata and message snapshots. */
+/** Durable Android implementation for conversation metadata and messages. */
 class AndroidConversationHistoryRepository(context: Context) : ConversationHistoryRepository {
     private val preferences = context.getSharedPreferences("conversation_history", Context.MODE_PRIVATE)
     private val lock = Any()
@@ -24,42 +25,37 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
     }
 
     override suspend fun rename(id: String, title: String, nowEpochMs: Long): Boolean = synchronized(lock) {
-        val current = readAll()
-        val index = current.indexOfFirst { it.id == id }
+        val current = readAll(); val index = current.indexOfFirst { it.id == id }
         if (index < 0) return@synchronized false
-        val old = current[index]
-        writeAll(current.toMutableList().also { it[index] = old.copy(title = title.trim().ifEmpty { old.title }, updatedAtEpochMs = nowEpochMs) })
+        writeAll(current.toMutableList().also { it[index] = current[index].copy(title = title.trim().ifEmpty { current[index].title }, updatedAtEpochMs = nowEpochMs) })
         true
     }
 
     override suspend fun delete(id: String): ConversationRecord? = synchronized(lock) {
-        val current = readAll()
-        val deleted = current.firstOrNull { it.id == id } ?: return@synchronized null
-        writeAll(current.filterNot { it.id == id })
-        preferences.edit().remove(messagesKey(id)).apply()
-        deleted
+        val current = readAll(); val deleted = current.firstOrNull { it.id == id } ?: return@synchronized null
+        writeAll(current.filterNot { it.id == id }); preferences.edit().remove(messagesKey(id)).apply(); deleted
     }
 
     override suspend fun restore(record: ConversationRecord): Boolean = synchronized(lock) {
-        val current = readAll()
-        if (current.any { it.id == record.id }) return@synchronized false
-        writeAll(current + record)
-        true
+        val current = readAll(); if (current.any { it.id == record.id }) return@synchronized false
+        writeAll(current + record); true
     }
 
     override suspend fun touch(id: String, messageCount: Int, nowEpochMs: Long): Boolean = synchronized(lock) {
-        val current = readAll()
-        val index = current.indexOfFirst { it.id == id }
+        val current = readAll(); val index = current.indexOfFirst { it.id == id }
         if (index < 0) return@synchronized false
-        writeAll(current.toMutableList().also { it[index] = current[index].copy(updatedAtEpochMs = nowEpochMs, messageCount = messageCount) })
-        true
+        writeAll(current.toMutableList().also { it[index] = current[index].copy(updatedAtEpochMs = nowEpochMs, messageCount = messageCount) }); true
     }
 
-    fun messages(id: String): List<StoredMessage> = synchronized(lock) { readMessages(id) }
+    override suspend fun messages(id: String): List<ConversationMessage> = synchronized(lock) { readMessages(id) }
 
-    fun replaceMessages(id: String, messages: List<StoredMessage>) = synchronized(lock) {
-        if (readAll().none { it.id == id }) return@synchronized
-        writeMessages(id, messages)
+    override suspend fun append(id: String, message: ConversationMessage, nowEpochMs: Long): Boolean = synchronized(lock) {
+        val current = readAll(); val index = current.indexOfFirst { it.id == id }
+        if (index < 0) return@synchronized false
+        val updatedMessages = readMessages(id).toMutableList().also { it += message }
+        writeMessages(id, updatedMessages)
+        writeAll(current.toMutableList().also { it[index] = current[index].copy(updatedAtEpochMs = nowEpochMs, messageCount = updatedMessages.size) })
+        true
     }
 
     private fun readAll(): List<ConversationRecord> {
@@ -67,8 +63,8 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
         return runCatching {
             val array = JSONArray(raw)
             buildList(array.length()) {
-                for (index in 0 until array.length()) {
-                    val item = array.getJSONObject(index)
+                for (i in 0 until array.length()) {
+                    val item = array.getJSONObject(i)
                     add(ConversationRecord(item.getString("id"), item.getString("title"), item.getLong("updatedAtEpochMs"), item.getInt("messageCount")))
                 }
             }
@@ -77,38 +73,31 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
 
     private fun writeAll(records: List<ConversationRecord>) {
         val array = JSONArray()
-        records.forEach { record -> array.put(JSONObject().put("id", record.id).put("title", record.title).put("updatedAtEpochMs", record.updatedAtEpochMs).put("messageCount", record.messageCount)) }
+        records.forEach { r -> array.put(JSONObject().put("id", r.id).put("title", r.title).put("updatedAtEpochMs", r.updatedAtEpochMs).put("messageCount", r.messageCount)) }
         preferences.edit().putString(KEY_RECORDS, array.toString()).apply()
     }
 
     private fun messagesKey(id: String) = "messages_$id"
 
-    private fun readMessages(id: String): List<StoredMessage> {
+    private fun readMessages(id: String): List<ConversationMessage> {
         val raw = preferences.getString(messagesKey(id), null) ?: return emptyList()
         return runCatching {
             val array = JSONArray(raw)
             buildList(array.length()) {
-                for (index in 0 until array.length()) {
-                    val item = array.getJSONObject(index)
-                    val role = runCatching { StoredMessage.Role.valueOf(item.getString("role")) }.getOrNull() ?: continue
-                    add(StoredMessage(item.getString("id"), role, item.getString("content"), item.getLong("timestampEpochMs")))
+                for (i in 0 until array.length()) {
+                    val item = array.getJSONObject(i)
+                    val role = runCatching { ConversationMessage.Role.valueOf(item.getString("role")) }.getOrNull() ?: continue
+                    add(ConversationMessage(item.getString("id"), role, item.getString("content"), item.getLong("timestampEpochMs")))
                 }
             }
         }.getOrDefault(emptyList())
     }
 
-    private fun writeMessages(id: String, messages: List<StoredMessage>) {
+    private fun writeMessages(id: String, messages: List<ConversationMessage>) {
         val array = JSONArray()
-        messages.forEach { message -> array.put(JSONObject().put("id", message.id).put("role", message.role.name).put("content", message.content).put("timestampEpochMs", message.timestampEpochMs)) }
+        messages.forEach { m -> array.put(JSONObject().put("id", m.id).put("role", m.role.name).put("content", m.content).put("timestampEpochMs", m.timestampEpochMs)) }
         preferences.edit().putString(messagesKey(id), array.toString()).apply()
     }
 
     private companion object { const val KEY_RECORDS = "records" }
 }
-
-data class StoredMessage(
-    val id: String,
-    val role: Role,
-    val content: String,
-    val timestampEpochMs: Long,
-) { enum class Role { SYSTEM, USER, ASSISTANT, TOOL } }
