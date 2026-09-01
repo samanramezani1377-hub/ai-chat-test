@@ -33,8 +33,7 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
 
     override suspend fun delete(id: String): ConversationRecord? = synchronized(lock) {
         val current = readAll(); val deleted = current.firstOrNull { it.id == id } ?: return@synchronized null
-        val messages = readMessages(id)
-        writeDeletedMessages(id, messages)
+        writeDeletedMessages(id, readMessages(id))
         writeAll(current.filterNot { it.id == id })
         preferences.edit().remove(messagesKey(id)).apply()
         deleted
@@ -46,6 +45,12 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
         writeMessages(record.id, readDeletedMessages(record.id))
         removeDeletedMessages(record.id)
         true
+    }
+
+    override suspend fun purge(id: String): Boolean = synchronized(lock) {
+        val existed = preferences.contains(deletedMessagesKey(id))
+        removeDeletedMessages(id)
+        existed
     }
 
     override suspend fun touch(id: String, messageCount: Int, nowEpochMs: Long): Boolean = synchronized(lock) {
@@ -64,9 +69,6 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
         writeAll(current.toMutableList().also { it[index] = current[index].copy(updatedAtEpochMs = nowEpochMs, messageCount = updatedMessages.size) })
         true
     }
-
-    /** Permanently removes the message snapshot after the undo window expires. */
-    fun purgeDeleted(id: String) = synchronized(lock) { removeDeletedMessages(id) }
 
     private fun readAll(): List<ConversationRecord> {
         val raw = preferences.getString(KEY_RECORDS, null) ?: return emptyList()
@@ -89,7 +91,6 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
 
     private fun messagesKey(id: String) = "messages_$id"
     private fun deletedMessagesKey(id: String) = "deleted_messages_$id"
-
     private fun readMessages(id: String): List<ConversationMessage> = readMessageArray(messagesKey(id))
     private fun readDeletedMessages(id: String): List<ConversationMessage> = readMessageArray(deletedMessagesKey(id))
 
