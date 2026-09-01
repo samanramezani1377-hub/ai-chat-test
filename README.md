@@ -93,7 +93,7 @@ System Context
 
 ## Action و تأیید
 
-Actionها در Registry مرکزی دسته‌بندی می‌شوند و هر Category قابلیت اضافه‌کردن Executor/Adapterهای بیشتر را دارد. Capability Check پیش از Execution مشخص می‌کند محیط فعلی قابلیت لازم را دارد.
+Actionها در Registry مرکزی دسته‌بندی می‌شوند و هر Category قابلیت اضافه‌کردن Executor/Adapterهای بیشتر دارد. Capability Check پیش از Execution مشخص می‌کند محیط فعلی قابلیت لازم را دارد.
 
 مسیر مرجع:
 
@@ -161,6 +161,6 @@ CI پایه از ابتدا فعال است: Build، Unit Test، Integration Tes
 
 ## Baseline
 
-Baseline فعلی Prototype می‌تواند Qwen3-1.7B در GGUF/Q4_K_M با llama.cpp باشد؛ این انتخاب نهایی محصول نیست و Runtime/Model باید قابل تعویض بماند.
+Baseline فعلی Prototype، **Qwen3-1.7B در GGUF/Q6_K با llama.cpp** است. این انتخاب برای Prototype فعلی مبناست و Runtime/Model همچنان باید قابل تعویض بماند.
 
 **مرجع اصلی تصمیم‌های فنی:** [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md)
