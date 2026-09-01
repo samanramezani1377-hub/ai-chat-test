@@ -32,4 +32,5 @@ dependencies {
     implementation(project(":core:settings"))
     implementation(project(":core:runtime"))
     implementation(project(":core:runtime-android"))
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 }
