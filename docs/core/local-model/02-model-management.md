@@ -45,8 +45,17 @@ Model Management
     └── Failed
 ```
 
-نام فایل نباید مبنای تشخیص مدل یا Quantization باشد؛ metadata واقعی فایل مرجع است.
+نام فایل به‌تنهایی مبنای تشخیص مدل یا Quantization نیست؛ metadata واقعی فایل مرجع است.
 
 مدل هدف اولیه: **Qwen3-1.7B · GGUF · Q6_K**.
 
-ارجاع: [Domain](03-model-domain.md)، [Storage](06-storage.md)، [UI Integration](15-ui-integration.md)
+## ارجاعات
+
+- [Architecture](01-architecture.md)
+- [Model Domain](03-model-domain.md)
+- [Storage](06-storage.md)
+- [Operations](07-operations.md)
+- [Concurrency & Cancellation](08-concurrency.md)
+- [Capabilities](11-capabilities.md)
+- [Testing](14-testing.md)
+- [UI Integration](15-ui-integration.md)
