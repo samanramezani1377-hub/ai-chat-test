@@ -2,6 +2,7 @@ package com.samanramezani.aichattest
 
 import android.app.Activity
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
@@ -18,6 +19,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.LayoutDirection
@@ -123,6 +128,10 @@ private fun AppRoot(container: AppContainer) {
         val records = history.recent(recentLimit)
         val record = records.firstOrNull() ?: history.create("گفت‌وگوی جدید")
         loadConversation(record)
+    }
+
+    BackHandler(enabled = sidebarOpen || quickMenuOpen) {
+        if (sidebarOpen) sidebarOpen = false else quickMenuOpen = false
     }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -524,7 +533,16 @@ private fun RuntimeDetailsDialog(status: String, model: ModelDescriptor?, runtim
         }
         Surface(Modifier.fillMaxWidth().padding(bottom = 12.dp), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), tonalElevation = 2.dp) {
             Row(Modifier.padding(8.dp), verticalAlignment = Alignment.Bottom) {
-                TextField(composer, onComposer, Modifier.weight(1f), placeholder = { Text("پیام خود را بنویسید…") }, maxLines = 6)
+                TextField(
+                    value = composer,
+                    onValueChange = onComposer,
+                    modifier = Modifier.weight(1f).onPreviewKeyEvent { event ->
+                        event.type == KeyEventType.KeyDown && event.key == Key.Enter && event.isShiftPressed
+                            .also { if (it) onSend() }
+                    },
+                    placeholder = { Text("پیام خود را بنویسید…") },
+                    maxLines = 6,
+                )
                 Spacer(Modifier.width(8.dp))
                 FilledIconButton(onClick = if (generating) onStop else onSend, enabled = generating || composer.isNotBlank(), modifier = Modifier.size(48.dp).semantics { contentDescription = if (generating) "توقف تولید" else "ارسال پیام" }) { Icon(if (generating) Icons.Default.Stop else Icons.Default.Send, if (generating) "توقف تولید" else "ارسال پیام") }
             }
