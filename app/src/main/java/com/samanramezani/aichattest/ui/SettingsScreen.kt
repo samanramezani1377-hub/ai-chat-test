@@ -17,7 +17,7 @@ private val appSections = listOf("فضای کار", "لاگ و عیب‌یابی
 @Composable
 fun SettingsScreen(
     models: List<ModelDescriptor>, active: ModelDescriptor?, error: String?, onImport: () -> Unit,
-    onRefresh: () -> Unit, onActivate: (String) -> Unit, onDelete: (String) -> Unit,
+    onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: () -> Unit, onDelete: (String) -> Unit,
 ) {
     var section by remember { mutableStateOf("مدل") }
     LazyColumn(
@@ -35,7 +35,7 @@ fun SettingsScreen(
         item { HorizontalDivider() }
         item {
             when (section) {
-                "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDelete)
+                "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
                 "استنتاج" -> UnavailableSection("استنتاج", "پارامترهای دما، حداکثر توکن، Top-K، Top-P، Min-P، جریمه تکرار، Seed و دنباله‌های توقف تا اتصال کنترل واقعی به Runtime قابل ویرایش نیستند.")
                 "زمینه" -> UnavailableSection("زمینه", "مدیریت System Context، Summary، پیام‌های اخیر و Workspace Context هنوز کنترل تغییرپذیر متصل به Core ندارد.")
                 "عامل" -> UnavailableSection("عامل", "کنترل آماده‌سازی، تأیید، اجرا، شکست و Recovery فقط با Action API واقعی ارائه می‌شود.")
@@ -56,9 +56,7 @@ private fun SettingsGroup(title: String, sections: List<String>, selected: Strin
             sections.forEach { name ->
                 TextButton(
                     onClick = { onSelect(name) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget).semantics {
-                        contentDescription = if (selected == name) "$name، انتخاب شده" else name
-                    },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget).semantics { contentDescription = if (selected == name) "$name، انتخاب شده" else name },
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 ) { Text(if (selected == name) "● $name" else name, Modifier.fillMaxWidth()) }
             }
@@ -69,7 +67,7 @@ private fun SettingsGroup(title: String, sections: List<String>, selected: Strin
 @Composable
 private fun ModelManagement(
     active: ModelDescriptor?, models: List<ModelDescriptor>, error: String?, onImport: () -> Unit,
-    onRefresh: () -> Unit, onActivate: (String) -> Unit, onDelete: (String) -> Unit,
+    onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: () -> Unit, onDelete: (String) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("مدل", style = MaterialTheme.typography.titleLarge)
@@ -78,6 +76,7 @@ private fun ModelManagement(
                 Text("مدل فعلی", style = MaterialTheme.typography.labelLarge)
                 Text(active?.displayName ?: "مدلی فعال نیست", style = MaterialTheme.typography.titleMedium)
                 Text(if (active != null) "آماده استفاده در گفت‌وگو" else "برای شروع، یک مدل محلی وارد و فعال کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (active != null) OutlinedButton(onClick = onDeactivate, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("خارج‌کردن مدل از حافظه") }
             }
         }
         Button(onClick = onImport, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("انتخاب فایل مدل از گوشی") }
@@ -85,8 +84,7 @@ private fun ModelManagement(
             Text("مدیریت مدل‌ها", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             TextButton(onClick = onRefresh, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text("به‌روزرسانی") }
         }
-        if (models.isEmpty()) EmptyState()
-        else models.forEach { model -> ModelCard(model, model.id == active?.id, onActivate, onDelete) }
+        if (models.isEmpty()) EmptyState() else models.forEach { model -> ModelCard(model, model.id == active?.id, onActivate, onDelete) }
         if (error != null) {
             Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
                 Text(error, Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onErrorContainer)
@@ -95,8 +93,7 @@ private fun ModelManagement(
     }
 }
 
-@Composable
-private fun EmptyState() {
+@Composable private fun EmptyState() {
     UiSurface {
         Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("مدل محلی واردشده‌ای وجود ندارد.", style = MaterialTheme.typography.titleMedium)
@@ -105,8 +102,7 @@ private fun EmptyState() {
     }
 }
 
-@Composable
-private fun ModelCard(model: ModelDescriptor, active: Boolean, onActivate: (String) -> Unit, onDelete: (String) -> Unit) {
+@Composable private fun ModelCard(model: ModelDescriptor, active: Boolean, onActivate: (String) -> Unit, onDelete: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     UiSurface {
         Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -132,8 +128,7 @@ private fun ModelCard(model: ModelDescriptor, active: Boolean, onActivate: (Stri
     }
 }
 
-@Composable
-private fun UnavailableSection(title: String, message: String) {
+@Composable private fun UnavailableSection(title: String, message: String) {
     UiSurface {
         Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text(title, style = MaterialTheme.typography.titleLarge)
