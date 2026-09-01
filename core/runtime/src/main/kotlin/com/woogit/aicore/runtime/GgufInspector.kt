@@ -83,18 +83,14 @@ class GgufInspector : ModelInspector {
         1 -> Quantization.F16
         2 -> Quantization.Q4_0
         3 -> Quantization.Q4_1
-        6 -> Quantization.Q5_0
-        7 -> Quantization.Q5_1
-        8 -> Quantization.Q8_0
+        7 -> Quantization.Q8_0
+        8 -> Quantization.Q5_0
+        9 -> Quantization.Q5_1
         10 -> Quantization.Q2_K
         11 -> Quantization.Q3_K_S
-        12 -> Quantization.Q3_K_M
-        13 -> Quantization.Q3_K_L
-        14 -> Quantization.Q4_K_S
-        15 -> Quantization.Q4_K_M
-        16 -> Quantization.Q5_K_S
-        17 -> Quantization.Q5_K_M
-        18 -> Quantization.Q6_K
+        12 -> Quantization.Q4_K_S
+        13 -> Quantization.Q5_K_S
+        14 -> Quantization.Q6_K
         else -> Quantization.UNKNOWN
     }
 
@@ -136,14 +132,14 @@ class GgufInspector : ModelInspector {
     }
 
     private fun BufferedInputStream.readValue(type: Int): Any? = when (type) {
-        0 -> readLeByte() != 0
-        1 -> readLeByte()
-        2 -> readLeByte().toByte().toInt()
-        3 -> readLeShort()
-        4 -> readLeShort().toShort().toInt()
-        5 -> readLeInt().toLong() and 0xffff_ffffL
-        6 -> readLeInt()
-        7 -> Float.fromBits(readLeInt())
+        0 -> readLeByte()
+        1 -> readLeByte().toByte().toInt()
+        2 -> readLeShort()
+        3 -> readLeShort().toShort().toInt()
+        4 -> readLeInt().toLong() and 0xffff_ffffL
+        5 -> readLeInt()
+        6 -> Float.fromBits(readLeInt())
+        7 -> readLeByte() != 0
         8 -> readString()
         9 -> {
             val elementType = readLeInt()
@@ -151,11 +147,17 @@ class GgufInspector : ModelInspector {
             require(count in 0..100_000) { "Invalid GGUF array length" }
             List(count.toInt()) { readValue(elementType) }
         }
-        10 -> readLeLong().toULong()
+        10 -> readLeLong()
         11 -> readLeLong()
         12 -> Double.fromBits(readLeLong())
         else -> error("Unsupported GGUF metadata type: $type")
     }
 
-    private fun Any?.asLongOrNull(): Long? = (this as? Number)?.toLong()
+    private fun Any?.asLongOrNull(): Long? = when (this) {
+        is Byte -> toLong()
+        is Short -> toLong()
+        is Int -> toLong()
+        is Long -> this
+        else -> null
+    }
 }
