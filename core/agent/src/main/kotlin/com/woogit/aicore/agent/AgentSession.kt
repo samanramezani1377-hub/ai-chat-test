@@ -33,67 +33,54 @@ class AgentSession(
 ) {
     init { require(maxActionSteps >= 0) { "maxActionSteps must be non-negative" } }
 
-    suspend fun send(
-        content: String,
-        settings: InferenceSettings,
-        requestedRecentMessages: Int = 10
-    ): AgentSessionResult.Reply {
+    suspend fun send(content: String, settings: InferenceSettings, requestedRecentMessages: Int = 10): AgentSessionResult.Reply {
         require(content.isNotBlank()) { "content must not be blank" }
-        conversationStore.append(
-            ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.USER, content, System.currentTimeMillis())
-        )
+        conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.USER, content, System.currentTimeMillis()))
         eventSink(AgentEvent.Started)
-
         return try {
-            var result = orchestrator.generate(settings, requestedRecentMessages) { token ->
-                eventSink(AgentEvent.Token(token))
-            }
+            var result = orchestrator.generate(settings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
             var plan: ActionPlan? = null
             var actionResult: String? = null
             var steps = 0
             var resultPersisted = false
-
             while (actionPlanCoordinator != null && steps < maxActionSteps) {
-                conversationStore.append(
-                    ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis())
-                )
+                conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
                 resultPersisted = true
-
                 plan = actionPlanCoordinator.prepare(contextProvider.build(requestedRecentMessages)) ?: break
                 eventSink(AgentEvent.ActionPrepared(plan.prepared.executionId, plan.prepared.actionId))
-
                 if (plan.prepared.risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE) {
                     eventSink(AgentEvent.ApprovalRequired(plan.prepared.executionId))
                     break
                 }
-
                 val executor = actionExecutor ?: break
                 val outcome = executor(plan)
                 actionResult = outcome.message
-                conversationStore.append(
-                    ConversationMessage(
-                        UUID.randomUUID().toString(),
-                        ConversationMessage.Role.TOOL,
-                        outcome.toProtocolResult(plan),
-                        System.currentTimeMillis()
-                    )
-                )
+                eventSink(AgentEvent.ActionExecuted(plan.prepared.executionId))
+                conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(plan), System.currentTimeMillis()))
                 steps++
                 if (!outcome.success) break
-
-                result = orchestrator.generate(settings, requestedRecentMessages) { token ->
-                    eventSink(AgentEvent.Token(token))
-                }
+                result = orchestrator.generate(settings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
                 resultPersisted = false
             }
-
-            if (!resultPersisted) {
-                conversationStore.append(
-                    ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis())
-                )
-            }
+            if (!resultPersisted) conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
             eventSink(AgentEvent.Completed)
             AgentSessionResult.Reply(result, plan, actionResult)
+        } catch (t: Throwable) {
+            eventSink(AgentEvent.Failed(t.message ?: t::class.simpleName.orEmpty()))
+            throw t
+        }
+    }
+
+    /** Continues an existing conversation after a sensitive action was approved and executed externally. */
+    suspend fun resumeApproved(executionId: String, outcome: ActionExecutionOutcome, settings: InferenceSettings, requestedRecentMessages: Int = 24): AgentSessionResult.Reply {
+        require(executionId.isNotBlank()) { "executionId must not be blank" }
+        eventSink(AgentEvent.Started)
+        conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(executionId), System.currentTimeMillis()))
+        return try {
+            val result = orchestrator.generate(settings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+            conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
+            eventSink(AgentEvent.Completed)
+            AgentSessionResult.Reply(result, null, outcome.message)
         } catch (t: Throwable) {
             eventSink(AgentEvent.Failed(t.message ?: t::class.simpleName.orEmpty()))
             throw t
@@ -108,9 +95,11 @@ data class ActionExecutionOutcome(
     val data: String? = null,
     val errorCode: String? = null,
 ) {
-    fun toProtocolResult(plan: ActionPlan): String = buildString {
+    fun toProtocolResult(plan: ActionPlan): String = toProtocolResult(plan.intent.requestId)
+
+    fun toProtocolResult(requestId: String): String = buildString {
         append("{\"version\":1,\"actionId\":\"")
-        append(plan.intent.requestId.replace("\\", "\\\\").replace("\"", "\\\""))
+        append(requestId.replace("\\", "\\\\").replace("\"", "\\\""))
         append("\",\"success\":").append(success)
         append(",\"verified\":").append(verified)
         append(",\"data\":")
