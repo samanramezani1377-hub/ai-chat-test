@@ -10,7 +10,9 @@ data class ActionIntent(
     val actionId: String,
     val input: Any,
     val requestedCapability: String? = null,
-    val explanation: String? = null
+    val explanation: String? = null,
+    /** Protocol-level request identifier, separate from the registered action name. */
+    val requestId: String = actionId,
 )
 
 data class ActionPlan(
