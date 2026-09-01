@@ -67,6 +67,29 @@ class ActionLifecycleTest {
         assertEquals(1, action.calls)
     }
 
+    @Test
+    fun retryIsBoundedByPolicy() = kotlinx.coroutines.test.runTest {
+        val checkpoint = InMemoryActionCheckpointStore()
+        val action = TestAction("unstable", RiskLevel.SAFE)
+        val lifecycle = ActionLifecycle(
+            TestRegistry(action),
+            TestCapabilities,
+            checkpoint,
+            retryPolicy = DefaultActionRetryPolicy(defaultMaxRetries = 2)
+        )
+        val prepared = lifecycle.prepare("unstable", "payload")
+        val approved = lifecycle.validate(prepared, null)
+
+        assertIs<ActionExecutionState.Failed>(lifecycle.executeApproved(approved.executionId, FailingVerifier))
+        assertIs<ActionExecutionState.Failed>(lifecycle.retryFailed(approved.executionId, FailingVerifier))
+        assertIs<ActionExecutionState.Failed>(lifecycle.retryFailed(approved.executionId, FailingVerifier))
+        val exhausted = lifecycle.retryFailed(approved.executionId, FailingVerifier)
+
+        assertIs<ActionExecutionState.Failed>(exhausted)
+        assertTrue((exhausted as ActionExecutionState.Failed).message.contains("Retry limit reached"))
+        assertEquals(2, action.calls)
+    }
+
     private class TestAction(
         override val id: String,
         override val risk: RiskLevel
@@ -92,5 +115,9 @@ class ActionLifecycleTest {
 
     private object TestVerifier : Verifier<Any> {
         override suspend fun verify(result: Any): VerificationResult = VerificationResult(true, "verified")
+    }
+
+    private object FailingVerifier : Verifier<Any> {
+        override suspend fun verify(result: Any): VerificationResult = VerificationResult(false, "forced verification failure")
     }
 }
