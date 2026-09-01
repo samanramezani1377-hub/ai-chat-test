@@ -1,11 +1,20 @@
-# UI Documentation
+# مستندات رابط کاربری
 
-This directory is the structured source of truth for the AI Chat Test UI.
+**وضعیت:** در حال تصمیم‌گیری و مستندسازی  
+**نسخه هدف:** UI v1.0.0
 
-## Documentation tree
+## 🔴 قانون اجباری زبان و جهت
+
+> **کل رابط کاربری برنامه باید فارسی و راست‌چین (RTL) باشد.**
+
+این قانون برای **تمام UI بدون استثنا** اعمال می‌شود؛ شامل Header، Navigation، Chat، Workspace، Errors، Settings، Dialogها، Menuها، Buttonها، پیام‌های وضعیت، خطاها، Empty Stateها و تمام متن‌های قابل مشاهده برای کاربر.
+
+استفاده از متن انگلیسی در UI فقط برای داده‌هایی مجاز است که ماهیت فنی و غیرقابل‌ترجمه دارند؛ مانند نام مدل، کد، URL، شناسه فنی یا خروجی خام فنی. حتی در این موارد، ساختار کلی صفحه و متن توضیحی باید فارسی و راست‌چین باقی بماند.
+
+## ساختار مستندات
 
 ```text
-ui/
+docs/ui/
 ├── README.md
 ├── DESIGN_SYSTEM.md
 ├── NAVIGATION.md
@@ -15,27 +24,59 @@ ui/
     ├── README.md
     ├── Q01.md
     ├── Q02.md
-    ├── ...
-    └── Q20.md
+    └── ...
 ```
 
-## Workflow
+## ترتیب تصمیم‌گیری
 
 ```text
-Question → User decision → Documentation update → Commit → Next question
+سؤال
+  ↓
+پاسخ مالک پروژه
+  ↓
+ثبت تصمیم در مستندات
+  ↓
+Commit
+  ↓
+سؤال بعدی
+  ↓
+Q20
+  ↓
+بازبینی نهایی
+  ↓
+قفل UI
+  ↓
+پیاده‌سازی
 ```
 
-No UI implementation is permitted while this decision phase is active.
+## قوانین فاز فعلی
 
-## Source documents
+- هیچ کد UI در این فاز اضافه نمی‌شود.
+- هر تصمیم UI ابتدا مستند می‌شود.
+- تصمیم پذیرفته‌شده قبل از رفتن به سؤال بعدی Commit می‌شود.
+- تصمیم‌های قبلی بدون بازبینی و تغییر نسخه قابل نقض نیستند.
+- CI مرجع طراحی UI نیست.
+- اگر محدودیت فنی با طراحی تضاد داشت، ابتدا مرز Core و API بررسی می‌شود.
+- هیچ Placeholder یا Mock جایگزین UI واقعی در زمان پیاده‌سازی نخواهد شد.
+- UI نهایی باید با مستندات مصوب مطابقت داشته باشد.
 
-- [Design System](DESIGN_SYSTEM.md)
-- [Navigation](NAVIGATION.md)
-- [States](STATES.md)
-- [Screens](SCREENS.md)
-- [UI Decision Questions](questions/README.md)
-- [UI Specification overview](../UI_SPECIFICATION.md)
+## استاندارد زبان
 
-## Lock policy
+- **زبان اصلی UI:** فارسی
+- **جهت اصلی UI:** راست‌چین (RTL)
+- **تمام متن‌های قابل مشاهده:** فارسی، مگر داده فنی غیرقابل‌ترجمه
+- **متن ترکیبی:** باید در RTL/LTR به‌درستی نمایش داده شود.
+- **کد، URL و شناسه فنی:** باید بدون خراب‌شدن ترتیب کاراکترها نمایش داده شوند.
 
-The UI is not considered implementation-ready until all 20 decisions are answered, documented, reviewed, and explicitly approved. The resulting specification becomes the implementation contract.
+## اسناد
+
+- [سیستم طراحی](DESIGN_SYSTEM.md)
+- [ناوبری](NAVIGATION.md)
+- [قرارداد وضعیت‌ها](STATES.md)
+- [صفحه‌ها](SCREENS.md)
+- [سؤالات تصمیم‌گیری UI](questions/README.md)
+- [نمای کلی مشخصات UI](../UI_SPECIFICATION.md)
+
+## وضعیت قفل
+
+UI تا زمانی که هر ۲۰ تصمیم پاسخ داده، مستند، بازبینی و صریحاً تأیید نشده‌اند، آماده پیاده‌سازی محسوب نمی‌شود.
