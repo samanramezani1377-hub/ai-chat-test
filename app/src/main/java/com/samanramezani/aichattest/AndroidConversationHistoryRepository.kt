@@ -6,7 +6,7 @@ import com.woogit.aicore.conversation.ConversationRecord
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Durable Android implementation for conversation metadata. Messages remain owned by Core stores. */
+/** Durable Android implementation for conversation metadata and message snapshots. */
 class AndroidConversationHistoryRepository(context: Context) : ConversationHistoryRepository {
     private val preferences = context.getSharedPreferences("conversation_history", Context.MODE_PRIVATE)
     private val lock = Any()
@@ -17,13 +17,9 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
     }
 
     override suspend fun create(title: String, nowEpochMs: Long): ConversationRecord = synchronized(lock) {
-        val record = ConversationRecord(
-            id = java.util.UUID.randomUUID().toString(),
-            title = title.trim().ifEmpty { "گفت‌وگوی جدید" },
-            updatedAtEpochMs = nowEpochMs,
-            messageCount = 0,
-        )
+        val record = ConversationRecord(java.util.UUID.randomUUID().toString(), title.trim().ifEmpty { "گفت‌وگوی جدید" }, nowEpochMs, 0)
         writeAll(readAll() + record)
+        writeMessages(record.id, emptyList())
         record
     }
 
@@ -32,11 +28,7 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
         val index = current.indexOfFirst { it.id == id }
         if (index < 0) return@synchronized false
         val old = current[index]
-        val updated = old.copy(
-            title = title.trim().ifEmpty { old.title },
-            updatedAtEpochMs = nowEpochMs,
-        )
-        writeAll(current.toMutableList().also { it[index] = updated })
+        writeAll(current.toMutableList().also { it[index] = old.copy(title = title.trim().ifEmpty { old.title }, updatedAtEpochMs = nowEpochMs) })
         true
     }
 
@@ -44,6 +36,7 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
         val current = readAll()
         val deleted = current.firstOrNull { it.id == id } ?: return@synchronized null
         writeAll(current.filterNot { it.id == id })
+        preferences.edit().remove(messagesKey(id)).apply()
         deleted
     }
 
@@ -58,9 +51,15 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
         val current = readAll()
         val index = current.indexOfFirst { it.id == id }
         if (index < 0) return@synchronized false
-        val updated = current[index].copy(updatedAtEpochMs = nowEpochMs, messageCount = messageCount)
-        writeAll(current.toMutableList().also { it[index] = updated })
+        writeAll(current.toMutableList().also { it[index] = current[index].copy(updatedAtEpochMs = nowEpochMs, messageCount = messageCount) })
         true
+    }
+
+    fun messages(id: String): List<StoredMessage> = synchronized(lock) { readMessages(id) }
+
+    fun replaceMessages(id: String, messages: List<StoredMessage>) = synchronized(lock) {
+        if (readAll().none { it.id == id }) return@synchronized
+        writeMessages(id, messages)
     }
 
     private fun readAll(): List<ConversationRecord> {
@@ -70,14 +69,7 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
             buildList(array.length()) {
                 for (index in 0 until array.length()) {
                     val item = array.getJSONObject(index)
-                    add(
-                        ConversationRecord(
-                            id = item.getString("id"),
-                            title = item.getString("title"),
-                            updatedAtEpochMs = item.getLong("updatedAtEpochMs"),
-                            messageCount = item.getInt("messageCount"),
-                        )
-                    )
+                    add(ConversationRecord(item.getString("id"), item.getString("title"), item.getLong("updatedAtEpochMs"), item.getInt("messageCount")))
                 }
             }
         }.getOrDefault(emptyList())
@@ -85,19 +77,38 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
 
     private fun writeAll(records: List<ConversationRecord>) {
         val array = JSONArray()
-        records.forEach { record ->
-            array.put(
-                JSONObject()
-                    .put("id", record.id)
-                    .put("title", record.title)
-                    .put("updatedAtEpochMs", record.updatedAtEpochMs)
-                    .put("messageCount", record.messageCount)
-            )
-        }
+        records.forEach { record -> array.put(JSONObject().put("id", record.id).put("title", record.title).put("updatedAtEpochMs", record.updatedAtEpochMs).put("messageCount", record.messageCount)) }
         preferences.edit().putString(KEY_RECORDS, array.toString()).apply()
     }
 
-    private companion object {
-        const val KEY_RECORDS = "records"
+    private fun messagesKey(id: String) = "messages_$id"
+
+    private fun readMessages(id: String): List<StoredMessage> {
+        val raw = preferences.getString(messagesKey(id), null) ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            buildList(array.length()) {
+                for (index in 0 until array.length()) {
+                    val item = array.getJSONObject(index)
+                    val role = runCatching { StoredMessage.Role.valueOf(item.getString("role")) }.getOrNull() ?: continue
+                    add(StoredMessage(item.getString("id"), role, item.getString("content"), item.getLong("timestampEpochMs")))
+                }
+            }
+        }.getOrDefault(emptyList())
     }
+
+    private fun writeMessages(id: String, messages: List<StoredMessage>) {
+        val array = JSONArray()
+        messages.forEach { message -> array.put(JSONObject().put("id", message.id).put("role", message.role.name).put("content", message.content).put("timestampEpochMs", message.timestampEpochMs)) }
+        preferences.edit().putString(messagesKey(id), array.toString()).apply()
+    }
+
+    private companion object { const val KEY_RECORDS = "records" }
 }
+
+data class StoredMessage(
+    val id: String,
+    val role: Role,
+    val content: String,
+    val timestampEpochMs: Long,
+) { enum class Role { SYSTEM, USER, ASSISTANT, TOOL } }
