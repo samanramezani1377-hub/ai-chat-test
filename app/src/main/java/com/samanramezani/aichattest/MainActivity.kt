@@ -19,15 +19,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isShiftPressed
-import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.graphics.Color
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.domain.ChatMessage
 import com.woogit.aicore.domain.InferenceSettings
@@ -77,6 +73,7 @@ private fun MainScreen(container: AppContainer) {
     var messages by remember { mutableStateOf(emptyList<UiMessage>()) }
     var composer by remember { mutableStateOf("") }
     var generating by remember { mutableStateOf(false) }
+    var approvalBusy by remember { mutableStateOf(false) }
     var runtimeStatus by remember { mutableStateOf("خارج از دسترس") }
     var diagnostic by remember { mutableStateOf<String?>(null) }
     var activeModel by remember { mutableStateOf<ModelDescriptor?>(null) }
@@ -101,7 +98,7 @@ private fun MainScreen(container: AppContainer) {
             withContext(Dispatchers.Main) {
                 models = (listed as? ModelResult.Success)?.value ?: emptyList()
                 activeModel = (active as? ModelResult.Success)?.value
-                if (!generating) runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"
+                if (!generating && !approvalBusy) runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"
             }
         }
     }
@@ -145,7 +142,7 @@ private fun MainScreen(container: AppContainer) {
 
     fun send() {
         val record = current ?: return
-        if (manager == null || generating) return
+        if (manager == null || generating || approvalBusy) return
         val text = composer.trim()
         if (text.isEmpty()) return
         composer = ""
@@ -207,8 +204,85 @@ private fun MainScreen(container: AppContainer) {
         }
     }
 
+    fun approveExecution() {
+        val record = current ?: return
+        val pending = execution ?: return
+        if (!pending.approvalRequired || approvalBusy) return
+        approvalBusy = true
+        generating = true
+        runtimeStatus = "در حال تأیید عملیات"
+        diagnostic = null
+        execution = pending.copy(status = "در حال تأیید")
+        scope.launch(Dispatchers.Default) {
+            try {
+                val outcome = container.approveAndExecute(pending.id)
+                if (!outcome.success) {
+                    withContext(Dispatchers.Main) {
+                        approvalBusy = false
+                        generating = false
+                        runtimeStatus = "خطا"
+                        diagnostic = outcome.message
+                        execution = pending.copy(status = "ناموفق", error = outcome.message, finishedAt = System.currentTimeMillis())
+                    }
+                    return@launch
+                }
+                val session = container.createAgentSession(record.id) { event ->
+                    scope.launch(Dispatchers.Main) {
+                        when (event) {
+                            AgentEvent.Started -> runtimeStatus = "در حال دریافت پاسخ نهایی"
+                            is AgentEvent.Token -> Unit
+                            is AgentEvent.Failed -> diagnostic = event.message
+                            else -> Unit
+                        }
+                    }
+                } ?: error("Agent Session در دسترس نیست.")
+                val result = session.resumeApproved(pending.id, outcome, InferenceSettings(maxNewTokens = 512), requestedRecentMessages = 24)
+                withContext(Dispatchers.Main) {
+                    messages = messages + UiMessage(ChatMessage.Role.ASSISTANT, result.generation.text, UUID.randomUUID().toString())
+                    approvalBusy = false
+                    generating = false
+                    runtimeStatus = "آماده"
+                    execution = pending.copy(status = "عملیات تأیید و تکمیل شد", finishedAt = System.currentTimeMillis(), resultPreview = result.generation.text.take(240), approvalRequired = false)
+                    conversations = history.recent(recentLimit)
+                    history.recent(recentLimit).firstOrNull { it.id == record.id }?.let { current = it }
+                }
+            } catch (t: Throwable) {
+                withContext(Dispatchers.Main) {
+                    approvalBusy = false
+                    generating = false
+                    runtimeStatus = "خطا"
+                    diagnostic = t.message ?: "Approval continuation failed"
+                    execution = pending.copy(status = "ناموفق", error = diagnostic, finishedAt = System.currentTimeMillis())
+                }
+            }
+        }
+    }
+
+    fun rejectExecution() {
+        val pending = execution ?: return
+        if (!pending.approvalRequired || approvalBusy) return
+        approvalBusy = true
+        runtimeStatus = "در حال رد عملیات"
+        execution = pending.copy(status = "در حال رد")
+        scope.launch(Dispatchers.Default) {
+            val rejected = container.reject(pending.id)
+            withContext(Dispatchers.Main) {
+                approvalBusy = false
+                generating = false
+                if (rejected) {
+                    runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"
+                    execution = pending.copy(status = "رد شد", approvalRequired = false, finishedAt = System.currentTimeMillis())
+                } else {
+                    runtimeStatus = "خطا"
+                    diagnostic = "رد عملیات انجام نشد. وضعیت Execution را بررسی کنید."
+                    execution = pending.copy(status = "ناموفق", error = diagnostic, finishedAt = System.currentTimeMillis())
+                }
+            }
+        }
+    }
+
     fun stop() {
-        if (!generating) return
+        if (!generating || approvalBusy) return
         scope.launch(Dispatchers.Default) { manager?.stopGeneration() }
         generating = false
         runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"
@@ -268,7 +342,7 @@ private fun MainScreen(container: AppContainer) {
                         AppHeader(destination, runtimeStatus, activeModel, { destination = it; quickMenuOpen = false }, { quickMenuOpen = !quickMenuOpen }, { quickMenuOpen = false; sidebarOpen = true }, { runtimeDetailsOpen = true })
                         Box(Modifier.weight(1f).fillMaxWidth()) {
                             when (destination) {
-                                Destination.CHAT -> ChatPage(messages, composer, generating, { composer = it }, ::send, ::stop, execution) { destination = Destination.WORK }
+                                Destination.CHAT -> ChatPage(messages, composer, generating, approvalBusy, { composer = it }, ::send, ::stop, execution, ::approveExecution, ::rejectExecution) { destination = Destination.WORK }
                                 Destination.WORK -> WorkspacePage(execution, activeModel) { destination = Destination.DIAGNOSTICS }
                                 Destination.DIAGNOSTICS -> DiagnosticsPage(diagnostic, execution)
                                 Destination.SETTINGS -> SettingsScreen(models, activeModel, diagnostic, onImport = { picker.launch(arrayOf("application/octet-stream", "application/gzip", "*/*")) }, onRefresh = ::refreshModels, onActivate = { id -> scope.launch(Dispatchers.Default) { manager?.activate(id); refreshModels() } }, onDeactivate = ::deactivateModel, onDelete = { id -> scope.launch(Dispatchers.Default) { manager?.delete(id); refreshModels() } })
@@ -301,9 +375,9 @@ private fun Boolean?.orFalse() = this == true
 @Composable private fun UndoBar(onUndo: () -> Unit, onDismiss: () -> Unit, onExpire: () -> Unit) { var remaining by remember { mutableIntStateOf(10) }; LaunchedEffect(Unit) { while (remaining > 0) { delay(1000); remaining-- }; onExpire() }; Box(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.BottomCenter) { Surface(Modifier.fillMaxWidth().widthIn(max = 620.dp), shape = RoundedCornerShape(18.dp), tonalElevation = 6.dp) { Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) { Text("گفت‌وگو حذف شد", Modifier.weight(1f)); TextButton(onClick = onUndo, Modifier.heightIn(min = 48.dp)) { Text("بازگردانی") }; Text("$remaining ثانیه", style = MaterialTheme.typography.labelMedium); IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp).semantics { contentDescription = "بستن پیام حذف" }) { Icon(Icons.Default.Close, "بستن") } } } } }
 @Composable private fun RenameDialog(initial: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) { var value by remember(initial) { mutableStateOf(initial) }; AlertDialog(onDismissRequest = onDismiss, title = { Text("تغییر نام گفت‌وگو") }, text = { TextField(value, { value = it }, singleLine = true, label = { Text("عنوان") }) }, confirmButton = { TextButton(onClick = { onConfirm(value.trim()) }, enabled = value.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text("ذخیره") } }, dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("انصراف") } }) }
 @Composable private fun RuntimeDetailsDialog(status: String, model: ModelDescriptor?, runtimeName: String, runtimeVersion: String, backend: String?, onDismiss: () -> Unit) { AlertDialog(onDismissRequest = onDismiss, title = { Text("وضعیت Runtime") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("وضعیت: $status"); Text("مدل: ${model?.displayName ?: "مدلی فعال نیست"}"); Text("Runtime: $runtimeName"); Text("نسخه: $runtimeVersion"); Text("Backend: ${backend ?: "ارائه نشده"}") } }, confirmButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("بستن") } }) }
-@Composable private fun ChatPage(messages: List<UiMessage>, composer: String, generating: Boolean, onComposer: (String) -> Unit, onSend: () -> Unit, onStop: () -> Unit, execution: ExecutionState?, onWorkspace: () -> Unit) { Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) { LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { if (messages.isEmpty()) item { Column(Modifier.fillMaxWidth().padding(top = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text("گفت‌وگو", style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(6.dp)); Text("پیام خود را بنویسید و گفتگو را شروع کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }; items(messages, key = { it.id }) { MessageRow(it) }; if (generating) item { Text("در حال اجرای Agent…", color = MaterialTheme.colorScheme.onSurfaceVariant) }; if (!generating && execution != null) item { ActionSummary(execution, onWorkspace) } }; Surface(Modifier.fillMaxWidth().padding(bottom = 12.dp), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), tonalElevation = 2.dp) { Row(Modifier.padding(8.dp), verticalAlignment = Alignment.Bottom) { TextField(value = composer, onValueChange = onComposer, modifier = Modifier.weight(1f), placeholder = { Text("پیام خود را بنویسید…") }, maxLines = 6); Spacer(Modifier.width(8.dp)); FilledIconButton(onClick = if (generating) onStop else onSend, enabled = generating || composer.isNotBlank(), modifier = Modifier.size(48.dp).semantics { contentDescription = if (generating) "توقف تولید" else "ارسال پیام" }) { Icon(if (generating) Icons.Default.Stop else Icons.Default.Send, if (generating) "توقف تولید" else "ارسال پیام") } } } } }
+@Composable private fun ChatPage(messages: List<UiMessage>, composer: String, generating: Boolean, approvalBusy: Boolean, onComposer: (String) -> Unit, onSend: () -> Unit, onStop: () -> Unit, execution: ExecutionState?, onApprove: () -> Unit, onReject: () -> Unit, onWorkspace: () -> Unit) { Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) { LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { if (messages.isEmpty()) item { Column(Modifier.fillMaxWidth().padding(top = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text("گفت‌وگو", style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(6.dp)); Text("پیام خود را بنویسید و گفتگو را شروع کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }; items(messages, key = { it.id }) { MessageRow(it) }; if (generating) item { Text(if (approvalBusy) "در حال پردازش تأیید…" else "در حال اجرای Agent…", color = MaterialTheme.colorScheme.onSurfaceVariant) }; if (!generating && execution != null) item { ActionSummary(execution, onWorkspace, onApprove, onReject, approvalBusy) } }; Surface(Modifier.fillMaxWidth().padding(bottom = 12.dp), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), tonalElevation = 2.dp) { Row(Modifier.padding(8.dp), verticalAlignment = Alignment.Bottom) { TextField(value = composer, onValueChange = onComposer, modifier = Modifier.weight(1f), placeholder = { Text("پیام خود را بنویسید…") }, maxLines = 6); Spacer(Modifier.width(8.dp)); FilledIconButton(onClick = if (generating) onStop else onSend, enabled = if (approvalBusy) false else generating || composer.isNotBlank(), modifier = Modifier.size(48.dp).semantics { contentDescription = if (generating) "توقف تولید" else "ارسال پیام" }) { Icon(if (generating) Icons.Default.Stop else Icons.Default.Send, if (generating) "توقف تولید" else "ارسال پیام") } } } } }
 @Composable private fun MessageRow(message: UiMessage) { val user = message.role == ChatMessage.Role.USER; Column(Modifier.fillMaxWidth(), horizontalAlignment = if (user) Alignment.Start else Alignment.End) { Text(if (user) "شما" else "مدل", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); if (user) Surface(color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .70f), shape = RoundedCornerShape(18.dp)) { Text(message.text, Modifier.padding(13.dp)) } else Text(message.text, Modifier.fillMaxWidth(.94f)) } }
-@Composable private fun ActionSummary(execution: ExecutionState, onWorkspace: () -> Unit) { Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)) { Column(Modifier.padding(12.dp)) { Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("آخرین عملیات: ${execution.action}", style = MaterialTheme.typography.titleSmall); Text("${execution.status} · ${durationText(execution)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); if (execution.approvalRequired) Text("این عملیات نیاز به تأیید دارد.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall) }; TextButton(onClick = onWorkspace, Modifier.heightIn(min = 48.dp)) { Text("مشاهده جزئیات") } }; if (execution.approvalRequired) { Spacer(Modifier.height(8.dp)); Text("برای عملیات حساس، ابتدا تأیید کاربر لازم است.", style = MaterialTheme.typography.bodySmall) } } } }
+@Composable private fun ActionSummary(execution: ExecutionState, onWorkspace: () -> Unit, onApprove: () -> Unit, onReject: () -> Unit, approvalBusy: Boolean) { Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)) { Column(Modifier.padding(12.dp)) { Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("آخرین عملیات: ${execution.action}", style = MaterialTheme.typography.titleSmall); Text("${execution.status} · ${durationText(execution)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); if (execution.approvalRequired) Text("این عملیات نیاز به تأیید دارد.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall) }; TextButton(onClick = onWorkspace, Modifier.heightIn(min = 48.dp)) { Text("مشاهده جزئیات") } }; if (execution.approvalRequired) { Spacer(Modifier.height(8.dp)); Text("این عملیات حساس است و بدون تأیید شما اجرا نمی‌شود.", style = MaterialTheme.typography.bodySmall); Spacer(Modifier.height(8.dp)); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = onApprove, enabled = !approvalBusy, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(if (approvalBusy) "در حال پردازش…" else "تأیید و اجرا") }; OutlinedButton(onClick = onReject, enabled = !approvalBusy, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("رد") } } } } } }
 @Composable private fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, onDiagnostics: () -> Unit) { var expanded by remember(execution?.id) { mutableStateOf(false) }; SimplePage("فضای کار") { Text("خلاصه اجرای جاری", style = MaterialTheme.typography.titleLarge); if (execution == null) Text("اجرای فعالی ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant) else { Text(execution.action, style = MaterialTheme.typography.titleMedium); Text(execution.status); Text("مدل: ${model?.displayName ?: "مدل محلی"}", style = MaterialTheme.typography.bodySmall); Text("شناسه Execution: ${execution.id}", style = MaterialTheme.typography.bodySmall); Text("Timeline مرکزی", style = MaterialTheme.typography.titleLarge); Surface(Modifier.fillMaxWidth().clickable { expanded = !expanded }.semantics { contentDescription = "جزئیات اجرای ${execution.action}" }, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f)) { Column(Modifier.padding(14.dp)) { Text("● ${execution.action}", style = MaterialTheme.typography.titleMedium); Text("${execution.status} · ${durationText(execution)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); execution.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }; Text(if (expanded) "▲ بستن جزئیات" else "▼ نمایش جزئیات", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp)); if (expanded) { ExpandLayer("اطلاعات درخواست") { Text(execution.requestPreview, style = MaterialTheme.typography.bodySmall) }; ExpandLayer("Preview / Result") { Text(execution.resultPreview ?: "نتیجه‌ای ثبت نشده است.", style = MaterialTheme.typography.bodySmall) }; ExpandLayer("Approval") { Text(if (execution.approvalRequired) "این عملیات برای ادامه نیازمند تأیید کاربر است." else "تأیید اضافی لازم نبود.") }; TextButton(onClick = onDiagnostics, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("مشاهده جزئیات → عیب‌یابی") } } } } }; Text("تاریخچه عملکرد", style = MaterialTheme.typography.titleLarge); Text("آمار فقط در صورت دریافت داده واقعی Runtime نمایش داده می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
 @Composable private fun ExpandLayer(title: String, content: @Composable ColumnScope.() -> Unit) { var open by remember { mutableStateOf(false) }; Column(Modifier.fillMaxWidth().padding(top = 8.dp)) { TextButton(onClick = { open = !open }, Modifier.fillMaxWidth().heightIn(min = 48.dp), contentPadding = PaddingValues(8.dp)) { Text(if (open) "▲ $title" else "▼ $title", Modifier.fillMaxWidth()) }; if (open) Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp), content = content) } }
 private fun durationText(execution: ExecutionState): String { val end = execution.finishedAt ?: System.currentTimeMillis(); return "${(end - execution.startedAt).coerceAtLeast(0L)} ms" }
