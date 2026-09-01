@@ -10,6 +10,8 @@ import com.woogit.aicore.domain.ModelResult
 import com.woogit.aicore.domain.ModelState
 import com.woogit.aicore.domain.RuntimeCompatibility
 import com.woogit.aicore.domain.ValidationStatus
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** Coordinates import, persistence and activation without exposing UI concerns. */
 class LocalModelService(
@@ -17,7 +19,7 @@ class LocalModelService(
     private val repository: ModelRepository,
     private val runtime: RuntimeAdapter
 ) : ModelLifecycleManager {
-    private val activationLock = Any()
+    private val lifecycleMutex = Mutex()
     private var activeId: String? = null
 
     suspend fun importModel(source: java.nio.file.Path): ModelResult<ModelDescriptor> {
@@ -39,29 +41,32 @@ class LocalModelService(
 
     suspend fun getModel(id: String): ModelResult<ModelDescriptor?> = repository.get(id)
 
-    override suspend fun activate(id: String): ModelResult<ModelDescriptor> = synchronized(activationLock) {
+    override suspend fun activate(id: String): ModelResult<ModelDescriptor> = lifecycleMutex.withLock {
         val model = when (val result = repository.get(id)) {
             is ModelResult.Success -> result.value
-            is ModelResult.Failure -> return@synchronized result
-        } ?: return@synchronized ModelResult.Failure(ModelError.InvalidModel("Model is not registered"))
+            is ModelResult.Failure -> return@withLock result
+        } ?: return@withLock ModelResult.Failure(ModelError.InvalidModel("Model is not registered"))
 
         if (model.format != ModelFormat.GGUF || model.validation != ValidationStatus.VALID) {
-            return@synchronized ModelResult.Failure(ModelError.InvalidModel("Model is not valid for activation"))
+            return@withLock ModelResult.Failure(ModelError.InvalidModel("Model is not valid for activation"))
         }
 
         try {
-            // Runtime.load is the single transition point. A concrete runtime must replace
-            // its previous loaded model atomically or fail without reporting success.
             runtime.load(model)
             when (val persisted = repository.setActive(id)) {
                 is ModelResult.Success -> Unit
-                is ModelResult.Failure -> return@synchronized persisted.toModelFailure()
+                is ModelResult.Failure -> {
+                    runtime.unload()
+                    return@withLock persisted
+                }
             }
             activeId = id
-            ModelResult.Success(model.copy(
-                state = ModelState.ACTIVE,
-                runtimeCompatibility = RuntimeCompatibility(true, null)
-            ))
+            ModelResult.Success(
+                model.copy(
+                    state = ModelState.ACTIVE,
+                    runtimeCompatibility = RuntimeCompatibility(true, null)
+                )
+            )
         } catch (t: OutOfMemoryError) {
             ModelResult.Failure(ModelError.OutOfMemory("Not enough memory to load model", t))
         } catch (t: Throwable) {
@@ -69,15 +74,16 @@ class LocalModelService(
         }
     }
 
-    override suspend fun deactivate(): ModelResult<Unit> = synchronized(activationLock) {
+    override suspend fun deactivate(): ModelResult<Unit> = lifecycleMutex.withLock {
         try {
             runtime.unload()
             when (val persisted = repository.setActive(null)) {
-                is ModelResult.Success -> Unit
-                is ModelResult.Failure -> return@synchronized persisted
+                is ModelResult.Success -> {
+                    activeId = null
+                    persisted
+                }
+                is ModelResult.Failure -> persisted
             }
-            activeId = null
-            ModelResult.Success(Unit)
         } catch (t: Throwable) {
             ModelResult.Failure(ModelError.LoadFailed("Unable to deactivate model", t))
         }
@@ -85,5 +91,5 @@ class LocalModelService(
 
     override suspend fun unload(): ModelResult<Unit> = deactivate()
 
-    private fun <T> ModelResult.Failure.toModelFailure(): ModelResult<T> = ModelResult.Failure(error)
+    fun activeModelId(): String? = activeId
 }
