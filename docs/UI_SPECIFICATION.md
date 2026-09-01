@@ -1,26 +1,29 @@
 # AI Chat Test — UI Specification
 
-**Status:** Design phase only  
-**Scope:** UI/UX documentation; no UI implementation in this phase  
-**Rule:** This document is the source of truth for the future UI implementation.
+**Status:** 🔒 UI DESIGN LOCKED — Documentation phase complete  
+**Version:** 1.0.0  
+**Scope:** UI/UX documentation only  
+**Source of truth:** This document is the contract for future UI implementation.
+
+> **LOCK RULE:** No UI implementation may begin until this specification is reviewed and approved. After lock, implementation must follow this document. A UI change requires an explicit specification change and a version increment.
 
 ## 1. Product UI Goals
 
 The application should feel like a polished, modern AI workspace rather than a technical test harness.
 
 Primary goals:
-- Make the conversation the primary interaction.
-- Keep AI generation state immediately understandable.
-- Make actions, errors, diagnostics, and settings accessible without cluttering the chat.
+- Make conversation the primary interaction.
+- Make AI generation state immediately understandable.
+- Keep actions, errors, diagnostics, and settings accessible without cluttering Chat.
 - Preserve a calm, focused visual hierarchy.
 - Use consistent components and states across every screen.
 - Never expose internal architecture terminology unless the user is viewing diagnostics.
 
 ## 2. Current State and Design Decision
 
-The current application UI is a minimal native Android screen containing four buttons and placeholder screens. It is not the final design and must not be treated as the target visual implementation.
+The current application UI is intentionally considered **non-final**. The existing minimal native screen and placeholder destinations are not a visual reference for implementation.
 
-The UI implementation is intentionally frozen while this specification is being prepared.
+The UI implementation is frozen during this documentation phase.
 
 ## 3. Information Architecture
 
@@ -29,7 +32,7 @@ The UI implementation is intentionally frozen while this specification is being 
 1. **Chat** — primary destination and default screen.
 2. **Workspace** — active tasks, actions, and execution context.
 3. **Errors** — user-facing failures, recovery options, and diagnostics.
-4. **Settings** — model, conversation, appearance, privacy, and diagnostic preferences.
+4. **Settings** — model, conversation, appearance, privacy, and diagnostics preferences.
 
 ### Secondary areas
 
@@ -40,7 +43,7 @@ The UI implementation is intentionally frozen while this specification is being 
 - Runtime/model status
 - About and diagnostics
 
-## 4. Navigation
+## 4. Navigation Contract
 
 ### Default entry
 
@@ -48,27 +51,25 @@ The application opens on **Chat**.
 
 ### Primary navigation
 
-Use a persistent mobile-friendly navigation pattern. The exact Android component is an implementation decision and is not prescribed by this document.
-
-Required destinations:
+A persistent, mobile-friendly navigation pattern must expose:
 - Chat
 - Workspace
 - Errors
 - Settings
 
+The exact Android navigation component is an implementation detail and must not change the information architecture.
+
 ### Navigation rules
 
 - Back returns to the previous logical destination.
-- Opening a detail view must preserve the originating screen state.
+- Detail views preserve originating screen state.
 - Navigating away from an active conversation must not discard unsent text.
-- Returning to Chat must preserve the current conversation and scroll position when practical.
-- Destructive navigation must never silently discard user work.
+- Returning to Chat preserves the current conversation and scroll position when practical.
+- Destructive navigation never silently discards user work.
 
 ## 5. Design Language
 
-### Visual direction
-
-The visual language should be **modern, premium, calm, and lightweight**, with subtle depth rather than heavy decoration.
+Visual direction: **modern, premium, calm, lightweight**.
 
 Principles:
 - Clear hierarchy over decoration.
@@ -76,15 +77,18 @@ Principles:
 - Soft surfaces and restrained elevation.
 - Rounded interactive surfaces.
 - Minimal visual noise.
-- Strong readability in both light and dark themes.
+- Strong readability in light and dark themes.
 
-Do not use excessive gradients, excessive blur, neon effects, or ornamental animations.
+Avoid excessive gradients, blur, neon effects, ornamental animation, or visual noise.
 
-## 6. Color System
+## 6. Design Tokens
 
-Define semantic colors rather than screen-specific colors.
+Concrete values are intentionally documented before implementation so the visual system is deterministic.
 
-Required semantic roles:
+### Color roles
+
+The implementation must define semantic tokens for:
+
 - Background
 - Surface
 - Elevated surface
@@ -101,46 +105,44 @@ Required semantic roles:
 - Assistant message surface
 - Code/technical surface
 - Divider/border
+- Focus indicator
 
-Light and dark themes must use the same semantic roles while allowing different concrete values.
+Light and dark themes use the same semantic roles with theme-specific values.
 
-## 7. Typography
+### Typography roles
 
-Typography must establish three clear levels:
-
-- **Display/Screen title** — page identity.
-- **Section title** — groups related content.
-- **Body/UI text** — normal interaction and content.
-
-Additional semantic styles:
-- Caption/metadata
-- Error text
+Required:
+- Display / screen title
+- Section title
+- Body
+- Caption / metadata
 - Button label
+- Error text
 - Monospace technical text
 
 Rules:
-- Never rely on font size alone to communicate hierarchy.
-- Persian text must remain readable and correctly aligned.
-- Mixed Persian/English/technical strings must not produce awkward visual jumps.
-- User-selectable system font scaling must remain usable.
+- Hierarchy must not depend on size alone.
+- Persian must remain readable.
+- Mixed Persian/English/technical content must remain visually stable.
+- System font scaling must remain usable.
 
-## 8. Spacing and Shape
+### Spacing
 
-Use a consistent spacing scale across the application.
-
-Required tokens:
-- Screen horizontal padding
+A consistent spacing scale is required for:
+- Screen padding
 - Section spacing
-- Component internal padding
+- Component padding
 - Message spacing
 - Input spacing
 - Dialog spacing
 
-Surfaces should use a consistent corner-radius family with larger radii for major containers and smaller radii for compact controls.
+### Shape
 
-## 9. Core Components
+Use a consistent corner-radius family. Major containers may use larger radii; compact controls use smaller radii.
 
-### 9.1 App Shell
+## 7. Core Components
+
+### App Shell
 
 Responsibilities:
 - Application identity.
@@ -148,9 +150,9 @@ Responsibilities:
 - Runtime status when relevant.
 - Navigation access.
 
-### 9.2 Status Indicator
+### Status Indicator
 
-Must communicate:
+States:
 - Connected
 - Connecting
 - Ready
@@ -158,22 +160,20 @@ Must communicate:
 - Offline
 - Error
 
-Status must never depend only on color; include text/icon/state semantics.
+Status must never rely on color alone.
 
-### 9.3 Chat Message
+### Chat Message
 
-Each message supports:
+Must support:
 - Sender identity.
-- Message content.
-- Timestamp/metadata when useful.
-- Generation state for assistant responses.
-- Error state where applicable.
+- Content.
+- Optional timestamp/metadata.
+- Assistant generation state.
+- Error state.
 
-Assistant and user messages must be visually distinct without making either visually dominant unnecessarily.
+### Message Composer
 
-### 9.4 Message Composer
-
-Required states:
+States:
 - Empty
 - Typing
 - Sending
@@ -181,103 +181,109 @@ Required states:
 - Disabled
 - Error
 
-Required interactions:
-- Enter/send behavior must be predictable.
-- Send must provide immediate feedback.
-- During generation, the user must have a clear way to stop generation when supported.
-- Failed messages must expose retry without forcing the user to recreate the message.
+Interactions:
+- Predictable send behavior.
+- Immediate send feedback.
+- Stop generation when supported.
+- Retry failed messages without recreating them.
 
-### 9.5 Loading Indicator
+### Loading Indicator
 
-Loading must communicate what is happening. Avoid indefinite generic spinners when a more specific state can be shown.
+Must communicate what is loading. Prefer meaningful progress/state over indefinite generic spinners.
 
-### 9.6 Error Banner/Card
+### Error Banner/Card
 
-Must include:
-- What happened in user-facing language.
-- Whether the operation can be retried.
-- Retry action when applicable.
-- Technical details only in diagnostics/details.
+Must communicate:
+- What happened.
+- Whether user action is required.
+- Whether retry is possible.
+- The next safe action.
 
-### 9.7 Empty State
+Technical details belong in diagnostics.
 
-Every empty screen must explain:
+### Empty State
+
+Must explain:
 - What the area is for.
 - Why it is empty.
 - What the user can do next.
 
-### 9.8 Buttons
+### Buttons
 
-Semantic variants:
+Variants:
 - Primary
 - Secondary
 - Tertiary/text
 - Destructive
 
-Buttons must have clear pressed, disabled, and loading states.
+States:
+- Normal
+- Pressed
+- Focused
+- Disabled
+- Loading
 
-## 10. Chat Screen
+## 8. Chat Screen Contract
 
-The Chat screen is the primary product surface.
+Chat is the primary product surface.
 
-### Layout
+### Layout order
 
-From top to bottom:
 1. App/conversation header.
 2. Optional runtime/model status.
 3. Conversation content.
 4. Composer anchored near the bottom.
-5. Navigation remains accessible without covering conversation content.
+5. Navigation accessible without covering conversation content.
 
-### Chat behavior
+### Behavior
 
-- New conversation starts visually clean.
+- New conversation starts cleanly.
 - Messages remain readable during streaming.
-- Assistant streaming must not cause disruptive layout jumps.
-- Long responses must support comfortable scrolling.
-- Code and technical output require a visually distinct treatment.
-- Errors belong close to the affected operation.
+- Streaming must not cause disruptive layout jumps.
+- Long responses support comfortable scrolling.
+- Code/technical output has distinct treatment.
+- Errors remain close to the affected operation.
 
-## 11. Conversation History
+## 9. Conversation History
 
-History should show:
+Each entry may show:
 - Conversation title.
 - Last activity.
-- Optional short preview.
-- Clear active/current state.
+- Short preview.
+- Active/current state.
 
-Required states:
+States:
 - Loading
 - Empty
 - Populated
-- Search/no-result if search is introduced
+- Search/no-result if search exists
 - Error
 
-## 12. Workspace Screen
+## 10. Workspace Contract
 
 Workspace represents active execution context around the conversation.
 
-It should expose:
+Expose:
 - Current task.
 - Active action.
 - Action state.
-- Relevant progress.
+- Meaningful progress.
 - User intervention requirements.
 - Completed/failed actions.
 
-Do not expose raw internal state machines as the primary UI. Translate them into understandable states.
+Do not expose raw internal state machines as the primary UX.
 
-## 13. Action Details
+## 11. Action Details
 
-Action detail must show:
+Show:
 - Action name.
 - Current state.
 - What the action is doing.
 - Relevant input/output summary.
 - Recovery option when available.
-- Technical details behind an expandable diagnostics section.
+- Expandable technical diagnostics.
 
-States to document visually:
+Visual states:
 - Pending
 - Running
 - Awaiting approval
@@ -287,12 +293,11 @@ States to document visually:
 - Recoverable
 - Cancelled
 
-## 14. Error Center
+## 12. Error Center
 
-The Error Center is a user-facing recovery area, not merely a log viewer.
+The Error Center is a recovery area, not merely a log viewer.
 
-### Error categories
-
+Categories:
 - Network/runtime
 - Model
 - Action execution
@@ -301,65 +306,61 @@ The Error Center is a user-facing recovery area, not merely a log viewer.
 - Configuration
 - Unknown/internal
 
-### Error presentation
-
-Each error should answer:
+Every error answers:
 1. What happened?
-2. Is anything required from the user?
+2. Is user action required?
 3. Can it be retried?
 4. What is the next safe action?
 
-Technical diagnostics may include:
-- Error identifier.
-- Trace identifier.
-- Timestamp.
-- Technical message.
-- Relevant context.
+Diagnostics may include:
+- Error identifier
+- Trace identifier
+- Timestamp
+- Technical message
+- Relevant context
 
-## 15. Settings
+Sensitive values must be redacted.
 
-Settings should be grouped by user intent rather than implementation modules.
+## 13. Settings Contract
 
-Suggested groups:
+Settings are grouped by user intent.
 
 ### AI / Model
-- Selected model.
-- Generation preferences.
-- Runtime status.
+- Selected model
+- Generation preferences
+- Runtime status
 
 ### Conversation
-- History behavior.
-- New conversation behavior.
-- Message preferences.
+- History behavior
+- New conversation behavior
+- Message preferences
 
 ### Appearance
-- Theme.
-- Dynamic/system appearance where supported.
-- Text/display preferences.
+- Theme
+- System/dynamic appearance where supported
+- Text/display preferences
 
 ### Privacy
-- Local data behavior.
-- Diagnostics/telemetry controls where applicable.
+- Local data behavior
+- Diagnostics/telemetry controls where applicable
 
 ### Diagnostics
-- Runtime information.
-- Logs/traces access.
-- Reset/recovery tools.
+- Runtime information
+- Logs/traces access
+- Reset/recovery tools
 
-## 16. Runtime States
+## 14. Runtime State Contract
 
-The UI must define a visual representation for each global runtime state:
-
-| State | Meaning | Required UX |
+| State | Meaning | UX requirement |
 |---|---|---|
-| Initializing | App is starting | Brief, non-blocking startup state where possible |
-| Ready | Runtime can accept work | Normal interaction |
-| Connecting | Runtime is being connected | Explain that connection is in progress |
-| Generating | AI is producing output | Streaming feedback + stop option when supported |
+| Initializing | App is starting | Brief, non-blocking state where possible |
+| Ready | Runtime accepts work | Normal interaction |
+| Connecting | Runtime connection is being established | Explain progress |
+| Generating | AI is producing output | Streaming feedback + stop when supported |
 | Offline | Required runtime/network unavailable | Explain impact + recovery |
 | Error | Runtime cannot operate normally | User-facing error + recovery |
 
-## 17. AI Generation States
+## 15. AI Generation State Contract
 
 Assistant response states:
 
@@ -371,9 +372,9 @@ Assistant response states:
 6. Failed
 7. Retry available
 
-The transition between states must be understandable without exposing internal implementation details.
+Transitions must be understandable without exposing implementation details.
 
-## 18. Accessibility
+## 16. Accessibility Contract
 
 Requirements:
 - Adequate touch targets.
@@ -381,52 +382,48 @@ Requirements:
 - Content descriptions for meaningful icons.
 - Semantic labels for controls.
 - Screen-reader-friendly navigation order.
-- Support for system font scaling.
-- Do not communicate important information by color alone.
+- System font scaling.
+- Important information never communicated by color alone.
 - Respect reduced-motion preferences where applicable.
 
-## 19. Localization and Persian UI
+## 17. Localization / Persian Contract
 
-The UI must support Persian as a first-class language.
+Persian is a first-class language.
 
 Requirements:
-- RTL layout support.
+- RTL layout.
 - Correct Persian typography.
-- Correct alignment of mixed RTL/LTR content.
-- Technical identifiers, URLs, code, and numbers must remain readable.
-- UI strings must not be hard-coded into screen logic.
+- Correct mixed RTL/LTR alignment.
+- Technical identifiers, URLs, code, and numbers remain readable.
+- UI strings are externalized and not hard-coded into screen logic.
 
-## 20. Motion
+## 18. Motion Contract
 
-Motion should explain state changes, not decorate the interface.
+Motion exists to explain state changes.
 
-Allowed purposes:
+Allowed:
 - Navigation transitions.
 - Message appearance.
 - Streaming state changes.
-- Expand/collapse diagnostics.
+- Diagnostics expand/collapse.
 - Progress/state transitions.
 
-Avoid:
-- Continuous decorative animation.
-- Animation that delays interaction.
-- Excessive bouncing or scaling.
+Avoid continuous decorative animation, interaction delays, excessive bouncing, or unnecessary scaling.
 
-## 21. Responsive Layout
+## 19. Responsive Contract
 
-The design must remain usable across:
-- Small Android phones.
-- Large Android phones.
-- Tablets.
-- Portrait.
-- Landscape.
+The design must remain usable on:
+- Small phones
+- Large phones
+- Tablets
+- Portrait
+- Landscape
 
-The exact breakpoints will be defined during implementation, but the design must not assume a single fixed screen size.
+Implementation breakpoints are implementation details, but no screen may assume a single fixed size.
 
-## 22. UI State Matrix
+## 20. UI State Matrix
 
-Every screen must document at least:
-
+Every screen must document:
 - Initial
 - Loading
 - Empty
@@ -436,53 +433,103 @@ Every screen must document at least:
 - Disabled
 - Offline where relevant
 
-Interactive controls must also define:
+Every interactive control must define:
 - Normal
 - Pressed
 - Focused
 - Disabled
 - Loading
 
-## 23. Security and Privacy UX
+## 21. Security / Privacy UX
 
-The UI must not expose:
-- Secrets.
-- API keys.
-- Authentication tokens.
-- Sensitive internal credentials.
+The UI must never expose:
+- Secrets
+- API keys
+- Authentication tokens
+- Sensitive internal credentials
 
 Diagnostics must redact sensitive values.
 
-## 24. Performance UX
+## 22. Performance UX
 
-The UI should remain responsive while AI generation and actions execute.
+The UI remains responsive while AI generation and actions execute.
 
 Requirements:
-- Never block the main interaction unnecessarily.
-- Streaming content should appear incrementally.
-- Long-running actions should expose meaningful progress/state.
+- Never block main interaction unnecessarily.
+- Streaming appears incrementally.
+- Long-running operations expose meaningful progress/state.
 - Avoid unnecessary full-screen redraws.
-- Loading states should appear promptly.
+- Loading states appear promptly.
 
-## 25. Design-to-Implementation Rules
+## 23. Architecture Boundary
 
-When implementation begins:
+UI must consume application state and presentation models; UI-specific concerns must not leak into Core business logic.
 
-1. This document is the UI contract.
-2. Components must be reusable rather than duplicated per screen.
-3. UI state must come from real application state.
-4. No fake data, mocks, or placeholder production UI may be introduced.
-5. UI implementation must not weaken existing tests or CI quality.
-6. Existing Core architecture must remain independent from presentation concerns.
-7. Accessibility and RTL support are requirements, not later polish.
-8. Every new screen must define its states before implementation.
+Implementation must preserve the existing Core architecture and test quality.
 
-## 26. Definition of Done for UI
+No UI implementation may introduce fake production data, mocks, or placeholders as a substitute for real application state.
 
-UI is considered ready only when:
+## 24. UI Change Control — LOCKED
+
+This section is mandatory.
+
+### Rule 1 — Documentation first
+
+Every new screen, component, interaction, or state must first be documented here.
+
+### Rule 2 — Review before implementation
+
+The proposed documentation must be reviewed for:
+- Completeness
+- Consistency
+- Accessibility
+- RTL behavior
+- State coverage
+- Navigation impact
+- Core/API compatibility
+
+### Rule 3 — Explicit lock
+
+A specification version is locked only after review and explicit approval.
+
+**UI v1.0.0 is now locked for implementation.**
+
+### Rule 4 — No silent UI changes
+
+Once locked, implementation must not silently change:
+- Navigation structure
+- Screen purpose
+- Component behavior
+- User-visible states
+- Interaction semantics
+- Visual hierarchy
+
+If implementation reveals a genuine design problem, update this document first, increment the version, review the change, then continue implementation.
+
+### Rule 5 — CI is not a design authority
+
+CI validates implementation quality. CI failures must never be solved by silently changing the UI specification or weakening UI requirements.
+
+### Rule 6 — No architecture-driven UI drift
+
+If Core/API limitations conflict with the locked UI, first evaluate the Core/API boundary. Do not distort the UI merely to accommodate an implementation shortcut.
+
+## 25. Implementation Gate
+
+UI implementation is **blocked** until this specification is approved.
+
+After approval, implementation follows:
+
+**UI Specification → Review → Lock → Implementation → Tests → CI → UX Verification**
+
+A successful build alone does not mean UI is complete.
+
+## 26. Definition of Done
+
+UI v1 is complete only when:
 
 - All primary screens have documented layouts.
-- All important states have documented behavior.
+- Important states have documented behavior.
 - Navigation is documented.
 - Component semantics are documented.
 - Light/dark themes are defined.
@@ -491,19 +538,20 @@ UI is considered ready only when:
 - Loading, streaming, error, retry, and empty states are covered.
 - No screen relies on placeholder content.
 - UI behavior is connected to real application state.
-- CI continues to pass with the existing test suite intact.
+- Existing tests remain intact.
+- CI quality is not weakened.
+- UX verification confirms the implementation matches the locked specification.
 
-## 27. Documentation Workflow
+## 27. Version History
 
-Before writing UI code for any screen:
+| Version | Status | Description |
+|---|---|---|
+| 1.0.0 | 🔒 Locked | Initial complete UI contract; implementation blocked until approval |
 
-1. Document the screen purpose.
-2. Document layout and hierarchy.
-3. Document all states.
-4. Document interactions.
-5. Document navigation entry/exit.
-6. Document accessibility/localization requirements.
-7. Review the specification.
-8. Only then implement.
+## 28. Current Phase
 
-**Current phase:** documentation only. No UI implementation should be added until the specification is reviewed and approved.
+**PHASE: UI DOCUMENTATION ONLY**
+
+No UI implementation should be added during this phase.
+
+The next action is **review and approval of UI v1.0.0**. Only after explicit approval may UI implementation begin.
