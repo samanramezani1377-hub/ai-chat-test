@@ -4,23 +4,20 @@ import com.woogit.aicore.domain.ChatMessage
 import com.woogit.aicore.domain.GenerationRequest
 import com.woogit.aicore.domain.GenerationResult
 import com.woogit.aicore.domain.ModelDescriptor
-import com.woogit.aicore.domain.ModelError
 import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeAdapter
 import dev.ffmpegkit.llama.Llama
 import dev.ffmpegkit.llama.LlamaConfig
 import dev.ffmpegkit.llama.LlamaModel
-import java.io.File
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
 /**
  * Real Android RuntimeAdapter backed by the llama.cpp AAR.
  *
- * The AAR currently exposes full-completion rather than token Flow streaming in its
- * free artifact, so this adapter emits the completed response as one token callback.
- * This is intentionally not presented as incremental streaming. The RuntimeAdapter
- * boundary remains ready for a streaming backend later.
+ * The selected free AAR exposes full completion rather than token Flow streaming, so
+ * this adapter emits the completed response through the existing callback as one chunk.
+ * It is intentionally not presented as incremental streaming.
  */
 class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 4096,
@@ -28,15 +25,14 @@ class LlamaCppAndroidRuntimeAdapter(
     private val gpuLayers: Int = 0,
 ) : RuntimeAdapter {
     private var loadedModel: LlamaModel? = null
-    private var loadedDescriptor: ModelDescriptor? = null
 
     override suspend fun load(model: ModelDescriptor) {
         currentCoroutineContext().ensureActive()
         unload()
 
         val file = model.path.toFile()
-        if (!file.isFile || !file.canRead()) {
-            throw ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}")
+        require(file.isFile && file.canRead()) {
+            "Model file cannot be read: ${file.absolutePath}"
         }
 
         try {
@@ -50,20 +46,17 @@ class LlamaCppAndroidRuntimeAdapter(
                     gpuLayers = gpuLayers.coerceAtLeast(0),
                 ),
             )
-            loadedDescriptor = model
         } catch (t: OutOfMemoryError) {
             throw t
         } catch (t: Throwable) {
             loadedModel = null
-            loadedDescriptor = null
-            throw ModelError.LoadFailed("Unable to load GGUF model", t)
+            throw IllegalStateException("Unable to load GGUF model", t)
         }
     }
 
     override suspend fun unload() {
         loadedModel?.let(Llama::releaseModel)
         loadedModel = null
-        loadedDescriptor = null
     }
 
     override suspend fun generate(
@@ -71,7 +64,8 @@ class LlamaCppAndroidRuntimeAdapter(
         onToken: suspend (String) -> Unit,
     ): GenerationResult {
         currentCoroutineContext().ensureActive()
-        val model = loadedModel ?: throw ModelError.RuntimeUnavailable("No local model is loaded")
+        val model = loadedModel
+            ?: throw IllegalStateException("No local model is loaded")
 
         val systemPrompt = request.messages
             .firstOrNull { it.role == ChatMessage.Role.SYSTEM }
@@ -89,8 +83,8 @@ class LlamaCppAndroidRuntimeAdapter(
                 }
             }
 
-        if (prompt.isBlank()) {
-            throw ModelError.Inference("Generation request contains no user/tool content")
+        require(prompt.isNotBlank()) {
+            "Generation request contains no user/tool content"
         }
 
         try {
@@ -103,36 +97,30 @@ class LlamaCppAndroidRuntimeAdapter(
             )
             currentCoroutineContext().ensureActive()
 
-            request.settings.stopSequences
-                .fold(result.text) { text, stop -> text.substringBefore(stop) }
-                .also { text ->
-                    if (text.isNotEmpty()) onToken(text)
-                }
+            val text = request.settings.stopSequences.fold(result.text) { value, stop ->
+                value.substringBefore(stop)
+            }
+            if (text.isNotEmpty()) onToken(text)
 
             return GenerationResult(
-                text = request.settings.stopSequences.fold(result.text) { text, stop ->
-                    text.substringBefore(stop)
-                },
+                text = text,
                 outputTokens = result.tokensGenerated.toLong(),
                 firstTokenTimeMs = result.promptEvalTimeMs,
                 generationTimeMs = result.generateTimeMs.takeIf { it > 0 }
                     ?: ((System.nanoTime() - startedAt) / 1_000_000),
                 stopped = false,
             )
-        } catch (t: ModelError) {
-            throw t
         } catch (t: OutOfMemoryError) {
             throw t
         } catch (t: Throwable) {
-            throw ModelError.Inference("Local model inference failed", t)
+            throw IllegalStateException("Local model inference failed", t)
         }
     }
 
     override suspend fun stopGeneration() {
-        // The selected Maven Central free AAR does not expose a native interrupt API.
-        // Coroutine cancellation is honored by the adapter around the native call, while
-        // a true mid-call native stop will be enabled when a streaming/interrupt-capable
-        // binding is selected.
+        // The selected free AAR does not expose a native mid-generation interrupt API.
+        // We still honor coroutine cancellation at the adapter boundary. A true native
+        // stop will require a streaming/interrupt-capable binding in a later runtime.
         currentCoroutineContext().ensureActive()
     }
 
