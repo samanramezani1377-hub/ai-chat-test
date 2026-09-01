@@ -26,7 +26,7 @@ dependencies {
     implementation(project(":core:domain"))
     implementation(project(":core:runtime"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    implementation("dev.ffmpegkit-maintained:llama-android:0.1.1")
+    implementation("org.codeshipping:llama-kotlin-android:0.1.0")
     testImplementation(kotlin("test"))
     testImplementation(kotlin("test-junit5"))
 }
