@@ -17,12 +17,29 @@ import androidx.compose.ui.unit.dp
 
 /** Central, lightweight UI contracts shared by documented screens. */
 object UiTokens {
+    // Layout
     val pagePadding = 20.dp
     val compactPadding = 12.dp
+    val sectionGap = 12.dp
+    val itemGap = 8.dp
+    val minimumTouchTarget = 48.dp
+    val contentMaxWidth = 760.dp
+    val sidebarMaxWidth = 520.dp
+
+    // Shape
     val surfaceRadius = 20.dp
     val controlRadius = 16.dp
-    val minimumTouchTarget = 48.dp
-    val sectionGap = 12.dp
+    val headerRadius = 22.dp
+    val dialogRadius = 28.dp
+    val composerRadius = 24.dp
+
+    // Vertical rhythm
+    val headerMinHeight = 68.dp
+    val compactControlHeight = 48.dp
+
+    // Elevation is intentionally shallow: the UI contract forbids heavy depth.
+    val surfaceElevation = 1.dp
+    val overlayElevation = 6.dp
 }
 
 @Composable
@@ -33,7 +50,7 @@ fun UiSection(
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap),
     ) {
         Text(title, style = MaterialTheme.typography.titleLarge)
         content()
@@ -49,7 +66,7 @@ fun UiSurface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(UiTokens.surfaceRadius),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp,
+        tonalElevation = UiTokens.surfaceElevation,
     ) {
         content()
     }
@@ -70,6 +87,10 @@ fun UiStatusRow(
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
