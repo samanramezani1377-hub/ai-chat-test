@@ -14,8 +14,10 @@ class AppContainer(context: Context? = null) {
     val actionRegistry: ActionRegistry = InMemoryActionRegistry()
     val modelRuntime: RuntimeAdapter = LlamaCppAndroidRuntimeAdapter()
 
-    /** Conversation metadata boundary used by the application shell. */
-    val conversationHistory: ConversationHistoryRepository = InMemoryConversationHistoryRepository()
+    /** Durable conversation metadata when running on Android; Core fallback for non-Android construction. */
+    val conversationHistory: ConversationHistoryRepository = context?.let {
+        AndroidConversationHistoryRepository(it.applicationContext)
+    } ?: InMemoryConversationHistoryRepository()
 
     val modelManager: AndroidModelManager? = context?.let {
         val directory = it.filesDir.toPath().resolve("models")
