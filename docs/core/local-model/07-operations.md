@@ -12,6 +12,14 @@ Operation
 └── Recovery
 ```
 
-هر عملیات مدل باید هویت قابل ردیابی داشته باشد تا نتیجه، خطا و Trace آن قابل اتصال به همان عملیات باشد.
+هر عملیات مدل باید هویت قابل ردیابی داشته باشد تا Result، Error و Trace آن به همان عملیات متصل بمانند.
 
-ارجاع: [Observability](10-observability.md)، [Errors](09-errors.md)، [UI Integration](15-ui-integration.md)
+## ارجاعات
+
+- [Architecture](01-architecture.md)
+- [Model Management](02-model-management.md)
+- [Activation](05-activation.md)
+- [Concurrency & Cancellation](08-concurrency.md)
+- [Errors](09-errors.md)
+- [Observability](10-observability.md)
+- [UI Integration](15-ui-integration.md)
