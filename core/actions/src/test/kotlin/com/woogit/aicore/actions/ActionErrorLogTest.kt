@@ -20,7 +20,7 @@ class ActionErrorLogTest {
         lifecycle.approve(prepared.executionId)
 
         val state = lifecycle.executeApproved(prepared.executionId, object : Verifier<Any> {
-            override fun verify(output: Any): VerificationResult = VerificationResult(true, "verified")
+            override suspend fun verify(result: Any): VerificationResult = VerificationResult(true, "verified")
         })
 
         assertTrue(state is ActionExecutionState.Failed)
