@@ -200,6 +200,27 @@ private fun AppRoot(container: AppContainer) {
         execution = execution?.copy(status = "متوقف شد", finishedAt = System.currentTimeMillis())
     }
 
+    fun deactivateModel() {
+        if (manager == null || activeModel == null) return
+        scope.launch(Dispatchers.Default) {
+            val result = manager.deactivate()
+            withContext(Dispatchers.Main) {
+                when (result) {
+                    is ModelResult.Success -> {
+                        activeModel = null
+                        runtimeStatus = "خارج از دسترس"
+                        diagnostic = null
+                        refreshModels()
+                    }
+                    is ModelResult.Failure -> {
+                        runtimeStatus = "خطا"
+                        diagnostic = result.error.message
+                    }
+                }
+            }
+        }
+    }
+
     fun createConversation() {
         scope.launch(Dispatchers.Default) {
             val record = history.create("گفت‌وگوی جدید")
@@ -274,6 +295,7 @@ private fun AppRoot(container: AppContainer) {
                                     onImport = { picker.launch(arrayOf("application/octet-stream", "application/gzip", "*/*")) },
                                     onRefresh = ::refreshModels,
                                     onActivate = { id -> scope.launch(Dispatchers.Default) { manager?.activate(id); refreshModels() } },
+                                    onDeactivate = ::deactivateModel,
                                     onDelete = { id -> scope.launch(Dispatchers.Default) { manager?.delete(id); refreshModels() } },
                                 )
                                 Destination.ABOUT -> AboutPage()
@@ -381,9 +403,9 @@ private fun AppHeader(destination: Destination, status: String, model: ModelDesc
 }
 
 @Composable private fun QuickMenu(onDiagnostics: () -> Unit, onSettings: () -> Unit) {
-    Surface(Modifier.padding(top = 82.dp, start = 12.dp).width(190.dp), shape = RoundedCornerShape(18.dp), tonalElevation = 6.dp) {
+    Surface(Modifier.padding(top = 82.dp, start = 12.dp).widthIn(max = 220.dp), shape = RoundedCornerShape(18.dp), tonalElevation = 6.dp) {
         Column(Modifier.padding(8.dp)) {
-            TextButton(onClick = onDiagnostics, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Default.BugReport, null); Spacer(Modifier.width(8.dp)); Text("لاگ") }
+            TextButton(onClick = onDiagnostics, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Default.BugReport, null); Spacer(Modifier.width(8.dp)); Text("عیب‌یابی") }
             TextButton(onClick = onSettings, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Default.Settings, null); Spacer(Modifier.width(8.dp)); Text("تنظیمات") }
         }
     }
@@ -392,7 +414,7 @@ private fun AppHeader(destination: Destination, status: String, model: ModelDesc
 @Composable
 private fun Sidebar(current: ConversationRecord?, conversations: List<ConversationRecord>, destination: Destination, onClose: () -> Unit, onDestination: (Destination) -> Unit, onNew: () -> Unit, onOpen: (ConversationRecord) -> Unit, onRename: (ConversationRecord) -> Unit, onDelete: (ConversationRecord) -> Unit, onMore: () -> Unit, canShowMore: Boolean) {
     Box(Modifier.fillMaxSize()) {
-        Spacer(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .24f)).clickable(onClick = onClose))
+        Spacer(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .24f)).clickable(onClick = onClose).semantics { contentDescription = "بستن نوار کناری" })
         Surface(Modifier.fillMaxHeight().fillMaxWidth(.88f).align(Alignment.CenterEnd), shape = RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp), tonalElevation = 8.dp) {
             LazyColumn(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 item { Text("منو", style = MaterialTheme.typography.headlineSmall); Spacer(Modifier.height(8.dp)) }
