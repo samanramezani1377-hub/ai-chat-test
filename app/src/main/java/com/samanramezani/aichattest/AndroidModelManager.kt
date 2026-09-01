@@ -2,6 +2,9 @@ package com.samanramezani.aichattest
 
 import android.content.ContentResolver
 import android.net.Uri
+import com.woogit.aicore.domain.ChatMessage
+import com.woogit.aicore.domain.GenerationResult
+import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.domain.ModelError
 import com.woogit.aicore.domain.ModelResult
@@ -42,12 +45,21 @@ class AndroidModelManager(
 
     suspend fun models(): ModelResult<List<ModelDescriptor>> = service.listModels()
 
-    suspend fun activeModel(): ModelResult<ModelDescriptor?> {
-        val activeId = service.activeModelId() ?: return ModelResult.Success(null)
-        return service.getModel(activeId)
-    }
+    suspend fun activeModel(): ModelResult<ModelDescriptor?> = service.activeModel()
+
+    suspend fun restoreActive(): ModelResult<ModelDescriptor?> = service.restoreActive()
 
     suspend fun activate(id: String): ModelResult<ModelDescriptor> = service.activate(id)
 
     suspend fun deactivate(): ModelResult<Unit> = service.deactivate()
+
+    suspend fun generate(
+        messages: List<ChatMessage>,
+        settings: InferenceSettings,
+        onToken: suspend (String) -> Unit = {},
+    ): ModelResult<GenerationResult> = service.generate(messages, settings, onToken)
+
+    suspend fun stopGeneration() = service.stopGeneration()
+
+    suspend fun delete(id: String): ModelResult<Unit> = service.deleteModel(id)
 }
