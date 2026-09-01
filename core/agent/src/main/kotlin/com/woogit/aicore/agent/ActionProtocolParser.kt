@@ -14,12 +14,13 @@ class ActionProtocolParser {
         val version = stringOrNumber(json, "version")?.toIntOrNull() ?: return null
         if (version != 1) return null
         val action = string(json, "action") ?: return null
-        val actionId = string(json, "actionId") ?: return null
-        if (action.isBlank() || actionId.isBlank()) return null
+        val requestId = string(json, "actionId") ?: return null
+        if (action.isBlank() || requestId.isBlank()) return null
 
         val arguments = object(json, "arguments") ?: return null
         return ActionIntent(
             actionId = action,
+            requestId = requestId,
             input = arguments,
             explanation = "ActionRequest v1: $action"
         )
