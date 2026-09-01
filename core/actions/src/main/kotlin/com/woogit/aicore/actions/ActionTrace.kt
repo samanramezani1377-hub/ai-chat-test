@@ -11,7 +11,8 @@ enum class ActionTraceType {
     EXECUTION_COMPLETED,
     VERIFICATION_FAILED,
     EXECUTION_FAILED,
-    RETRY_REQUESTED
+    RETRY_REQUESTED,
+    RETRY_REJECTED
 }
 
 data class ActionTraceEvent(
