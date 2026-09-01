@@ -3,7 +3,8 @@
         android:name=".AIChatApplication"
         android:label="AI Chat Test"
         android:allowBackup="true"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:extractNativeLibs="true">
         <activity
             android:name=".MainActivity"
             android:exported="true">
