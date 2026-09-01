@@ -9,36 +9,52 @@
 ```text
 Local AI Model Backend
 │
-├── 1. Model Management
+├── 1. Architecture
+│   ├── Domain
+│   ├── Model Management
+│   ├── Runtime
+│   ├── Storage
+│   ├── Operations
+│   ├── Errors
+│   ├── Observability
+│   ├── Resource Management
+│   ├── Security
+│   ├── Testing
+│   └── UI Integration Boundary
+│
+├── 2. Model Management
+│   │
 │   ├── Import
-│   │   ├── دریافت URI / فایل انتخاب‌شده
-│   │   ├── بررسی دسترسی خواندن
-│   │   ├── ایجاد Model ID
-│   │   ├── انتقال به Storage مدیریت‌شده در صورت نیاز
-│   │   ├── جلوگیری از Import ناقص
-│   │   ├── Cancellation
+│   │   ├── source URI / selected file
+│   │   ├── read permission
+│   │   ├── source accessibility
+│   │   ├── Model ID generation
+│   │   ├── managed-storage copy/registration
+│   │   ├── integrity verification
+│   │   ├── duplicate detection
+│   │   ├── cancellation
+│   │   ├── cleanup on failure
 │   │   └── Import Result
 │   │
-│   ├── Validation
-│   │   ├── File existence / accessibility
-│   │   ├── File readability
-│   │   ├── Format detection
-│   │   ├── GGUF header validation
-│   │   ├── GGUF structure validation
-│   │   ├── Metadata validation
-│   │   ├── Architecture validation
-│   │   ├── Real quantization detection
-│   │   └── Runtime compatibility
-│   │
 │   ├── Inspection
-│   │   └── GGUF Metadata Reader
-│   │       ├── model architecture
-│   │       ├── model name
-│   │       ├── quantization
-│   │       ├── context information
-│   │       ├── tensor/file information
-│   │       ├── tokenizer metadata
-│   │       └── سایر metadataهای موردنیاز Runtime
+│   │   ├── format detection
+│   │   ├── GGUF header
+│   │   ├── GGUF structure
+│   │   ├── metadata extraction
+│   │   ├── architecture
+│   │   ├── quantization
+│   │   ├── tensor/file information
+│   │   ├── tokenizer metadata
+│   │   └── runtime requirements
+│   │
+│   ├── Validation
+│   │   ├── file validity
+│   │   ├── GGUF validity
+│   │   ├── metadata validity
+│   │   ├── architecture support
+│   │   ├── real quantization detection
+│   │   ├── runtime compatibility
+│   │   └── resource compatibility
 │   │
 │   ├── Registry / Repository
 │   │   ├── register
@@ -60,35 +76,46 @@ Local AI Model Backend
 │       ├── Invalid
 │       └── Failed
 │
-├── 2. Model Descriptor
-│   ├── id
-│   ├── displayName
-│   ├── source / managed path
-│   ├── format
-│   ├── quantization
-│   ├── architecture
-│   ├── size
-│   ├── metadata
-│   ├── validation status
-│   └── runtime compatibility
+├── 3. Model Domain
+│   ├── ModelDescriptor
+│   │   ├── id
+│   │   ├── displayName
+│   │   ├── source / managed path
+│   │   ├── format
+│   │   ├── quantization
+│   │   ├── architecture
+│   │   ├── size
+│   │   ├── metadata
+│   │   ├── validation status
+│   │   └── runtime compatibility
+│   │
+│   ├── ModelMetadata
+│   ├── ModelFormat
+│   ├── Quantization
+│   ├── Architecture
+│   ├── ModelState
+│   └── RuntimeCompatibility
 │
-├── 3. Runtime
+├── 4. Runtime
+│   │
 │   ├── Runtime Contract
-│   │   ├── load
-│   │   ├── unload
-│   │   ├── generate
-│   │   ├── stopGeneration
-│   │   └── runtimeInfo
+│   │   ├── load(model)
+│   │   ├── unload()
+│   │   ├── generate(...)
+│   │   ├── stopGeneration()
+│   │   └── runtimeInfo()
 │   │
 │   ├── Runtime Adapter
 │   │   └── ModelRuntime / RuntimeAdapter boundary
 │   │
 │   ├── GGUF Backend
-│   │   ├── model loading
-│   │   ├── tensor access
-│   │   ├── tokenizer/runtime setup
+│   │   ├── backend initialization
+│   │   ├── GGUF model loading
+│   │   ├── metadata access
+│   │   ├── tokenizer setup
+│   │   ├── context setup
 │   │   ├── inference
-│   │   ├── stop generation
+│   │   ├── generation cancellation
 │   │   ├── unload
 │   │   ├── memory management
 │   │   └── resource cleanup
@@ -102,25 +129,37 @@ Local AI Model Backend
 │       ├── unloading
 │       └── failed
 │
-├── 4. Model Activation
+├── 5. Model Activation
 │   ├── activate
 │   ├── deactivate
 │   ├── active model
-│   ├── previous model هنگام تعویض
+│   ├── previous model during replacement
+│   ├── safe transition
 │   ├── runtime state
 │   └── activation result
 │
-├── 5. Storage & File Lifecycle
+├── 6. Storage & File Lifecycle
 │   ├── selected source
 │   ├── managed model file
-│   ├── persistence
-│   ├── integrity
+│   ├── persistent registry
+│   ├── integrity information
+│   ├── recovery
 │   ├── cleanup
-│   ├── حذف مدل
-│   └── جلوگیری از استفاده از مسیر موقت به‌عنوان مسیر دائمی
+│   ├── deletion policy
+│   └── temporary URI protection
 │
-├── 6. Concurrency & Cancellation
-│   ├── operation serialization / policy
+├── 7. Operations
+│   ├── Operation ID
+│   ├── Execution ID
+│   ├── Trace ID
+│   ├── operation state
+│   ├── cancellation
+│   ├── concurrency policy
+│   ├── state transitions
+│   └── recovery
+│
+├── 8. Concurrency & Cancellation
+│   ├── serialized/policy-controlled operations
 │   ├── duplicate import protection
 │   ├── duplicate load protection
 │   ├── cancellation propagation
@@ -128,11 +167,17 @@ Local AI Model Backend
 │   ├── race prevention
 │   └── safe active-model transitions
 │
-├── 7. Error Model
+├── 9. Error Model
+│   ├── typed error
+│   ├── error code
+│   ├── user-facing message
+│   ├── technical cause
+│   ├── diagnostics reference
 │   ├── FileAccessError
 │   ├── UnsupportedFormat
 │   ├── InvalidModel
 │   ├── InvalidMetadata
+│   ├── UnsupportedArchitecture
 │   ├── UnsupportedQuantization
 │   ├── RuntimeUnavailable
 │   ├── LoadFailed
@@ -141,14 +186,14 @@ Local AI Model Backend
 │   ├── StorageError
 │   └── InferenceError
 │
-├── 8. Observability / Action Trace
-│   ├── Import
-│   ├── Validation
-│   ├── Inspection
-│   ├── Registration
-│   ├── Activation
-│   ├── Load
-│   ├── Inference
+├── 10. Observability / Action Trace
+│   ├── Import Trace
+│   ├── Validation Trace
+│   ├── Inspection Trace
+│   ├── Registration Trace
+│   ├── Activation Trace
+│   ├── Load Trace
+│   ├── Inference Trace
 │   └── Trace Payload
 │       ├── operationId
 │       ├── executionId
@@ -156,12 +201,12 @@ Local AI Model Backend
 │       ├── modelId
 │       ├── stage
 │       ├── start/end
-│       ├── duration واقعی در صورت اندازه‌گیری
+│       ├── real duration when measurable
 │       ├── status
 │       ├── errorCode
-│       └── metadata غیرحساس
+│       └── non-sensitive metadata
 │
-├── 9. Capabilities
+├── 11. Capabilities
 │   ├── import
 │   ├── inspect
 │   ├── validate
@@ -175,16 +220,37 @@ Local AI Model Backend
 │   ├── runtimeInfo
 │   └── inference
 │
-├── 10. Backend Tests
+├── 12. Resource Management
+│   ├── model size
+│   ├── memory requirements
+│   ├── runtime resources
+│   ├── load limits
+│   ├── resource reservation
+│   ├── cleanup
+│   └── OutOfMemory handling
+│
+├── 13. Security
+│   ├── File URI access
+│   ├── persistent URI permission where required
+│   ├── storage isolation
+│   ├── input validation
+│   ├── path/URI safety
+│   ├── sensitive metadata protection
+│   └── no arbitrary external execution
+│
+├── 14. Backend Tests
 │   ├── valid GGUF import
 │   ├── non-GGUF import
 │   ├── corrupt file
 │   ├── incomplete metadata
+│   ├── unsupported architecture
 │   ├── unsupported quantization
 │   ├── valid Q6_K
 │   ├── duplicate model
 │   ├── import cancellation
 │   ├── storage failure
+│   ├── successful validation
+│   ├── failed validation
 │   ├── successful load
 │   ├── failed load
 │   ├── unload
@@ -195,11 +261,23 @@ Local AI Model Backend
 │   ├── generate
 │   ├── stop generation
 │   ├── runtime unavailable
-│   └── memory/resource failures
+│   ├── memory/resource failures
+│   └── trace/error propagation
 │
-└── 11. UI Integration Contract
+└── 15. UI Integration Contract
+    │
+    ├── Commands
+    │   ├── import model
+    │   ├── inspect
+    │   ├── validate
+    │   ├── activate
+    │   ├── deactivate
+    │   ├── unload
+    │   └── delete
+    │
     ├── Model List
     │   ├── list models
+    │   ├── model descriptor
     │   └── item state
     │
     ├── Current Model
@@ -215,19 +293,15 @@ Local AI Model Backend
     │   └── error
     │
     ├── Model Details
-    │   ├── metadata
+    │   ├── model name
+    │   ├── file name
     │   ├── format
     │   ├── quantization
     │   ├── size
     │   ├── architecture
+    │   ├── validation
     │   ├── compatibility
     │   └── runtime state
-    │
-    ├── Model Actions
-    │   ├── activate
-    │   ├── deactivate
-    │   ├── unload
-    │   └── delete
     │
     ├── Runtime
     │   ├── status
@@ -244,52 +318,54 @@ Local AI Model Backend
     │   ├── activeOperation
     │   └── error
     │
-    ├── Import Result
-    │   ├── success/failure
-    │   ├── model descriptor
-    │   ├── operation/execution id
-    │   ├── validation result
-    │   └── error
+    ├── Results
+    │   ├── ImportResult
+    │   │   ├── success/failure
+    │   │   ├── model descriptor
+    │   │   ├── operation/execution id
+    │   │   ├── validation result
+    │   │   └── error
+    │   └── RuntimeResult
+    │       ├── success/failure
+    │       ├── operation/execution id
+    │       ├── runtime state
+    │       └── error
     │
-    ├── Diagnostics
-    │   ├── execution id
-    │   ├── trace id
-    │   ├── error code
-    │   ├── error message
-    │   └── report navigation target
+    ├── Events
+    │   ├── MODEL_IMPORT_STARTED
+    │   ├── MODEL_VALIDATION_STARTED
+    │   ├── MODEL_VALIDATION_COMPLETED
+    │   ├── MODEL_IMPORTED
+    │   ├── MODEL_IMPORT_FAILED
+    │   ├── MODEL_LOAD_STARTED
+    │   ├── MODEL_LOADED
+    │   ├── MODEL_LOAD_FAILED
+    │   ├── MODEL_UNLOADED
+    │   ├── MODEL_ACTIVATED
+    │   └── MODEL_DEACTIVATED
     │
-    └── Runtime Events
-        ├── MODEL_IMPORT_STARTED
-        ├── MODEL_VALIDATION_STARTED
-        ├── MODEL_VALIDATION_COMPLETED
-        ├── MODEL_IMPORTED
-        ├── MODEL_IMPORT_FAILED
-        ├── MODEL_LOAD_STARTED
-        ├── MODEL_LOADED
-        ├── MODEL_LOAD_FAILED
-        ├── MODEL_UNLOADED
-        ├── MODEL_ACTIVATED
-        └── MODEL_DEACTIVATED
+    └── Diagnostics
+        ├── executionId
+        ├── traceId
+        ├── errorCode
+        ├── error details
+        └── navigation target for same execution/trace
 ```
 
-## ۲. قراردادهای اجرایی
-
-### استقلال Backend از UI
-
-گره‌های `1` تا `10` باید بدون وابستگی به Composable، Screen یا ViewModel خاص طراحی و کدنویسی شوند. UI فقط مصرف‌کننده قرارداد گره `11` است.
-
-### جریان استاندارد
+## ۲. جریان استاندارد Backend
 
 ```text
 Android File Picker
       ↓
 File URI
       ↓
-Model Import
+Import
       ↓
-Validation
+Integrity Check
       ↓
 GGUF Inspection
+      ↓
+Validation
       ↓
 Registration
       ↓
@@ -300,46 +376,70 @@ Activation
 Runtime Load
       ↓
 Inference
+      ↓
+Trace / Result
 ```
 
-### مدل هدف اولیه
+## ۳. اصل استقلال UI
+
+تمام گره‌های `1` تا `14` باید در Core/Runtime/Model Management مستقل از Composable، Screen یا ViewModel طراحی و کدنویسی شوند.
+
+UI فقط قرارداد گره `15` را مصرف می‌کند.
+
+هیچ Parse، Validation، Persistence یا Runtime Loading نباید داخل UI انجام شود.
+
+## ۴. مدل هدف اولیه
 
 **Qwen3-1.7B · GGUF · Q6_K**
 
-Backend باید مشخصات واقعی فایل را از Validation و Metadata استخراج کند؛ نام فایل به‌تنهایی معتبر نیست.
+این انتخاب مدل هدف است. Backend باید مشخصات واقعی فایل انتخاب‌شده را از GGUF metadata و validation استخراج کند و نباید صرفاً از نام فایل نتیجه‌گیری کند.
 
-### صحت و تست
+## ۵. قرارداد اتصال به UI
 
-موفقیت Import، Load و Inference نباید با Mock یا Placeholder جعل شود. Mock فقط برای Boundaryهای ضروری Unit Test مجاز است.
+این بخش باید **همزمان با طراحی و کدنویسی Backend** به‌روزرسانی شود. هر API، State، Event، Result، Capability یا Error جدیدی که UI باید مصرف کند باید در گره `15` ثبت شود.
 
-## ۳. قرارداد اتصال به UI
-
-این بخش باید **همزمان با طراحی و کدنویسی Backend** نگهداری شود و هر API، State، Event، Result یا Error جدیدی که UI باید مصرف کند در همین قسمت ثبت شود.
-
-پس از تغییر این قرارداد:
+ترتیب مرجع:
 
 ```text
-Backend Contract
-      ↓
+Backend Implementation
+        ↓
 UI Integration Contract
-      ↓
+        ↓
 UI_TREE.md
-      ↓
+        ↓
 SCREENS.md
-      ↓
+        ↓
 LOCAL_MODEL_IMPORT_UI.md
 ```
 
-تمام ارجاعات UI باید با قرارداد واقعی Backend هماهنگ بمانند.
+پس از هر تغییر Backend که روی UI اثر دارد، ارجاعات اسناد UI باید همان زمان بررسی و اصلاح شوند.
 
-## ۴. Definition of Done
+## ۶. Definition of Done
 
-Backend فقط زمانی کامل است که:
+Backend مدل محلی فقط زمانی کامل محسوب می‌شود که:
 
-- تمام گره‌های `1` تا `10` با پیاده‌سازی واقعی تکمیل شده باشند.
-- تست‌های لازم وجود داشته و نتیجه واقعی آن‌ها قابل مشاهده باشد.
-- Trace و Error Contract کامل باشد.
-- Q6_K در صورت پشتیبانی Runtime واقعاً Load شود.
-- Import و Lifecycle واقعی باشند.
-- گره `11` کامل و قابل مصرف توسط UI باشد.
-- ارجاعات اسناد UI به این قرارداد برقرار و هماهنگ باشند.
+- Import واقعی انجام شود.
+- GGUF واقعاً Inspect و Validate شود.
+- Metadata واقعی استخراج شود.
+- Model Repository پایدار باشد.
+- Lifecycle کامل مدل پیاده شود.
+- Runtime واقعی GGUF متصل شود.
+- Q6_K در صورت پشتیبانی Backend واقعاً Load شود.
+- Inference واقعی کار کند.
+- Activation/Deactivation امن باشد.
+- Cancellation و Concurrency کنترل شوند.
+- Resource و Memory Management وجود داشته باشد.
+- Error Contract کامل باشد.
+- Action Trace/Diagnostics واقعی ثبت شود.
+- تست‌های لازم واقعی باشند.
+- هیچ موفقیت Import/Load/Inference با Mock یا Placeholder جعل نشود.
+- UI Integration Contract کامل باشد.
+- ارجاعات لازم در اسناد UI برقرار باشند.
+
+## ۷. ارجاعات اجباری
+
+- UI Tree: [`../ui/UI_TREE.md`](../ui/UI_TREE.md)
+- UI Screens: [`../ui/SCREENS.md`](../ui/SCREENS.md)
+- UI Import Model: [`../ui/LOCAL_MODEL_IMPORT_UI.md`](../ui/LOCAL_MODEL_IMPORT_UI.md)
+
+این سند **مرجع واحد Backend مدل محلی** است. قرارداد موازی برای همین قابلیت نباید ساخته شود.
