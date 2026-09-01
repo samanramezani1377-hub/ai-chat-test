@@ -23,6 +23,14 @@ Error Types
 └── InferenceError
 ```
 
-UI باید پیام کاربرپسند را دریافت کند؛ علت فنی و شناسه Diagnostics برای عیب‌یابی باقی می‌ماند.
+UI پیام کاربرپسند را دریافت می‌کند؛ علت فنی، Error Code و Diagnostics Reference برای عیب‌یابی حفظ می‌شوند.
 
-ارجاع: [Observability](10-observability.md)، [UI Integration](15-ui-integration.md)
+## ارجاعات
+
+- [Model Management](02-model-management.md)
+- [Runtime](04-runtime.md)
+- [Operations](07-operations.md)
+- [Observability](10-observability.md)
+- [Resources](12-resources.md)
+- [Testing](14-testing.md)
+- [UI Integration](15-ui-integration.md)
