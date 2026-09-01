@@ -1,71 +1,91 @@
-# AI Chat Test — UI Specification
+# مشخصات رابط کاربری
 
-**Status:** 🟡 UI DESIGN DECISION PHASE  
-**Version:** 0.2.0  
-**Scope:** UI/UX documentation only  
-**Source of truth:** The structured documents under [`docs/ui/`](ui/README.md).
+**وضعیت:** 🟡 مرحله تصمیم‌گیری رابط کاربری  
+**نسخه:** ۰.۳.۰  
+**دامنه:** فقط مستندسازی UI/UX
 
-> **IMPORTANT:** UI v1 is **not locked yet**. The previous broad specification is retained as a baseline, but the final UI contract will be produced from the 20 owner decisions. No UI implementation may begin before all decisions are answered, reviewed, and explicitly approved.
+> 🔴 **قانون اجباری:** کل رابط کاربری برنامه باید فارسی و راست‌چین (RTL) باشد. این الزام شامل تمام صفحه‌ها، Header، Navigation، منوها، Buttonها، پیام‌ها، وضعیت‌ها، خطاها، Dialogها و تمام متن‌های قابل مشاهده برای کاربر است.
 
-## Documentation structure
+**مرجع اصلی:** مستندات ساختاری داخل [`docs/ui/`](ui/README.md).
 
-The UI specification is intentionally split into focused documents:
+## ساختار مستندات
 
-- [`ui/README.md`](ui/README.md) — UI documentation entry point and workflow
-- [`ui/DESIGN_SYSTEM.md`](ui/DESIGN_SYSTEM.md) — visual system
-- [`ui/NAVIGATION.md`](ui/NAVIGATION.md) — navigation contract
-- [`ui/STATES.md`](ui/STATES.md) — state contract
-- [`ui/SCREENS.md`](ui/SCREENS.md) — screen map
-- [`ui/questions/README.md`](ui/questions/README.md) — 20-question decision process
-
-## Baseline requirements
-
-The baseline UI must:
-
-- Make Chat the primary interaction.
-- Provide Workspace, Errors, and Settings as primary areas.
-- Clearly communicate AI/runtime state.
-- Support streaming, errors, retry, loading, empty, offline, and recovery states.
-- Treat Persian/RTL as first-class.
-- Support accessibility and responsive layouts.
-- Keep technical diagnostics separate from normal user-facing UX.
-- Preserve the existing Core architecture and test quality.
-- Never use fake production data or placeholders as a substitute for real state.
-
-## Decision and lock process
+مستندات UI عمداً به فایل‌های کوچک و تخصصی تقسیم شده‌اند تا یک فایل طولانی و غیرقابل مدیریت ایجاد نشود:
 
 ```text
-Baseline UI requirements
-        ↓
-20 owner decisions
-        ↓
-Documentation updates
-        ↓
-Review for consistency / architecture / accessibility
-        ↓
-Explicit UI v1 approval
-        ↓
-UI LOCK
-        ↓
-Implementation
-        ↓
-Tests + CI + UX verification
+docs/ui/
+├── README.md
+├── DESIGN_SYSTEM.md
+├── NAVIGATION.md
+├── STATES.md
+├── SCREENS.md
+└── questions/
+    ├── README.md
+    ├── Q01.md
+    ├── Q02.md
+    └── ...
 ```
 
-## Change-control rules
+## الزامات پایه
 
-1. No UI implementation during the decision phase.
-2. Every new UI decision is documented before implementation.
-3. Each accepted answer is committed before the next question is asked.
-4. Conflicts between decisions require an explicit revision rather than a silent change.
-5. CI is not a design authority.
-6. Core/API limitations must not silently degrade the approved UX.
-7. After UI Lock, any UI change requires a specification revision and version increment.
+- گفت‌وگو تعامل اصلی برنامه است.
+- فضای کار، خطاها و تنظیمات باید در ساختار UI پیش‌بینی شوند.
+- وضعیت هوش مصنوعی و Runtime باید واضح و قابل فهم باشد.
+- وضعیت‌های بارگذاری، خالی، خطا، تلاش مجدد، در حال کار، در حال تولید پاسخ و خارج از دسترس باید پوشش داده شوند.
+- **تمام UI فارسی و راست‌چین است.**
+- Accessibility و چیدمان واکنش‌گرا باید رعایت شوند.
+- جزئیات فنی از تجربه عادی کاربر جدا می‌شوند.
+- معماری Core و کیفیت تست‌ها نباید تضعیف شوند.
+- داده جعلی یا Placeholder جایگزین وضعیت واقعی برنامه نمی‌شود.
 
-## Current phase
+## زبان و جهت
 
-**PHASE: UI DOCUMENTATION + 20 DECISION QUESTIONS**
+### قانون قطعی
 
-The next active decision is [`Q01`](ui/questions/Q01.md).
+> **هیچ بخش قابل مشاهده‌ای از UI نباید به‌صورت پیش‌فرض انگلیسی باشد. زبان UI فارسی و جهت UI راست‌چین است.**
 
-No production UI code should be added until the decision process and final review are complete.
+استثنا فقط داده‌هایی است که ذاتاً فنی و غیرقابل‌ترجمه‌اند؛ مانند نام مدل، کد، URL یا شناسه فنی. این داده‌ها می‌توانند LTR نمایش داده شوند، اما متن توضیحی، عنوان، برچسب و ساختار اطراف آن‌ها همچنان فارسی و RTL است.
+
+## فرایند تصمیم و قفل
+
+```text
+الزامات پایه
+      ↓
+۲۰ تصمیم مالک پروژه
+      ↓
+به‌روزرسانی مستندات
+      ↓
+بازبینی سازگاری / معماری / دسترسی‌پذیری
+      ↓
+تأیید صریح UI v1
+      ↓
+قفل UI
+      ↓
+پیاده‌سازی
+      ↓
+تست + CI + بررسی UX
+```
+
+## قوانین کنترل تغییر
+
+۱. در مرحله تصمیم‌گیری هیچ UI پیاده‌سازی نمی‌شود.
+
+۲. هر تصمیم جدید ابتدا در مستندات ثبت می‌شود.
+
+۳. هر پاسخ پذیرفته‌شده قبل از سؤال بعدی Commit می‌شود.
+
+۴. تعارض بین تصمیم‌ها نیازمند بازنگری صریح است و نباید به‌صورت خاموش حل شود.
+
+۵. CI مرجع طراحی UI نیست.
+
+۶. محدودیت Core/API نباید باعث افت خاموش UX تأییدشده شود.
+
+۷. بعد از قفل UI، هر تغییر UI نیازمند اصلاح مشخصات و افزایش نسخه است.
+
+## وضعیت فعلی
+
+**فاز: فقط مستندسازی UI + ۲۰ سؤال تصمیم‌گیری**
+
+سؤال‌های Q01 و Q02 تصمیم‌گیری شده‌اند و Q03 سؤال فعال است.
+
+تا پایان فرایند تصمیم‌گیری و بازبینی نهایی، هیچ کد تولیدی UI نباید اضافه شود.
