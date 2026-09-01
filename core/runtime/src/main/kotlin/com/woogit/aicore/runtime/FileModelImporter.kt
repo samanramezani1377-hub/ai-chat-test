@@ -13,7 +13,7 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.UUID
 
-/** Imports a user-selected file into managed storage and validates its real GGUF metadata. */
+/** Imports a user-selected model into managed storage using the real file and GGUF inspector. */
 class FileModelImporter(
     private val storageDirectory: Path,
     private val inspector: GgufInspector = GgufInspector()
@@ -32,31 +32,36 @@ class FileModelImporter(
             if (inspection.format != ModelFormat.GGUF) {
                 return ModelResult.Failure(ModelError.UnsupportedFormat("Only GGUF models are supported"))
             }
+
             val id = UUID.randomUUID().toString()
             val target = storageDirectory.resolve("$id.gguf")
             Files.copy(source, target, StandardCopyOption.COPY_ATTRIBUTES)
-            val storedSize = Files.size(target)
-            if (storedSize != inspection.sizeBytes) {
-                Files.deleteIfExists(target)
-                return ModelResult.Failure(ModelError.Storage("Imported model size changed during copy"))
-            }
-            ModelResult.Success(
-                ModelDescriptor(
-                    id = id,
-                    displayName = inspection.metadata.name ?: source.fileName.toString(),
-                    path = target,
-                    format = inspection.format,
-                    quantization = inspection.quantization,
-                    sizeBytes = storedSize,
-                    metadata = inspection.metadata,
-                    validation = ValidationStatus.VALID,
-                    runtimeCompatibility = RuntimeCompatibility(
-                        supported = true,
-                        reason = null
-                    ),
-                    state = ModelState.READY
+            try {
+                val storedSize = Files.size(target)
+                if (storedSize != inspection.sizeBytes) {
+                    return ModelResult.Failure(ModelError.Storage("Imported model size changed during copy"))
+                }
+                ModelResult.Success(
+                    ModelDescriptor(
+                        id = id,
+                        displayName = inspection.metadata.name ?: source.fileName.toString(),
+                        path = target,
+                        format = inspection.format,
+                        quantization = inspection.quantization,
+                        sizeBytes = storedSize,
+                        metadata = inspection.metadata,
+                        validation = ValidationStatus.VALID,
+                        runtimeCompatibility = RuntimeCompatibility(
+                            supported = false,
+                            reason = "Runtime compatibility is established when a concrete runtime is configured"
+                        ),
+                        state = ModelState.READY
+                    )
                 )
-            )
+            } catch (t: Throwable) {
+                Files.deleteIfExists(target)
+                throw t
+            }
         } catch (t: Throwable) {
             ModelResult.Failure(ModelError.Storage("Unable to import model", t))
         }
