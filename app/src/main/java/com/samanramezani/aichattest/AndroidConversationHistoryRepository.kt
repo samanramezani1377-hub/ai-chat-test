@@ -33,12 +33,19 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
 
     override suspend fun delete(id: String): ConversationRecord? = synchronized(lock) {
         val current = readAll(); val deleted = current.firstOrNull { it.id == id } ?: return@synchronized null
-        writeAll(current.filterNot { it.id == id }); preferences.edit().remove(messagesKey(id)).apply(); deleted
+        val messages = readMessages(id)
+        writeDeletedMessages(id, messages)
+        writeAll(current.filterNot { it.id == id })
+        preferences.edit().remove(messagesKey(id)).apply()
+        deleted
     }
 
     override suspend fun restore(record: ConversationRecord): Boolean = synchronized(lock) {
         val current = readAll(); if (current.any { it.id == record.id }) return@synchronized false
-        writeAll(current + record); true
+        writeAll(current + record)
+        writeMessages(record.id, readDeletedMessages(record.id))
+        removeDeletedMessages(record.id)
+        true
     }
 
     override suspend fun touch(id: String, messageCount: Int, nowEpochMs: Long): Boolean = synchronized(lock) {
@@ -57,6 +64,9 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
         writeAll(current.toMutableList().also { it[index] = current[index].copy(updatedAtEpochMs = nowEpochMs, messageCount = updatedMessages.size) })
         true
     }
+
+    /** Permanently removes the message snapshot after the undo window expires. */
+    fun purgeDeleted(id: String) = synchronized(lock) { removeDeletedMessages(id) }
 
     private fun readAll(): List<ConversationRecord> {
         val raw = preferences.getString(KEY_RECORDS, null) ?: return emptyList()
@@ -78,9 +88,13 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
     }
 
     private fun messagesKey(id: String) = "messages_$id"
+    private fun deletedMessagesKey(id: String) = "deleted_messages_$id"
 
-    private fun readMessages(id: String): List<ConversationMessage> {
-        val raw = preferences.getString(messagesKey(id), null) ?: return emptyList()
+    private fun readMessages(id: String): List<ConversationMessage> = readMessageArray(messagesKey(id))
+    private fun readDeletedMessages(id: String): List<ConversationMessage> = readMessageArray(deletedMessagesKey(id))
+
+    private fun readMessageArray(key: String): List<ConversationMessage> {
+        val raw = preferences.getString(key, null) ?: return emptyList()
         return runCatching {
             val array = JSONArray(raw)
             buildList(array.length()) {
@@ -93,11 +107,16 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
         }.getOrDefault(emptyList())
     }
 
-    private fun writeMessages(id: String, messages: List<ConversationMessage>) {
+    private fun writeMessages(id: String, messages: List<ConversationMessage>) = writeMessageArray(messagesKey(id), messages)
+    private fun writeDeletedMessages(id: String, messages: List<ConversationMessage>) = writeMessageArray(deletedMessagesKey(id), messages)
+
+    private fun writeMessageArray(key: String, messages: List<ConversationMessage>) {
         val array = JSONArray()
         messages.forEach { m -> array.put(JSONObject().put("id", m.id).put("role", m.role.name).put("content", m.content).put("timestampEpochMs", m.timestampEpochMs)) }
-        preferences.edit().putString(messagesKey(id), array.toString()).apply()
+        preferences.edit().putString(key, array.toString()).apply()
     }
+
+    private fun removeDeletedMessages(id: String) = preferences.edit().remove(deletedMessagesKey(id)).apply()
 
     private companion object { const val KEY_RECORDS = "records" }
 }
