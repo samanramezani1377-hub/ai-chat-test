@@ -29,7 +29,7 @@ class AppContainer(context: Context? = null) {
                     val active = modelManager?.activeModel()
                     when (active) {
                         is ModelResult.Success -> active.value?.let {
-                            "name=${it.name}, quantization=${it.quantization}, sizeBytes=${it.sizeBytes}"
+                            "name=${it.displayName}, quantization=${it.quantization}, sizeBytes=${it.sizeBytes}"
                         } ?: "no-active-model"
                         is ModelResult.Failure -> "unavailable: ${active.error.message}"
                         null -> "no-model-manager"
