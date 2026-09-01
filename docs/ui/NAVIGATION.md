@@ -1,23 +1,40 @@
-# UI Navigation
+# ناوبری رابط کاربری
 
-**Status:** Draft — decisions pending
+**وضعیت:** پیش‌نویس — تصمیم‌های بیشتر در حال تکمیل
 
-## Primary destinations
+> 🔴 **تمام UI فارسی و راست‌چین (RTL) است.** تمام عنوان‌ها، برچسب‌ها، منوها و پیام‌های ناوبری باید فارسی باشند؛ داده‌های فنی غیرقابل‌ترجمه استثنا هستند.
+
+## درخت مقصدهای اصلی
 
 ```text
-App
-├── Chat
-├── Workspace
-├── Errors
-└── Settings
+برنامه
+├── گفت‌وگو
+├── فضای کار
+├── خطاها
+└── تنظیمات
 ```
 
-Secondary/detail destinations will be defined by the 20 decisions.
+## مدل ناوبری فعلی مصوب
 
-## Rules
+Header شامل سه ناحیه است:
 
-- Chat is the primary interaction.
-- Back preserves logical screen state.
-- Unsaved message text must not be silently discarded.
-- Active conversation state must survive navigation.
-- Navigation must not expose internal architecture unnecessarily.
+```text
+┌──────────────────────────────────────────────┐
+│ گفت‌وگو │ کار │ ⋯     ● وضعیت       │ ☰ │
+└──────────────────────────────────────────────┘
+```
+
+- سمت چپ: دسترسی سریع به گفت‌وگو، فضای کار و منوی ثانویه.
+- وسط: وضعیت Runtime/AI محلی.
+- سمت راست: منوی اصلی Sidebar.
+
+## قوانین
+
+- گفت‌وگو مقصد اصلی است.
+- دکمه «⋯» برای ابزارهای جانبی مانند لاگ و تنظیمات است.
+- دکمه «☰» منوی ساختاری اصلی برنامه را باز می‌کند.
+- بازگشت باید وضعیت منطقی صفحه را حفظ کند.
+- متن پیام ذخیره‌نشده نباید بی‌صدا حذف شود.
+- وضعیت گفت‌وگوی فعال باید هنگام جابه‌جایی حفظ شود.
+- ناوبری نباید جزئیات معماری داخلی را بی‌دلیل نمایش دهد.
+- جهت پیش‌فرض تمام مسیرهای UI راست‌چین است.
