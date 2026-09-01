@@ -30,6 +30,29 @@ class GgufInspectorTest {
         }
     }
 
+    @Test
+    fun `inspects GGUF metadata containing tokenizer sized arrays without retaining every element`() {
+        val file = Files.createTempFile("qwen3-large-metadata-", ".gguf")
+        try {
+            Files.write(file, buildQwen3WithLargeArray())
+
+            val result = kotlinx.coroutines.runBlocking { GgufInspector().inspect(file) }
+            val inspection = assertIs<ModelResult.Success<*>>(result).value as com.woogit.aicore.domain.ModelInspection
+
+            assertEquals("qwen3", inspection.metadata.architecture)
+            assertEquals(151_936L, (inspection.metadata.raw["tokenizer.ggml.tokens"] as? Any)?.let { arrayInfoCount(it) })
+            assertEquals(Quantization.Q6_K, inspection.quantization)
+        } finally {
+            Files.deleteIfExists(file)
+        }
+    }
+
+    private fun arrayInfoCount(value: Any): Long {
+        val field = value.javaClass.getDeclaredField("count")
+        field.isAccessible = true
+        return field.getLong(value)
+    }
+
     private fun buildMinimalQwen3Q6K(): ByteArray {
         val out = mutableListOf<Byte>()
         out.addAll("GGUF".encodeToByteArray().toList())
@@ -55,7 +78,31 @@ class GgufInspectorTest {
 
         out.writeString("general.file_type")
         out.writeIntLE(4)
-        out.writeIntLE(14)
+        out.writeIntLE(18)
+
+        return out.toByteArray()
+    }
+
+    private fun buildQwen3WithLargeArray(): ByteArray {
+        val out = mutableListOf<Byte>()
+        out.addAll("GGUF".encodeToByteArray().toList())
+        out.writeIntLE(3)
+        out.writeLongLE(1)
+        out.writeLongLE(3)
+
+        out.writeString("general.architecture")
+        out.writeIntLE(8)
+        out.writeString("qwen3")
+
+        out.writeString("tokenizer.ggml.tokens")
+        out.writeIntLE(9)
+        out.writeIntLE(8)
+        out.writeLongLE(151_936)
+        repeat(151_936) { out.writeString("x") }
+
+        out.writeString("general.file_type")
+        out.writeIntLE(4)
+        out.writeIntLE(18)
 
         return out.toByteArray()
     }
