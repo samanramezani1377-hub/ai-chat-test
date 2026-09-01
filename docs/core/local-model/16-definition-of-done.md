@@ -1,48 +1,40 @@
 # 16 — Definition of Done
 
+## Implementation status
+
+🟡 **Backend implementation started** — domain, GGUF inspection, managed import, persistent registry and lifecycle orchestration are now being implemented independently from UI.
+
 ```text
 Backend Complete
-├── Import واقعی
-├── GGUF Inspection واقعی
-├── Validation واقعی
-├── Metadata واقعی
-├── Persistent Repository
-├── Lifecycle Manager
-├── GGUF Runtime Backend
-├── Q6_K Load when supported
-├── Real Inference
-├── Safe Activation / Deactivation
-├── Cancellation
-├── Concurrency Control
-├── Resource / Memory Management
-├── Typed Errors
-├── Action Trace / Diagnostics
-├── Real Tests
-├── UI Integration Contract Complete
-└── UI References Updated
+├── Domain Contract                    [implemented]
+├── GGUF Inspection                    [implemented]
+├── Real Import to Managed Storage     [implemented]
+├── Persistent Model Registry          [implemented]
+├── Validation                         [foundation present; runtime validation pending]
+├── Lifecycle Manager                  [foundation implemented]
+├── GGUF Runtime Backend               [pending concrete native/runtime adapter]
+├── Q6_K Load                          [pending concrete runtime support]
+├── Real Inference                     [pending concrete runtime support]
+├── Safe Activation / Deactivation     [foundation implemented]
+├── Cancellation                       [pending propagation through all layers]
+├── Concurrency Control                [foundation implemented]
+├── Resource / Memory Management       [pending runtime integration]
+├── Typed Errors                       [implemented]
+├── Action Trace / Diagnostics          [pending wiring]
+├── Real Tests                         [pending]
+├── UI Integration Contract             [documented]
+└── UI References Updated               [pending final API wiring]
 ```
 
 ## شرط نهایی
 
-قابلیت فقط زمانی آماده ورود به UI است که Backend موارد بالا را واقعاً پیاده و تست کرده باشد و [UI Integration Contract](15-ui-integration.md) قرارداد نهایی اتصال را توصیف کند.
-
-## مرجع اسناد
-
-- [Documentation Tree](00-tree.md)
-- [Architecture](01-architecture.md)
-- [Model Management](02-model-management.md)
-- [Model Domain](03-model-domain.md)
-- [Runtime](04-runtime.md)
-- [Activation](05-activation.md)
-- [Storage](06-storage.md)
-- [Operations](07-operations.md)
-- [Concurrency](08-concurrency.md)
-- [Errors](09-errors.md)
-- [Observability](10-observability.md)
-- [Capabilities](11-capabilities.md)
-- [Resources](12-resources.md)
-- [Security](13-security.md)
-- [Testing](14-testing.md)
-- [UI Integration](15-ui-integration.md)
+قابلیت زمانی آماده ورود به UI است که موارد Backend بالا واقعاً پیاده و تست شده باشند و `15-ui-integration.md` دقیقاً قرارداد نهایی اتصال را توصیف کند.
 
 هیچ Mock یا Placeholder نباید موفقیت Import، Load یا Inference را جعل کند.
+
+## ارجاعات
+
+- [Architecture](01-architecture.md)
+- [Model Management](02-model-management.md)
+- [Runtime](04-runtime.md)
+- [UI Integration](15-ui-integration.md)
