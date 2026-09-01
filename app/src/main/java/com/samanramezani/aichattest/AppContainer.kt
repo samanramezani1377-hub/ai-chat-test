@@ -4,11 +4,10 @@ import android.content.Context
 import android.os.Build
 import com.woogit.aicore.actions.ActionExecutionService
 import com.woogit.aicore.actions.ActionLifecycle
+import com.woogit.aicore.actions.ApprovalController
 import com.woogit.aicore.actions.DefaultActionRegistry
 import com.woogit.aicore.actions.DefaultActionRetryPolicy
 import com.woogit.aicore.actions.InMemoryActionCheckpointStore
-import com.woogit.aicore.actions.InMemoryCapabilityProvider
-import com.woogit.aicore.actions.InMemoryActionRegistry
 import com.woogit.aicore.actions.registerBuiltinFileActions
 import com.woogit.aicore.actions.registerProviderActions
 import com.woogit.aicore.agent.ActionExecutionOutcome
@@ -85,25 +84,21 @@ class AppContainer(context: Context? = null) {
     }
     private val coordinator = ActionPlanCoordinator(lifecycle, ProtocolActionIntentPlanner())
     private val actionExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan ->
-        val state = if (lifecycle.requiresApproval(plan.prepared)) {
-            ActionExecutionOutcome(false, false, "Approval required", errorCode = "APPROVAL_REQUIRED")
-        } else {
-            val execution = lifecycle.executeApproved(plan.prepared.executionId, verifier)
-            when (execution) {
-                is com.woogit.aicore.actions.ActionExecutionState.Completed -> ActionExecutionOutcome(
-                    success = true,
-                    verified = execution.verification.success,
-                    message = execution.verification.evidence ?: "Action completed",
-                    data = execution.verification.evidence,
-                )
-                is com.woogit.aicore.actions.ActionExecutionState.Failed -> ActionExecutionOutcome(
-                    success = false,
-                    verified = false,
-                    message = execution.message,
-                    errorCode = "ACTION_FAILED",
-                )
-                else -> ActionExecutionOutcome(false, false, "Action was not executed", errorCode = "NOT_EXECUTED")
-            }
+        val execution = lifecycle.executeApproved(plan.prepared.executionId, verifier)
+        when (execution) {
+            is com.woogit.aicore.actions.ActionExecutionState.Completed -> ActionExecutionOutcome(
+                success = true,
+                verified = execution.verification.success,
+                message = execution.verification.evidence ?: "Action completed",
+                data = execution.verification.evidence,
+            )
+            is com.woogit.aicore.actions.ActionExecutionState.Failed -> ActionExecutionOutcome(
+                success = false,
+                verified = false,
+                message = execution.message,
+                errorCode = "ACTION_FAILED",
+            )
+            else -> ActionExecutionOutcome(false, false, "Action was not executed", errorCode = "NOT_EXECUTED")
         }
     }
 
@@ -119,5 +114,5 @@ class AppContainer(context: Context? = null) {
         )
     }
 
-    val actionExecutionService = ActionExecutionService(lifecycle, com.woogit.aicore.actions.ApprovalController(lifecycle))
+    val actionExecutionService = ActionExecutionService(lifecycle, ApprovalController(lifecycle))
 }
