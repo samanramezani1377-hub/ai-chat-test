@@ -11,6 +11,14 @@ Resources
 └── OutOfMemory Handling
 ```
 
-قبل از Load باید منابع موردنیاز تا حد امکان از اطلاعات واقعی مدل/Runtime مشخص شود. خطای کمبود منابع باید به Error Contract و Diagnostics متصل شود.
+قبل از Load باید منابع موردنیاز تا حد امکان از اطلاعات واقعی مدل و Runtime مشخص شود. خطای کمبود منابع باید به Error Contract و Diagnostics متصل شود.
 
-ارجاع: [Runtime](04-runtime.md)، [Errors](09-errors.md)، [Testing](14-testing.md)
+## ارجاعات
+
+- [Model Domain](03-model-domain.md)
+- [Runtime](04-runtime.md)
+- [Operations](07-operations.md)
+- [Concurrency & Cancellation](08-concurrency.md)
+- [Errors](09-errors.md)
+- [Testing](14-testing.md)
+- [UI Integration](15-ui-integration.md)
