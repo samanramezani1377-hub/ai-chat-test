@@ -20,12 +20,24 @@ data class PreparedAction(
     val actionId: String,
     val input: Any,
     val risk: com.woogit.aicore.domain.RiskLevel,
-    val state: ActionExecutionState = ActionExecutionState.Prepared
+    val state: ActionExecutionState = ActionExecutionState.Prepared,
+    /** Number of retry attempts already consumed for this prepared execution. */
+    val retryCount: Int = 0
 )
 
 interface ActionApprovalPolicy { fun requiresApproval(risk: com.woogit.aicore.domain.RiskLevel): Boolean }
 class DefaultActionApprovalPolicy : ActionApprovalPolicy {
     override fun requiresApproval(risk: com.woogit.aicore.domain.RiskLevel) = risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE
+}
+
+/** Explicit retry budget prevents an indefinitely failing action from looping forever. */
+interface ActionRetryPolicy {
+    fun maxRetries(action: PreparedAction): Int
+}
+
+class DefaultActionRetryPolicy(private val defaultMaxRetries: Int = 2) : ActionRetryPolicy {
+    init { require(defaultMaxRetries >= 0) { "defaultMaxRetries must be non-negative" } }
+    override fun maxRetries(action: PreparedAction): Int = defaultMaxRetries
 }
 
 interface ActionCheckpointStore {
@@ -45,6 +57,7 @@ class ActionLifecycle(
     private val capabilityProvider: CapabilityProvider,
     private val checkpointStore: ActionCheckpointStore,
     private val approvalPolicy: ActionApprovalPolicy = DefaultActionApprovalPolicy(),
+    private val retryPolicy: ActionRetryPolicy = DefaultActionRetryPolicy(),
     private val traceSink: ActionTraceSink? = null,
     private val errorLogSink: ActionErrorLogSink? = null
 ) {
@@ -135,10 +148,25 @@ class ActionLifecycle(
     }
 
     suspend fun retryFailed(executionId: String, verifier: Verifier<Any>): ActionExecutionState {
-        val failed = checkpointStore.get(executionId) ?: return ActionExecutionState.Failed("Prepared action not found: $executionId")
-        if (failed.state !is ActionExecutionState.Failed) return ActionExecutionState.Failed("Only failed executions can be retried")
-        trace(executionId, ActionTraceType.RETRY_REQUESTED)
-        val reset = failed.copy(state = if (requiresApproval(failed)) ActionExecutionState.AwaitingApproval else ActionExecutionState.Approved)
+        val failed = checkpointStore.get(executionId)
+            ?: return ActionExecutionState.Failed("Prepared action not found: $executionId")
+        if (failed.state !is ActionExecutionState.Failed) {
+            return ActionExecutionState.Failed("Only failed executions can be retried")
+        }
+
+        val maxRetries = retryPolicy.maxRetries(failed).coerceAtLeast(0)
+        if (failed.retryCount >= maxRetries) {
+            val raw = "Retry limit reached: $maxRetries"
+            logError(executionId, failed.actionId, raw, "تعداد تلاش مجدد این عملیات به سقف مجاز رسیده است.")
+            trace(executionId, ActionTraceType.RETRY_REJECTED, raw)
+            return ActionExecutionState.Failed(raw)
+        }
+
+        trace(executionId, ActionTraceType.RETRY_REQUESTED, "attempt=${failed.retryCount + 1}/$maxRetries")
+        val reset = failed.copy(
+            state = if (requiresApproval(failed)) ActionExecutionState.AwaitingApproval else ActionExecutionState.Approved,
+            retryCount = failed.retryCount + 1
+        )
         checkpointStore.save(reset)
         return if (reset.state == ActionExecutionState.Approved) executeApproved(executionId, verifier) else reset.state
     }
