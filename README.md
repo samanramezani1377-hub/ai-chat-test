@@ -37,6 +37,17 @@
 | [`QUESTION_BANK.md`](docs/QUESTION_BANK.md) | سؤالات و تصمیم‌های ثبت‌شده |
 | [`DOCUMENTATION_READINESS.md`](docs/DOCUMENTATION_READINESS.md) | وضعیت آمادگی مستندات |
 
+### UI Documentation
+
+UI مستندات ساختاریافته و جداگانه دارد تا Specification نهایی به یک فایل طولانی تبدیل نشود:
+
+- [`docs/ui/README.md`](docs/ui/README.md) — نقطه ورود مستندات UI
+- [`docs/ui/DESIGN_SYSTEM.md`](docs/ui/DESIGN_SYSTEM.md) — Design System
+- [`docs/ui/NAVIGATION.md`](docs/ui/NAVIGATION.md) — Navigation Contract
+- [`docs/ui/STATES.md`](docs/ui/STATES.md) — State Contract
+- [`docs/ui/SCREENS.md`](docs/ui/SCREENS.md) — نقشه صفحات
+- [`docs/ui/questions/README.md`](docs/ui/questions/README.md) — Question Bank بیست‌گانه و وضعیت تصمیم‌ها
+
 ## معماری اصلی
 
 اصل کلیدی: **AI Core کاملاً مستقل از UI و Runtime است.**
