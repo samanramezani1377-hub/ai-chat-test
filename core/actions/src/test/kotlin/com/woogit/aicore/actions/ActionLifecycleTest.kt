@@ -70,7 +70,7 @@ class ActionLifecycleTest {
     @Test
     fun retryIsBoundedByPolicy() = kotlinx.coroutines.test.runTest {
         val checkpoint = InMemoryActionCheckpointStore()
-        val action = TestAction("unstable", RiskLevel.SAFE)
+        val action = TestAction("unstable", RiskLevel.LOW)
         val lifecycle = ActionLifecycle(
             TestRegistry(action),
             TestCapabilities,
@@ -87,7 +87,7 @@ class ActionLifecycleTest {
 
         assertIs<ActionExecutionState.Failed>(exhausted)
         assertTrue((exhausted as ActionExecutionState.Failed).message.contains("Retry limit reached"))
-        assertEquals(2, action.calls)
+        assertEquals(3, action.calls)
     }
 
     private class TestAction(
