@@ -42,8 +42,10 @@ class AndroidModelManager(
 
     suspend fun models(): ModelResult<List<ModelDescriptor>> = service.listModels()
 
-    suspend fun activeModel(): ModelResult<ModelDescriptor?> =
-        service.getModel(service.activeModelId() ?: return ModelResult.Success(null))
+    suspend fun activeModel(): ModelResult<ModelDescriptor?> {
+        val activeId = service.activeModelId() ?: return ModelResult.Success(null)
+        return service.getModel(activeId)
+    }
 
     suspend fun activate(id: String): ModelResult<ModelDescriptor> = service.activate(id)
 
