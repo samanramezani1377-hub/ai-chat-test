@@ -27,7 +27,7 @@ class GgufInspector : ModelInspector {
                 }
             }
         } catch (t: Throwable) {
-            ModelResult.Failure(ModelError.InvalidModel("Unable to inspect GGUF model", t))
+            ModelResult.Failure(ModelError.InvalidModel("Unable to inspect GGUF model"))
         }
     }
 
