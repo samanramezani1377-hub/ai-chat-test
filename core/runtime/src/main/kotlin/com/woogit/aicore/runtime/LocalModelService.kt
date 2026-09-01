@@ -26,7 +26,10 @@ class LocalModelService(
     private val repository: ModelRepository,
     private val runtime: RuntimeAdapter
 ) : ModelLifecycleManager {
+    /** Protects model load/unload and repository/runtime state transitions. */
     private val runtimeMutex = Mutex()
+    /** Serializes generation calls without blocking stopGeneration from reaching the runtime. */
+    private val generationMutex = Mutex()
     private var activeId: String? = null
     @Volatile private var generationJob: Job? = null
 
@@ -63,6 +66,7 @@ class LocalModelService(
     }
 
     override suspend fun activate(id: String): ModelResult<ModelDescriptor> = runtimeMutex.withLock {
+        stopAndAwaitGeneration()
         val model = when (val result = repository.get(id)) {
             is ModelResult.Success -> result.value
             is ModelResult.Failure -> return@withLock result
@@ -106,17 +110,23 @@ class LocalModelService(
         onToken: suspend (String) -> Unit = {}
     ): ModelResult<GenerationResult> {
         require(messages.isNotEmpty()) { "messages must not be empty" }
-        return runtimeMutex.withLock {
-            val persisted = when (val result = repository.getActive()) {
-                is ModelResult.Success -> result.value
-                is ModelResult.Failure -> return@withLock result
+
+        return generationMutex.withLock {
+            val persisted = runtimeMutex.withLock {
+                when (val result = repository.getActive()) {
+                    is ModelResult.Success -> {
+                        val model = result.value
+                        if (model != null && activeId != model.id) {
+                            runtime.load(model)
+                            activeId = model.id
+                        }
+                        model
+                    }
+                    is ModelResult.Failure -> return@withLock result
+                }
             } ?: return@withLock ModelResult.Failure(ModelError.RuntimeUnavailable("No model is active"))
 
             try {
-                if (activeId != persisted.id) {
-                    runtime.load(persisted)
-                    activeId = persisted.id
-                }
                 generationJob = currentCoroutineContext()[Job]
                 currentCoroutineContext().ensureActive()
                 val result = runtime.generate(GenerationRequest(messages, settings), onToken)
@@ -135,11 +145,18 @@ class LocalModelService(
 
     suspend fun stopGeneration() {
         generationJob?.cancel()
+        runCatching { runtime.stopGeneration() }
+    }
+
+    private suspend fun stopAndAwaitGeneration() {
+        generationJob?.cancel()
+        runCatching { runtime.stopGeneration() }
+        generationMutex.withLock { /* waits for the current generation to leave the runtime */ }
     }
 
     override suspend fun deactivate(): ModelResult<Unit> = runtimeMutex.withLock {
         try {
-            generationJob?.cancel()
+            stopAndAwaitGeneration()
             runtime.unload()
             when (val persisted = repository.setActive(null)) {
                 is ModelResult.Success -> {
@@ -158,6 +175,7 @@ class LocalModelService(
     suspend fun deleteModel(id: String): ModelResult<Unit> = runtimeMutex.withLock {
         val active = repository.getActive()
         if (active is ModelResult.Success && active.value?.id == id) {
+            stopAndAwaitGeneration()
             runtime.unload()
             repository.setActive(null)
             activeId = null
