@@ -14,10 +14,18 @@ Storage
 └── Temporary URI Protection
 ```
 
-مسیر موقت یا URI غیرقابل‌دسترسی نباید به‌عنوان مسیر دائمی مدل ثبت شود. چرخه استاندارد:
+مسیر موقت یا URI غیرقابل‌دسترسی نباید به‌عنوان مسیر دائمی مدل ثبت شود.
 
 ```text
 Selected URI → Validated Source → Managed File → Registry → Runtime
 ```
 
-ارجاع: [Model Management](02-model-management.md)، [Security](13-security.md)
+## ارجاعات
+
+- [Architecture](01-architecture.md)
+- [Model Management](02-model-management.md)
+- [Operations](07-operations.md)
+- [Concurrency & Cancellation](08-concurrency.md)
+- [Security](13-security.md)
+- [Testing](14-testing.md)
+- [UI Integration](15-ui-integration.md)
