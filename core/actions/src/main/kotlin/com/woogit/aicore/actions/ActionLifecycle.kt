@@ -2,6 +2,7 @@ package com.woogit.aicore.actions
 
 import com.woogit.aicore.domain.ActionRegistry
 import com.woogit.aicore.domain.CapabilityProvider
+import com.woogit.aicore.domain.VerificationResult
 import com.woogit.aicore.domain.Verifier
 import java.util.UUID
 
@@ -10,7 +11,7 @@ sealed interface ActionExecutionState {
     data object AwaitingApproval : ActionExecutionState
     data object Approved : ActionExecutionState
     data object Executing : ActionExecutionState
-    data class Completed(val verification: com.woogit.aicore.domain.VerificationResult) : ActionExecutionState
+    data class Completed(val verification: VerificationResult) : ActionExecutionState
     data class Failed(val message: String) : ActionExecutionState
     data object Rejected : ActionExecutionState
 }
@@ -45,6 +46,11 @@ class InMemoryActionCheckpointStore : ActionCheckpointStore {
     override suspend fun get(executionId: String): PreparedAction? = synchronized(values) { values[executionId] }
 }
 
+/** Independent verification hook. Implementations must verify the external side effect, not just the return value. */
+fun interface ActionResultVerifier {
+    suspend fun verify(action: PreparedAction, result: Any): VerificationResult
+}
+
 class ActionLifecycle(
     private val registry: ActionRegistry,
     private val capabilityProvider: CapabilityProvider,
@@ -52,14 +58,18 @@ class ActionLifecycle(
     private val approvalPolicy: ActionApprovalPolicy = DefaultActionApprovalPolicy(),
     private val retryPolicy: ActionRetryPolicy = DefaultActionRetryPolicy(),
     private val traceSink: ActionTraceSink? = null,
-    private val errorLogSink: ActionErrorLogSink? = null
+    private val errorLogSink: ActionErrorLogSink? = null,
+    private val actionResultVerifier: ActionResultVerifier? = null,
 ) {
     private suspend fun trace(id: String, type: ActionTraceType, message: String? = null) = traceSink?.record(ActionTraceEvent(id, type, message))
     private suspend fun logError(executionId: String?, actionId: String?, raw: String, userMessage: String) = errorLogSink?.record(ActionErrorLog(executionId, actionId, userMessage, raw))
 
     suspend fun prepare(actionId: String, input: Any): PreparedAction {
         val action = registry.find(actionId) ?: error("Action not found: $actionId")
-        return PreparedAction(actionId = action.id, input = input, risk = action.risk).also { checkpointStore.save(it); trace(it.executionId, ActionTraceType.PREPARED, it.actionId) }
+        return PreparedAction(actionId = action.id, input = input, risk = action.risk).also {
+            checkpointStore.save(it)
+            trace(it.executionId, ActionTraceType.PREPARED, it.actionId)
+        }
     }
 
     fun requiresApproval(prepared: PreparedAction) = approvalPolicy.requiresApproval(prepared.risk)
@@ -71,7 +81,11 @@ class ActionLifecycle(
             error(raw)
         }
         val state = if (requiresApproval(prepared)) ActionExecutionState.AwaitingApproval else ActionExecutionState.Approved
-        return prepared.copy(state = state).also { checkpointStore.save(it); trace(it.executionId, ActionTraceType.VALIDATED, capability); if (state == ActionExecutionState.AwaitingApproval) trace(it.executionId, ActionTraceType.APPROVAL_REQUESTED) }
+        return prepared.copy(state = state).also {
+            checkpointStore.save(it)
+            trace(it.executionId, ActionTraceType.VALIDATED, capability)
+            if (state == ActionExecutionState.AwaitingApproval) trace(it.executionId, ActionTraceType.APPROVAL_REQUESTED)
+        }
     }
 
     suspend fun checkpoint(executionId: String): PreparedAction = checkpointStore.get(executionId) ?: error("Prepared action not found: $executionId")
@@ -82,7 +96,10 @@ class ActionLifecycle(
         return prepared.copy(state = ActionExecutionState.Approved).also { checkpointStore.save(it); trace(executionId, ActionTraceType.APPROVED) }
     }
 
-    suspend fun reject(prepared: PreparedAction): PreparedAction = prepared.copy(state = ActionExecutionState.Rejected).also { checkpointStore.save(it); trace(it.executionId, ActionTraceType.REJECTED) }
+    suspend fun reject(prepared: PreparedAction): PreparedAction {
+        require(prepared.state == ActionExecutionState.AwaitingApproval) { "Action is not awaiting approval" }
+        return prepared.copy(state = ActionExecutionState.Rejected).also { checkpointStore.save(it); trace(it.executionId, ActionTraceType.REJECTED) }
+    }
 
     suspend fun executeApproved(executionId: String, verifier: Verifier<Any>): ActionExecutionState {
         val prepared = checkpointStore.get(executionId) ?: return ActionExecutionState.Failed("Prepared action not found: $executionId")
@@ -92,7 +109,7 @@ class ActionLifecycle(
             checkpointStore.save(prepared.copy(state = ActionExecutionState.Executing))
             trace(executionId, ActionTraceType.EXECUTION_STARTED, prepared.actionId)
             val result = action.execute(prepared.input)
-            val verification = verifier.verify(result)
+            val verification = actionResultVerifier?.verify(prepared, result) ?: verifier.verify(result)
             if (!verification.success) {
                 val raw = verification.evidence ?: "Action verification failed"
                 checkpointStore.save(prepared.copy(state = ActionExecutionState.Failed(raw)))
