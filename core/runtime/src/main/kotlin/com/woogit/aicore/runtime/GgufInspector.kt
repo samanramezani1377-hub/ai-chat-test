@@ -27,7 +27,7 @@ class GgufInspector : ModelInspector {
                 }
             }
         } catch (t: Throwable) {
-            ModelResult.Failure(ModelError.InvalidModel("Unable to inspect GGUF model"))
+            ModelResult.Failure(ModelError.InvalidModel("Unable to inspect GGUF model: ${t.message ?: t::class.simpleName}"))
         }
     }
 
@@ -88,9 +88,8 @@ class GgufInspector : ModelInspector {
         9 -> Quantization.Q5_1
         10 -> Quantization.Q2_K
         11 -> Quantization.Q3_K_S
-        12 -> Quantization.Q4_K_S
-        13 -> Quantization.Q5_K_S
-        14 -> Quantization.Q6_K
+        14 -> Quantization.Q4_K_S
+        18 -> Quantization.Q6_K
         else -> Quantization.UNKNOWN
     }
 
@@ -125,7 +124,7 @@ class GgufInspector : ModelInspector {
 
     private fun BufferedInputStream.readString(): String {
         val length = readLeLong()
-        require(length in 0..(16L * 1024 * 1024)) { "Invalid GGUF string length" }
+        require(length in 0..(1024L * 1024 * 1024)) { "Invalid GGUF string length" }
         val bytes = ByteArray(length.toInt())
         readFully(bytes)
         return bytes.decodeToString()
@@ -144,14 +143,60 @@ class GgufInspector : ModelInspector {
         9 -> {
             val elementType = readLeInt()
             val count = readLeLong()
-            require(count in 0..100_000) { "Invalid GGUF array length" }
-            List(count.toInt()) { readValue(elementType) }
+            require(count >= 0) { "Invalid GGUF array length" }
+            repeat(count.toIntExact()) { skipValue(elementType) }
+            GgufArrayInfo(elementType, count)
         }
         10 -> readLeLong()
         11 -> readLeLong()
         12 -> Double.fromBits(readLeLong())
         else -> error("Unsupported GGUF metadata type: $type")
     }
+
+    private fun BufferedInputStream.skipValue(type: Int) {
+        when (type) {
+            0, 1, 7 -> skipFully(1)
+            2, 3 -> skipFully(2)
+            4, 5, 6 -> skipFully(4)
+            8 -> {
+                val length = readLeLong()
+                require(length >= 0) { "Invalid GGUF string length" }
+                skipFully(length)
+            }
+            9 -> {
+                val elementType = readLeInt()
+                val count = readLeLong()
+                require(count >= 0) { "Invalid GGUF array length" }
+                repeat(count.toIntExact()) { skipValue(elementType) }
+            }
+            10, 11, 12 -> skipFully(8)
+            else -> error("Unsupported GGUF metadata type: $type")
+        }
+    }
+
+    private fun BufferedInputStream.skipFully(count: Long) {
+        require(count >= 0) { "Invalid skip length" }
+        var remaining = count
+        while (remaining > 0) {
+            val skipped = skip(remaining)
+            if (skipped > 0) {
+                remaining -= skipped
+            } else {
+                if (read() < 0) error("Unexpected end of file")
+                remaining--
+            }
+        }
+    }
+
+    private fun Long.toIntExact(): Int {
+        require(this in 0..Int.MAX_VALUE.toLong()) { "GGUF array is too large" }
+        return toInt()
+    }
+
+    private data class GgufArrayInfo(
+        val elementType: Int,
+        val count: Long,
+    )
 
     private fun Any?.asLongOrNull(): Long? = when (this) {
         is Byte -> toLong()
