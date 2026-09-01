@@ -134,6 +134,8 @@ class WorkspacePathResolver(private val root: Path) {
         require(candidate.startsWith(root.normalize())) { "Path escapes workspace" }
         return candidate
     }
+
+    fun relative(path: Path): String = root.normalize().relativize(path.normalize()).toString()
 }
 
 class CreateFileAction(private val workspace: WorkspacePathResolver) : Action<Any, Any> {
@@ -147,7 +149,7 @@ class CreateFileAction(private val workspace: WorkspacePathResolver) : Action<An
         Files.createDirectories(path.parent)
         Files.write(path, bytes)
         require(Files.size(path) == bytes.size.toLong()) { "File write verification failed" }
-        return "created:${workspace.resolve(ActionArguments.string(input, "file_name")).fileName}"
+        return "created:${workspace.relative(path)}"
     }
 }
 
@@ -170,11 +172,9 @@ class ListFilesAction(private val workspace: WorkspacePathResolver) : Action<Any
         val directory = workspace.resolve(relative.ifBlank { "." })
         require(Files.isDirectory(directory)) { "Directory not found" }
         Files.list(directory).use { stream ->
-            return stream.map { workspaceRootRelative(workspace, it) }.sorted().toList().joinToString("\n")
+            return stream.map(workspace::relative).sorted().toList().joinToString("\n")
         }
     }
-
-    private fun workspaceRootRelative(workspace: WorkspacePathResolver, path: Path): String = path.fileName.toString()
 }
 
 class DeleteFileAction(private val workspace: WorkspacePathResolver) : Action<Any, Any> {
@@ -185,7 +185,7 @@ class DeleteFileAction(private val workspace: WorkspacePathResolver) : Action<An
         require(Files.isRegularFile(path)) { "File not found" }
         Files.delete(path)
         require(!Files.exists(path)) { "File deletion verification failed" }
-        return "deleted"
+        return "deleted:${workspace.relative(path)}"
     }
 }
 
