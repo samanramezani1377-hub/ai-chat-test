@@ -31,4 +31,5 @@ dependencies {
     implementation(project(":core:observability"))
     implementation(project(":core:settings"))
     implementation(project(":core:runtime"))
+    implementation(project(":core:runtime-android"))
 }
