@@ -1,6 +1,5 @@
 package com.woogit.aicore.runtime.android
 
-import com.woogit.aicore.domain.ChatMessage
 import com.woogit.aicore.domain.GenerationRequest
 import com.woogit.aicore.domain.GenerationResult
 import com.woogit.aicore.domain.ModelDescriptor
@@ -82,32 +81,22 @@ class LlamaCppAndroidRuntimeAdapter(
         val model = loadedModel
             ?: return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
 
-        val systemPrompt = request.messages
-            .firstOrNull { it.role == ChatMessage.Role.SYSTEM }
-            ?.content
-            .orEmpty()
-
-        val prompt = request.messages
-            .filter { it.role != ChatMessage.Role.SYSTEM }
-            .joinToString("\n") { message ->
-                when (message.role) {
-                    ChatMessage.Role.USER -> "User: ${message.content}"
-                    ChatMessage.Role.ASSISTANT -> "Assistant: ${message.content}"
-                    ChatMessage.Role.TOOL -> "Tool: ${message.content}"
-                    ChatMessage.Role.SYSTEM -> message.content
-                }
-            }
-
-        if (prompt.isBlank()) {
-            return ModelResult.Failure(ModelError.Inference("Generation request contains no user/tool content"))
+        val prompt = try {
+            Qwen3PromptFormatter.format(request.messages)
+        } catch (t: IllegalArgumentException) {
+            return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation"))
         }
 
         return try {
             val startedAt = System.nanoTime()
+            // The selected free AAR exposes completion rather than token streaming.
+            // Keep the domain callback contract, but emit only the completed response.
+            // Qwen3's ChatML prompt is formatted explicitly so multi-turn history and
+            // role boundaries are preserved instead of using generic User/Assistant text.
             val result = Llama.complete(
                 model = model,
                 prompt = prompt,
-                systemPrompt = systemPrompt,
+                systemPrompt = "",
                 maxTokens = request.settings.maxNewTokens.coerceAtLeast(1),
             )
             currentCoroutineContext().ensureActive()
@@ -133,6 +122,9 @@ class LlamaCppAndroidRuntimeAdapter(
     }
 
     override suspend fun stopGeneration() {
+        // The free AAR does not expose a native interrupt API. Coroutine cancellation
+        // remains the only honest stop mechanism until a streaming/interrupt-capable
+        // runtime is selected.
         currentCoroutineContext().ensureActive()
     }
 
