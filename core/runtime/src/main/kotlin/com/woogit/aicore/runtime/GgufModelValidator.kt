@@ -19,38 +19,29 @@ class GgufModelValidator(
     private val supportedQuantizations: Set<Quantization> = DEFAULT_QUANTIZATIONS
 ) : ModelValidator {
     override suspend fun validate(inspection: ModelInspection): ModelResult<ValidationStatus> {
-        if (inspection.error != null) {
-            return ModelResult.Failure(inspection.error)
+        val inspectionError = inspection.error
+        if (inspectionError != null) {
+            return ModelResult.Failure(inspectionError)
         }
 
         if (inspection.format != ModelFormat.GGUF) {
-            return ModelResult.Failure(
-                ModelError.UnsupportedFormat("Only GGUF models are supported")
-            )
+            return ModelResult.Failure(ModelError.UnsupportedFormat("Only GGUF models are supported"))
         }
 
         if (inspection.version !in SUPPORTED_GGUF_VERSIONS) {
-            return ModelResult.Failure(
-                ModelError.InvalidModel("Unsupported GGUF version: ${inspection.version}")
-            )
+            return ModelResult.Failure(ModelError.InvalidModel("Unsupported GGUF version: ${inspection.version}"))
         }
 
         if (inspection.sizeBytes <= 0L) {
-            return ModelResult.Failure(
-                ModelError.InvalidModel("GGUF model has an invalid file size")
-            )
+            return ModelResult.Failure(ModelError.InvalidModel("GGUF model has an invalid file size"))
         }
 
         if (inspection.tensorCount <= 0L) {
-            return ModelResult.Failure(
-                ModelError.InvalidModel("GGUF model contains no tensors")
-            )
+            return ModelResult.Failure(ModelError.InvalidModel("GGUF model contains no tensors"))
         }
 
         val architecture = inspection.metadata.architecture?.trim()?.lowercase()
-            ?: return ModelResult.Failure(
-                ModelError.InvalidMetadata("GGUF model does not declare an architecture")
-            )
+            ?: return ModelResult.Failure(ModelError.InvalidMetadata("GGUF model does not declare an architecture"))
 
         if (architecture !in supportedArchitectures) {
             return ModelResult.Failure(
@@ -61,9 +52,7 @@ class GgufModelValidator(
         }
 
         if (inspection.quantization == Quantization.UNKNOWN) {
-            return ModelResult.Failure(
-                ModelError.UnsupportedQuantization("Unable to determine model quantization")
-            )
+            return ModelResult.Failure(ModelError.UnsupportedQuantization("Unable to determine model quantization"))
         }
 
         if (inspection.quantization !in supportedQuantizations) {
@@ -76,23 +65,17 @@ class GgufModelValidator(
 
         val contextLength = inspection.metadata.contextLength
         if (contextLength != null && contextLength <= 0L) {
-            return ModelResult.Failure(
-                ModelError.InvalidMetadata("GGUF context length is invalid")
-            )
+            return ModelResult.Failure(ModelError.InvalidMetadata("GGUF context length is invalid"))
         }
 
         val embeddingLength = inspection.metadata.embeddingLength
         if (embeddingLength != null && embeddingLength <= 0L) {
-            return ModelResult.Failure(
-                ModelError.InvalidMetadata("GGUF embedding length is invalid")
-            )
+            return ModelResult.Failure(ModelError.InvalidMetadata("GGUF embedding length is invalid"))
         }
 
         val blockCount = inspection.metadata.blockCount
         if (blockCount != null && blockCount <= 0L) {
-            return ModelResult.Failure(
-                ModelError.InvalidMetadata("GGUF block count is invalid")
-            )
+            return ModelResult.Failure(ModelError.InvalidMetadata("GGUF block count is invalid"))
         }
 
         return ModelResult.Success(ValidationStatus.VALID)
@@ -100,13 +83,7 @@ class GgufModelValidator(
 
     companion object {
         private val SUPPORTED_GGUF_VERSIONS = setOf(1, 2, 3)
-
-        // The initial application target is Qwen3. Other architectures can be enabled by
-        // dependency injection when a concrete runtime supports them.
         private val DEFAULT_ARCHITECTURES = setOf("qwen3")
-
-        // Q6_K is the selected initial model target. F16/F32 are kept for validation so a
-        // compatible runtime can explicitly support them without changing the validator.
         private val DEFAULT_QUANTIZATIONS = setOf(
             Quantization.Q6_K,
             Quantization.F16,
