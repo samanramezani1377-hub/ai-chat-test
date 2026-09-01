@@ -131,6 +131,8 @@ class LlamaCppAndroidRuntimeAdapter(
                     return@collect
                 }
 
+                // Keep enough trailing text buffered to detect a stop sequence split
+                // across two native token callbacks without delaying the visible stream.
                 val holdBack = (maxStopLength - 1).coerceAtLeast(0)
                 val safeEnd = (output.length - holdBack).coerceAtLeast(emittedLength)
                 if (safeEnd > emittedLength) {
@@ -144,35 +146,30 @@ class LlamaCppAndroidRuntimeAdapter(
                 emittedLength = output.length
             }
 
-            val finishedAt = System.nanoTime()
             ModelResult.Success(
                 GenerationResult(
-                    text = output.toString().let { text ->
-                        val stopIndex = firstStopIndex(StringBuilder(text), settings.stopSequences)
-                        if (stopIndex >= 0) text.substring(0, stopIndex) else text
-                    },
+                    text = trimAtStop(output.toString(), settings.stopSequences),
                     outputTokens = null,
                     firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
-                    generationTimeMs = (finishedAt - startedAt) / 1_000_000,
+                    generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
                     stopped = stopRequested.get(),
                 )
             )
         } catch (t: CancellationException) {
             if (stopRequested.get()) {
-                ModelResult.Success(
-                    GenerationResult(
-                        text = output.toString(),
-                        outputTokens = null,
-                        firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
-                        generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
-                        stopped = true,
-                    )
-                )
+                stoppedResult(output, firstTokenAt, startedAt, settings.stopSequences)
             } else {
                 throw t
             }
         } catch (t: Throwable) {
-            ModelResult.Failure(RuntimeErrorMapper.inferenceFailure(t))
+            // The native runtime reports explicit cancellation as a library exception,
+            // while coroutine cancellation uses CancellationException. Both are normal
+            // outcomes when the user presses Stop.
+            if (stopRequested.get()) {
+                stoppedResult(output, firstTokenAt, startedAt, settings.stopSequences)
+            } else {
+                ModelResult.Failure(RuntimeErrorMapper.inferenceFailure(t))
+            }
         } finally {
             stopRequested.set(false)
         }
@@ -232,6 +229,31 @@ class LlamaCppAndroidRuntimeAdapter(
         }
         return first
     }
+
+    private fun trimAtStop(text: String, stops: List<String>): String {
+        var first = -1
+        for (stop in stops) {
+            if (stop.isEmpty()) continue
+            val index = text.indexOf(stop)
+            if (index >= 0 && (first < 0 || index < first)) first = index
+        }
+        return if (first >= 0) text.substring(0, first) else text
+    }
+
+    private fun stoppedResult(
+        output: StringBuilder,
+        firstTokenAt: Long?,
+        startedAt: Long,
+        stops: List<String>,
+    ): ModelResult.Success<GenerationResult> = ModelResult.Success(
+        GenerationResult(
+            text = trimAtStop(output.toString(), stops),
+            outputTokens = null,
+            firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
+            generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
+            stopped = true,
+        )
+    )
 
     private class RuntimeFailure(val error: ModelError) : IllegalStateException(error.message)
 }
