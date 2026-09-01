@@ -4,6 +4,7 @@ import com.woogit.aicore.domain.Action
 import com.woogit.aicore.domain.RiskLevel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.time.Instant
 import java.time.ZoneId
@@ -11,20 +12,21 @@ import java.time.format.DateTimeFormatter
 
 private const val MAX_FILE_BYTES = 1_048_576L
 
-/** Minimal, dependency-free argument reader for the strict action protocol. */
+/** Minimal argument reader retained for the current dependency-free core. */
 internal object ActionArguments {
     fun string(input: Any, name: String): String {
         val raw = input.toString()
         val pattern = Regex("\\\"${Regex.escape(name)}\\\"\\s*:\\s*\\\"((?:\\\\.|[^\\\"])*)\\\"")
         val value = pattern.find(raw)?.groupValues?.get(1)
             ?: throw IllegalArgumentException("Missing string argument: $name")
-        return value.replace("\\\\", "\\").replace("\\\"", "\"")
+        return value
+            .replace("\\\\\\\"", "\\\"")
+            .replace("\\\\\\\\", "\\\\")
     }
 }
 
 private class ExpressionParser(private val source: String) {
     private var index = 0
-
     fun parse(): Double {
         skipWhitespace()
         val value = expression()
@@ -33,7 +35,6 @@ private class ExpressionParser(private val source: String) {
         require(value.isFinite()) { "Result is not finite" }
         return value
     }
-
     private fun expression(): Double {
         var value = term()
         while (true) {
@@ -45,7 +46,6 @@ private class ExpressionParser(private val source: String) {
             }
         }
     }
-
     private fun term(): Double {
         var value = unary()
         while (true) {
@@ -61,7 +61,6 @@ private class ExpressionParser(private val source: String) {
             }
         }
     }
-
     private fun unary(): Double {
         skipWhitespace()
         return when {
@@ -70,7 +69,6 @@ private class ExpressionParser(private val source: String) {
             else -> primary()
         }
     }
-
     private fun primary(): Double {
         skipWhitespace()
         if (consume('(')) {
@@ -85,18 +83,11 @@ private class ExpressionParser(private val source: String) {
         return source.substring(start, index).toDoubleOrNull()
             ?: throw IllegalArgumentException("Invalid number")
     }
-
     private fun consume(char: Char): Boolean {
-        if (index < source.length && source[index] == char) {
-            index++
-            return true
-        }
+        if (index < source.length && source[index] == char) { index++; return true }
         return false
     }
-
-    private fun skipWhitespace() {
-        while (index < source.length && source[index].isWhitespace()) index++
-    }
+    private fun skipWhitespace() { while (index < source.length && source[index].isWhitespace()) index++ }
 }
 
 class CalculateAction : Action<Any, Any> {
@@ -123,19 +114,35 @@ class GetTimeAction(
 }
 
 class WorkspacePathResolver(private val root: Path) {
+    private val rootPath: Path
+
     init {
         Files.createDirectories(root)
-        require(Files.isDirectory(root)) { "Workspace root is not a directory" }
+        require(Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) { "Workspace root is not a directory" }
+        require(!Files.isSymbolicLink(root)) { "Workspace root must not be a symbolic link" }
+        rootPath = root.toAbsolutePath().normalize().toRealPath(LinkOption.NOFOLLOW_LINKS)
     }
 
     fun resolve(relativePath: String): Path {
         require(relativePath.isNotBlank()) { "Path must not be blank" }
-        val candidate = root.resolve(relativePath).normalize()
-        require(candidate.startsWith(root.normalize())) { "Path escapes workspace" }
+        val candidate = rootPath.resolve(relativePath).normalize()
+        require(candidate.startsWith(rootPath)) { "Path escapes workspace" }
+        validateNoSymlinkTraversal(candidate)
         return candidate
     }
 
-    fun relative(path: Path): String = root.normalize().relativize(path.normalize()).toString()
+    fun relative(path: Path): String = rootPath.relativize(path.toAbsolutePath().normalize()).toString()
+
+    private fun validateNoSymlinkTraversal(candidate: Path) {
+        var current = rootPath
+        val relative = rootPath.relativize(candidate)
+        for (part in relative) {
+            current = current.resolve(part)
+            if (Files.exists(current, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(current)) {
+                throw IllegalArgumentException("Symbolic links are not allowed inside workspace paths")
+            }
+        }
+    }
 }
 
 class CreateFileAction(private val workspace: WorkspacePathResolver) : Action<Any, Any> {
@@ -147,6 +154,7 @@ class CreateFileAction(private val workspace: WorkspacePathResolver) : Action<An
         val bytes = content.toByteArray(StandardCharsets.UTF_8)
         require(bytes.size <= MAX_FILE_BYTES) { "File content exceeds 1 MiB" }
         Files.createDirectories(path.parent)
+        require(!Files.isSymbolicLink(path)) { "Symbolic links cannot be modified" }
         Files.write(path, bytes)
         require(Files.size(path) == bytes.size.toLong()) { "File write verification failed" }
         return "created:${workspace.relative(path)}"
@@ -158,7 +166,7 @@ class ReadFileAction(private val workspace: WorkspacePathResolver) : Action<Any,
     override val risk = RiskLevel.LOW
     override suspend fun execute(input: Any): Any {
         val path = workspace.resolve(ActionArguments.string(input, "file_name"))
-        require(Files.isRegularFile(path)) { "File not found" }
+        require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) { "File not found" }
         require(Files.size(path) <= MAX_FILE_BYTES) { "File exceeds 1 MiB" }
         return Files.readString(path, StandardCharsets.UTF_8)
     }
@@ -170,9 +178,9 @@ class ListFilesAction(private val workspace: WorkspacePathResolver) : Action<Any
     override suspend fun execute(input: Any): Any {
         val relative = runCatching { ActionArguments.string(input, "path") }.getOrNull().orEmpty()
         val directory = workspace.resolve(relative.ifBlank { "." })
-        require(Files.isDirectory(directory)) { "Directory not found" }
+        require(Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) { "Directory not found" }
         Files.list(directory).use { stream ->
-            return stream.map(workspace::relative).sorted().toList().joinToString("\n")
+            return stream.filter { !Files.isSymbolicLink(it) }.map(workspace::relative).sorted().toList().joinToString("\n")
         }
     }
 }
@@ -182,9 +190,9 @@ class DeleteFileAction(private val workspace: WorkspacePathResolver) : Action<An
     override val risk = RiskLevel.SENSITIVE
     override suspend fun execute(input: Any): Any {
         val path = workspace.resolve(ActionArguments.string(input, "file_name"))
-        require(Files.isRegularFile(path)) { "File not found" }
+        require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) { "File not found" }
         Files.delete(path)
-        require(!Files.exists(path)) { "File deletion verification failed" }
+        require(!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) { "File deletion verification failed" }
         return "deleted:${workspace.relative(path)}"
     }
 }
