@@ -16,10 +16,7 @@ sealed interface AgentSessionResult {
     ) : AgentSessionResult
 }
 
-/**
- * Application-level agent loop.
- * The Action System remains the only authority capable of executing an action.
- */
+/** Application-level model → action → tool result → final answer loop. */
 class AgentSession(
     private val orchestrator: AgentOrchestrator,
     private val conversationStore: ConversationStore,
@@ -54,12 +51,15 @@ class AgentSession(
             var plan: ActionPlan? = null
             var actionResult: String? = null
             var steps = 0
+            var resultPersisted = false
 
-            while (steps < maxActionSteps) {
+            while (actionPlanCoordinator != null && steps < maxActionSteps) {
                 conversationStore.append(
                     ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis())
                 )
-                plan = actionPlanCoordinator?.prepare(contextProvider.build(requestedRecentMessages)) ?: break
+                resultPersisted = true
+
+                plan = actionPlanCoordinator.prepare(contextProvider.build(requestedRecentMessages)) ?: break
                 eventSink(AgentEvent.ActionPrepared(plan.prepared.executionId, plan.prepared.actionId))
 
                 if (plan.prepared.risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE) {
@@ -84,17 +84,17 @@ class AgentSession(
                 result = orchestrator.generate(settings, requestedRecentMessages) { token ->
                     eventSink(AgentEvent.Token(token))
                 }
+                resultPersisted = false
             }
 
-            if (steps == maxActionSteps && maxActionSteps > 0) {
+            if (!resultPersisted) {
+                conversationStore.append(
+                    ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis())
+                )
+            }
+            if (steps >= maxActionSteps && maxActionSteps > 0) {
                 eventSink(AgentEvent.Failed("Agent action step limit reached"))
             }
-
-            // When an action was executed, the final generation is the post-tool answer.
-            // With no action, the first generation is the final answer.
-            conversationStore.append(
-                ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis())
-            )
             eventSink(AgentEvent.Completed)
             AgentSessionResult.Reply(result, plan, actionResult)
         } catch (t: Throwable) {
@@ -119,7 +119,7 @@ data class ActionExecutionOutcome(
         append(",\"data\":")
         append(data?.let { "\"${it.replace("\\", "\\\\").replace("\"", "\\\"")}\"" } ?: "null")
         append(",\"error\":")
-        append(errorCode?.let { "\"${it.replace("\"", "\\\"")}" }?.let { "\"$it\"" } ?: "null")
+        append(errorCode?.let { "\"${it.replace("\\", "\\\"")}\"" } ?: "null")
         append("}")
     }
 }
