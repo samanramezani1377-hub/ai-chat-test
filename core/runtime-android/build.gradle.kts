@@ -1,0 +1,29 @@
+plugins {
+    id("com.android.library")
+    id("org.jetbrains.kotlin.android")
+}
+
+android {
+    namespace = "com.woogit.aicore.runtime.android"
+    compileSdk = 35
+
+    defaultConfig {
+        minSdk = 26
+        consumerProguardFiles("consumer-rules.pro")
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
+dependencies {
+    implementation(project(":core:domain"))
+    implementation(project(":core:runtime"))
+    implementation("dev.ffmpegkit-maintained:llama-android:0.1.1")
+}
