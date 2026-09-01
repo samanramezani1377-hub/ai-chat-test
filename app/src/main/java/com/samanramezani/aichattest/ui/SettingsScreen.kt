@@ -17,14 +17,10 @@ private val appSections = listOf("فضای کار", "لاگ و عیب‌یابی
 @Composable
 fun SettingsScreen(
     models: List<ModelDescriptor>, active: ModelDescriptor?, error: String?, onImport: () -> Unit,
-    onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: () -> Unit, onDelete: (String) -> Unit,
+    onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)? = null, onDelete: (String) -> Unit,
 ) {
     var section by remember { mutableStateOf("مدل") }
-    LazyColumn(
-        Modifier.fillMaxSize().padding(horizontal = UiTokens.pagePadding),
-        contentPadding = PaddingValues(top = 18.dp, bottom = 36.dp),
-        verticalArrangement = Arrangement.spacedBy(UiTokens.sectionGap),
-    ) {
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = UiTokens.pagePadding), contentPadding = PaddingValues(top = 18.dp, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(UiTokens.sectionGap)) {
         item {
             Text("تنظیمات", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(4.dp))
@@ -54,21 +50,14 @@ private fun SettingsGroup(title: String, sections: List<String>, selected: Strin
         Column(Modifier.padding(vertical = 8.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             sections.forEach { name ->
-                TextButton(
-                    onClick = { onSelect(name) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget).semantics { contentDescription = if (selected == name) "$name، انتخاب شده" else name },
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                ) { Text(if (selected == name) "● $name" else name, Modifier.fillMaxWidth()) }
+                TextButton(onClick = { onSelect(name) }, modifier = Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget).semantics { contentDescription = if (selected == name) "$name، انتخاب شده" else name }, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) { Text(if (selected == name) "● $name" else name, Modifier.fillMaxWidth()) }
             }
         }
     }
 }
 
 @Composable
-private fun ModelManagement(
-    active: ModelDescriptor?, models: List<ModelDescriptor>, error: String?, onImport: () -> Unit,
-    onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: () -> Unit, onDelete: (String) -> Unit,
-) {
+private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescriptor>, error: String?, onImport: () -> Unit, onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)?, onDelete: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("مدل", style = MaterialTheme.typography.titleLarge)
         UiSurface {
@@ -76,7 +65,7 @@ private fun ModelManagement(
                 Text("مدل فعلی", style = MaterialTheme.typography.labelLarge)
                 Text(active?.displayName ?: "مدلی فعال نیست", style = MaterialTheme.typography.titleMedium)
                 Text(if (active != null) "آماده استفاده در گفت‌وگو" else "برای شروع، یک مدل محلی وارد و فعال کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (active != null) OutlinedButton(onClick = onDeactivate, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("خارج‌کردن مدل از حافظه") }
+                if (active != null && onDeactivate != null) OutlinedButton(onClick = onDeactivate, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("خارج‌کردن مدل از حافظه") }
             }
         }
         Button(onClick = onImport, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("انتخاب فایل مدل از گوشی") }
@@ -85,21 +74,12 @@ private fun ModelManagement(
             TextButton(onClick = onRefresh, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text("به‌روزرسانی") }
         }
         if (models.isEmpty()) EmptyState() else models.forEach { model -> ModelCard(model, model.id == active?.id, onActivate, onDelete) }
-        if (error != null) {
-            Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
-                Text(error, Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onErrorContainer)
-            }
-        }
+        if (error != null) Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) { Text(error, Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onErrorContainer) }
     }
 }
 
 @Composable private fun EmptyState() {
-    UiSurface {
-        Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("مدل محلی واردشده‌ای وجود ندارد.", style = MaterialTheme.typography.titleMedium)
-            Text("از انتخاب فایل مدل برای واردکردن یک فایل GGUF استفاده کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
+    UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("مدل محلی واردشده‌ای وجود ندارد.", style = MaterialTheme.typography.titleMedium); Text("از انتخاب فایل مدل برای واردکردن یک فایل GGUF استفاده کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
 }
 
 @Composable private fun ModelCard(model: ModelDescriptor, active: Boolean, onActivate: (String) -> Unit, onDelete: (String) -> Unit) {
@@ -107,10 +87,7 @@ private fun ModelManagement(
     UiSurface {
         Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Column(Modifier.weight(1f)) {
-                    Text(model.displayName, style = MaterialTheme.typography.titleMedium)
-                    Text("GGUF · ${model.quantization}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                Column(Modifier.weight(1f)) { Text(model.displayName, style = MaterialTheme.typography.titleMedium); Text("GGUF · ${model.quantization}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 Text(if (active) "فعال" else "غیرفعال", style = MaterialTheme.typography.labelLarge)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -129,11 +106,5 @@ private fun ModelManagement(
 }
 
 @Composable private fun UnavailableSection(title: String, message: String) {
-    UiSurface {
-        Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text(title, style = MaterialTheme.typography.titleLarge)
-            Text("خارج از دسترس", style = MaterialTheme.typography.labelLarge)
-            Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
+    UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) { Text(title, style = MaterialTheme.typography.titleLarge); Text("خارج از دسترس", style = MaterialTheme.typography.labelLarge); Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
 }
