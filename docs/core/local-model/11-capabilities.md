@@ -16,6 +16,15 @@ Model Capabilities
 └── inference
 ```
 
-هر Capability باید نتیجه واقعی، State و Error قابل دسترسی داشته باشد.
+هر Capability باید نتیجه واقعی، State، Error و در عملیات قابل ردیابی، Operation/Execution/Trace ID داشته باشد.
 
-ارجاع: [UI Integration](15-ui-integration.md)
+## ارجاعات
+
+- [Model Management](02-model-management.md)
+- [Runtime](04-runtime.md)
+- [Activation](05-activation.md)
+- [Operations](07-operations.md)
+- [Errors](09-errors.md)
+- [Observability](10-observability.md)
+- [Testing](14-testing.md)
+- [UI Integration](15-ui-integration.md)
