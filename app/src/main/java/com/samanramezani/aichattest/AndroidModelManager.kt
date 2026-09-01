@@ -44,14 +44,11 @@ class AndroidModelManager(
     }
 
     suspend fun models(): ModelResult<List<ModelDescriptor>> = service.listModels()
-
     suspend fun activeModel(): ModelResult<ModelDescriptor?> = service.activeModel()
-
     suspend fun restoreActive(): ModelResult<ModelDescriptor?> = service.restoreActive()
-
     suspend fun activate(id: String): ModelResult<ModelDescriptor> = service.activate(id)
-
     suspend fun deactivate(): ModelResult<Unit> = service.deactivate()
+    suspend fun unload(): ModelResult<Unit> = service.unload()
 
     suspend fun generate(
         messages: List<ChatMessage>,
@@ -60,6 +57,5 @@ class AndroidModelManager(
     ): ModelResult<GenerationResult> = service.generate(messages, settings, onToken)
 
     suspend fun stopGeneration() = service.stopGeneration()
-
     suspend fun delete(id: String): ModelResult<Unit> = service.deleteModel(id)
 }
