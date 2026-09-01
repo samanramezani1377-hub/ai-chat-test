@@ -1,27 +1,35 @@
-# UI Screens
+# صفحه‌های رابط کاربری
 
-**Status:** Draft — decisions pending
+**وضعیت:** پیش‌نویس — تصمیم‌های بیشتر در حال تکمیل
 
-## Screen tree
+> 🔴 **تمام صفحه‌های رابط کاربری باید فارسی و راست‌چین (RTL) باشند.**
+
+## درخت صفحه‌ها
 
 ```text
-UI
-├── Chat
-│   ├── Conversation
-│   └── Conversation History
-├── Workspace
-│   ├── Task
-│   └── Action Detail
-├── Errors
-│   └── Error Detail
-└── Settings
-    ├── AI / Model
-    ├── Conversation
-    ├── Appearance
-    ├── Privacy
-    └── Diagnostics
+رابط کاربری
+├── گفت‌وگو
+│   ├── گفتگو
+│   └── تاریخچه گفتگوها
+├── فضای کار
+│   ├── وظیفه
+│   └── جزئیات عملیات
+├── خطاها
+│   └── جزئیات خطا
+└── تنظیمات
+    ├── هوش مصنوعی / مدل
+    ├── گفتگو
+    ├── ظاهر
+    ├── حریم خصوصی
+    └── عیب‌یابی
 ```
 
-Each screen will receive a dedicated specification when its design decisions are finalized.
+## قواعد عمومی صفحه‌ها
 
-No implementation is added in this phase.
+- عنوان‌ها و توضیحات فارسی هستند.
+- چینش اصلی راست‌چین است.
+- اطلاعات فنی غیرقابل‌ترجمه می‌تواند LTR باشد، اما نباید جهت کلی صفحه را تغییر دهد.
+- هر صفحه باید حالت‌های مرتبط خود را مستند کند.
+- هیچ صفحه‌ای در فاز فعلی پیاده‌سازی نمی‌شود.
+
+هر صفحه پس از نهایی‌شدن تصمیم‌های مربوط به آن، مشخصات اختصاصی دریافت می‌کند.
