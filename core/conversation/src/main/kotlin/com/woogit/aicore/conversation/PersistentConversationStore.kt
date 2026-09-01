@@ -26,18 +26,17 @@ interface ConversationHistoryRepository {
     suspend fun rename(id: String, title: String, nowEpochMs: Long = System.currentTimeMillis()): Boolean
     suspend fun delete(id: String): ConversationRecord?
     suspend fun restore(record: ConversationRecord): Boolean
+    /** Permanently removes retained data for a conversation after the undo window expires. */
+    suspend fun purge(id: String): Boolean
     suspend fun touch(id: String, messageCount: Int, nowEpochMs: Long = System.currentTimeMillis()): Boolean
-
-    /** Returns persisted messages for one conversation, in chronological order. */
     suspend fun messages(id: String): List<ConversationMessage>
-
-    /** Persists one message and advances conversation metadata atomically from the repository's perspective. */
     suspend fun append(id: String, message: ConversationMessage, nowEpochMs: Long = System.currentTimeMillis()): Boolean
 }
 
 class InMemoryConversationHistoryRepository : ConversationHistoryRepository {
     private val records = LinkedHashMap<String, ConversationRecord>()
     private val messages = LinkedHashMap<String, MutableList<ConversationMessage>>()
+    private val deletedMessages = LinkedHashMap<String, List<ConversationMessage>>()
 
     @Synchronized
     override suspend fun recent(limit: Int): List<ConversationRecord> {
@@ -60,27 +59,36 @@ class InMemoryConversationHistoryRepository : ConversationHistoryRepository {
         return true
     }
 
-    @Synchronized override suspend fun delete(id: String): ConversationRecord? {
-        messages.remove(id)
-        return records.remove(id)
+    @Synchronized
+    override suspend fun delete(id: String): ConversationRecord? {
+        val record = records.remove(id) ?: return null
+        deletedMessages[id] = messages.remove(id)?.toList() ?: emptyList()
+        return record
     }
 
-    @Synchronized override suspend fun restore(record: ConversationRecord): Boolean {
+    @Synchronized
+    override suspend fun restore(record: ConversationRecord): Boolean {
         if (records.containsKey(record.id)) return false
         records[record.id] = record
-        messages.putIfAbsent(record.id, mutableListOf())
+        messages[record.id] = deletedMessages.remove(record.id)?.toMutableList() ?: mutableListOf()
         return true
     }
 
-    @Synchronized override suspend fun touch(id: String, messageCount: Int, nowEpochMs: Long): Boolean {
+    @Synchronized
+    override suspend fun purge(id: String): Boolean = deletedMessages.remove(id) != null
+
+    @Synchronized
+    override suspend fun touch(id: String, messageCount: Int, nowEpochMs: Long): Boolean {
         val current = records[id] ?: return false
         records[id] = current.copy(updatedAtEpochMs = nowEpochMs, messageCount = messageCount)
         return true
     }
 
-    @Synchronized override suspend fun messages(id: String): List<ConversationMessage> = messages[id]?.toList() ?: emptyList()
+    @Synchronized
+    override suspend fun messages(id: String): List<ConversationMessage> = messages[id]?.toList() ?: emptyList()
 
-    @Synchronized override suspend fun append(id: String, message: ConversationMessage, nowEpochMs: Long): Boolean {
+    @Synchronized
+    override suspend fun append(id: String, message: ConversationMessage, nowEpochMs: Long): Boolean {
         val current = records[id] ?: return false
         val list = messages.getOrPut(id) { mutableListOf() }
         list += message
