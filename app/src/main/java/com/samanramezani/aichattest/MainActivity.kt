@@ -29,13 +29,11 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import com.woogit.aicore.agent.AgentEvent
-import com.woogit.aicore.conversation.ConversationMessage
-import com.woogit.aicore.conversation.ConversationRecord
 import com.woogit.aicore.domain.ChatMessage
 import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.ModelDescriptor
-import com.woogit.aicore.domain.ModelError
 import com.woogit.aicore.domain.ModelResult
+import com.woogit.aicore.conversation.ConversationRecord
 import com.samanramezani.aichattest.ui.SettingsScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -64,51 +62,42 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val container = (application as? AIChatApplication)?.container ?: AppContainer(this)
-        setContent { AppRoot(container) }
+        setContent { MainScreen(container) }
     }
 }
 
 @Composable
-private fun AppRoot(container: AppContainer) {
+private fun MainScreen(container: AppContainer) {
+    val history = remember { container.conversationHistory }
+    val manager = remember { container.modelManager }
+    val scope = rememberCoroutineScope()
     var destination by remember { mutableStateOf(Destination.CHAT) }
-    var sidebarOpen by remember { mutableStateOf(false) }
-    var quickMenuOpen by remember { mutableStateOf(false) }
-    var runtimeDetailsOpen by remember { mutableStateOf(false) }
+    var current by remember { mutableStateOf<ConversationRecord?>(null) }
+    var conversations by remember { mutableStateOf(emptyList<ConversationRecord>()) }
     var messages by remember { mutableStateOf(emptyList<UiMessage>()) }
     var composer by remember { mutableStateOf("") }
     var generating by remember { mutableStateOf(false) }
     var runtimeStatus by remember { mutableStateOf("خارج از دسترس") }
-    var activeModel by remember { mutableStateOf<ModelDescriptor?>(null) }
-    var models by remember { mutableStateOf<List<ModelDescriptor>>(emptyList()) }
     var diagnostic by remember { mutableStateOf<String?>(null) }
-    var conversations by remember { mutableStateOf<List<ConversationRecord>>(emptyList()) }
-    var current by remember { mutableStateOf<ConversationRecord?>(null) }
-    var deleted by remember { mutableStateOf<DeletedConversation?>(null) }
-    var renameTarget by remember { mutableStateOf<ConversationRecord?>(null) }
-    var recentLimit by remember { mutableIntStateOf(5) }
+    var activeModel by remember { mutableStateOf<ModelDescriptor?>(null) }
+    var models by remember { mutableStateOf(emptyList<ModelDescriptor>()) }
     var execution by remember { mutableStateOf<ExecutionState?>(null) }
-    val scope = rememberCoroutineScope()
-    val manager = container.modelManager
-    val history = container.conversationHistory
+    var sidebarOpen by remember { mutableStateOf(false) }
+    var quickMenuOpen by remember { mutableStateOf(false) }
+    var runtimeDetailsOpen by remember { mutableStateOf(false) }
+    var renameTarget by remember { mutableStateOf<ConversationRecord?>(null) }
+    var deleted by remember { mutableStateOf<DeletedConversation?>(null) }
+    var recentLimit by remember { mutableIntStateOf(20) }
 
-    suspend fun loadConversation(record: ConversationRecord) {
-        val stored = history.messages(record.id)
+    fun loadConversation(record: ConversationRecord) {
         current = record
-        messages = stored.map {
-            UiMessage(
-                if (it.role == ConversationMessage.Role.USER) ChatMessage.Role.USER else ChatMessage.Role.ASSISTANT,
-                it.content,
-                it.id,
-            )
-        }
-        conversations = history.recent(recentLimit)
+        messages = history.messages(record.id).map { UiMessage(it.role, it.content, it.id) }
     }
 
     fun refreshModels() {
-        if (manager == null) return
         scope.launch(Dispatchers.Default) {
-            val listed = manager.models()
-            val active = manager.activeModel()
+            val listed = manager?.models()
+            val active = manager?.activeModel()
             withContext(Dispatchers.Main) {
                 models = (listed as? ModelResult.Success)?.value ?: emptyList()
                 activeModel = (active as? ModelResult.Success)?.value
@@ -125,10 +114,11 @@ private fun AppRoot(container: AppContainer) {
     }
 
     LaunchedEffect(Unit) {
-        if (manager != null) withContext(Dispatchers.Default) { manager.restoreActive() }
+        manager?.let { withContext(Dispatchers.Default) { it.restoreActive() } }
         refreshModels()
         val records = history.recent(recentLimit)
         val record = records.firstOrNull() ?: history.create("گفت‌وگوی جدید")
+        conversations = history.recent(recentLimit)
         loadConversation(record)
     }
 
@@ -166,20 +156,17 @@ private fun AppRoot(container: AppContainer) {
         execution = ExecutionState(UUID.randomUUID().toString(), "درخواست Agent", "در حال اجرا", System.currentTimeMillis(), requestPreview = text)
         scope.launch(Dispatchers.Default) {
             val session = container.createAgentSession(record.id) { event ->
-                withContext(Dispatchers.Main) {
+                scope.launch(Dispatchers.Main) {
                     when (event) {
                         AgentEvent.Started -> runtimeStatus = "در حال اجرای Agent"
                         is AgentEvent.Token -> Unit
-                        is AgentEvent.ActionPrepared -> {
-                            execution = execution?.copy(id = event.executionId, action = event.actionId, status = "در حال اجرای عملیات")
-                        }
+                        is AgentEvent.ActionPrepared -> execution = execution?.copy(id = event.executionId, action = event.actionId, status = "در حال اجرای عملیات")
                         is AgentEvent.ApprovalRequired -> {
                             execution = execution?.copy(id = event.executionId, status = "نیازمند تأیید", approvalRequired = true)
                             runtimeStatus = "نیازمند تأیید"
+                            generating = false
                         }
-                        is AgentEvent.ActionExecuted -> {
-                            execution = execution?.copy(status = "عملیات انجام شد")
-                        }
+                        is AgentEvent.ActionExecuted -> execution = execution?.copy(status = "عملیات انجام شد")
                         is AgentEvent.Failed -> {
                             diagnostic = event.message
                             execution = execution?.copy(status = "ناموفق", error = event.message, finishedAt = System.currentTimeMillis())
@@ -187,8 +174,7 @@ private fun AppRoot(container: AppContainer) {
                         AgentEvent.Completed -> if (!execution?.approvalRequired.orFalse()) runtimeStatus = "آماده"
                     }
                 }
-            }
-            if (session == null) {
+            } ?: run {
                 withContext(Dispatchers.Main) {
                     generating = false
                     runtimeStatus = "خطا"
@@ -201,13 +187,8 @@ private fun AppRoot(container: AppContainer) {
                 val result = session.send(text, InferenceSettings(maxNewTokens = 512), requestedRecentMessages = 24)
                 withContext(Dispatchers.Main) {
                     generating = false
-                    val assistantId = UUID.randomUUID().toString()
-                    messages = messages + UiMessage(ChatMessage.Role.ASSISTANT, result.generation.text, assistantId)
-                    execution = execution?.copy(
-                        status = if (result.actionPlan != null) "عملیات تکمیل شد" else "پاسخ آماده است",
-                        finishedAt = System.currentTimeMillis(),
-                        resultPreview = result.generation.text.take(240),
-                    )
+                    messages = messages + UiMessage(ChatMessage.Role.ASSISTANT, result.generation.text, UUID.randomUUID().toString())
+                    execution = execution?.copy(status = if (result.actionPlan != null) "عملیات تکمیل شد" else "پاسخ آماده است", finishedAt = System.currentTimeMillis(), resultPreview = result.generation.text.take(240))
                     if (!execution?.approvalRequired.orFalse()) runtimeStatus = "آماده"
                 }
             } catch (t: Throwable) {
@@ -218,7 +199,7 @@ private fun AppRoot(container: AppContainer) {
                     execution = execution?.copy(status = "ناموفق", finishedAt = System.currentTimeMillis(), error = diagnostic)
                 }
             }
-            val updated = withContext(Dispatchers.Default) { history.recent(recentLimit).firstOrNull { it.id == record.id } }
+            val updated = history.recent(recentLimit).firstOrNull { it.id == record.id }
             withContext(Dispatchers.Main) {
                 if (updated != null) current = updated
                 conversations = history.recent(recentLimit)
@@ -235,9 +216,10 @@ private fun AppRoot(container: AppContainer) {
     }
 
     fun deactivateModel() {
-        if (manager == null || activeModel == null) return
+        val m = manager ?: return
+        if (activeModel == null) return
         scope.launch(Dispatchers.Default) {
-            val result = manager.deactivate()
+            val result = m.deactivate()
             withContext(Dispatchers.Main) {
                 when (result) {
                     is ModelResult.Success -> { activeModel = null; runtimeStatus = "خارج از دسترس"; diagnostic = null; refreshModels() }
@@ -255,7 +237,9 @@ private fun AppRoot(container: AppContainer) {
     }
 
     fun openConversation(record: ConversationRecord) {
-        scope.launch(Dispatchers.Default) { loadConversation(record); withContext(Dispatchers.Main) { destination = Destination.CHAT; sidebarOpen = false } }
+        loadConversation(record)
+        destination = Destination.CHAT
+        sidebarOpen = false
     }
 
     fun deleteConversation(record: ConversationRecord) {
@@ -263,14 +247,17 @@ private fun AppRoot(container: AppContainer) {
             val removed = history.delete(record.id) ?: return@launch
             val replacement = if (current?.id == removed.id) history.recent(1).firstOrNull() else null
             withContext(Dispatchers.Main) {
-                if (replacement != null) scope.launch(Dispatchers.Default) { loadConversation(replacement) } else if (current?.id == removed.id) { current = null; messages = emptyList() }
-                conversations = history.recent(recentLimit); deleted = DeletedConversation(removed)
+                if (replacement != null) loadConversation(replacement) else if (current?.id == removed.id) { current = null; messages = emptyList() }
+                conversations = history.recent(recentLimit)
+                deleted = DeletedConversation(removed)
             }
         }
     }
 
     fun restoreDeleted(record: ConversationRecord) {
-        scope.launch(Dispatchers.Default) { if (history.restore(record)) { loadConversation(record); withContext(Dispatchers.Main) { conversations = history.recent(recentLimit); deleted = null } } }
+        scope.launch(Dispatchers.Default) {
+            if (history.restore(record)) withContext(Dispatchers.Main) { loadConversation(record); conversations = history.recent(recentLimit); deleted = null }
+        }
     }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -310,13 +297,13 @@ private fun Boolean?.orFalse() = this == true
 @Composable private fun Sidebar(current: ConversationRecord?, conversations: List<ConversationRecord>, destination: Destination, onClose: () -> Unit, onDestination: (Destination) -> Unit, onNew: () -> Unit, onOpen: (ConversationRecord) -> Unit, onRename: (ConversationRecord) -> Unit, onDelete: (ConversationRecord) -> Unit, onMore: () -> Unit, canShowMore: Boolean) { Box(Modifier.fillMaxSize()) { Spacer(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .24f)).clickable(onClick = onClose).semantics { contentDescription = "بستن نوار کناری" }); Surface(Modifier.fillMaxHeight().fillMaxWidth(.88f).align(Alignment.CenterEnd), shape = RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp), tonalElevation = 8.dp) { LazyColumn(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) { item { Text("منو", style = MaterialTheme.typography.headlineSmall); Spacer(Modifier.height(8.dp)) }; item { Button(onClick = onNew, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp)); Text("گفت‌وگوی جدید") } }; item { SectionLabel("ابزارها") }; item { SideNav("فضای کار", destination == Destination.WORK) { onDestination(Destination.WORK) } }; item { SideNav("عیب‌یابی", destination == Destination.DIAGNOSTICS) { onDestination(Destination.DIAGNOSTICS) } }; item { SideNav("تنظیمات", destination == Destination.SETTINGS) { onDestination(Destination.SETTINGS) } }; item { SectionLabel("اطلاعات") }; item { SideNav("درباره برنامه", destination == Destination.ABOUT) { onDestination(Destination.ABOUT) } }; item { SectionLabel("اخیر") }; if (conversations.isEmpty()) item { Text("گفت‌وگوی ذخیره‌شده‌ای وجود ندارد.", color = MaterialTheme.colorScheme.onSurfaceVariant) }; items(conversations, key = { it.id }) { record -> RecentConversation(record, record.id == current?.id, { onOpen(record) }, { onRename(record) }, { onDelete(record) }) }; if (canShowMore) item { TextButton(onClick = onMore, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("مشاهده بیشتر") } }; item { OutlinedButton(onClick = onClose, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("بستن") } } } } } }
 @Composable private fun SectionLabel(text: String) { Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 14.dp, bottom = 3.dp)) }
 @Composable private fun SideNav(text: String, active: Boolean, onClick: () -> Unit) { TextButton(onClick = onClick, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (active) "● $text" else text, Modifier.fillMaxWidth()) } }
-@Composable private fun RecentConversation(record: ConversationRecord, active: Boolean, onOpen: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) { var menu by remember { mutableStateOf(false) }; val time = remember(record.updatedAtEpochMs) { DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(record.updatedAtEpochMs)) }; Box(Modifier.fillMaxWidth()) { Surface(Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = { menu = true }).semantics { contentDescription = "گفت‌وگو ${record.title}. برای گزینه‌ها لمس طولانی کنید." }, shape = RoundedCornerShape(16.dp), color = if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .55f) else Color.Transparent) { Row(Modifier.padding(12.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) { Text("●", color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline); Spacer(Modifier.width(8.dp)); Column(Modifier.weight(1f)) { Text(record.title, maxLines = 1); Text("${record.messageCount} پیام", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }; TextButton(onClick = { menu = !menu }, Modifier.align(Alignment.TopEnd).heightIn(min = 48.dp).semantics { contentDescription = "گزینه‌های ${record.title}" }) { Text("گزینه‌ها") }; DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) { DropdownMenuItem(text = { Text("باز کردن") }, onClick = { menu = false; onOpen() }); DropdownMenuItem(text = { Text("تغییر نام") }, onClick = { menu = false; onRename() }); DropdownMenuItem(text = { Text("حذف", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; onDelete() }) } } }
+@Composable private fun RecentConversation(record: ConversationRecord, active: Boolean, onOpen: () -> Unit, onLongPress: () -> Unit, onDelete: () -> Unit) { var menu by remember { mutableStateOf(false) }; val time = remember(record.updatedAtEpochMs) { DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(record.updatedAtEpochMs)) }; Box(Modifier.fillMaxWidth()) { Surface(Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = { menu = true }).semantics { contentDescription = "گفت‌وگو ${record.title}. برای گزینه‌ها لمس طولانی کنید." }, shape = RoundedCornerShape(16.dp), color = if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .55f) else Color.Transparent) { Row(Modifier.padding(12.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) { Text("●", color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline); Spacer(Modifier.width(8.dp)); Column(Modifier.weight(1f)) { Text(record.title, maxLines = 1); Text("${record.messageCount} پیام", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }; TextButton(onClick = { menu = !menu }, Modifier.align(Alignment.TopEnd).heightIn(min = 48.dp).semantics { contentDescription = "گزینه‌های ${record.title}" }) { Text("گزینه‌ها") }; DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) { DropdownMenuItem(text = { Text("باز کردن") }, onClick = { menu = false; onOpen() }); DropdownMenuItem(text = { Text("تغییر نام") }, onClick = { menu = false; onLongPress() }); DropdownMenuItem(text = { Text("حذف", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; onDelete() }) } } }
 @Composable private fun UndoBar(onUndo: () -> Unit, onDismiss: () -> Unit, onExpire: () -> Unit) { var remaining by remember { mutableIntStateOf(10) }; LaunchedEffect(Unit) { while (remaining > 0) { delay(1000); remaining-- }; onExpire() }; Box(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.BottomCenter) { Surface(Modifier.fillMaxWidth().widthIn(max = 620.dp), shape = RoundedCornerShape(18.dp), tonalElevation = 6.dp) { Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) { Text("گفت‌وگو حذف شد", Modifier.weight(1f)); TextButton(onClick = onUndo, Modifier.heightIn(min = 48.dp)) { Text("بازگردانی") }; Text("$remaining ثانیه", style = MaterialTheme.typography.labelMedium); IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp).semantics { contentDescription = "بستن پیام حذف" }) { Icon(Icons.Default.Close, "بستن") } } } } }
 @Composable private fun RenameDialog(initial: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) { var value by remember(initial) { mutableStateOf(initial) }; AlertDialog(onDismissRequest = onDismiss, title = { Text("تغییر نام گفت‌وگو") }, text = { TextField(value, { value = it }, singleLine = true, label = { Text("عنوان") }) }, confirmButton = { TextButton(onClick = { onConfirm(value.trim()) }, enabled = value.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text("ذخیره") } }, dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("انصراف") } }) }
 @Composable private fun RuntimeDetailsDialog(status: String, model: ModelDescriptor?, runtimeName: String, runtimeVersion: String, backend: String?, onDismiss: () -> Unit) { AlertDialog(onDismissRequest = onDismiss, title = { Text("وضعیت Runtime") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("وضعیت: $status"); Text("مدل: ${model?.displayName ?: "مدلی فعال نیست"}"); Text("Runtime: $runtimeName"); Text("نسخه: $runtimeVersion"); Text("Backend: ${backend ?: "ارائه نشده"}") } }, confirmButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("بستن") } }) }
-@Composable private fun ChatPage(messages: List<UiMessage>, composer: String, generating: Boolean, onComposer: (String) -> Unit, onSend: () -> Unit, onStop: () -> Unit, execution: ExecutionState?, onWorkspace: () -> Unit) { Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) { LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { if (messages.isEmpty()) item { Column(Modifier.fillMaxWidth().padding(top = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text("گفت‌وگو", style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(6.dp)); Text("پیام خود را بنویسید و گفتگو را شروع کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }; items(messages, key = { it.id }) { MessageRow(it) }; if (generating) item { Text("در حال اجرای Agent…", color = MaterialTheme.colorScheme.onSurfaceVariant) }; if (!generating && execution != null) item { ActionSummary(execution, onWorkspace) } }; Surface(Modifier.fillMaxWidth().padding(bottom = 12.dp), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), tonalElevation = 2.dp) { Row(Modifier.padding(8.dp), verticalAlignment = Alignment.Bottom) { TextField(value = composer, onValueChange = onComposer, modifier = Modifier.weight(1f).onPreviewKeyEvent { event -> event.type == KeyEventType.KeyDown && event.key == Key.Enter && event.isShiftPressed.also { if (it) onSend() } }, placeholder = { Text("پیام خود را بنویسید…") }, maxLines = 6); Spacer(Modifier.width(8.dp)); FilledIconButton(onClick = if (generating) onStop else onSend, enabled = generating || composer.isNotBlank(), modifier = Modifier.size(48.dp).semantics { contentDescription = if (generating) "توقف تولید" else "ارسال پیام" }) { Icon(if (generating) Icons.Default.Stop else Icons.Default.Send, if (generating) "توقف تولید" else "ارسال پیام") } } } } }
+@Composable private fun ChatPage(messages: List<UiMessage>, composer: String, generating: Boolean, onComposer: (String) -> Unit, onSend: () -> Unit, onStop: () -> Unit, execution: ExecutionState?, onWorkspace: () -> Unit) { Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) { LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { if (messages.isEmpty()) item { Column(Modifier.fillMaxWidth().padding(top = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text("گفت‌وگو", style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(6.dp)); Text("پیام خود را بنویسید و گفتگو را شروع کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }; items(messages, key = { it.id }) { MessageRow(it) }; if (generating) item { Text("در حال اجرای Agent…", color = MaterialTheme.colorScheme.onSurfaceVariant) }; if (!generating && execution != null) item { ActionSummary(execution, onWorkspace) } }; Surface(Modifier.fillMaxWidth().padding(bottom = 12.dp), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), tonalElevation = 2.dp) { Row(Modifier.padding(8.dp), verticalAlignment = Alignment.Bottom) { TextField(value = composer, onValueChange = onComposer, modifier = Modifier.weight(1f), placeholder = { Text("پیام خود را بنویسید…") }, maxLines = 6); Spacer(Modifier.width(8.dp)); FilledIconButton(onClick = if (generating) onStop else onSend, enabled = generating || composer.isNotBlank(), modifier = Modifier.size(48.dp).semantics { contentDescription = if (generating) "توقف تولید" else "ارسال پیام" }) { Icon(if (generating) Icons.Default.Stop else Icons.Default.Send, if (generating) "توقف تولید" else "ارسال پیام") } } } } }
 @Composable private fun MessageRow(message: UiMessage) { val user = message.role == ChatMessage.Role.USER; Column(Modifier.fillMaxWidth(), horizontalAlignment = if (user) Alignment.Start else Alignment.End) { Text(if (user) "شما" else "مدل", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); if (user) Surface(color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .70f), shape = RoundedCornerShape(18.dp)) { Text(message.text, Modifier.padding(13.dp)) } else Text(message.text, Modifier.fillMaxWidth(.94f)) } }
-@Composable private fun ActionSummary(execution: ExecutionState, onWorkspace: () -> Unit) { Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)) { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("آخرین عملیات: ${execution.action}", style = MaterialTheme.typography.titleSmall); Text("${execution.status} · ${durationText(execution)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); if (execution.approvalRequired) Text("این عملیات نیاز به تأیید دارد.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall) }; TextButton(onClick = onWorkspace, Modifier.heightIn(min = 48.dp)) { Text("مشاهده جزئیات") } } } }
+@Composable private fun ActionSummary(execution: ExecutionState, onWorkspace: () -> Unit) { Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)) { Column(Modifier.padding(12.dp)) { Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("آخرین عملیات: ${execution.action}", style = MaterialTheme.typography.titleSmall); Text("${execution.status} · ${durationText(execution)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); if (execution.approvalRequired) Text("این عملیات نیاز به تأیید دارد.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall) }; TextButton(onClick = onWorkspace, Modifier.heightIn(min = 48.dp)) { Text("مشاهده جزئیات") } }; if (execution.approvalRequired) { Spacer(Modifier.height(8.dp)); Text("برای عملیات حساس، ابتدا تأیید کاربر لازم است.", style = MaterialTheme.typography.bodySmall) } } } }
 @Composable private fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, onDiagnostics: () -> Unit) { var expanded by remember(execution?.id) { mutableStateOf(false) }; SimplePage("فضای کار") { Text("خلاصه اجرای جاری", style = MaterialTheme.typography.titleLarge); if (execution == null) Text("اجرای فعالی ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant) else { Text(execution.action, style = MaterialTheme.typography.titleMedium); Text(execution.status); Text("مدل: ${model?.displayName ?: "مدل محلی"}", style = MaterialTheme.typography.bodySmall); Text("شناسه Execution: ${execution.id}", style = MaterialTheme.typography.bodySmall); Text("Timeline مرکزی", style = MaterialTheme.typography.titleLarge); Surface(Modifier.fillMaxWidth().clickable { expanded = !expanded }.semantics { contentDescription = "جزئیات اجرای ${execution.action}" }, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f)) { Column(Modifier.padding(14.dp)) { Text("● ${execution.action}", style = MaterialTheme.typography.titleMedium); Text("${execution.status} · ${durationText(execution)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); execution.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }; Text(if (expanded) "▲ بستن جزئیات" else "▼ نمایش جزئیات", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp)); if (expanded) { ExpandLayer("اطلاعات درخواست") { Text(execution.requestPreview, style = MaterialTheme.typography.bodySmall) }; ExpandLayer("Preview / Result") { Text(execution.resultPreview ?: "نتیجه‌ای ثبت نشده است.", style = MaterialTheme.typography.bodySmall) }; ExpandLayer("Approval") { Text(if (execution.approvalRequired) "این عملیات برای ادامه نیازمند تأیید کاربر است." else "تأیید اضافی لازم نبود.") }; TextButton(onClick = onDiagnostics, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("مشاهده جزئیات → عیب‌یابی") } } } } }; Text("تاریخچه عملکرد", style = MaterialTheme.typography.titleLarge); Text("آمار فقط در صورت دریافت داده واقعی Runtime نمایش داده می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
 @Composable private fun ExpandLayer(title: String, content: @Composable ColumnScope.() -> Unit) { var open by remember { mutableStateOf(false) }; Column(Modifier.fillMaxWidth().padding(top = 8.dp)) { TextButton(onClick = { open = !open }, Modifier.fillMaxWidth().heightIn(min = 48.dp), contentPadding = PaddingValues(8.dp)) { Text(if (open) "▲ $title" else "▼ $title", Modifier.fillMaxWidth()) }; if (open) Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp), content = content) } }
 private fun durationText(execution: ExecutionState): String { val end = execution.finishedAt ?: System.currentTimeMillis(); return "${(end - execution.startedAt).coerceAtLeast(0L)} ms" }
