@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.view.Gravity
-import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -215,24 +214,25 @@ class MainActivity : Activity() {
         }
         root.addView(input)
         val actions = LinearLayout(this)
+        lateinit var stopButton: Button
         val send = Button(this).apply {
             text = "ارسال"
             setOnClickListener {
                 val text = input.text.toString().trim()
-                if (text.isNotEmpty() && !generationRunning) sendMessage(text, input, messages, scroll, this)
+                if (text.isNotEmpty() && !generationRunning) sendMessage(text, input, messages, scroll, this, stopButton)
             }
         }
         actions.addView(send, LinearLayout.LayoutParams(0, -2, 1f))
-        actions.addView(Button(this).apply {
+        stopButton = Button(this).apply {
             text = "توقف"
             isEnabled = false
-            tag = "stop"
             setOnClickListener {
                 scope.launch { container.modelManager?.stopGeneration() }
                 lastStatus = "درخواست توقف ارسال شد؛ runtime فعلی interrupt بومی ندارد."
                 modelLabel.text = lastStatus
             }
-        }, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        actions.addView(stopButton, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(actions)
         root.addView(actionButton("مدل‌ها") { showModels() })
         root.addView(actionButton("بازگشت") { showHome() })
@@ -256,6 +256,7 @@ class MainActivity : Activity() {
         messages: LinearLayout,
         scroll: ScrollView,
         sendButton: Button,
+        stopButton: Button,
     ) {
         val manager = container.modelManager ?: return
         val user = ChatLine(ChatMessage.Role.USER, text, System.currentTimeMillis())
@@ -265,7 +266,7 @@ class MainActivity : Activity() {
         input.text.clear()
         generationRunning = true
         sendButton.isEnabled = false
-        (messages.parent.parent.findViewWithTag<View>("stop") as? Button)?.isEnabled = true
+        stopButton.isEnabled = true
         scope.launch(Dispatchers.Default) {
             val requestMessages = history.takeLast(MAX_CONTEXT_MESSAGES).map { ChatMessage(it.role, it.content) }
             val result = try {
@@ -278,7 +279,7 @@ class MainActivity : Activity() {
             withContext(Dispatchers.Main) {
                 generationRunning = false
                 sendButton.isEnabled = true
-                (messages.parent.parent.findViewWithTag<View>("stop") as? Button)?.isEnabled = false
+                stopButton.isEnabled = false
                 when (result) {
                     is ModelResult.Success -> {
                         val assistant = ChatLine(ChatMessage.Role.ASSISTANT, result.value.text, System.currentTimeMillis())
