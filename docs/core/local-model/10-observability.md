@@ -22,6 +22,12 @@ Observability
     └── non-sensitive metadata
 ```
 
-هر Action واقعی باید Trace داشته باشد. UI Workspace و Diagnostics در صورت نیاز از همین شناسه‌ها استفاده می‌کنند و نباید Trace موازی بسازند.
+هر Action واقعی باید Trace داشته باشد. Workspace و Diagnostics در صورت نیاز از همین شناسه‌ها استفاده می‌کنند و نباید Trace موازی بسازند.
 
-ارجاع: [Operations](07-operations.md)، [UI Integration](15-ui-integration.md)
+## ارجاعات
+
+- [Operations](07-operations.md)
+- [Errors](09-errors.md)
+- [Capabilities](11-capabilities.md)
+- [Testing](14-testing.md)
+- [UI Integration](15-ui-integration.md)
