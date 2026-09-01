@@ -1,32 +1,19 @@
 package com.samanramezani.aichattest.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.woogit.aicore.domain.ModelDescriptor
+
+private val aiSections = listOf("مدل", "استنتاج", "زمینه", "عامل")
+private val appSections = listOf("فضای کار", "لاگ و عیب‌یابی", "عملکرد", "امنیت و تأیید")
 
 @Composable
 fun SettingsScreen(
@@ -40,100 +27,107 @@ fun SettingsScreen(
 ) {
     var section by remember { mutableStateOf("مدل") }
     LazyColumn(
-        Modifier.fillMaxWidth().padding(UiTokens.pagePadding),
-        contentPadding = PaddingValues(bottom = 32.dp),
+        Modifier.fillMaxSize().padding(horizontal = UiTokens.pagePadding),
+        contentPadding = PaddingValues(top = 18.dp, bottom = 36.dp),
         verticalArrangement = Arrangement.spacedBy(UiTokens.sectionGap),
     ) {
-        item { Text("تنظیمات", style = MaterialTheme.typography.headlineMedium) }
-        item { Text("هوش مصنوعی", style = MaterialTheme.typography.titleLarge) }
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf("مدل", "استنتاج", "زمینه", "عامل").forEach { name ->
-                    SettingsTab(name, section == name) { section = name }
-                }
-            }
+            Text("تنظیمات", style = MaterialTheme.typography.headlineMedium)
+            Spacer(Modifier.height(4.dp))
+            Text("کنترل‌های واقعی برنامه و Runtime محلی", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        item { HorizontalDivider() }
-        item { SettingsCategory("فضای کار", "مسیر نمایش اجرای جاری و Timeline در صفحه «فضای کار» قرار دارد.") }
-        item { SettingsCategory("لاگ و عیب‌یابی", "گزارش‌های واقعی Execution و خطا از صفحه «عیب‌یابی» قابل مشاهده‌اند.") }
-        item { SettingsCategory("عملکرد", "Metric فقط زمانی نمایش داده می‌شود که Runtime داده واقعی ارائه کند.") }
-        item { SettingsCategory("امنیت و تأیید", "کنترل تأیید فقط برای عملیات واقعی که نیازمند تأیید هستند نمایش داده می‌شود.") }
+        item { SettingsGroup("هوش مصنوعی", aiSections, section) { section = it } }
+        item { SettingsGroup("برنامه", appSections, section) { section = it } }
         item { HorizontalDivider() }
         when (section) {
-            "مدل" -> {
-                item { UiSection("مدل") {
-                    UiStatusRow("مدل فعلی", active?.displayName ?: "مدلی فعال نیست")
-                    Button(
-                        onClick = onImport,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget),
-                    ) { Text("بارگذاری مدل از گوشی") }
-                    Text("مدیریت مدل‌ها", style = MaterialTheme.typography.titleMedium)
-                } }
-                if (models.isEmpty()) {
-                    item { Text("مدل محلی واردشده‌ای وجود ندارد.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                }
-                items(models, key = { it.id }) { model ->
-                    ModelCard(model, model.id == active?.id, onActivate, onDelete)
-                }
-                item { TextButton(onClick = onRefresh, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("به‌روزرسانی فهرست مدل‌ها") } }
-                if (error != null) item { Text(error, color = MaterialTheme.colorScheme.error) }
-            }
-            "استنتاج" -> item { UnavailableSection("استنتاج", "پارامترهای دما، Top-K، Top-P، Min-P، جریمه تکرار و سایر گزینه‌ها تا اتصال کنترل واقعی به Runtime، قابل ویرایش نیستند.") }
-            "زمینه" -> item { UnavailableSection("زمینه", "مدیریت System Context، Summary و پیام‌های اخیر هنوز کنترل تغییرپذیر متصل به Core ندارد.") }
-            "عامل" -> item { UnavailableSection("عامل", "کنترل آماده‌سازی، تأیید، اجرا و Recovery فقط با Action API واقعی ارائه می‌شود.") }
+            "مدل" -> item { ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDelete) }
+            "استنتاج" -> item { UnavailableSection("استنتاج", "پارامترهای دما، حداکثر توکن، Top-K، Top-P، Min-P، جریمه تکرار، Seed و دنباله‌های توقف تا اتصال کنترل واقعی به Runtime قابل ویرایش نیستند.") }
+            "زمینه" -> item { UnavailableSection("زمینه", "مدیریت System Context، Summary، پیام‌های اخیر و Workspace Context هنوز کنترل تغییرپذیر متصل به Core ندارد.") }
+            "عامل" -> item { UnavailableSection("عامل", "کنترل آماده‌سازی، تأیید، اجرا، شکست و Recovery فقط با Action API واقعی ارائه می‌شود.") }
+            "فضای کار" -> item { UnavailableSection("فضای کار", "Workspace محل نمایش Timeline و کنترل‌های Contextual است و تنظیم تغییرپذیر مستقلی در Core فعلی ندارد.") }
+            "لاگ و عیب‌یابی" -> item { UnavailableSection("لاگ و عیب‌یابی", "نمایش جزئیات کامل خطا فقط وقتی ارائه می‌شود که تنظیم واقعی Debug در Core پشتیبانی شود.") }
+            "عملکرد" -> item { UnavailableSection("عملکرد", "Metricهای Performance فقط از داده واقعی Runtime نمایش داده می‌شوند و مقدار ساختگی استفاده نمی‌شود.") }
+            "امنیت و تأیید" -> item { UnavailableSection("امنیت و تأیید", "کنترل تأیید فقط برای Action واقعی با ریسک حساس و در وضعیت نیازمند تأیید نمایش داده می‌شود.") }
         }
     }
 }
 
 @Composable
-private fun SettingsTab(text: String, selected: Boolean, onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
-        modifier = Modifier.heightIn(min = UiTokens.minimumTouchTarget).semantics { contentDescription = "تنظیمات $text" },
-    ) { Text(if (selected) "● $text" else text) }
+private fun SettingsGroup(title: String, sections: List<String>, selected: String, onSelect: (String) -> Unit) {
+    UiSurface {
+        Column(Modifier.padding(vertical = 8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            sections.forEach { name ->
+                TextButton(
+                    onClick = { onSelect(name) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget).semantics {
+                        contentDescription = if (selected == name) "$name، انتخاب شده" else name
+                    },
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                ) { Text(if (selected == name) "● $name" else name, Modifier.fillMaxWidth()) }
+            }
+        }
+    }
 }
 
 @Composable
-private fun SettingsCategory(title: String, description: String) {
+private fun ModelManagement(
+    active: ModelDescriptor?, models: List<ModelDescriptor>, error: String?, onImport: () -> Unit,
+    onRefresh: () -> Unit, onActivate: (String) -> Unit, onDelete: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("مدل", style = MaterialTheme.typography.titleLarge)
+        UiSurface {
+            Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("مدل فعلی", style = MaterialTheme.typography.labelLarge)
+                Text(active?.displayName ?: "مدلی فعال نیست", style = MaterialTheme.typography.titleMedium)
+                Text(if (active != null) "آماده استفاده در گفت‌وگو" else "برای شروع، یک مدل محلی وارد و فعال کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Button(onClick = onImport, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("انتخاب فایل مدل از گوشی") }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("مدیریت مدل‌ها", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = onRefresh, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text("به‌روزرسانی") }
+        }
+        if (models.isEmpty()) EmptyState()
+        else items(models, key = { it.id }) { ModelCard(it, it.id == active?.id, onActivate, onDelete) }
+        if (error != null) {
+            Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
+                Text(error, Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onErrorContainer)
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyState() {
     UiSurface {
         Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            Text("مدل محلی واردشده‌ای وجود ندارد.", style = MaterialTheme.typography.titleMedium)
+            Text("از انتخاب فایل مدل برای واردکردن یک فایل GGUF استفاده کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 @Composable
-private fun ModelCard(
-    model: ModelDescriptor,
-    active: Boolean,
-    onActivate: (String) -> Unit,
-    onDelete: (String) -> Unit,
-) {
+private fun ModelCard(model: ModelDescriptor, active: Boolean, onActivate: (String) -> Unit, onDelete: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     UiSurface {
         Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text(model.displayName, style = MaterialTheme.typography.titleMedium)
-            Text("GGUF · ${model.quantization}", style = MaterialTheme.typography.bodySmall)
-            Text(
-                if (active) "● فعال و آماده" else "وضعیت: ${model.state}",
-                style = MaterialTheme.typography.labelMedium,
-                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (!active) {
-                    OutlinedButton(onClick = { onActivate(model.id) }, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text("فعال‌سازی") }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(model.displayName, style = MaterialTheme.typography.titleMedium)
+                    Text("GGUF · ${model.quantization}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                OutlinedButton(onClick = { expanded = !expanded }, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) {
-                    Text(if (expanded) "بستن جزئیات" else "جزئیات")
-                }
-                TextButton(
-                    onClick = { onDelete(model.id) },
-                    modifier = Modifier.heightIn(min = UiTokens.minimumTouchTarget),
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                ) { Text("حذف") }
+                Text(if (active) "فعال" else "غیرفعال", style = MaterialTheme.typography.labelLarge)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (!active) OutlinedButton(onClick = { onActivate(model.id) }, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text("فعال‌سازی") }
+                TextButton(onClick = { expanded = !expanded }, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text(if (expanded) "بستن" else "جزئیات") }
+                TextButton(onClick = { onDelete(model.id) }, Modifier.heightIn(min = UiTokens.minimumTouchTarget), colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("حذف") }
             }
             if (expanded) {
+                HorizontalDivider()
                 Text("شناسه مدل: ${model.id}", style = MaterialTheme.typography.bodySmall)
                 Text("وضعیت: ${model.state}", style = MaterialTheme.typography.bodySmall)
                 Text("کمّیت‌سازی: ${model.quantization}", style = MaterialTheme.typography.bodySmall)
@@ -145,9 +139,9 @@ private fun ModelCard(
 @Composable
 private fun UnavailableSection(title: String, message: String) {
     UiSurface {
-        Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text("خارج از دسترس", style = MaterialTheme.typography.labelMedium)
+        Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(title, style = MaterialTheme.typography.titleLarge)
+            Text("خارج از دسترس", style = MaterialTheme.typography.labelLarge)
             Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
