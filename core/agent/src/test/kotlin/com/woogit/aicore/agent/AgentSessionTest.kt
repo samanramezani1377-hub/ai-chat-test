@@ -20,7 +20,11 @@ class AgentSessionTest {
         val provider = DefaultContextProvider(store, { "system" }, { "task" }, { "workspace" })
         val orchestrator = AgentOrchestrator(provider, runtime)
         val events = mutableListOf<AgentEvent>()
-        val session = AgentSession(orchestrator, store) { events += it }
+        val session = AgentSession(
+            orchestrator = orchestrator,
+            conversationStore = store,
+            eventSink = { event -> events += event }
+        )
 
         session.send("hello", InferenceSettings())
 
