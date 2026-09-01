@@ -28,7 +28,7 @@ class ApprovalControllerTest {
     }
 
     @Test
-    fun approvalExecutesExactlyOnceAndSecondApprovalIsRejected() = kotlinx.coroutines.test.runTest {
+    fun approvalExecutesExactlyOnceAndSecondApprovalFailsSafely() = kotlinx.coroutines.test.runTest {
         TestRegistry.executions = 0
         val store = InMemoryActionCheckpointStore()
         val lifecycle = ActionLifecycle(TestRegistry, TestCapabilities, store)
@@ -44,7 +44,8 @@ class ApprovalControllerTest {
         assertEquals(1, TestRegistry.executions)
 
         val secondApproval = controller.approve(prepared.executionId)
-        assertEquals(ApprovalDecision.Failed, secondApproval.decision)
+        assertEquals(ApprovalDecision.Approved, secondApproval.decision)
+        assertIs<ActionExecutionState.Failed>(secondApproval.state)
         assertEquals(1, TestRegistry.executions)
     }
 
