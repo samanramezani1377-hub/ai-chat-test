@@ -8,13 +8,6 @@ interface ModelRuntime {
     fun runtimeInfo(): RuntimeInfo
 }
 
-data class ModelDescriptor(
-    val id: String,
-    val path: String,
-    val format: String,
-    val quantization: String? = null
-)
-
 data class GenerationRequest(
     val messages: List<ChatMessage>,
     val settings: InferenceSettings
@@ -45,7 +38,11 @@ data class InferenceSettings(
     val contextLength: Int? = null
 )
 
-data class RuntimeInfo(val name: String, val version: String, val backend: String?)
+data class RuntimeInfo(
+    val name: String,
+    val version: String,
+    val backend: String?
+)
 
 interface Action<in I, out O> {
     val id: String
