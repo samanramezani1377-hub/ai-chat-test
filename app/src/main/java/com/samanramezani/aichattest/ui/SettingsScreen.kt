@@ -2,7 +2,6 @@ package com.samanramezani.aichattest.ui
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -17,13 +16,8 @@ private val appSections = listOf("فضای کار", "لاگ و عیب‌یابی
 
 @Composable
 fun SettingsScreen(
-    models: List<ModelDescriptor>,
-    active: ModelDescriptor?,
-    error: String?,
-    onImport: () -> Unit,
-    onRefresh: () -> Unit,
-    onActivate: (String) -> Unit,
-    onDelete: (String) -> Unit,
+    models: List<ModelDescriptor>, active: ModelDescriptor?, error: String?, onImport: () -> Unit,
+    onRefresh: () -> Unit, onActivate: (String) -> Unit, onDelete: (String) -> Unit,
 ) {
     var section by remember { mutableStateOf("مدل") }
     LazyColumn(
@@ -39,15 +33,17 @@ fun SettingsScreen(
         item { SettingsGroup("هوش مصنوعی", aiSections, section) { section = it } }
         item { SettingsGroup("برنامه", appSections, section) { section = it } }
         item { HorizontalDivider() }
-        when (section) {
-            "مدل" -> item { ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDelete) }
-            "استنتاج" -> item { UnavailableSection("استنتاج", "پارامترهای دما، حداکثر توکن، Top-K، Top-P، Min-P، جریمه تکرار، Seed و دنباله‌های توقف تا اتصال کنترل واقعی به Runtime قابل ویرایش نیستند.") }
-            "زمینه" -> item { UnavailableSection("زمینه", "مدیریت System Context، Summary، پیام‌های اخیر و Workspace Context هنوز کنترل تغییرپذیر متصل به Core ندارد.") }
-            "عامل" -> item { UnavailableSection("عامل", "کنترل آماده‌سازی، تأیید، اجرا، شکست و Recovery فقط با Action API واقعی ارائه می‌شود.") }
-            "فضای کار" -> item { UnavailableSection("فضای کار", "Workspace محل نمایش Timeline و کنترل‌های Contextual است و تنظیم تغییرپذیر مستقلی در Core فعلی ندارد.") }
-            "لاگ و عیب‌یابی" -> item { UnavailableSection("لاگ و عیب‌یابی", "نمایش جزئیات کامل خطا فقط وقتی ارائه می‌شود که تنظیم واقعی Debug در Core پشتیبانی شود.") }
-            "عملکرد" -> item { UnavailableSection("عملکرد", "Metricهای Performance فقط از داده واقعی Runtime نمایش داده می‌شوند و مقدار ساختگی استفاده نمی‌شود.") }
-            "امنیت و تأیید" -> item { UnavailableSection("امنیت و تأیید", "کنترل تأیید فقط برای Action واقعی با ریسک حساس و در وضعیت نیازمند تأیید نمایش داده می‌شود.") }
+        item {
+            when (section) {
+                "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDelete)
+                "استنتاج" -> UnavailableSection("استنتاج", "پارامترهای دما، حداکثر توکن، Top-K، Top-P، Min-P، جریمه تکرار، Seed و دنباله‌های توقف تا اتصال کنترل واقعی به Runtime قابل ویرایش نیستند.")
+                "زمینه" -> UnavailableSection("زمینه", "مدیریت System Context، Summary، پیام‌های اخیر و Workspace Context هنوز کنترل تغییرپذیر متصل به Core ندارد.")
+                "عامل" -> UnavailableSection("عامل", "کنترل آماده‌سازی، تأیید، اجرا، شکست و Recovery فقط با Action API واقعی ارائه می‌شود.")
+                "فضای کار" -> UnavailableSection("فضای کار", "Workspace محل نمایش Timeline و کنترل‌های Contextual است و تنظیم تغییرپذیر مستقلی در Core فعلی ندارد.")
+                "لاگ و عیب‌یابی" -> UnavailableSection("لاگ و عیب‌یابی", "نمایش جزئیات کامل خطا فقط وقتی ارائه می‌شود که تنظیم واقعی Debug در Core پشتیبانی شود.")
+                "عملکرد" -> UnavailableSection("عملکرد", "Metricهای Performance فقط از داده واقعی Runtime نمایش داده می‌شوند و مقدار ساختگی استفاده نمی‌شود.")
+                "امنیت و تأیید" -> UnavailableSection("امنیت و تأیید", "کنترل تأیید فقط برای Action واقعی با ریسک حساس و در وضعیت نیازمند تأیید نمایش داده می‌شود.")
+            }
         }
     }
 }
@@ -90,7 +86,7 @@ private fun ModelManagement(
             TextButton(onClick = onRefresh, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text("به‌روزرسانی") }
         }
         if (models.isEmpty()) EmptyState()
-        else items(models, key = { it.id }) { ModelCard(it, it.id == active?.id, onActivate, onDelete) }
+        else models.forEach { model -> ModelCard(model, model.id == active?.id, onActivate, onDelete) }
         if (error != null) {
             Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
                 Text(error, Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onErrorContainer)
