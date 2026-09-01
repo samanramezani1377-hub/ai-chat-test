@@ -21,9 +21,9 @@ interface WorkspaceStore {
 class InMemoryWorkspaceStore : WorkspaceStore {
     private val values = mutableMapOf<String, WorkspaceState>()
 
-    @Synchronized
-    override suspend fun get(id: String): WorkspaceState? = values[id]
+    override suspend fun get(id: String): WorkspaceState? = synchronized(values) { values[id] }
 
-    @Synchronized
-    override suspend fun save(state: WorkspaceState) { values[state.id] = state }
+    override suspend fun save(state: WorkspaceState) {
+        synchronized(values) { values[state.id] = state }
+    }
 }
