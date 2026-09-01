@@ -51,7 +51,20 @@ class LocalModelService(
             return@withLock ModelResult.Failure(ModelError.InvalidModel("Model is not valid for activation"))
         }
 
+        val persistedActive = when (val result = repository.getActive()) {
+            is ModelResult.Success -> result.value?.id
+            is ModelResult.Failure -> return@withLock result
+        }
+
         try {
+            if (persistedActive != null && persistedActive != id) {
+                runtime.unload()
+                when (val cleared = repository.setActive(null)) {
+                    is ModelResult.Success -> activeId = null
+                    is ModelResult.Failure -> return@withLock cleared
+                }
+            }
+
             runtime.load(model)
             when (val persisted = repository.setActive(id)) {
                 is ModelResult.Success -> Unit
@@ -68,8 +81,10 @@ class LocalModelService(
                 )
             )
         } catch (t: OutOfMemoryError) {
+            activeId = null
             ModelResult.Failure(ModelError.OutOfMemory("Not enough memory to load model", t))
         } catch (t: Throwable) {
+            activeId = null
             ModelResult.Failure(ModelError.LoadFailed("Unable to load model", t))
         }
     }
