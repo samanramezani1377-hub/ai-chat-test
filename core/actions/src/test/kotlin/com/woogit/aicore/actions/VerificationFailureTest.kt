@@ -31,7 +31,7 @@ class VerificationFailureTest {
         lifecycle.approve(prepared.executionId)
 
         val state = lifecycle.executeApproved(prepared.executionId, object : Verifier<Any> {
-            override fun verify(output: Any): VerificationResult = VerificationResult(false, "verification mismatch")
+            override suspend fun verify(result: Any): VerificationResult = VerificationResult(false, "verification mismatch")
         })
 
         assertIs<ActionExecutionState.Failed>(state)
