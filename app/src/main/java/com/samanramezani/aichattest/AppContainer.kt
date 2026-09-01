@@ -13,17 +13,19 @@ import com.woogit.aicore.actions.registerProviderActions
 import com.woogit.aicore.agent.ActionExecutionOutcome
 import com.woogit.aicore.agent.ActionPlan
 import com.woogit.aicore.agent.ActionPlanCoordinator
+import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.agent.AgentOrchestrator
 import com.woogit.aicore.agent.AgentSession
 import com.woogit.aicore.agent.ProtocolActionIntentPlanner
-import com.woogit.aicore.conversation.ConversationStore
-import com.woogit.aicore.conversation.InMemoryConversationStore
 import com.woogit.aicore.conversation.ConversationHistoryRepository
+import com.woogit.aicore.conversation.ConversationMessage
+import com.woogit.aicore.conversation.ConversationStore
+import com.woogit.aicore.conversation.DefaultContextProvider
 import com.woogit.aicore.conversation.InMemoryConversationHistoryRepository
 import com.woogit.aicore.domain.ActionRegistry
 import com.woogit.aicore.domain.CapabilityProvider
-import com.woogit.aicore.domain.Verifier
 import com.woogit.aicore.domain.ModelResult
+import com.woogit.aicore.domain.Verifier
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
 import java.nio.file.Files
@@ -33,30 +35,6 @@ class AppContainer(context: Context? = null) {
     private val appContext = context?.applicationContext
 
     val modelRuntime: RuntimeAdapter = LlamaCppAndroidRuntimeAdapter()
-
-    val actionRegistry: ActionRegistry = DefaultActionRegistry().also { registry ->
-        if (appContext != null) {
-            val workspace = appContext.filesDir.toPath().resolve("workspace")
-            Files.createDirectories(workspace)
-            registry.registerBuiltinFileActions(workspace)
-            registry.registerProviderActions(
-                modelInfo = {
-                    val active = modelManager?.activeModel()
-                    when (active) {
-                        is ModelResult.Success -> active.value?.let {
-                            "name=${it.displayName}, quantization=${it.quantization}, sizeBytes=${it.sizeBytes}"
-                        } ?: "no-active-model"
-                        is ModelResult.Failure -> "unavailable: ${active.error.message}"
-                        null -> "no-model-manager"
-                    }
-                },
-                performanceStats = { "runtime=${modelRuntime.runtimeInfo().name}, backend=${modelRuntime.runtimeInfo().backend ?: "unknown"}" },
-                deviceInfo = {
-                    "manufacturer=${Build.MANUFACTURER}, model=${Build.MODEL}, sdk=${Build.VERSION.SDK_INT}"
-                },
-            )
-        }
-    }
 
     val conversationHistory: ConversationHistoryRepository = appContext?.let {
         AndroidConversationHistoryRepository(it)
@@ -68,7 +46,32 @@ class AppContainer(context: Context? = null) {
         AndroidModelManager(it.contentResolver, directory, modelRuntime)
     }
 
-    private val agentConversation: ConversationStore = InMemoryConversationStore()
+    val actionRegistry: ActionRegistry = DefaultActionRegistry().also { registry ->
+        if (appContext != null) {
+            val workspace = appContext.filesDir.toPath().resolve("workspace")
+            Files.createDirectories(workspace)
+            registry.registerBuiltinFileActions(workspace)
+            registry.registerProviderActions(
+                modelInfo = {
+                    when (val active = modelManager?.activeModel()) {
+                        is ModelResult.Success -> active.value?.let {
+                            "name=${it.displayName}, quantization=${it.quantization}, sizeBytes=${it.sizeBytes}"
+                        } ?: "no-active-model"
+                        is ModelResult.Failure -> "unavailable: ${active.error.message}"
+                        null -> "no-model-manager"
+                    }
+                },
+                performanceStats = {
+                    val info = modelRuntime.runtimeInfo()
+                    "runtime=${info.name}, backend=${info.backend ?: "unknown"}"
+                },
+                deviceInfo = {
+                    "manufacturer=${Build.MANUFACTURER}, model=${Build.MODEL}, sdk=${Build.VERSION.SDK_INT}"
+                },
+            )
+        }
+    }
+
     private val capabilityProvider: CapabilityProvider = object : CapabilityProvider {
         override fun supports(capability: String): Boolean = capability in setOf("filesystem", "runtime", "device", "utility")
     }
@@ -102,17 +105,41 @@ class AppContainer(context: Context? = null) {
         }
     }
 
-    val agentSession: AgentSession? = appContext?.let {
-        AgentSession(
+    fun createAgentSession(
+        conversationId: String,
+        eventSink: suspend (AgentEvent) -> Unit = {},
+    ): AgentSession? {
+        if (appContext == null || modelManager == null) return null
+        val store = HistoryConversationStore(conversationHistory, conversationId)
+        return AgentSession(
             orchestrator = AgentOrchestrator(
-                contextProvider = com.woogit.aicore.conversation.DefaultContextProvider(agentConversation),
+                contextProvider = DefaultContextProvider(store),
                 runtime = modelRuntime,
             ),
-            conversationStore = agentConversation,
+            conversationStore = store,
             actionPlanCoordinator = coordinator,
             actionExecutor = actionExecutor,
+            eventSink = eventSink,
         )
     }
 
     val actionExecutionService = ActionExecutionService(lifecycle, ApprovalController(lifecycle))
+}
+
+/** Adapts the durable conversation repository to the agent's ConversationStore contract. */
+private class HistoryConversationStore(
+    private val repository: ConversationHistoryRepository,
+    private val conversationId: String,
+) : ConversationStore {
+    override suspend fun append(message: ConversationMessage) {
+        check(repository.append(conversationId, message, message.timestampEpochMs)) {
+            "Conversation does not exist: $conversationId"
+        }
+    }
+
+    override suspend fun recent(limit: Int): List<ConversationMessage> = repository.messages(conversationId).takeLast(limit)
+
+    override suspend fun summary(): String? = null
+
+    override suspend fun replaceSummary(summary: String) = Unit
 }
