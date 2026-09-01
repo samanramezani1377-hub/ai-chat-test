@@ -1,36 +1,48 @@
-# UI State Contract
+# قرارداد وضعیت‌های رابط کاربری
 
-**Status:** Draft — decisions pending
+**وضعیت:** پیش‌نویس — تصمیم‌های بیشتر در حال تکمیل
 
-Every screen and interactive component must define its relevant states.
+> 🔴 **تمام وضعیت‌ها و پیام‌های قابل مشاهده UI باید فارسی و راست‌چین (RTL) باشند.**
 
-## Screen states
+## وضعیت‌های صفحه
 
-- Initial
-- Loading
-- Empty
-- Content
-- Success
-- Error
-- Offline
-- Disabled
+- اولیه
+- در حال بارگذاری
+- خالی
+- دارای محتوا
+- موفق
+- خطا
+- خارج از دسترس
+- غیرفعال
 
-## AI states
+## وضعیت‌های هوش مصنوعی
 
-- Queued
-- Generating
-- Streaming
-- Completed
-- Interrupted
-- Failed
-- Retry available
+- در صف
+- در حال کار
+- در حال تولید پاسخ
+- تکمیل‌شده
+- متوقف‌شده
+- ناموفق
+- امکان تلاش مجدد
 
-## Interaction states
+## وضعیت‌های تعامل
 
-- Normal
-- Pressed
-- Focused
-- Disabled
-- Loading
+- عادی
+- فشرده‌شده
+- دارای Focus
+- غیرفعال
+- در حال بارگذاری
 
-Final state behavior is determined through the 20 UI decisions.
+## وضعیت Runtime محلی
+
+| وضعیت | معنی |
+|---|---|
+| آماده | Runtime محلی آماده دریافت کار است. |
+| در حال کار | Runtime محلی در حال پردازش کار است. |
+| در حال تولید پاسخ | مدل در حال تولید پاسخ است. |
+| خارج از دسترس | Runtime محلی به دلیل مشکل عملکردی قابل استفاده نیست. |
+| خطا | خطای Runtime یا برنامه رخ داده است. |
+
+رنگ فقط نشانه کمکی است؛ معنا باید از متن و معنای دسترسی‌پذیر وضعیت قابل تشخیص باشد.
+
+رفتار نهایی هر وضعیت با تکمیل ۲۰ تصمیم UI تعیین می‌شود.
