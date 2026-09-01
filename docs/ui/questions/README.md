@@ -1,55 +1,58 @@
-# UI Decision Questions
+# سؤالات تصمیم‌گیری رابط کاربری
 
-**Status:** In progress  
-**Total decisions:** 20  
-**Current:** Q01
+**وضعیت:** در حال انجام  
+**تعداد تصمیم‌ها:** ۲۰  
+**سؤال فعلی:** Q03
 
-## Process
+> 🔴 **تمام UI پروژه باید فارسی و راست‌چین (RTL) باشد. این الزام بخشی از تمام تصمیم‌های ۲۰گانه است.**
 
-Each question is answered by the project owner one at a time. The accepted answer is documented and committed before the next question is asked.
+## فرایند
+
+هر سؤال فقط یکی‌یکی از مالک پروژه پرسیده می‌شود. پاسخ پذیرفته‌شده در مستند مربوط ثبت و Commit می‌شود و سپس سؤال بعدی پرسیده می‌شود.
 
 ```text
-Q01 → answer → commit
-Q02 → answer → commit
+Q01 → پاسخ → ثبت → Commit
+Q02 → پاسخ → ثبت → Commit
 ...
-Q20 → answer → commit
-       ↓
-UI v1 final review
-       ↓
-UI lock
-       ↓
-Implementation may begin
+Q20 → پاسخ → ثبت → Commit
+          ↓
+بازبینی نهایی UI
+          ↓
+قفل UI
+          ↓
+شروع پیاده‌سازی
 ```
 
-## Question tree
+## درخت سؤالات
 
-| ID | Decision area | Status |
+| شناسه | موضوع تصمیم | وضعیت |
 |---|---|---|
-| Q01 | Overall visual direction | 🔵 Current |
-| Q02 | App shell and navigation | ⏳ |
-| Q03 | Chat screen structure | ⏳ |
-| Q04 | Message bubble design | ⏳ |
-| Q05 | Composer and send controls | ⏳ |
-| Q06 | AI streaming experience | ⏳ |
-| Q07 | Conversation history | ⏳ |
-| Q08 | Workspace design | ⏳ |
-| Q09 | Action/task presentation | ⏳ |
-| Q10 | Approval and verification UX | ⏳ |
-| Q11 | Error Center | ⏳ |
-| Q12 | Loading, empty, and error states | ⏳ |
-| Q13 | Color system | ⏳ |
-| Q14 | Typography | ⏳ |
-| Q15 | Light/dark themes | ⏳ |
-| Q16 | Motion and feedback | ⏳ |
-| Q17 | RTL/Persian and localization | ⏳ |
-| Q18 | Accessibility and responsive layout | ⏳ |
-| Q19 | Settings and diagnostics | ⏳ |
-| Q20 | Final polish and UI lock criteria | ⏳ |
+| Q01 | زبان بصری کلی | 🔒 |
+| Q02 | Header و ناوبری اصلی | 🔒 |
+| Q03 | ساختار صفحه گفت‌وگو | 🔵 فعلی |
+| Q04 | طراحی حباب پیام | ⏳ |
+| Q05 | Composer و کنترل‌های ارسال | ⏳ |
+| Q06 | تجربه تولید تدریجی پاسخ | ⏳ |
+| Q07 | تاریخچه گفتگوها | ⏳ |
+| Q08 | طراحی فضای کار | ⏳ |
+| Q09 | نمایش عملیات و وظیفه | ⏳ |
+| Q10 | تجربه تأیید و اعتبارسنجی | ⏳ |
+| Q11 | مرکز خطا | ⏳ |
+| Q12 | وضعیت‌های بارگذاری، خالی و خطا | ⏳ |
+| Q13 | سیستم رنگ | ⏳ |
+| Q14 | تایپوگرافی | ⏳ |
+| Q15 | تم روشن و تاریک | ⏳ |
+| Q16 | حرکت و بازخورد | ⏳ |
+| Q17 | راست‌چین، فارسی و بومی‌سازی | ⏳ |
+| Q18 | دسترسی‌پذیری و چیدمان واکنش‌گرا | ⏳ |
+| Q19 | تنظیمات و عیب‌یابی | ⏳ |
+| Q20 | پرداخت نهایی و معیارهای قفل UI | ⏳ |
 
-## Rules
+## قوانین
 
-- No UI implementation during this decision phase.
-- Answers must be reflected in the appropriate UI document.
-- Every accepted decision is committed before moving on.
-- A later decision must not silently invalidate an earlier decision; conflicts require an explicit revision.
-- After Q20, the complete UI specification is reviewed before implementation.
+- در فاز تصمیم‌گیری هیچ UI پیاده‌سازی نمی‌شود.
+- هر پاسخ باید در مستند مناسب ثبت شود.
+- هر تصمیم پذیرفته‌شده قبل از رفتن به سؤال بعدی Commit می‌شود.
+- تصمیم بعدی نباید بی‌صدا تصمیم قبلی را نقض کند؛ تعارض نیازمند بازنگری صریح است.
+- پس از Q20، کل مشخصات UI بازبینی و سپس قفل می‌شود.
+- زبان تمام متن‌های UI فارسی و جهت تمام UI راست‌چین است.
