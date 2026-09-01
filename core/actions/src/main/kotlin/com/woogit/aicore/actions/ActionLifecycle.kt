@@ -39,11 +39,13 @@ class DefaultActionRetryPolicy(private val defaultMaxRetries: Int = 2) : ActionR
 interface ActionCheckpointStore {
     suspend fun save(action: PreparedAction)
     suspend fun get(executionId: String): PreparedAction?
+    suspend fun list(): List<PreparedAction> = emptyList()
 }
 class InMemoryActionCheckpointStore : ActionCheckpointStore {
     private val values = mutableMapOf<String, PreparedAction>()
     override suspend fun save(action: PreparedAction) { synchronized(values) { values[action.executionId] = action } }
     override suspend fun get(executionId: String): PreparedAction? = synchronized(values) { values[executionId] }
+    override suspend fun list(): List<PreparedAction> = synchronized(values) { values.values.toList() }
 }
 
 /** Independent verification hook. Implementations must verify the external side effect, not just the return value. */
@@ -89,6 +91,7 @@ class ActionLifecycle(
     }
 
     suspend fun checkpoint(executionId: String): PreparedAction = checkpointStore.get(executionId) ?: error("Prepared action not found: $executionId")
+    suspend fun pendingApprovals(): List<PreparedAction> = checkpointStore.list().filter { it.state == ActionExecutionState.AwaitingApproval }
 
     suspend fun approve(executionId: String): PreparedAction {
         val prepared = checkpoint(executionId)
