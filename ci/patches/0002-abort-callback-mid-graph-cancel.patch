@@ -1,7 +1,7 @@
 diff --git a/llama-kt/src/main/cpp/rn-completion.cpp b/llama-kt/src/main/cpp/rn-completion.cpp
 --- a/llama-kt/src/main/cpp/rn-completion.cpp
 +++ b/llama-kt/src/main/cpp/rn-completion.cpp
-@@ -23,6 +23,12 @@ namespace rnllama {
+@@ -20,6 +20,12 @@ namespace rnllama {
  llama_rn_context_completion::llama_rn_context_completion(llama_rn_context* parent)
      : parent_ctx(parent) {
  }
@@ -15,38 +15,11 @@ diff --git a/llama-kt/src/main/cpp/rn-completion.cpp b/llama-kt/src/main/cpp/rn-
  // Destructor
  llama_rn_context_completion::~llama_rn_context_completion() {
      resetSpeculative();
-@@ -1457,7 +1463,32 @@ completion_token_output llama_rn_context_completion::nextToken()
--            if (llama_decode(parent_ctx->ctx, llama_batch_get_one(&embd[n_past], n_eval)))
-+            const int32_t decode_ret = llama_decode(parent_ctx->ctx, llama_batch_get_one(&embd[n_past], n_eval));
-+            if (decode_ret != 0)
-             {
--                LOG_ERROR("failed to eval, n_eval: %d, n_past: %d, n_threads: %d, embd: %s",
--                    n_eval,
--                    n_past,
--                    parent_ctx->params.cpuparams.n_threads,
--                    tokens_to_str(parent_ctx->ctx, embd.cbegin() + n_past, embd.cend()).c_str()
--                );
-+                if (decode_ret == 2) {
-+                    // Aborted mid-graph by abortCallback() (is_interrupted set via
-+                    // nativeInterrupt) rather than a real decode failure. llama_decode()
-+                    // rolls back the in-flight work before returning 2, so do not
-+                    // advance n_past and do not report a native error.
-+                    LOG_INFO("Decoding Interrupted mid-eval (n_past: %d, n_eval: %d)", n_past, n_eval);
-+                } else {
-+                    LOG_ERROR("failed to eval, n_eval: %d, n_past: %d, n_threads: %d, embd: %s",
-+                        n_eval,
-+                        n_past,
-+                        parent_ctx->params.cpuparams.n_threads,
-+                        tokens_to_str(parent_ctx->ctx, embd.cbegin() + n_past, embd.cend()).c_str()
-+                    );
-+                }
-                 has_next_token = false;
-                 return result;
-             }
-diff --git a/llama-kt/src/main/cpp/rn-completion.h b/llama-kt/src/main/cpp/rn-completion.h
+     if (ctx_sampling != nullptr) {
+ diff --git a/llama-kt/src/main/cpp/rn-completion.h b/llama-kt/src/main/cpp/rn-completion.h
 --- a/llama-kt/src/main/cpp/rn-completion.h
 +++ b/llama-kt/src/main/cpp/rn-completion.h
-@@ -102,6 +102,16 @@ struct llama_rn_context_completion {
+@@ -100,6 +100,13 @@ struct llama_rn_context_completion {
      // Destructor
      ~llama_rn_context_completion();
  
@@ -60,10 +33,10 @@ diff --git a/llama-kt/src/main/cpp/rn-completion.h b/llama-kt/src/main/cpp/rn-co
      // Completion processing methods
      void rewind();
      bool initSampling();
-diff --git a/llama-kt/src/main/cpp/rn-llama.cpp b/llama-kt/src/main/cpp/rn-llama.cpp
+ diff --git a/llama-kt/src/main/cpp/rn-llama.cpp b/llama-kt/src/main/cpp/rn-llama.cpp
 --- a/llama-kt/src/main/cpp/rn-llama.cpp
 +++ b/llama-kt/src/main/cpp/rn-llama.cpp
-@@ -426,6 +426,13 @@ llama_rn_context::~llama_rn_context() {
+@@ -423,6 +423,11 @@ llama_rn_context::~llama_rn_context() {
      removeLoraAdapters();
      cleanupThreadpools();
  
@@ -75,7 +48,7 @@ diff --git a/llama-kt/src/main/cpp/rn-llama.cpp b/llama-kt/src/main/cpp/rn-llama
      if (completion != nullptr) {
          delete completion;
          completion = nullptr;
-@@ -532,6 +539,9 @@ bool llama_rn_context::loadModel(common_params &params_)
+@@ -535,6 +540,9 @@ bool llama_rn_context::loadModel(common_params &params_)
      }
      completion = new llama_rn_context_completion(this);
  
