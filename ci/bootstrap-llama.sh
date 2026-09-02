@@ -111,7 +111,6 @@ apply_native_patches() {
   if ! grep -Fq "$marker" "$script"; then
     echo 'Applying Vulkan shader cache transformation...'
     python3 - "$script" <<'PY'
-import re
 import sys
 from pathlib import Path
 
@@ -150,7 +149,6 @@ fi
 
 cp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" "$CPP_DIR/ggml-vulkan/"
 
-# Fix relative include in shader cpp files (they're compiled from shaders/ subdir)
 for f in "$VK_OUT_DIR"/*.cpp; do
   sed 's|#include "ggml-vulkan-shaders.hpp"|#include "../ggml-vulkan-shaders.hpp"|g' "$f" > "$CPP_DIR/ggml-vulkan/shaders/$(basename "$f")"
 done
@@ -162,6 +160,23 @@ PY
   fi
 
   grep -Fq "$marker" "$script"
+
+  # llama.kt 5a20956 still carries its historical 0001 UMA patch, but the
+  # pinned llama.cpp revision already contains the upstream fix merged from
+  # PR #25245. Remove only that obsolete patch after verifying the exact
+  # overflow-safe macro is present; otherwise keep the fail-fast behavior.
+  local vulkan_cpp="$LLAMA_CPP_DIR/ggml/src/ggml-vulkan/ggml-vulkan.cpp"
+  local uma_patch="$LLAMA_KT/patches/0001-vulkan-uma-descriptor-ceildiv.patch"
+  if grep -Fq '#define CEIL_DIV(M, N) (((M) / (N)) + (((M) % (N)) != 0))' "$vulkan_cpp"; then
+    if [ -f "$uma_patch" ]; then
+      echo 'Upstream llama.cpp already contains the Vulkan UMA CEIL_DIV fix; skipping obsolete llama.kt 0001 patch.'
+      rm -f "$uma_patch"
+    fi
+  else
+    echo 'ERROR: pinned llama.cpp does not contain the upstream Vulkan UMA CEIL_DIV fix; refusing to discard 0001 patch.'
+    exit 1
+  fi
+
   bash "$script" 2>&1 | tee "$ROOT_DIR/bootstrap-output.log"
   LLAMA_BOOTSTRAP_REBUILT=true
 }
