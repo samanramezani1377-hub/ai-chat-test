@@ -1,7 +1,6 @@
 package com.samanramezani.aichattest.ui.workspace
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -10,6 +9,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.samanramezani.aichattest.AppContainer
+import com.samanramezani.aichattest.ui.components.SimplePage
 import com.samanramezani.aichattest.ui.state.ExecutionState
 import com.woogit.aicore.actions.ActionErrorLog
 import com.woogit.aicore.actions.ActionExecutionState
@@ -150,7 +150,7 @@ internal fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, 
                 if (relevant.isEmpty()) Text("خطای ثبت‌شده‌ای برای این Execution وجود ندارد.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 relevant.takeLast(10).reversed().forEach { error ->
                     Surface(Modifier.fillMaxWidth().padding(top = 6.dp), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer) {
-                        Column(Modifier.padding(12.dp)) { Text(error.userMessage); Text(error.rawError, style = MaterialTheme.typography.bodySmall) }
+                        Column(Modifier.padding(12.dp)) { Text(error.userMessageFa); Text(error.rawMachineError, style = MaterialTheme.typography.bodySmall) }
                     }
                 }
             }
@@ -193,11 +193,4 @@ internal fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, 
 private fun durationText(execution: ExecutionState): String {
     val end = execution.finishedAt ?: System.currentTimeMillis()
     return "${(end - execution.startedAt).coerceAtLeast(0L)} ms"
-}
-
-@Composable private fun SimplePage(title: String, content: @Composable ColumnScope.() -> Unit) {
-    LazyColumn(Modifier.fillMaxSize().padding(20.dp), contentPadding = PaddingValues(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text(title, style = MaterialTheme.typography.headlineMedium) }
-        item { Column(verticalArrangement = Arrangement.spacedBy(12.dp), content = content) }
-    }
 }
