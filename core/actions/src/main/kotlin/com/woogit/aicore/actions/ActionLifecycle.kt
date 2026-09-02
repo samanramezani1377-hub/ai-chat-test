@@ -11,6 +11,7 @@ sealed interface ActionExecutionState {
     data object AwaitingApproval : ActionExecutionState
     data object Approved : ActionExecutionState
     data object Executing : ActionExecutionState
+    data object Unknown : ActionExecutionState
     data class Completed(val verification: VerificationResult) : ActionExecutionState
     data class Failed(val message: String) : ActionExecutionState
     data object Rejected : ActionExecutionState
@@ -29,6 +30,13 @@ data class PreparedAction(
 interface ActionApprovalPolicy { fun requiresApproval(risk: com.woogit.aicore.domain.RiskLevel): Boolean }
 class DefaultActionApprovalPolicy : ActionApprovalPolicy {
     override fun requiresApproval(risk: com.woogit.aicore.domain.RiskLevel) = risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE
+}
+
+interface ActionPermissionPolicy {
+    fun isAllowed(actionId: String, permission: String): Boolean
+}
+class DefaultActionPermissionPolicy : ActionPermissionPolicy {
+    override fun isAllowed(actionId: String, permission: String): Boolean = permission == "action:$actionId"
 }
 
 interface ActionRetryPolicy { fun maxRetries(action: PreparedAction): Int }
@@ -62,6 +70,7 @@ class ActionLifecycle(
     private val traceSink: ActionTraceSink? = null,
     private val errorLogSink: ActionErrorLogSink? = null,
     private val actionResultVerifier: ActionResultVerifier? = null,
+    private val permissionPolicy: ActionPermissionPolicy = DefaultActionPermissionPolicy(),
 ) {
     private suspend fun trace(id: String, type: ActionTraceType, message: String? = null) = traceSink?.record(ActionTraceEvent(id, type, message))
     private suspend fun logError(executionId: String?, actionId: String?, raw: String, userMessage: String) = errorLogSink?.record(ActionErrorLog(executionId, actionId, userMessage, raw))
@@ -77,6 +86,12 @@ class ActionLifecycle(
     fun requiresApproval(prepared: PreparedAction) = approvalPolicy.requiresApproval(prepared.risk)
 
     suspend fun validate(prepared: PreparedAction, capability: String?): PreparedAction {
+        val action = registry.find(prepared.actionId) ?: error("Action not found: ${prepared.actionId}")
+        if (!permissionPolicy.isAllowed(action.id, action.permission)) {
+            val raw = "Action permission denied: ${action.permission}"
+            logError(prepared.executionId, prepared.actionId, raw, "مجوز لازم برای اجرای این عملیات صادر نشده است.")
+            error(raw)
+        }
         if (capability != null && !capabilityProvider.supports(capability)) {
             val raw = "Required capability is unavailable: $capability"
             logError(prepared.executionId, prepared.actionId, raw, "قابلیت موردنیاز برای اجرای عملیات در دسترس نیست.")
@@ -127,16 +142,26 @@ class ActionLifecycle(
             completed
         } catch (t: Throwable) {
             val raw = t.message ?: t::class.simpleName.orEmpty()
-            checkpointStore.save(prepared.copy(state = ActionExecutionState.Failed(raw)))
+            checkpointStore.save(prepared.copy(state = ActionExecutionState.Unknown))
             trace(executionId, ActionTraceType.EXECUTION_FAILED, raw)
-            logError(executionId, prepared.actionId, raw, "اجرای عملیات با خطا مواجه شد.")
-            ActionExecutionState.Failed(raw)
+            logError(executionId, prepared.actionId, raw, "وضعیت اجرای عملیات نامشخص است؛ ابتدا نتیجه واقعی باید بررسی شود.")
+            ActionExecutionState.Unknown
         }
+    }
+
+    suspend fun markInterruptedExecutionsUnknown(): List<PreparedAction> {
+        val interrupted = checkpointStore.list().filter { it.state == ActionExecutionState.Executing }
+        interrupted.forEach { checkpointStore.save(it.copy(state = ActionExecutionState.Unknown)) }
+        return interrupted.map { it.copy(state = ActionExecutionState.Unknown) }
     }
 
     suspend fun retryFailed(executionId: String, verifier: Verifier<Any>): ActionExecutionState {
         val failed = checkpoint(executionId)
         if (failed.state !is ActionExecutionState.Failed) return ActionExecutionState.Failed("Only failed executions can be retried")
+        val action = registry.find(failed.actionId) ?: return ActionExecutionState.Failed("Action not found: ${failed.actionId}")
+        if (action.stateChanging && !action.idempotent) {
+            return ActionExecutionState.Failed("State-changing non-idempotent action requires reconciliation before retry")
+        }
         val maxRetries = retryPolicy.maxRetries(failed).coerceAtLeast(0)
         if (failed.retryCount >= maxRetries) return ActionExecutionState.Failed("Retry limit reached: $maxRetries")
         trace(executionId, ActionTraceType.RETRY_REQUESTED, "attempt=${failed.retryCount + 1}/$maxRetries")
