@@ -91,7 +91,7 @@ class ActionLifecycleSafetyTest {
 
     private class TestRegistry(private val action: Action<Any, Any>) : ActionRegistry {
         override fun register(category: String, action: Action<Any, Any>) = Unit
-        override fun find(actionId: String): Action<Any, Any>? = action.takeIf { it.id == actionActionId }
+        override fun find(actionId: String): Action<Any, Any>? = action.takeIf { it.id == actionId }
         override fun categories(): Set<String> = setOf("test")
     }
 
