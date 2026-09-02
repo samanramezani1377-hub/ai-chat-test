@@ -5,6 +5,7 @@ import com.woogit.aicore.domain.CapabilityProvider
 import com.woogit.aicore.domain.VerificationResult
 import com.woogit.aicore.domain.Verifier
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 
 sealed interface ActionExecutionState {
     data object Prepared : ActionExecutionState
@@ -140,6 +141,8 @@ class ActionLifecycle(
             checkpointStore.save(prepared.copy(state = completed))
             trace(executionId, ActionTraceType.EXECUTION_COMPLETED)
             completed
+        } catch (cancellation: CancellationException) {
+            throw cancellation
         } catch (t: Throwable) {
             val raw = t.message ?: t::class.simpleName.orEmpty()
             checkpointStore.save(prepared.copy(state = ActionExecutionState.Failed(raw)))
