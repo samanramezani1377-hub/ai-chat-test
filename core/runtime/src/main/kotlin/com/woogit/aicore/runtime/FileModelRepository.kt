@@ -6,6 +6,7 @@ import com.woogit.aicore.domain.ModelRepository
 import com.woogit.aicore.domain.ModelResult
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.util.Properties
 
 /** Small durable registry. Model files remain outside the registry; only metadata is persisted. */
@@ -40,8 +41,7 @@ class FileModelRepository(private val registryFile: Path) : ModelRepository {
     override suspend fun list(): ModelResult<List<ModelDescriptor>> = synchronized(lock) {
         runCatching {
             val properties = load()
-            properties.stringPropertyNames().asSequence()
-                .filter { it.startsWith("model.") && it.endsWith(".displayName") }
+            properties.stringPropertyNames().asSequence().filter { it.startsWith("model.") && it.endsWith(".displayName") }
                 .map { it.removePrefix("model.").removeSuffix(".displayName") }
                 .mapNotNull { loadModel(properties, it) }
                 .toList()
@@ -86,8 +86,16 @@ class FileModelRepository(private val registryFile: Path) : ModelRepository {
     }
 
     private fun save(properties: Properties) {
-        Files.createDirectories(registryFile.parent ?: registryFile.toAbsolutePath().parent)
-        Files.newOutputStream(registryFile).use { properties.store(it, "AI Chat local model registry") }
+        val parent = registryFile.parent ?: registryFile.toAbsolutePath().parent
+        Files.createDirectories(parent)
+        val temp = Files.createTempFile(parent, registryFile.fileName.toString(), ".tmp")
+        try {
+            Files.newOutputStream(temp).use { properties.store(it, "AI Chat local model registry") }
+            runCatching { Files.move(temp, registryFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING) }
+                .getOrElse { Files.move(temp, registryFile, StandardCopyOption.REPLACE_EXISTING) }
+        } finally {
+            Files.deleteIfExists(temp)
+        }
     }
 
     private fun loadModel(properties: Properties, id: String): ModelDescriptor? {
@@ -113,8 +121,7 @@ class FileModelRepository(private val registryFile: Path) : ModelRepository {
             ),
             validation = validation,
             runtimeCompatibility = com.woogit.aicore.domain.RuntimeCompatibility(validation == com.woogit.aicore.domain.ValidationStatus.VALID, if (fileValid) null else "Registered model file is missing or has changed"),
-            state = if (validation != com.woogit.aicore.domain.ValidationStatus.VALID) com.woogit.aicore.domain.ModelState.INVALID
-            else if (properties.getProperty("activeModelId") == id) com.woogit.aicore.domain.ModelState.ACTIVE else com.woogit.aicore.domain.ModelState.READY
+            state = if (validation != com.woogit.aicore.domain.ValidationStatus.VALID) com.woogit.aicore.domain.ModelState.INVALID else if (properties.getProperty("activeModelId") == id) com.woogit.aicore.domain.ModelState.ACTIVE else com.woogit.aicore.domain.ModelState.READY
         )
     }
 
