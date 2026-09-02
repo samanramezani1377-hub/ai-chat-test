@@ -10,6 +10,7 @@ import com.woogit.aicore.actions.BuiltinActionVerifier
 import com.woogit.aicore.actions.DefaultActionRegistry
 import com.woogit.aicore.actions.DefaultActionRetryPolicy
 import com.woogit.aicore.actions.InMemoryActionCheckpointStore
+import com.woogit.aicore.actions.PreparedAction
 import com.woogit.aicore.actions.registerBuiltinFileActions
 import com.woogit.aicore.actions.registerProviderActions
 import com.woogit.aicore.agent.ActionExecutionOutcome
@@ -26,7 +27,6 @@ import com.woogit.aicore.conversation.DefaultContextProvider
 import com.woogit.aicore.conversation.InMemoryConversationHistoryRepository
 import com.woogit.aicore.domain.ActionRegistry
 import com.woogit.aicore.domain.CapabilityProvider
-import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.ModelResult
 import com.woogit.aicore.domain.Verifier
 import com.woogit.aicore.runtime.RuntimeAdapter
@@ -94,6 +94,8 @@ class AppContainer(context: Context? = null) {
     private val actionExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan ->
         lifecycle.executeApproved(plan.prepared.executionId, verifier).let(::executionOutcome)
     }
+
+    suspend fun pendingApproval(): PreparedAction? = lifecycle.pendingApprovals().maxByOrNull { it.executionId }
 
     suspend fun approveAndExecute(executionId: String): ActionExecutionOutcome = runCatching {
         val approved = lifecycle.approve(executionId)
