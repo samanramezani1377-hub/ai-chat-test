@@ -37,13 +37,24 @@ jobs:
           git -C libs/llama.kt submodule sync --recursive
           git -C libs/llama.kt submodule update --init --depth=1 --recursive
 
-      - name: Align llama.cpp revision used by llama.kt
+      - name: Pin llama.cpp revision used by llama.kt bootstrap
         run: |
           set -euo pipefail
-          test -d libs/llama.kt/third_party/llama.cpp
-          git -C libs/llama.kt/third_party/llama.cpp fetch --depth=1 origin 91f8c9c5fb038c086e13e9cd823c29b33b07ba54
-          git -C libs/llama.kt/third_party/llama.cpp checkout --detach 91f8c9c5fb038c086e13e9cd823c29b33b07ba54
-          test "$(git -C libs/llama.kt/third_party/llama.cpp rev-parse HEAD)" = "91f8c9c5fb038c086e13e9cd823c29b33b07ba54"
+          LLAMA_CPP_REV=91f8c9c5fb038c086e13e9cd823c29b33b07ba54
+          cd libs/llama.kt
+          test -d third_party/llama.cpp
+          git fetch --depth=1 origin "$LLAMA_CPP_REV"
+          git -C third_party/llama.cpp fetch --depth=1 origin "$LLAMA_CPP_REV"
+          git -C third_party/llama.cpp checkout --detach "$LLAMA_CPP_REV"
+
+          # bootstrap.sh reads the llama.cpp gitlink from llama.kt HEAD.
+          # Update that gitlink in a local CI-only commit so bootstrap cannot
+          # silently reset the working tree back to the old revision.
+          git update-index --add --cacheinfo 160000,"$LLAMA_CPP_REV",third_party/llama.cpp
+          git -c user.name='CI' -c user.email='ci@localhost' commit -m 'ci: pin llama.cpp for bootstrap' --no-verify
+
+          test "$(git -C third_party/llama.cpp rev-parse HEAD)" = "$LLAMA_CPP_REV"
+          test "$(git ls-tree HEAD third_party/llama.cpp | awk '{print $3}')" = "$LLAMA_CPP_REV"
 
       - name: Setup Java 21
         uses: actions/setup-java@v5
@@ -72,7 +83,10 @@ jobs:
           cp ci/patches/0002-abort-callback-mid-graph-cancel.patch libs/llama.kt/patches/0002-abort-callback-mid-graph-cancel.patch
 
       - name: Bootstrap llama.cpp sources
-        run: bash libs/llama.kt/scripts/bootstrap.sh
+        run: |
+          set -o pipefail
+          bash libs/llama.kt/scripts/bootstrap.sh 2>&1 | tee bootstrap-output.log
+          test "$(git -C libs/llama.kt/third_party/llama.cpp rev-parse HEAD)" = "91f8c9c5fb038c086e13e9cd823c29b33b07ba54"
 
       - name: Apply llama.rn Barbet compatibility patches
         run: |
@@ -106,7 +120,9 @@ jobs:
           grep -Fq 'llama_model_barbet::load_arch_hparams' models/barbet.cpp
 
       - name: Build OpenCL loader
-        run: bash libs/llama.kt/scripts/build-opencl.sh
+        run: |
+          set -o pipefail
+          bash libs/llama.kt/scripts/build-opencl.sh 2>&1 | tee opencl-output.log
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
@@ -134,19 +150,19 @@ jobs:
             echo "- Runner OS: ${RUNNER_OS}"
             echo "- Runner architecture: ${RUNNER_ARCH}"
             echo
-            echo "## Failed step"
-            echo "- Step: Build and test"
-            echo "- Command: gradle build --parallel --no-daemon"
+            echo "## Diagnostic guidance"
+            echo "The CI can fail before Gradle. Diagnose the earliest failed stage and its first real error."
+            echo "Warnings are not the root cause unless no error is present."
             echo
-            echo "## AI diagnosis input"
-            echo "The following is the complete stdout/stderr captured from the failed Build and test step."
-            echo "Use the first error and its surrounding context as the primary diagnostic signal."
-            echo "Do not treat warnings as the root cause unless no error is present."
-            echo
-            echo "## Build log"
-            echo '```text'
-            cat build-output.log
-            echo '```'
+            for log in bootstrap-output.log opencl-output.log build-output.log; do
+              if [ -s "$log" ]; then
+                echo "## $log"
+                echo '```text'
+                cat "$log"
+                echo '```'
+                echo
+              fi
+            done
           } > ai-build-failure-report.md
 
       - name: Upload AI-readable build failure report
