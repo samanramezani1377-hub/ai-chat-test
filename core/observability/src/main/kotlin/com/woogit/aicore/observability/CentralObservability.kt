@@ -3,15 +3,21 @@ package com.woogit.aicore.observability
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedDeque
 
-/**
- * The single observability boundary for the application.
- * Components emit events/errors here; presentation layers only query/subscribe.
- */
+/** Single observability boundary. Components emit here; presentation only queries/subscribes. */
 class CentralObservability(
     private val errorStore: ErrorReportStore = InMemoryErrorReportStore(),
     private val traceStore: ExecutionTraceStore = InMemoryExecutionTraceStore(),
     private val redactor: LogRedactor = DefaultLogRedactor,
-) {
+) : CentralErrorReporter {
+    override suspend fun report(error: ErrorReport) {
+        errorStore.append(error.copy(
+            rawMachineError = redactor.redact(error.rawMachineError),
+            trace = error.trace?.let(redactor::redact),
+            relatedLogs = error.relatedLogs.map(redactor::redact),
+            redactionStatus = RedactionStatus.REDACTED,
+        ))
+    }
+
     suspend fun error(
         appVersion: String,
         component: String,
@@ -31,21 +37,9 @@ class CentralObservability(
         modelInfo: String? = null,
     ): ErrorReport {
         val report = ErrorReportBuilder(appVersion, redactor).build(
-            eventId = eventId,
-            component = component,
-            errorCode = errorCode,
-            userMessageFa = userMessageFa,
-            rawMachineError = rawMachineError,
-            severity = severity,
-            taskId = taskId,
-            actionId = actionId,
-            trace = trace,
-            relatedLogs = relatedLogs,
-            executionState = executionState,
-            recoveryState = recoveryState,
-            verificationState = verificationState,
-            runtimeInfo = runtimeInfo,
-            modelInfo = modelInfo,
+            eventId, component, errorCode, userMessageFa, rawMachineError, severity,
+            taskId, actionId, trace, relatedLogs, executionState, recoveryState,
+            verificationState, runtimeInfo, modelInfo,
         )
         errorStore.append(report)
         return report
@@ -62,23 +56,14 @@ class CentralObservability(
         actionId: String? = null,
         message: String? = null,
     ): ExecutionTraceEvent {
-        val event = ExecutionTraceEvent(
-            executionId = executionId,
-            taskId = taskId,
-            actionId = actionId,
-            phase = phase,
-            message = message,
-        )
+        val event = ExecutionTraceEvent(executionId, taskId, actionId, phase, message)
         trace(event)
         return event
     }
 
     suspend fun errors(limit: Int? = null): List<ErrorReport> = errorStore.recent(limit)
     suspend fun traces(executionId: String): List<ExecutionTraceEvent> = traceStore.forExecution(executionId)
-
-    suspend fun reportForAgent(reportId: String): String? =
-        errorStore.find(reportId)?.let(ErrorReportFormatter::forAgent)
-
+    suspend fun reportForAgent(reportId: String): String? = errorStore.find(reportId)?.let(ErrorReportFormatter::forAgent)
     suspend fun copyableReport(reportId: String): String? = reportForAgent(reportId)
 }
 
@@ -90,14 +75,11 @@ interface ErrorReportStore {
 
 class InMemoryErrorReportStore : ErrorReportStore {
     private val reports = ConcurrentLinkedDeque<ErrorReport>()
-
     override suspend fun append(report: ErrorReport) { reports.addLast(report) }
-
     override suspend fun recent(limit: Int?): List<ErrorReport> {
         val values = reports.toList().asReversed()
         return if (limit == null) values else values.take(limit.coerceAtLeast(0))
     }
-
     override suspend fun find(reportId: String): ErrorReport? = reports.firstOrNull { it.reportId == reportId }
 }
 
@@ -132,8 +114,5 @@ object DefaultLogRedactor : LogRedactor {
         Regex("(?i)((?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|authorization|password|secret)\\s*[:=]\\s*)[^\\s,;]+") to "$1[REDACTED]",
         Regex("(?i)(x-api-key\\s*[:=]\\s*)[^\\s,;]+") to "$1[REDACTED]",
     )
-
-    override fun redact(value: String): String = patterns.fold(value) { text, (pattern, replacement) ->
-        pattern.replace(text, replacement)
-    }
+    override fun redact(value: String): String = patterns.fold(value) { text, (pattern, replacement) -> pattern.replace(text, replacement) }
 }
