@@ -33,16 +33,27 @@ class ActionLifecycleSafetyTest {
     @Test
     fun interruptedExecutionIsMarkedUnknownAndNeverSilentlyRetried() = kotlinx.coroutines.test.runTest {
         val checkpoint = InMemoryActionCheckpointStore()
-        val action = TestAction("write", RiskLevel.NORMAL, throws = true)
+        val action = TestAction("write", RiskLevel.NORMAL)
         val lifecycle = ActionLifecycle(TestRegistry(action), TestCapabilities, checkpoint)
-        val prepared = lifecycle.prepare(action.id, "payload")
-        val approved = lifecycle.validate(prepared, null)
+        val interrupted = PreparedAction(
+            executionId = "interrupted",
+            actionId = action.id,
+            input = "payload",
+            risk = action.risk,
+            state = ActionExecutionState.Executing
+        )
+        checkpoint.save(interrupted)
 
-        val result = lifecycle.executeApproved(approved.executionId, TestVerifier)
+        val recovered = lifecycle.markInterruptedExecutionsUnknown()
 
-        assertIs<ActionExecutionState.Unknown>(result)
-        assertIs<ActionExecutionState.Unknown>(lifecycle.checkpoint(approved.executionId).state)
-        assertEquals(1, action.calls)
+        assertEquals(1, recovered.size)
+        assertIs<ActionExecutionState.Unknown>(recovered.single().state)
+        assertIs<ActionExecutionState.Unknown>(lifecycle.checkpoint(interrupted.executionId).state)
+
+        val retry = lifecycle.retryFailed(interrupted.executionId, TestVerifier)
+        assertIs<ActionExecutionState.Failed>(retry)
+        assertEquals("Only failed executions can be retried", retry.message)
+        assertEquals(0, action.calls)
     }
 
     @Test
@@ -80,7 +91,7 @@ class ActionLifecycleSafetyTest {
 
     private class TestRegistry(private val action: Action<Any, Any>) : ActionRegistry {
         override fun register(category: String, action: Action<Any, Any>) = Unit
-        override fun find(actionId: String): Action<Any, Any>? = action.takeIf { it.id == actionId }
+        override fun find(actionId: String): Action<Any, Any>? = action.takeIf { it.id == actionActionId }
         override fun categories(): Set<String> = setOf("test")
     }
 
