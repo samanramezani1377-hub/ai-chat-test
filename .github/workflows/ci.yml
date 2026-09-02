@@ -68,13 +68,6 @@ jobs:
             ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
           key: ci-native-2-${{ runner.os }}-vulkan-1.4.321.1-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-ndk-27.2.12479018
 
-      - name: Restore llama.kt bootstrap output cache
-        id: bootstrap-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: /tmp/llama-kt-bootstrap-cache
-          key: ci-bootstrap-3-llama-kt-5a20956b1fe2f40d07252f079c31bcaa08250e6b-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-vulkan-1.4.321.1-ndk-27.2.12479018-${{ hashFiles('ci/patches/0002-abort-callback-mid-graph-cancel.patch') }}
-
       - name: Restore Vulkan shader generation cache
         id: shader-cache
         uses: actions/cache/restore@v4
@@ -178,28 +171,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BOOTSTRAP_CACHE_DIR=/tmp/llama-kt-bootstrap-cache
           CPP_DIR=libs/llama.kt/llama-kt/src/main/cpp
           LLAMA_CPP_DIR=libs/llama.kt/third_party/llama.cpp
-          apply_downstream_patch() {
-            cp ci/patches/0002-abort-callback-mid-graph-cancel.patch libs/llama.kt/patches/0002-abort-callback-mid-graph-cancel.patch
-            rm -f libs/llama.kt/patches/0001-vulkan-uma-descriptor-ceildiv.patch
-          }
-          restore_cached_bootstrap() {
-            echo 'Bootstrap cache hit; restoring generated llama.kt native sources'
-            rm -rf "$CPP_DIR"
-            mkdir -p "$CPP_DIR"
-            cp -a "$BOOTSTRAP_CACHE_DIR/cpp/." "$CPP_DIR/"
-          }
-          if [ -d "$BOOTSTRAP_CACHE_DIR" ] && [ -f "$BOOTSTRAP_CACHE_DIR/.complete" ]; then
-            restore_cached_bootstrap
-          else
-            echo 'Bootstrap cache miss; running pinned llama.kt bootstrap'
-            apply_downstream_patch
-            patch -p1 --forward < ci/patches/0003-cache-vulkan-shader-generation.patch
-            bash libs/llama.kt/scripts/bootstrap.sh 2>&1 | tee bootstrap-output.log
-            test "$(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
-          fi
+          echo 'Running fresh pinned llama.kt bootstrap; bootstrap output cache is intentionally disabled for debugging'
+          cp ci/patches/0002-abort-callback-mid-graph-cancel.patch libs/llama.kt/patches/0002-abort-callback-mid-graph-cancel.patch
+          rm -f libs/llama.kt/patches/0001-vulkan-uma-descriptor-ceildiv.patch
+          patch -p1 --forward < ci/patches/0003-cache-vulkan-shader-generation.patch
+          bash libs/llama.kt/scripts/bootstrap.sh 2>&1 | tee bootstrap-output.log
+
+          test "$(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
+          echo "Validated llama.cpp revision: $(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)"
+          test -s "$CPP_DIR/llama.h"
+          test -s "$CPP_DIR/llama.cpp"
+          test -s "$CPP_DIR/ggml.h"
+          echo 'Validated fresh llama.kt native tree: llama.h llama.cpp ggml.h'
 
           test -s /tmp/llama.rn-ref/cpp/rn-llama-version.h
           cp /tmp/llama.rn-ref/cpp/rn-llama-version.h "$CPP_DIR/rn-llama-version.h"
@@ -220,14 +205,6 @@ jobs:
           EOF
           test -s "$CPP_DIR/common/json.h"
           test -s "$CPP_DIR/common/json.cpp"
-
-          if [ ! -f "$BOOTSTRAP_CACHE_DIR/.complete" ]; then
-            rm -rf "$BOOTSTRAP_CACHE_DIR"
-            mkdir -p "$BOOTSTRAP_CACHE_DIR/cpp"
-            cp -a "$CPP_DIR/." "$BOOTSTRAP_CACHE_DIR/cpp/"
-            : > "$BOOTSTRAP_CACHE_DIR/.complete"
-            echo 'Bootstrap output staged in cache; continuing with project-specific compatibility files'
-          fi
 
           test "$(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
           test -f "$LLAMA_CPP_DIR/ggml/src/ggml-feats.h"
@@ -253,6 +230,7 @@ jobs:
           test -s "$CPP_DIR/ggml-feats.h"
           test -s "$CPP_DIR/tools/mtmd/mtmd-internal.h"
           test -s "$CPP_DIR/rn-llama-version.h"
+          echo 'Fresh bootstrap validation completed successfully'
 
       - name: Save Vulkan shader generation cache
         if: success() && steps.shader-cache.outputs.cache-hit != 'true'
