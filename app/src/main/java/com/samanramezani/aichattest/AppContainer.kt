@@ -98,12 +98,14 @@ class AppContainer(context: Context? = null) {
     private fun executionOutcome(state: ActionExecutionState): ActionExecutionOutcome = when (state) {
         is ActionExecutionState.Completed -> ActionExecutionOutcome(true, state.verification.success, state.verification.evidence ?: "Action completed", state.verification.evidence)
         is ActionExecutionState.Failed -> ActionExecutionOutcome(false, false, state.message, errorCode = "ACTION_FAILED")
+        ActionExecutionState.Unknown -> ActionExecutionOutcome(false, false, "Action execution state is unknown; reconciliation is required", errorCode = "ACTION_UNKNOWN")
         else -> ActionExecutionOutcome(false, false, "Action was not executed", errorCode = "NOT_EXECUTED")
     }
 
     private val actionExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan -> lifecycle.executeApproved(plan.prepared.executionId, verifier).let(::executionOutcome) }
 
     suspend fun pendingApproval(conversationId: String): PreparedAction? = lifecycle.pendingApprovals(conversationId).maxByOrNull { it.executionId }
+    suspend fun reconcileInterruptedActions(): List<PreparedAction> = lifecycle.markInterruptedExecutionsUnknown()
     fun actionTraces(): List<ActionTraceEvent> = actionTraceSink.snapshot()
     fun actionErrors(): List<ActionErrorLog> = actionErrorLogSink.snapshot()
 
