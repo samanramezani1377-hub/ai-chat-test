@@ -35,12 +35,19 @@ jobs:
       - name: Install NDK 27.2
         run: sdkmanager "ndk;27.2.12479018"
 
-      - name: Prepare llama.rn sources for llama.kt bootstrap
+      - name: Prepare pinned llama.rn sources for llama.kt bootstrap
         run: |
           rm -rf /tmp/llama.rn-ref
-          git clone --depth 1 https://github.com/mybigday/llama.rn /tmp/llama.rn-ref
+          git clone --filter=blob:none --no-checkout https://github.com/mybigday/llama.rn /tmp/llama.rn-ref
+          git -C /tmp/llama.rn-ref fetch --depth 1 origin 7afb5c8934aea7fa41f4522662f03b3461916927
+          git -C /tmp/llama.rn-ref checkout --detach 7afb5c8934aea7fa41f4522662f03b3461916927
+          test "$(git -C /tmp/llama.rn-ref rev-parse HEAD)" = "7afb5c8934aea7fa41f4522662f03b3461916927"
           test -f /tmp/llama.rn-ref/cpp/rn-llama.cpp
           test -f /tmp/llama.rn-ref/cpp/rn-llama.h
+
+      - name: Apply downstream llama.rn abort patch
+        run: |
+          cp ci/patches/0002-abort-callback-mid-graph-cancel.patch libs/llama.kt/patches/0002-abort-callback-mid-graph-cancel.patch
 
       - name: Bootstrap llama.cpp sources
         run: bash libs/llama.kt/scripts/bootstrap.sh
