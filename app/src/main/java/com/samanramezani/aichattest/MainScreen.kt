@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import com.samanramezani.aichattest.ui.SettingsScreen
 import com.samanramezani.aichattest.ui.about.AboutPage
@@ -31,6 +32,7 @@ import java.util.UUID
 internal fun MainScreen(container: AppContainer) {
     val history = remember { container.conversationHistory }
     val manager = remember { container.modelManager }
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var destination by remember { mutableStateOf(AppDestination.CHAT) }
     var current by remember { mutableStateOf<ConversationRecord?>(null) }
@@ -114,6 +116,10 @@ internal fun MainScreen(container: AppContainer) {
         }
     }
 
+    fun stopForegroundRuntime() {
+        RuntimeExecutionForegroundService.stop(context)
+    }
+
     fun send() {
         val record = current ?: return
         if (manager == null || generating || approvalBusy) return
@@ -128,6 +134,7 @@ internal fun MainScreen(container: AppContainer) {
         runtimeStatus = "در حال اجرای Agent"
         diagnostic = null
         execution = ExecutionState(UUID.randomUUID().toString(), "درخواست Agent", "در حال اجرا", System.currentTimeMillis(), requestPreview = text)
+        RuntimeExecutionForegroundService.start(context)
         scope.launch(Dispatchers.Default) {
             val session = container.createAgentSession(record.id) { event ->
                 withContext(Dispatchers.Main.immediate) {
@@ -140,6 +147,7 @@ internal fun MainScreen(container: AppContainer) {
                             runtimeStatus = "نیازمند تأیید"
                             generating = false
                             activeStreamId = null
+                            stopForegroundRuntime()
                         }
                         is AgentEvent.ActionExecuted -> execution = execution?.copy(status = "عملیات انجام شد")
                         is AgentEvent.Failed -> {
@@ -156,6 +164,7 @@ internal fun MainScreen(container: AppContainer) {
                     runtimeStatus = "خطا"
                     diagnostic = "Agent Session در دسترس نیست."
                     execution = execution?.copy(status = "ناموفق", finishedAt = System.currentTimeMillis(), error = diagnostic)
+                    stopForegroundRuntime()
                 }
                 return@launch
             }
@@ -167,6 +176,7 @@ internal fun MainScreen(container: AppContainer) {
                     activeStreamId = null
                     execution = execution?.copy(status = if (result.actionPlan != null) "عملیات تکمیل شد" else "پاسخ آماده است", finishedAt = System.currentTimeMillis(), resultPreview = result.generation.text.take(240))
                     if (!execution?.approvalRequired.orFalse()) runtimeStatus = "آماده"
+                    stopForegroundRuntime()
                 }
             } catch (t: Throwable) {
                 withContext(Dispatchers.Main) {
@@ -175,6 +185,7 @@ internal fun MainScreen(container: AppContainer) {
                     runtimeStatus = "خطا"
                     diagnostic = t.message ?: "Local agent execution failed"
                     execution = execution?.copy(status = "ناموفق", finishedAt = System.currentTimeMillis(), error = diagnostic)
+                    stopForegroundRuntime()
                 }
             }
             val updated = history.recent(recentLimit).firstOrNull { it.id == record.id }
@@ -197,6 +208,7 @@ internal fun MainScreen(container: AppContainer) {
         val streamId = UUID.randomUUID().toString()
         activeStreamId = streamId
         messages = messages + UiMessage(ChatMessage.Role.ASSISTANT, "", streamId)
+        RuntimeExecutionForegroundService.start(context)
         scope.launch(Dispatchers.Default) {
             try {
                 val outcome = container.approveAndExecute(pending.id)
@@ -208,6 +220,7 @@ internal fun MainScreen(container: AppContainer) {
                         runtimeStatus = "خطا"
                         diagnostic = outcome.message
                         execution = pending.copy(status = "ناموفق", error = outcome.message, finishedAt = System.currentTimeMillis())
+                        stopForegroundRuntime()
                     }
                     return@launch
                 }
@@ -231,6 +244,7 @@ internal fun MainScreen(container: AppContainer) {
                     execution = pending.copy(status = "عملیات تأیید و تکمیل شد", finishedAt = System.currentTimeMillis(), resultPreview = result.generation.text.take(240), approvalRequired = false)
                     conversations = history.recent(recentLimit)
                     history.recent(recentLimit).firstOrNull { it.id == record.id }?.let { current = it }
+                    stopForegroundRuntime()
                 }
             } catch (t: Throwable) {
                 withContext(Dispatchers.Main) {
@@ -240,6 +254,7 @@ internal fun MainScreen(container: AppContainer) {
                     runtimeStatus = "خطا"
                     diagnostic = t.message ?: "Approval continuation failed"
                     execution = pending.copy(status = "ناموفق", error = diagnostic, finishedAt = System.currentTimeMillis())
+                    stopForegroundRuntime()
                 }
             }
         }
@@ -265,6 +280,7 @@ internal fun MainScreen(container: AppContainer) {
                     diagnostic = "رد عملیات انجام نشد. وضعیت Execution را بررسی کنید."
                     execution = pending.copy(status = "ناموفق", error = diagnostic, finishedAt = System.currentTimeMillis())
                 }
+                stopForegroundRuntime()
             }
         }
     }
@@ -276,6 +292,7 @@ internal fun MainScreen(container: AppContainer) {
         generating = false
         runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"
         execution = execution?.copy(status = "متوقف شد", finishedAt = System.currentTimeMillis())
+        stopForegroundRuntime()
     }
 
     fun deactivateModel() {
