@@ -71,6 +71,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(JNIEnv *env
     if (!g_model || !g_context) return 1;
     g_stop.store(false);
     llama_memory_clear(llama_get_memory(g_context), true);
+
     const char *prompt = env->GetStringUTFChars(jprompt, nullptr);
     const llama_vocab *vocab = llama_model_get_vocab(g_model);
     const int n = -llama_tokenize(vocab, prompt, strlen(prompt), nullptr, 0, true, true);
@@ -91,12 +92,18 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(JNIEnv *env
 
     jmethodID on_token = nullptr;
     if (listener) on_token = env->GetMethodID(env->GetObjectClass(listener), "onToken", "(Ljava/lang/String;)V");
-    llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
-    int generated = 0;
-    while (generated < std::max(1, max_tokens) && !g_stop.load()) {
+
+    const int batch_size = (int)llama_n_batch(g_context);
+    for (int offset = 0; offset < n; offset += batch_size) {
+        const int count = std::min(batch_size, n - offset);
+        llama_batch batch = llama_batch_get_one(tokens.data() + offset, count);
         if (llama_memory_seq_pos_max(llama_get_memory(g_context), 0) + 1 + batch.n_tokens > (int)llama_n_ctx(g_context)) return 4;
         const int rc = llama_decode(g_context, batch);
         if (rc != 0) return rc == 2 ? 5 : 6;
+    }
+
+    int generated = 0;
+    while (generated < std::max(1, max_tokens) && !g_stop.load()) {
         const llama_token id = llama_sampler_sample(g_sampler, g_context, -1);
         llama_sampler_accept(g_sampler, id);
         if (llama_vocab_is_eog(vocab, id)) break;
@@ -109,7 +116,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(JNIEnv *env
             if (env->ExceptionCheck()) { env->ExceptionClear(); return 8; }
         }
         ++generated;
-        batch = llama_batch_get_one(const_cast<llama_token *>(&id), 1);
+        llama_batch batch = llama_batch_get_one(const_cast<llama_token *>(&id), 1);
+        if (llama_memory_seq_pos_max(llama_get_memory(g_context), 0) + 1 + batch.n_tokens > (int)llama_n_ctx(g_context)) return 4;
+        const int rc = llama_decode(g_context, batch);
+        if (rc != 0) return rc == 2 ? 5 : 6;
     }
     return g_stop.load() ? 9 : 0;
 }
