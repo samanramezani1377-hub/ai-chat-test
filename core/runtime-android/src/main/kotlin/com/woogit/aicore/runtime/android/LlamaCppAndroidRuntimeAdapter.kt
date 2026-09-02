@@ -10,6 +10,7 @@ import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
 import com.woogit.aicore.runtime.RuntimeMetrics
+import com.woogit.aicore.runtime.RuntimeTraceEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -106,6 +107,7 @@ class LlamaCppAndroidRuntimeAdapter(
             gpuLayers = gpuLayers.coerceAtLeast(0),
         )
         stopRequested.set(false)
+        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "context=$effectiveContext")
         val startedAt = System.nanoTime()
         var firstTokenAt: Long? = null
         val output = StringBuilder()
@@ -116,7 +118,10 @@ class LlamaCppAndroidRuntimeAdapter(
             model.generateStream(prompt, config).collect { chunk ->
                 currentCoroutineContext().ensureActive()
                 if (chunk.isEmpty() || stopRequested.get()) return@collect
-                if (firstTokenAt == null) firstTokenAt = System.nanoTime()
+                if (firstTokenAt == null) {
+                    firstTokenAt = System.nanoTime()
+                    RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.FIRST_TOKEN, "ttftMs=${(firstTokenAt!! - startedAt) / 1_000_000}")
+                }
                 output.append(chunk)
                 val stopIndex = firstStopIndex(output, settings.stopSequences)
                 if (stopIndex >= 0) {
@@ -159,7 +164,10 @@ class LlamaCppAndroidRuntimeAdapter(
                 latestGeneration = stopped.value
                 RuntimeDiagnosticsStore.recordGeneration(settings, stopped.value, runtimeInfo())
                 stopped
-            } else ModelResult.Failure(RuntimeErrorMapper.inferenceFailure(t))
+            } else {
+                RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_FAILED, t.message)
+                ModelResult.Failure(RuntimeErrorMapper.inferenceFailure(t))
+            }
         } finally {
             stopRequested.set(false)
         }
@@ -167,6 +175,7 @@ class LlamaCppAndroidRuntimeAdapter(
 
     override suspend fun stopGeneration() {
         stopRequested.set(true)
+        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STOPPED)
         loadedModel?.cancelGeneration()
     }
 
