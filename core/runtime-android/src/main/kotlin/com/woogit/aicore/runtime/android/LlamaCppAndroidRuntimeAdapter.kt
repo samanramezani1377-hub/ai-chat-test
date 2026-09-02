@@ -45,7 +45,6 @@ class LlamaCppAndroidRuntimeAdapter(
         if (!file.isFile || !file.canRead()) {
             return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
         }
-
         val startedAt = System.nanoTime()
         return try {
             val requested = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
@@ -53,7 +52,6 @@ class LlamaCppAndroidRuntimeAdapter(
             if (result != 0) {
                 return ModelResult.Failure(ModelError.Inference("llama.cpp failed to load the model (code=$result)"))
             }
-
             val info = NativeLlamaCpp.runtimeInfo()
             selectedBackend = info.substringBefore(';').ifBlank { "CPU/NEON" }
             selectedGpuLayers = if (selectedBackend.contains("Vulkan", ignoreCase = true)) 99 else 0
@@ -90,16 +88,10 @@ class LlamaCppAndroidRuntimeAdapter(
 
     suspend fun generateResult(request: GenerationRequest, onToken: suspend (String) -> Unit): ModelResult<GenerationResult> {
         currentCoroutineContext().ensureActive()
-        if (loadedContextLength == null) {
-            return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
-        }
-
+        if (loadedContextLength == null) return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
         val settings = request.settings
-        val prompt = try {
-            Qwen3PromptFormatter.format(request.messages)
-        } catch (t: Throwable) {
-            return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation"))
-        }
+        val prompt = try { Qwen3PromptFormatter.format(request.messages) }
+        catch (t: Throwable) { return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation")) }
 
         stopRequested.set(false)
         RuntimeDiagnosticsStore.recordTrace(
@@ -109,6 +101,16 @@ class LlamaCppAndroidRuntimeAdapter(
         val startedAt = System.nanoTime()
         var firstTokenAt: Long? = null
         val output = StringBuilder()
+        val pending = StringBuilder()
+        val maxStopLength = settings.stopSequences.maxOfOrNull { it.length } ?: 0
+        var emittedChars = 0
+
+        fun emitSafe(text: String) {
+            if (text.isNotEmpty()) {
+                output.append(text)
+                emittedChars += text.length
+            }
+        }
 
         return try {
             NativeLlamaCpp.generate(
@@ -122,19 +124,30 @@ class LlamaCppAndroidRuntimeAdapter(
                 currentCoroutineContext().ensureActive()
                 if (chunk.isEmpty() || stopRequested.get()) return@collect
                 if (firstTokenAt == null) firstTokenAt = System.nanoTime()
+                pending.append(chunk)
 
-                output.append(chunk)
-                val stop = settings.stopSequences.firstOrNull { output.contains(it) }
+                val stop = settings.stopSequences.firstOrNull { pending.indexOf(it) >= 0 }
                 if (stop != null) {
+                    val index = pending.indexOf(stop)
+                    val visible = pending.substring(0, index)
+                    emitSafe(visible)
+                    pending.setLength(0)
                     stopRequested.set(true)
                     NativeLlamaCpp.stop()
-                    val visible = output.toString().substringBefore(stop)
-                    output.setLength(0)
-                    output.append(visible)
-                    onToken(visible)
                 } else {
-                    onToken(chunk)
+                    val safeCount = if (maxStopLength > 0) pending.length - maxStopLength + 1 else pending.length
+                    if (safeCount > 0) {
+                        val safe = pending.substring(0, safeCount)
+                        pending.delete(0, safeCount)
+                        onToken(safe)
+                        emitSafe(safe)
+                    }
                 }
+            }
+            if (!stopRequested.get() && pending.isNotEmpty()) {
+                onToken(pending.toString())
+                emitSafe(pending.toString())
+                pending.setLength(0)
             }
 
             val completed = GenerationResult(
@@ -149,24 +162,14 @@ class LlamaCppAndroidRuntimeAdapter(
             ModelResult.Success(completed)
         } catch (t: CancellationException) {
             if (stopRequested.get()) {
-                val stopped = GenerationResult(
-                    text = output.toString(), outputTokens = null,
-                    firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
-                    generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
-                    stopped = true,
-                )
+                val stopped = GenerationResult(output.toString(), null, firstTokenAt?.let { (it - startedAt) / 1_000_000 }, (System.nanoTime() - startedAt) / 1_000_000, true)
                 latestGeneration = stopped
                 RuntimeDiagnosticsStore.recordGeneration(settings, stopped, runtimeInfo())
                 ModelResult.Success(stopped)
             } else throw t
         } catch (t: Throwable) {
             if (stopRequested.get()) {
-                val stopped = GenerationResult(
-                    text = output.toString(), outputTokens = null,
-                    firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
-                    generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
-                    stopped = true,
-                )
+                val stopped = GenerationResult(output.toString(), null, firstTokenAt?.let { (it - startedAt) / 1_000_000 }, (System.nanoTime() - startedAt) / 1_000_000, true)
                 latestGeneration = stopped
                 RuntimeDiagnosticsStore.recordGeneration(settings, stopped, runtimeInfo())
                 ModelResult.Success(stopped)
