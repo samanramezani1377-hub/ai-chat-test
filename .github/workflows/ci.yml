@@ -213,11 +213,11 @@ jobs:
             sed -i 's/LM_LM_GGML_ASSERT/LM_GGML_ASSERT/g' "$CPP_DIR/common/json-partial.cpp"
           fi
           cat > "$CPP_DIR/common/json.h" <<'EOF'
-#include "../../../../../third_party/llama.cpp/common/json.h"
-EOF
+          #include "../../../../../third_party/llama.cpp/common/json.h"
+          EOF
           cat > "$CPP_DIR/common/json.cpp" <<'EOF'
-#include "../../../../../third_party/llama.cpp/common/json.cpp"
-EOF
+          #include "../../../../../third_party/llama.cpp/common/json.cpp"
+          EOF
           test -s "$CPP_DIR/common/json.h"
           test -s "$CPP_DIR/common/json.cpp"
 
@@ -235,7 +235,7 @@ EOF
           sed -i 's/GGML_/LM_GGML_/g; s/ggml_/lm_ggml_/g' "$CPP_DIR/ggml-feats.h"
           test -s "$CPP_DIR/ggml-feats.h"
           grep -Fq 'lm_ggml_feats_arch64_runtime_t' "$CPP_DIR/ggml-feats.h"
-          grep -Fq 'lm_ggml_feats_get_arch64_runtime' "$CPP_DIR/ggml-feats.h"
+          grep -Fq 'lm_ggml_feats_get_arch64_runtime' "$CPP_DIR/ggml-feats.h'
 
           for header in llama-kv-cache-dsa-iswa.h llama-kv-cache-msa.h llama-kv-cache-dsv4.h; do
             test -f "$LLAMA_CPP_DIR/src/$header"
