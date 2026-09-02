@@ -26,9 +26,9 @@ class LocalModelService(
     private val repository: ModelRepository,
     private val runtime: RuntimeAdapter
 ) : ModelLifecycleManager {
-    /** Protects model load/unload and repository/runtime state transitions. */
+    /** Runtime state transitions are always protected by this mutex. */
     private val runtimeMutex = Mutex()
-    /** Serializes generation calls without blocking stopGeneration from reaching the runtime. */
+    /** Generation is serialized independently; lock ordering is generation -> runtime, never the reverse. */
     private val generationMutex = Mutex()
     private var activeId: String? = null
     @Volatile private var generationJob: Job? = null
@@ -49,9 +49,7 @@ class LocalModelService(
     }
 
     suspend fun listModels(): ModelResult<List<ModelDescriptor>> = repository.list()
-
     suspend fun getModel(id: String): ModelResult<ModelDescriptor?> = repository.get(id)
-
     suspend fun activeModel(): ModelResult<ModelDescriptor?> = repository.getActive()
 
     suspend fun restoreActive(): ModelResult<ModelDescriptor?> {
@@ -65,42 +63,41 @@ class LocalModelService(
         }
     }
 
-    override suspend fun activate(id: String): ModelResult<ModelDescriptor> = runtimeMutex.withLock {
-        stopAndAwaitGeneration()
-        val model = when (val result = repository.get(id)) {
-            is ModelResult.Success -> result.value
-            is ModelResult.Failure -> return@withLock result
-        } ?: return@withLock ModelResult.Failure(ModelError.InvalidModel("Model is not registered"))
+    override suspend fun activate(id: String): ModelResult<ModelDescriptor> {
+        stopGeneration()
+        return generationMutex.withLock {
+            runtimeMutex.withLock {
+                val model = when (val result = repository.get(id)) {
+                    is ModelResult.Success -> result.value
+                    is ModelResult.Failure -> return@withLock result
+                } ?: return@withLock ModelResult.Failure(ModelError.InvalidModel("Model is not registered"))
 
-        if (model.format != ModelFormat.GGUF || model.validation != ValidationStatus.VALID) {
-            return@withLock ModelResult.Failure(ModelError.InvalidModel("Model is not valid for activation"))
-        }
-
-        try {
-            runtime.unload()
-            runtime.load(model)
-            when (val persisted = repository.setActive(id)) {
-                is ModelResult.Success -> {
-                    activeId = id
-                    ModelResult.Success(
-                        model.copy(
-                            state = ModelState.ACTIVE,
-                            runtimeCompatibility = RuntimeCompatibility(true, null)
-                        )
-                    )
+                if (model.format != ModelFormat.GGUF || model.validation != ValidationStatus.VALID) {
+                    return@withLock ModelResult.Failure(ModelError.InvalidModel("Model is not valid for activation"))
                 }
-                is ModelResult.Failure -> {
+
+                try {
                     runtime.unload()
+                    runtime.load(model)
+                    when (val persisted = repository.setActive(id)) {
+                        is ModelResult.Success -> {
+                            activeId = id
+                            ModelResult.Success(model.copy(state = ModelState.ACTIVE, runtimeCompatibility = RuntimeCompatibility(true, null)))
+                        }
+                        is ModelResult.Failure -> {
+                            runtime.unload()
+                            activeId = null
+                            persisted
+                        }
+                    }
+                } catch (t: OutOfMemoryError) {
                     activeId = null
-                    persisted
+                    ModelResult.Failure(ModelError.OutOfMemory("Not enough memory to load model", t))
+                } catch (t: Throwable) {
+                    activeId = null
+                    ModelResult.Failure(ModelError.LoadFailed("Unable to load model", t))
                 }
             }
-        } catch (t: OutOfMemoryError) {
-            activeId = null
-            ModelResult.Failure(ModelError.OutOfMemory("Not enough memory to load model", t))
-        } catch (t: Throwable) {
-            activeId = null
-            ModelResult.Failure(ModelError.LoadFailed("Unable to load model", t))
         }
     }
 
@@ -148,44 +145,43 @@ class LocalModelService(
         runCatching { runtime.stopGeneration() }
     }
 
-    private suspend fun stopAndAwaitGeneration() {
-        generationJob?.cancel()
-        runCatching { runtime.stopGeneration() }
-        generationMutex.withLock { /* waits for the current generation to leave the runtime */ }
-    }
-
-    override suspend fun deactivate(): ModelResult<Unit> = runtimeMutex.withLock {
-        try {
-            stopAndAwaitGeneration()
-            runtime.unload()
-            when (val persisted = repository.setActive(null)) {
-                is ModelResult.Success -> {
-                    activeId = null
-                    persisted
+    override suspend fun deactivate(): ModelResult<Unit> {
+        stopGeneration()
+        return generationMutex.withLock {
+            runtimeMutex.withLock {
+                try {
+                    runtime.unload()
+                    when (val persisted = repository.setActive(null)) {
+                        is ModelResult.Success -> { activeId = null; persisted }
+                        is ModelResult.Failure -> persisted
+                    }
+                } catch (t: Throwable) {
+                    ModelResult.Failure(ModelError.LoadFailed("Unable to deactivate model", t))
                 }
-                is ModelResult.Failure -> persisted
             }
-        } catch (t: Throwable) {
-            ModelResult.Failure(ModelError.LoadFailed("Unable to deactivate model", t))
         }
     }
 
     override suspend fun unload(): ModelResult<Unit> = deactivate()
 
-    suspend fun deleteModel(id: String): ModelResult<Unit> = runtimeMutex.withLock {
-        val active = repository.getActive()
-        if (active is ModelResult.Success && active.value?.id == id) {
-            stopAndAwaitGeneration()
-            runtime.unload()
-            repository.setActive(null)
-            activeId = null
+    suspend fun deleteModel(id: String): ModelResult<Unit> {
+        stopGeneration()
+        return generationMutex.withLock {
+            runtimeMutex.withLock {
+                val active = repository.getActive()
+                if (active is ModelResult.Success && active.value?.id == id) {
+                    runtime.unload()
+                    repository.setActive(null)
+                    activeId = null
+                }
+                val model = when (val result = repository.get(id)) {
+                    is ModelResult.Success -> result.value
+                    is ModelResult.Failure -> return@withLock result
+                } ?: return@withLock ModelResult.Failure(ModelError.InvalidModel("Model is not registered"))
+                java.nio.file.Files.deleteIfExists(model.path)
+                repository.unregister(id)
+            }
         }
-        val model = when (val result = repository.get(id)) {
-            is ModelResult.Success -> result.value
-            is ModelResult.Failure -> return@withLock result
-        } ?: return@withLock ModelResult.Failure(ModelError.InvalidModel("Model is not registered"))
-        java.nio.file.Files.deleteIfExists(model.path)
-        repository.unregister(id)
     }
 
     fun activeModelId(): String? = activeId
