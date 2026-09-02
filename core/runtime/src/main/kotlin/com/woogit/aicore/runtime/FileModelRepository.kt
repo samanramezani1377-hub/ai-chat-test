@@ -9,9 +9,7 @@ import java.nio.file.Path
 import java.util.Properties
 
 /** Small durable registry. Model files remain outside the registry; only metadata is persisted. */
-class FileModelRepository(
-    private val registryFile: Path
-) : ModelRepository {
+class FileModelRepository(private val registryFile: Path) : ModelRepository {
     private val lock = Any()
 
     override suspend fun register(model: ModelDescriptor): ModelResult<Unit> = synchronized(lock) {
@@ -36,15 +34,13 @@ class FileModelRepository(
     }
 
     override suspend fun get(id: String): ModelResult<ModelDescriptor?> = synchronized(lock) {
-        runCatching { loadModel(load(), id) }
-            .fold({ ModelResult.Success(it) }, { ModelResult.Failure(ModelError.Storage("Unable to read model registry", it)) })
+        runCatching { loadModel(load(), id) }.fold({ ModelResult.Success(it) }, { ModelResult.Failure(ModelError.Storage("Unable to read model registry", it)) })
     }
 
     override suspend fun list(): ModelResult<List<ModelDescriptor>> = synchronized(lock) {
         runCatching {
             val properties = load()
-            properties.stringPropertyNames()
-                .asSequence()
+            properties.stringPropertyNames().asSequence()
                 .filter { it.startsWith("model.") && it.endsWith(".displayName") }
                 .map { it.removePrefix("model.").removeSuffix(".displayName") }
                 .mapNotNull { loadModel(properties, it) }
@@ -54,15 +50,19 @@ class FileModelRepository(
 
     override suspend fun getActive(): ModelResult<ModelDescriptor?> = synchronized(lock) {
         runCatching {
-            loadModel(load(), load().getProperty("activeModelId").orEmpty())
+            val properties = load()
+            loadModel(properties, properties.getProperty("activeModelId").orEmpty())
         }.fold({ ModelResult.Success(it) }, { ModelResult.Failure(ModelError.Storage("Unable to read active model", it)) })
     }
 
     override suspend fun setActive(id: String?): ModelResult<Unit> = synchronized(lock) {
         runCatching {
             val properties = load()
-            if (!id.isNullOrBlank() && loadModel(properties, id) == null) {
-                return@synchronized ModelResult.Failure(ModelError.InvalidModel("Cannot activate an unregistered model"))
+            if (!id.isNullOrBlank()) {
+                val model = loadModel(properties, id)
+                if (model == null || model.validation != com.woogit.aicore.domain.ValidationStatus.VALID) {
+                    return@synchronized ModelResult.Failure(ModelError.InvalidModel("Cannot activate an invalid or missing model"))
+                }
             }
             properties.setProperty("activeModelId", id.orEmpty())
             save(properties)
@@ -86,19 +86,24 @@ class FileModelRepository(
     }
 
     private fun save(properties: Properties) {
+        Files.createDirectories(registryFile.parent ?: registryFile.toAbsolutePath().parent)
         Files.newOutputStream(registryFile).use { properties.store(it, "AI Chat local model registry") }
     }
 
     private fun loadModel(properties: Properties, id: String): ModelDescriptor? {
         if (id.isBlank() || !properties.containsKey("model.$id.displayName")) return null
         val prefix = "model.$id."
+        val path = runCatching { Path.of(properties.getProperty(prefix + "path")) }.getOrNull() ?: return null
+        val recordedSize = properties.getProperty(prefix + "sizeBytes")?.toLongOrNull()
+        val fileValid = Files.isRegularFile(path) && recordedSize != null && recordedSize >= 0 && runCatching { Files.size(path) == recordedSize }.getOrDefault(false)
+        val validation = if (fileValid) com.woogit.aicore.domain.ValidationStatus.VALID else com.woogit.aicore.domain.ValidationStatus.INVALID
         return ModelDescriptor(
             id = id,
             displayName = properties.getProperty(prefix + "displayName"),
-            path = Path.of(properties.getProperty(prefix + "path")),
+            path = path,
             format = enumValue(properties.getProperty(prefix + "format"), com.woogit.aicore.domain.ModelFormat.UNKNOWN),
             quantization = enumValue(properties.getProperty(prefix + "quantization"), com.woogit.aicore.domain.Quantization.UNKNOWN),
-            sizeBytes = properties.getProperty(prefix + "sizeBytes", "0").toLong(),
+            sizeBytes = recordedSize ?: 0L,
             metadata = com.woogit.aicore.domain.ModelMetadata(
                 architecture = properties.getProperty(prefix + "architecture").orEmpty().ifBlank { null },
                 name = properties.getProperty(prefix + "name").orEmpty().ifBlank { null },
@@ -106,12 +111,12 @@ class FileModelRepository(
                 embeddingLength = properties.getProperty(prefix + "embeddingLength").toLongOrNull(),
                 blockCount = properties.getProperty(prefix + "blockCount").toLongOrNull()
             ),
-            validation = com.woogit.aicore.domain.ValidationStatus.VALID,
-            runtimeCompatibility = com.woogit.aicore.domain.RuntimeCompatibility(false, "Runtime compatibility must be established by the configured runtime"),
-            state = if (properties.getProperty("activeModelId") == id) com.woogit.aicore.domain.ModelState.ACTIVE else com.woogit.aicore.domain.ModelState.READY
+            validation = validation,
+            runtimeCompatibility = com.woogit.aicore.domain.RuntimeCompatibility(validation == com.woogit.aicore.domain.ValidationStatus.VALID, if (fileValid) null else "Registered model file is missing or has changed"),
+            state = if (validation != com.woogit.aicore.domain.ValidationStatus.VALID) com.woogit.aicore.domain.ModelState.INVALID
+            else if (properties.getProperty("activeModelId") == id) com.woogit.aicore.domain.ModelState.ACTIVE else com.woogit.aicore.domain.ModelState.READY
         )
     }
 
-    private inline fun <reified T : Enum<T>> enumValue(value: String?, fallback: T): T =
-        value?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: fallback
+    private inline fun <reified T : Enum<T>> enumValue(value: String?, fallback: T): T = value?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: fallback
 }
