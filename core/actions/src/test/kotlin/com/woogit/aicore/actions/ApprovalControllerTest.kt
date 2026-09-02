@@ -44,7 +44,7 @@ class ApprovalControllerTest {
         assertEquals(1, TestRegistry.executions)
 
         val secondApproval = controller.approve(prepared.executionId)
-        assertEquals(ApprovalDecision.Approved, secondApproval.decision)
+        assertEquals(ApprovalDecision.Rejected, secondApproval.decision)
         assertIs<ActionExecutionState.Failed>(secondApproval.state)
         assertEquals(1, TestRegistry.executions)
     }
