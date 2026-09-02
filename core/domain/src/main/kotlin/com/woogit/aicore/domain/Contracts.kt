@@ -35,8 +35,12 @@ data class InferenceSettings(
     val repeatPenalty: Double? = null,
     val seed: Long? = null,
     val stopSequences: List<String> = emptyList(),
-    val contextLength: Int? = null
-)
+    val contextLength: Int? = null,
+    /** Maximum number of real Action steps the Agent may execute for one request. */
+    val maxActionSteps: Int = 4,
+) {
+    init { require(maxActionSteps >= 0) { "maxActionSteps must be non-negative" } }
+}
 
 data class RuntimeInfo(
     val name: String,
