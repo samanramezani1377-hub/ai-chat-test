@@ -41,6 +41,7 @@ internal fun MainScreen(container: AppContainer) {
     var composer by remember { mutableStateOf("") }
     var generating by remember { mutableStateOf(false) }
     var approvalBusy by remember { mutableStateOf(false) }
+    var importBusy by remember { mutableStateOf(false) }
     var runtimeStatus by remember { mutableStateOf("خارج از دسترس") }
     var diagnostic by remember { mutableStateOf<String?>(null) }
     var activeModel by remember { mutableStateOf<ModelDescriptor?>(null) }
@@ -66,7 +67,7 @@ internal fun MainScreen(container: AppContainer) {
             withContext(Dispatchers.Main) {
                 models = (listed as? ModelResult.Success)?.value ?: emptyList()
                 activeModel = (active as? ModelResult.Success)?.value
-                if (!generating && !approvalBusy) runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"
+                if (!generating && !approvalBusy && !importBusy) runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"
             }
         }
     }
@@ -93,18 +94,30 @@ internal fun MainScreen(container: AppContainer) {
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null || manager == null) return@rememberLauncherForActivityResult
+        importBusy = true
+        runtimeStatus = "در حال وارد کردن مدل…"
+        diagnostic = null
         scope.launch {
-            runtimeStatus = "در حال کار"
-            diagnostic = null
-            val result = withContext(Dispatchers.Default) { manager.import(uri) }
-            when (result) {
-                is ModelResult.Success -> {
-                    val activation = withContext(Dispatchers.Default) { manager.activate(result.value.id) }
-                    if (activation is ModelResult.Failure) diagnostic = activation.error.message
+            try {
+                val result = withContext(Dispatchers.Default) { manager.import(uri) }
+                when (result) {
+                    is ModelResult.Success -> {
+                        runtimeStatus = "مدل وارد شد؛ در حال آماده‌سازی…"
+                        val activation = withContext(Dispatchers.Default) { manager.activate(result.value.id) }
+                        if (activation is ModelResult.Failure) diagnostic = activation.error.message
+                    }
+                    is ModelResult.Failure -> diagnostic = result.error.message
                 }
-                is ModelResult.Failure -> diagnostic = result.error.message
+            } catch (t: Throwable) {
+                diagnostic = t.message ?: "وارد کردن مدل ناموفق بود."
+            } finally {
+                withContext(Dispatchers.Main) {
+                    importBusy = false
+                    if (diagnostic == null) runtimeStatus = "آماده"
+                    else runtimeStatus = "خطا"
+                }
+                refreshModels()
             }
-            refreshModels()
         }
     }
 
@@ -122,7 +135,7 @@ internal fun MainScreen(container: AppContainer) {
 
     fun send() {
         val record = current ?: return
-        if (manager == null || generating || approvalBusy) return
+        if (manager == null || generating || approvalBusy || importBusy) return
         val text = composer.trim()
         if (text.isEmpty()) return
         composer = ""
@@ -351,7 +364,7 @@ internal fun MainScreen(container: AppContainer) {
                                 AppDestination.CHAT -> ChatPage(messages, composer, generating, approvalBusy, { composer = it }, ::send, ::stop, execution, ::approveExecution, ::rejectExecution) { destination = AppDestination.WORK }
                                 AppDestination.WORK -> WorkspacePage(execution, activeModel) { destination = AppDestination.DIAGNOSTICS }
                                 AppDestination.DIAGNOSTICS -> DiagnosticsPage(diagnostic, execution)
-                                AppDestination.SETTINGS -> SettingsScreen(models, activeModel, diagnostic, onImport = { picker.launch(arrayOf("application/octet-stream", "application/gzip", "*/*")) }, onRefresh = ::refreshModels, onActivate = { id -> scope.launch(Dispatchers.Default) { manager?.activate(id); refreshModels() } }, onDeactivate = ::deactivateModel, onDelete = { id -> scope.launch(Dispatchers.Default) { manager?.delete(id); refreshModels() } })
+                                AppDestination.SETTINGS -> SettingsScreen(models, activeModel, diagnostic, importBusy, onImport = { if (!importBusy) picker.launch(arrayOf("application/octet-stream", "application/gzip", "*/*")) }, onRefresh = ::refreshModels, onActivate = { id -> scope.launch(Dispatchers.Default) { manager?.activate(id); refreshModels() } }, onDeactivate = ::deactivateModel, onDelete = { id -> scope.launch(Dispatchers.Default) { manager?.delete(id); refreshModels() } })
                                 AppDestination.ABOUT -> AboutPage()
                             }
                         }
