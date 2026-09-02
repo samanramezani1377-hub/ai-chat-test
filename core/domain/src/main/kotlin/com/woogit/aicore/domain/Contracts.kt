@@ -44,10 +44,24 @@ data class RuntimeInfo(
     val backend: String?
 )
 
+enum class ActionArgumentType { STRING, INTEGER, NUMBER, BOOLEAN, OBJECT, ARRAY }
+
+data class ActionArgument(
+    val name: String,
+    val type: ActionArgumentType,
+    val required: Boolean = true,
+    val maxLength: Int? = null,
+)
+
+data class ActionSchema(
+    val version: Int = 1,
+    val arguments: List<ActionArgument> = emptyList(),
+)
+
 interface Action<in I, out O> {
     val id: String
     val risk: RiskLevel
-    val schemaVersion: Int get() = 1
+    val schema: ActionSchema get() = ActionSchema()
     val permission: String get() = "action:$id"
     val confirmationRequired: Boolean get() = risk == RiskLevel.SENSITIVE
     val stateChanging: Boolean get() = risk != RiskLevel.LOW
