@@ -31,14 +31,15 @@ class AgentSession(
 ) {
     init { require(maxActionSteps == null || maxActionSteps >= 0) { "maxActionSteps must be non-negative" } }
 
-    suspend fun send(content: String, settings: InferenceSettings, requestedRecentMessages: Int = 10): AgentSessionResult.Reply {
+    suspend fun send(content: String, settings: InferenceSettings, requestedRecentMessages: Int? = null): AgentSessionResult.Reply {
         require(content.isNotBlank()) { "content must not be blank" }
         val effectiveSettings = InferenceSettingsStore.current
+        val effectiveRecentMessages = requestedRecentMessages ?: effectiveSettings.recentMessages
         val effectiveMaxActionSteps = maxActionSteps ?: effectiveSettings.maxActionSteps
         conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.USER, content, System.currentTimeMillis()))
         eventSink(AgentEvent.Started)
         return try {
-            var result = orchestrator.generate(effectiveSettings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+            var result = orchestrator.generate(effectiveSettings, effectiveRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
             var plan: ActionPlan? = null
             var actionResult: String? = null
             var steps = 0
@@ -46,7 +47,7 @@ class AgentSession(
             while (actionPlanCoordinator != null && steps < effectiveMaxActionSteps) {
                 conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
                 resultPersisted = true
-                plan = actionPlanCoordinator.prepare(contextProvider.build(requestedRecentMessages), conversationId) ?: break
+                plan = actionPlanCoordinator.prepare(contextProvider.build(effectiveRecentMessages), conversationId) ?: break
                 eventSink(AgentEvent.ActionPrepared(plan.prepared.executionId, plan.prepared.actionId))
                 if (plan.prepared.risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE) {
                     eventSink(AgentEvent.ApprovalRequired(plan.prepared.executionId))
@@ -58,13 +59,12 @@ class AgentSession(
                 eventSink(AgentEvent.ActionExecuted(plan.prepared.executionId))
                 conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(plan), System.currentTimeMillis()))
                 steps++
-                // A successful Action is accepted only after real verification.
                 if (!outcome.success || !outcome.verified) {
-                    result = orchestrator.generate(effectiveSettings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+                    result = orchestrator.generate(effectiveSettings, effectiveRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
                     resultPersisted = false
                     break
                 }
-                result = orchestrator.generate(effectiveSettings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+                result = orchestrator.generate(effectiveSettings, effectiveRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
                 resultPersisted = false
             }
             if (!resultPersisted) conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
@@ -76,14 +76,15 @@ class AgentSession(
         }
     }
 
-    suspend fun resumeApproved(executionId: String, outcome: ActionExecutionOutcome, settings: InferenceSettings, requestedRecentMessages: Int = 24): AgentSessionResult.Reply {
+    suspend fun resumeApproved(executionId: String, outcome: ActionExecutionOutcome, settings: InferenceSettings, requestedRecentMessages: Int? = null): AgentSessionResult.Reply {
         require(executionId.isNotBlank()) { "executionId must not be blank" }
         require(outcome.success && outcome.verified) { "Approved action result must be successful and verified before resuming the agent" }
         val effectiveSettings = InferenceSettingsStore.current
+        val effectiveRecentMessages = requestedRecentMessages ?: effectiveSettings.recentMessages
         eventSink(AgentEvent.Started)
         conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(executionId), System.currentTimeMillis()))
         return try {
-            val result = orchestrator.generate(effectiveSettings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+            val result = orchestrator.generate(effectiveSettings, effectiveRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
             conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
             eventSink(AgentEvent.Completed)
             AgentSessionResult.Reply(result, null, outcome.message)
