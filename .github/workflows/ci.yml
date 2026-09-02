@@ -34,6 +34,7 @@ jobs:
 
       - name: Restore native dependency cache
         id: native-cache
+        continue-on-error: true
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -41,38 +42,41 @@ jobs:
             /tmp/llama.rn-ref
             ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
             $HOME/vulkan-sdk
-          key: ci-native-3-${{ runner.os }}-vulkan-1.4.321.1-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-ndk-27.2.12479018
+          key: ci-native-4-${{ runner.os }}-vulkan-1.4.321.1-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-ndk-27.2.12479018
 
       - name: Restore native bootstrap cache
         id: bootstrap-cache
+        continue-on-error: true
         uses: actions/cache/restore@v4
         with:
           path: libs/llama.kt/llama-kt/src/main/cpp
-          key: ci-bootstrap-2-${{ runner.os }}-llama-kt-5a20956b1fe2f40d07252f079c31bcaa08250e6b-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-${{ hashFiles('ci/bootstrap-llama.sh', 'ci/patches/*.patch') }}
+          key: ci-bootstrap-4-${{ runner.os }}-llama-kt-5a20956b1fe2f40d07252f079c31bcaa08250e6b-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-${{ hashFiles('ci/bootstrap-llama.sh', 'ci/patches/*.patch') }}
 
       - name: Prepare pinned native dependencies
         shell: bash
         env:
-          LLAMA_BOOTSTRAP_CACHE_HIT: ${{ steps.bootstrap-cache.outputs.cache-hit == 'true' && 'true' || 'false' }}
+          LLAMA_BOOTSTRAP_CACHE_HIT: ${{ steps.bootstrap-cache.outcome == 'success' && steps.bootstrap-cache.outputs.cache-hit == 'true' && 'true' || 'false' }}
         run: bash ci/bootstrap-llama.sh
 
       - name: Save native dependency cache
         if: success() && steps.native-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
+        continue-on-error: true
         with:
           path: |
             /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
             /tmp/llama.rn-ref
             ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
             $HOME/vulkan-sdk
-          key: ${{ steps.native-cache.outputs.cache-primary-key }}
+          key: ci-native-4-${{ runner.os }}-${{ github.run_id }}-vulkan-1.4.321.1-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-ndk-27.2.12479018
 
       - name: Save native bootstrap cache
         if: success() && steps.bootstrap-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: libs/llama.kt/llama-kt/src/main/cpp
-          key: ${{ steps.bootstrap-cache.outputs.cache-primary-key }}
+          key: ci-bootstrap-4-${{ runner.os }}-${{ github.run_id }}-llama-kt-5a20956b1fe2f40d07252f079c31bcaa08250e6b-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-${{ hashFiles('ci/bootstrap-llama.sh', 'ci/patches/*.patch') }}
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
