@@ -70,7 +70,23 @@ jobs:
           gradle-version: '8.11.1'
 
       - name: Build and test
-        run: gradle :app:assembleDebug :app:testDebugUnitTest --stacktrace
+        run: gradle :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest --stacktrace
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-chat-test-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload release APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-chat-test-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
 
       - name: Save native CMake cache
         if: success()
