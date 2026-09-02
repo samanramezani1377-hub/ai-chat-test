@@ -1,19 +1,18 @@
 package com.woogit.aicore.observability
 
+/** Compatibility contract; CentralObservability is the only production implementation. */
 interface CentralErrorReporter {
     suspend fun report(error: ErrorReport)
 }
 
+/** In-memory compatibility adapter for tests and legacy callers. */
+@Deprecated("Use CentralObservability directly")
 class InMemoryCentralErrorReporter : CentralErrorReporter {
-    private val reports = mutableListOf<ErrorReport>()
+    private val delegate = InMemoryErrorReportStore()
 
     override suspend fun report(error: ErrorReport) {
-        synchronized(reports) {
-            reports += error
-        }
+        delegate.append(error)
     }
 
-    fun all(): List<ErrorReport> = synchronized(reports) {
-        reports.toList()
-    }
+    suspend fun all(): List<ErrorReport> = delegate.recent()
 }
