@@ -25,6 +25,7 @@ class LlamaCppAndroidRuntimeAdapter(
     private var loadedModel: LlamaModel? = null
     private val stopRequested = AtomicBoolean(false)
     @Volatile private var latestGeneration: GenerationResult? = null
+    @Volatile private var loadedContextLength: Int? = null
 
     override fun lastGeneration(): GenerationResult? = latestGeneration
 
@@ -40,18 +41,21 @@ class LlamaCppAndroidRuntimeAdapter(
         val file = model.path.toFile()
         if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
         return try {
+            val contextLength = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
             loadedModel = LlamaModel.load(
                 modelPath = file.absolutePath,
                 config = LlamaConfig(
-                    contextSize = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength,
+                    contextSize = contextLength,
                     threads = defaultThreads.coerceAtLeast(1),
                     gpuLayers = gpuLayers.coerceAtLeast(0),
                 ),
             )
+            loadedContextLength = contextLength
             latestGeneration = null
             ModelResult.Success(Unit)
         } catch (t: Throwable) {
             loadedModel = null
+            loadedContextLength = null
             ModelResult.Failure(RuntimeErrorMapper.loadFailure(t, file.absolutePath))
         }
     }
@@ -60,6 +64,7 @@ class LlamaCppAndroidRuntimeAdapter(
         stopRequested.set(true)
         loadedModel?.close()
         loadedModel = null
+        loadedContextLength = null
     }
 
     override suspend fun generate(request: GenerationRequest, onToken: suspend (String) -> Unit): GenerationResult =
@@ -75,10 +80,12 @@ class LlamaCppAndroidRuntimeAdapter(
             return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation"))
         }
         val settings = request.settings
-        val effectiveContext = settings.contextLength?.takeIf { it > 0 }?.let { requested ->
-            val modelMax = runCatching { model.contextSize }.getOrNull()?.takeIf { it > 0 }
-            if (modelMax != null) requested.coerceAtMost(modelMax) else requested
-        } ?: defaultContextLength
+        val requestedContext = settings.contextLength?.takeIf { it > 0 }
+        val effectiveContext = when {
+            requestedContext == null -> loadedContextLength ?: defaultContextLength
+            loadedContextLength != null -> requestedContext.coerceAtMost(loadedContextLength!!)
+            else -> requestedContext
+        }
         val config = LlamaConfig(
             contextSize = effectiveContext,
             threads = defaultThreads.coerceAtLeast(1),
@@ -121,7 +128,6 @@ class LlamaCppAndroidRuntimeAdapter(
             }
             if (!stopRequested.get() && emittedLength < output.length) {
                 emitRange(output, emittedLength, output.length, onToken)
-                emittedLength = output.length
             }
             val completed = GenerationResult(
                 text = trimAtStop(output.toString(), settings.stopSequences),
@@ -162,9 +168,7 @@ class LlamaCppAndroidRuntimeAdapter(
 
     private fun buildPrompt(model: LlamaModel, messages: List<ChatMessage>): String {
         val json = org.json.JSONArray().apply {
-            messages.forEach { message ->
-                put(org.json.JSONObject().put("role", message.role.toTemplateRole()).put("content", message.content))
-            }
+            messages.forEach { message -> put(org.json.JSONObject().put("role", message.role.toTemplateRole()).put("content", message.content)) }
         }
         return runCatching { model.applyChatTemplate(json.toString(), true) }.getOrElse { Qwen3PromptFormatter.format(messages) }
     }
@@ -201,15 +205,13 @@ class LlamaCppAndroidRuntimeAdapter(
     }
 
     private fun stoppedResult(output: StringBuilder, firstTokenAt: Long?, startedAt: Long, stops: List<String>): ModelResult.Success<GenerationResult> =
-        ModelResult.Success(
-            GenerationResult(
-                text = trimAtStop(output.toString(), stops),
-                outputTokens = null,
-                firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
-                generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
-                stopped = true,
-            )
-        )
+        ModelResult.Success(GenerationResult(
+            text = trimAtStop(output.toString(), stops),
+            outputTokens = null,
+            firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
+            generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
+            stopped = true,
+        ))
 
     private class RuntimeFailure(val error: ModelError) : IllegalStateException(error.message)
 }
