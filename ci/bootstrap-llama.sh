@@ -8,6 +8,9 @@ LLAMA_CPP_DIR="$LLAMA_KT/third_party/llama.cpp"
 LLAMA_KT_SHA=5a20956b1fe2f40d07252f079c31bcaa08250e6b
 LLAMA_CPP_SHA=c5fc7e34885ba31217e330809437afa993d27745
 LLAMA_RN_SHA=7afb5c8934aea7fa41f4522662f03b3461916927
+VULKAN_VERSION=1.4.321.1
+VULKAN_SHA256=f22a3625bd4d7a32e7a0d926ace16d5278c149e938dac63cecc00537626cbf73
+NDK_VERSION=27.2.12479018
 
 prepare_submodule() {
   git -C "$ROOT_DIR" submodule sync -- libs/llama.kt
@@ -20,6 +23,35 @@ prepare_submodule() {
   test "$(git -C "$LLAMA_KT" rev-parse HEAD)" = "$LLAMA_KT_SHA"
   git -C "$LLAMA_KT" submodule sync --recursive
   git -C "$LLAMA_KT" submodule update --init --recursive
+}
+
+prepare_toolchains() {
+  local ndk_path="${ANDROID_HOME}/ndk/${NDK_VERSION}"
+  if [ ! -x "$ndk_path/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" ]; then
+    rm -rf "$ndk_path"
+    sdkmanager "ndk;${NDK_VERSION}"
+  fi
+  test -x "$ndk_path/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+
+  local archive="/tmp/vulkansdk-linux-x86_64-${VULKAN_VERSION}.tar.xz"
+  if [ ! -s "$archive" ]; then
+    curl -fL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 1800 \
+      -o "$archive.part" \
+      "https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/linux/vulkansdk-linux-x86_64-${VULKAN_VERSION}.tar.xz"
+    echo "${VULKAN_SHA256}  ${archive}.part" | sha256sum -c -
+    mv -f "$archive.part" "$archive"
+  fi
+  echo "${VULKAN_SHA256}  ${archive}" | sha256sum -c -
+
+  local vulkan_sdk="$HOME/vulkan-sdk/${VULKAN_VERSION}/x86_64"
+  if [ ! -x "$vulkan_sdk/bin/glslc" ]; then
+    rm -rf "$HOME/vulkan-sdk"
+    mkdir -p "$HOME/vulkan-sdk"
+    tar -xf "$archive" -C "$HOME/vulkan-sdk"
+  fi
+  test -x "$vulkan_sdk/bin/glslc"
+  printf 'VULKAN_SDK=%s\nPATH=%s/bin:%s\nLD_LIBRARY_PATH=%s/lib:%s\n' \
+    "$vulkan_sdk" "$vulkan_sdk" "$PATH" "$vulkan_sdk" "${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
 }
 
 pin_llama_cpp() {
@@ -100,6 +132,7 @@ apply_barbet_patches() {
 }
 
 prepare_submodule
+prepare_toolchains
 pin_llama_cpp
 prepare_llama_rn
 if [ "${LLAMA_BOOTSTRAP_CACHE_HIT:-false}" = "true" ]; then
