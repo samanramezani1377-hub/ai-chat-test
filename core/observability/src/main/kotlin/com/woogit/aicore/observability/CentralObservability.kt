@@ -56,7 +56,13 @@ class CentralObservability(
         actionId: String? = null,
         message: String? = null,
     ): ExecutionTraceEvent {
-        val event = ExecutionTraceEvent(executionId, taskId, actionId, phase, message)
+        val event = ExecutionTraceEvent(
+            executionId = executionId,
+            taskId = taskId,
+            actionId = actionId,
+            phase = phase,
+            message = message,
+        )
         trace(event)
         return event
     }
