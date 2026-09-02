@@ -32,6 +32,64 @@ private const val KEY_MAX_ACTION_STEPS = "max_action_steps"
 private val aiSections = listOf("مدل", "استنتاج", "زمینه", "عامل")
 private val appSections = listOf("فضای کار", "لاگ و عیب‌یابی", "عملکرد", "امنیت و تأیید")
 
+private enum class InferencePreset(
+    val title: String,
+    val description: String,
+    val settings: InferenceSettings,
+) {
+    FAST(
+        "سریع",
+        "پاسخ سریع‌تر و مصرف کمتر؛ مناسب گفت‌وگوی روزمره و دستگاه‌های ضعیف‌تر.",
+        InferenceSettings(
+            temperature = 0.7,
+            maxNewTokens = 256,
+            topK = 32,
+            topP = 0.9,
+            minP = 0.0,
+            repeatPenalty = 1.1,
+            seed = null,
+            stopSequences = emptyList(),
+            contextLength = 2048,
+            recentMessages = 6,
+            maxActionSteps = 2,
+        ),
+    ),
+    BALANCED(
+        "استاندارد",
+        "تعادل پیشنهادی بین کیفیت، سرعت و مصرف منابع؛ گزینه مناسب برای استفاده معمول.",
+        InferenceSettings(
+            temperature = 0.7,
+            maxNewTokens = 512,
+            topK = 40,
+            topP = 0.9,
+            minP = 0.0,
+            repeatPenalty = 1.1,
+            seed = null,
+            stopSequences = emptyList(),
+            contextLength = 4096,
+            recentMessages = 10,
+            maxActionSteps = 4,
+        ),
+    ),
+    DEEP(
+        "عمیق",
+        "فضای بیشتر برای پاسخ‌های طولانی و چندمرحله‌ای؛ کندتر و پرمصرف‌تر.",
+        InferenceSettings(
+            temperature = 0.65,
+            maxNewTokens = 1024,
+            topK = 50,
+            topP = 0.92,
+            minP = 0.0,
+            repeatPenalty = 1.1,
+            seed = null,
+            stopSequences = emptyList(),
+            contextLength = 8192,
+            recentMessages = 20,
+            maxActionSteps = 6,
+        ),
+    ),
+}
+
 @Composable
 fun SettingsScreen(
     models: List<ModelDescriptor>, active: ModelDescriptor?, error: String?, onImport: () -> Unit,
@@ -66,9 +124,20 @@ private fun InferenceControls() {
 
     Column(verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
         Text("استنتاج", style = MaterialTheme.typography.titleLarge)
-        Text("این مقادیر مستقیماً برای Generation بعدی به Runtime محلی ارسال می‌شوند و روی دستگاه ذخیره می‌شوند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("یک پروفایل آماده انتخاب کنید یا بعد از انتخاب، هر مقدار را به‌صورت سفارشی تغییر دهید. انتخاب پروفایل فقط مقادیر همین تنظیمات را تغییر می‌دهد و تا زمان اعمال، روی Runtime اجرا نمی‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        UiSurface {
+            Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("پروفایل آماده", style = MaterialTheme.typography.titleMedium)
+                Text("سریع · استاندارد · عمیق", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                InferencePresetSelector(settings, ::update)
+            }
+        }
+
         UiSurface {
             Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("تنظیمات سفارشی", style = MaterialTheme.typography.titleMedium)
+                Text("هر تغییری در کنترل‌های زیر یعنی تنظیمات سفارشی شما؛ نیازی نیست یکی از پروفایل‌ها را برای همیشه انتخاب کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("Temperature: %.2f".format(settings.temperature))
                 Slider(value = settings.temperature.toFloat(), onValueChange = { update(settings.copy(temperature = it.toDouble())) }, valueRange = 0f..2f)
                 Text("Top-P: %.2f".format(settings.topP ?: 0.9))
@@ -91,6 +160,24 @@ private fun InferenceControls() {
             OutlinedButton(onClick = { settings = InferenceSettings(); apply() }, Modifier.weight(1f).heightIn(min = UiTokens.minimumTouchTarget)) { Text("بازنشانی") }
         }
         Text(if (dirty) "تغییرات ذخیره نشده‌اند." else "تنظیمات ذخیره و برای Generation بعدی آماده‌اند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun InferencePresetSelector(settings: InferenceSettings, onSelect: (InferenceSettings) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        InferencePreset.values().forEach { preset ->
+            val selected = settings == preset.settings
+            OutlinedButton(
+                onClick = { onSelect(preset.settings) },
+                modifier = Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget),
+            ) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(if (selected) "✓ ${preset.title}" else preset.title, style = MaterialTheme.typography.titleSmall)
+                    Text(preset.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
     }
 }
 
