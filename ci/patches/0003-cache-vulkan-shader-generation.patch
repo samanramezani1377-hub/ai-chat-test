@@ -1,6 +1,6 @@
-diff --git a/scripts/bootstrap.sh b/scripts/bootstrap.sh
---- a/scripts/bootstrap.sh
-+++ b/scripts/bootstrap.sh
+diff --git a/libs/llama.kt/scripts/bootstrap.sh b/libs/llama.kt/scripts/bootstrap.sh
+--- a/libs/llama.kt/scripts/bootstrap.sh
++++ b/libs/llama.kt/scripts/bootstrap.sh
 @@ -76,18 +76,26 @@ cmake --build "$VK_BUILD_DIR" --config Release -j$(nproc) > /dev/null 2>&1
  if [ ! -x "$VK_GEN" ]; then
    echo "ERROR: vulkan-shaders-gen build failed — cannot generate Vulkan shaders"
