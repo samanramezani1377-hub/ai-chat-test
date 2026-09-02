@@ -36,10 +36,15 @@ data class InferenceSettings(
     val seed: Long? = null,
     val stopSequences: List<String> = emptyList(),
     val contextLength: Int? = null,
+    /** Number of recent conversation messages included in generated context. */
+    val recentMessages: Int = 10,
     /** Maximum number of real Action steps the Agent may execute for one request. */
     val maxActionSteps: Int = 4,
 ) {
-    init { require(maxActionSteps >= 0) { "maxActionSteps must be non-negative" } }
+    init {
+        require(recentMessages >= 0) { "recentMessages must be non-negative" }
+        require(maxActionSteps >= 0) { "maxActionSteps must be non-negative" }
+    }
 }
 
 data class RuntimeInfo(
