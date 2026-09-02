@@ -9,6 +9,7 @@ include(FetchContent)
 set(LLAMA_CPP_TAG "c5fc7e34885ba31217e330809437afa993d27745" CACHE STRING "Pinned llama.cpp revision")
 set(FETCHCONTENT_QUIET OFF)
 
+# Direct llama.cpp integration: no llama.kt/llama.rn bootstrap layer.
 if (ANDROID AND DEFINED ENV{VULKAN_SDK})
     set(Vulkan_INCLUDE_DIR "$ENV{VULKAN_SDK}/include" CACHE PATH "Vulkan headers" FORCE)
     set(Vulkan_GLSLC_EXECUTABLE "$ENV{VULKAN_SDK}/bin/glslc" CACHE FILEPATH "Vulkan shader compiler" FORCE)
