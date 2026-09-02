@@ -102,12 +102,9 @@ jobs:
             echo '::endgroup::'
           }
 
-          install_ndk &
-          ndk_pid=$!
-          install_vulkan &
-          vulkan_pid=$!
-          prepare_llama_rn &
-          llama_rn_pid=$!
+          install_ndk & ndk_pid=$!
+          install_vulkan & vulkan_pid=$!
+          prepare_llama_rn & llama_rn_pid=$!
 
           failed=0
           for pid in "$ndk_pid" "$vulkan_pid" "$llama_rn_pid"; do
@@ -117,25 +114,45 @@ jobs:
           done
           exit "$failed"
 
-      - name: Apply downstream llama.rn abort patch
+      - name: Bootstrap llama.cpp and apply downstream patch in parallel
+        shell: bash
         run: |
-          cp ci/patches/0002-abort-callback-mid-graph-cancel.patch libs/llama.kt/patches/0002-abort-callback-mid-graph-cancel.patch
-          rm -f libs/llama.kt/patches/0001-vulkan-uma-descriptor-ceildiv.patch
+          set -euo pipefail
 
-      - name: Bootstrap llama.cpp sources
-        run: |
-          set -o pipefail
-          bash libs/llama.kt/scripts/bootstrap.sh 2>&1 | tee bootstrap-output.log
-          test "$(git -C libs/llama.kt/third_party/llama.cpp rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
-          test -f libs/llama.kt/third_party/llama.cpp/ggml/src/ggml-feats.h
-          cp libs/llama.kt/third_party/llama.cpp/ggml/src/ggml-feats.h libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
-          sed -i 's/GGML_/LM_GGML_/g; s/ggml_/lm_ggml_/g' libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
-          test -s libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
-          grep -Fq 'lm_ggml_feats_arch64_runtime_t' libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
-          grep -Fq 'lm_ggml_feats_get_arch64_runtime' libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
-          test -f libs/llama.kt/third_party/llama.cpp/tools/mtmd/mtmd-internal.h
-          cp libs/llama.kt/third_party/llama.cpp/tools/mtmd/mtmd-internal.h libs/llama.kt/llama-kt/src/main/cpp/tools/mtmd/mtmd-internal.h
-          test -s libs/llama.kt/llama-kt/src/main/cpp/tools/mtmd/mtmd-internal.h
+          apply_downstream_patch() {
+            echo '::group::Apply downstream llama.rn abort patch'
+            cp ci/patches/0002-abort-callback-mid-graph-cancel.patch libs/llama.kt/patches/0002-abort-callback-mid-graph-cancel.patch
+            rm -f libs/llama.kt/patches/0001-vulkan-uma-descriptor-ceildiv.patch
+            echo '::endgroup::'
+          }
+
+          bootstrap_llama() {
+            echo '::group::Bootstrap llama.cpp sources'
+            set -o pipefail
+            bash libs/llama.kt/scripts/bootstrap.sh 2>&1 | tee bootstrap-output.log
+            test "$(git -C libs/llama.kt/third_party/llama.cpp rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
+            test -f libs/llama.kt/third_party/llama.cpp/ggml/src/ggml-feats.h
+            cp libs/llama.kt/third_party/llama.cpp/ggml/src/ggml-feats.h libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
+            sed -i 's/GGML_/LM_GGML_/g; s/ggml_/lm_ggml_/g' libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
+            test -s libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
+            grep -Fq 'lm_ggml_feats_arch64_runtime_t' libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
+            grep -Fq 'lm_ggml_feats_get_arch64_runtime' libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
+            test -f libs/llama.kt/third_party/llama.cpp/tools/mtmd/mtmd-internal.h
+            cp libs/llama.kt/third_party/llama.cpp/tools/mtmd/mtmd-internal.h libs/llama.kt/llama-kt/src/main/cpp/tools/mtmd/mtmd-internal.h
+            test -s libs/llama.kt/llama-kt/src/main/cpp/tools/mtmd/mtmd-internal.h
+            echo '::endgroup::'
+          }
+
+          apply_downstream_patch & patch_pid=$!
+          bootstrap_llama & bootstrap_pid=$!
+
+          failed=0
+          for pid in "$patch_pid" "$bootstrap_pid"; do
+            if ! wait "$pid"; then
+              failed=1
+            fi
+          done
+          exit "$failed"
 
       - name: Apply llama.rn Barbet compatibility patches
         run: |
