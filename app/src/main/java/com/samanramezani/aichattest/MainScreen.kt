@@ -136,6 +136,11 @@ internal fun MainScreen(container: AppContainer) {
     fun send() {
         val record = current ?: return
         if (manager == null || generating || approvalBusy || importBusy) return
+        if (activeModel == null) {
+            runtimeStatus = "خارج از دسترس"
+            diagnostic = "برای ارسال پیام ابتدا یک مدل محلی را فعال کنید."
+            return
+        }
         val text = composer.trim()
         if (text.isEmpty()) return
         composer = ""
@@ -146,7 +151,9 @@ internal fun MainScreen(container: AppContainer) {
         generating = true
         runtimeStatus = "در حال اجرای Agent"
         diagnostic = null
-        execution = ExecutionState(UUID.randomUUID().toString(), "درخواست Agent", "در حال اجرا", System.currentTimeMillis(), requestPreview = text)
+        // This is an Agent execution, not an Action yet. The real Action id is assigned only
+        // after the current model generation produces a valid ActionPlan.
+        execution = ExecutionState(UUID.randomUUID().toString(), "در حال تولید پاسخ", "در حال تولید پاسخ مدل", System.currentTimeMillis(), requestPreview = text)
         RuntimeExecutionForegroundService.start(context)
         scope.launch(Dispatchers.Default) {
             val session = container.createAgentSession(record.id) { event ->
@@ -187,7 +194,12 @@ internal fun MainScreen(container: AppContainer) {
                     updateStreamMessage(streamId, replace = result.generation.text)
                     generating = false
                     activeStreamId = null
-                    execution = execution?.copy(status = if (result.actionPlan != null) "عملیات تکمیل شد" else "پاسخ آماده است", finishedAt = System.currentTimeMillis(), resultPreview = result.generation.text.take(240))
+                    val finalStatus = when {
+                        execution?.approvalRequired == true -> "نیازمند تأیید"
+                        result.actionPlan != null -> "عملیات تکمیل شد"
+                        else -> "پاسخ آماده است"
+                    }
+                    execution = execution?.copy(status = finalStatus, finishedAt = System.currentTimeMillis(), resultPreview = result.generation.text.take(240))
                     if (!execution?.approvalRequired.orFalse()) runtimeStatus = "آماده"
                     stopForegroundRuntime()
                 }
@@ -358,39 +370,22 @@ internal fun MainScreen(container: AppContainer) {
             Surface(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize()) {
-                        AppHeader(destination, runtimeStatus, activeModel, { destination = it; quickMenuOpen = false }, { quickMenuOpen = !quickMenuOpen }, { quickMenuOpen = false; sidebarOpen = true }, { runtimeDetailsOpen = true })
-                        Box(Modifier.weight(1f).fillMaxWidth()) {
-                            when (destination) {
-                                AppDestination.CHAT -> ChatPage(messages, composer, generating, approvalBusy, { composer = it }, ::send, ::stop, execution, ::approveExecution, ::rejectExecution) { destination = AppDestination.WORK }
-                                AppDestination.WORK -> WorkspacePage(execution, activeModel) { destination = AppDestination.DIAGNOSTICS }
-                                AppDestination.DIAGNOSTICS -> DiagnosticsPage(diagnostic, execution)
-                                AppDestination.SETTINGS -> SettingsScreen(models, activeModel, diagnostic, importBusy, onImport = { if (!importBusy) picker.launch(arrayOf("application/octet-stream", "application/gzip", "*/*")) }, onRefresh = ::refreshModels, onActivate = { id -> scope.launch(Dispatchers.Default) { manager?.activate(id); refreshModels() } }, onDeactivate = ::deactivateModel, onDelete = { id -> scope.launch(Dispatchers.Default) { manager?.delete(id); refreshModels() } })
-                                AppDestination.ABOUT -> AboutPage()
-                            }
+                        AppHeader(destination, runtimeStatus, activeModel, { destination = it; quickMenuOpen = false }, { quickMenuOpen = !quickMenuOpen }, { quickMenuOpen = false; sidebarOpen = !sidebarOpen }, { runtimeDetailsOpen = !runtimeDetailsOpen })
+                        when (destination) {
+                            AppDestination.CHAT -> ChatPage(messages, composer, { composer = it }, ::send, generating, ::stop)
+                            AppDestination.WORKSPACE -> WorkspacePage(execution, activeModel, { destination = AppDestination.DIAGNOSTICS })
+                            AppDestination.DIAGNOSTICS -> DiagnosticsPage(container, execution, activeModel)
+                            AppDestination.SETTINGS -> SettingsScreen(models, activeModel, runtimeStatus, diagnostic, { picker.launch(arrayOf("application/octet-stream", "application/*")) }, ::deactivateModel, ::refreshModels)
+                            AppDestination.ABOUT -> AboutPage()
                         }
                     }
-                    if (quickMenuOpen) QuickMenu({ destination = AppDestination.DIAGNOSTICS; quickMenuOpen = false }, { destination = AppDestination.SETTINGS; quickMenuOpen = false })
-                    if (sidebarOpen) Sidebar(current, conversations, destination, { sidebarOpen = false }, { destination = it; sidebarOpen = false }, ::createConversation, ::openConversation, { renameTarget = it }, ::deleteConversation, { recentLimit += 5; refreshHistory() }, conversations.size >= recentLimit)
-                    deleted?.let { item -> UndoBar({ restoreDeleted(item.record) }, { scope.launch(Dispatchers.Default) { history.purge(item.record.id) }; deleted = null }, { scope.launch(Dispatchers.Default) { history.purge(item.record.id) }; deleted = null }) }
+                    if (sidebarOpen) AppSidebar(conversations, current, recentLimit, ::createConversation, ::openConversation, ::deleteConversation, { recentLimit += 20; refreshHistory() }, { sidebarOpen = false })
+                    if (quickMenuOpen) AppQuickMenu({ destination = AppDestination.DIAGNOSTICS; quickMenuOpen = false }, { destination = AppDestination.SETTINGS; quickMenuOpen = false })
+                    if (runtimeDetailsOpen) RuntimeDetailsDialog(activeModel, runtimeStatus, { runtimeDetailsOpen = false })
+                    ApprovalDialog(execution, ::approveExecution, ::rejectExecution)
+                    deleted?.let { SnackbarHost(remember { SnackbarHostState() }) }
                 }
             }
         }
     }
-
-    renameTarget?.let { target ->
-        RenameDialog(target.title, { renameTarget = null }) { title ->
-            scope.launch(Dispatchers.Default) {
-                history.rename(target.id, title, System.currentTimeMillis())
-                val updated = history.recent(recentLimit).firstOrNull { it.id == target.id }
-                withContext(Dispatchers.Main) {
-                    if (updated?.id == current?.id) current = updated
-                    conversations = history.recent(recentLimit)
-                    renameTarget = null
-                }
-            }
-        }
-    }
-    if (runtimeDetailsOpen) RuntimeDetailsDialog(runtimeStatus, activeModel, container.modelRuntime.runtimeInfo().name, container.modelRuntime.runtimeInfo().version, container.modelRuntime.runtimeInfo().backend) { runtimeDetailsOpen = false }
 }
-
-private fun Boolean?.orFalse() = this == true
