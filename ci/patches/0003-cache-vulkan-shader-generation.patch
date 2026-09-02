@@ -1,7 +1,7 @@
 diff --git a/libs/llama.kt/scripts/bootstrap.sh b/libs/llama.kt/scripts/bootstrap.sh
 --- a/libs/llama.kt/scripts/bootstrap.sh
 +++ b/libs/llama.kt/scripts/bootstrap.sh
-@@ -76,21 +76,31 @@ cmake --build "$VK_BUILD_DIR" --config Release -j$(nproc) > /dev/null 2>&1
+@@ -76,23 +76,24 @@ cmake --build "$VK_BUILD_DIR" --config Release -j$(nproc) > /dev/null 2>&1
  if [ ! -x "$VK_GEN" ]; then
    echo "ERROR: vulkan-shaders-gen build failed — cannot generate Vulkan shaders"
    exit 1
@@ -11,6 +11,7 @@ diff --git a/libs/llama.kt/scripts/bootstrap.sh b/libs/llama.kt/scripts/bootstra
 -"$VK_GEN" \
 -  --output-dir "$VK_SPV_DIR" \
 -  --target-hpp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp"
+-
 -echo "  Compiling GLSL shaders to SPIR-V and generating per-shader .cpp files..."
 -for comp in "$VK_SHADERS_SRC"/*.comp; do
 -  base=$(basename "$comp")
@@ -22,6 +23,13 @@ diff --git a/libs/llama.kt/scripts/bootstrap.sh b/libs/llama.kt/scripts/bootstra
 -    --target-cpp "$VK_OUT_DIR/${base}.cpp"
 -done
 -
+-cp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" "$CPP_DIR/ggml-vulkan/"
+-
+-# Fix relative include in shader cpp files (they're compiled from shaders/ subdir)
+-for f in "$VK_OUT_DIR"/*.cpp; do
+-  sed 's|#include "ggml-vulkan-shaders.hpp"|#include "../ggml-vulkan-shaders.hpp"|g' "$f" \
+-    > "$CPP_DIR/ggml-vulkan/shaders/$(basename "$f")"
+-done
 +VK_SHADER_CACHE_SENTINEL="$VK_OUT_DIR/.complete"
 +if [ -s "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" ] && [ -f "$VK_SHADER_CACHE_SENTINEL" ]; then
 +  echo "  Vulkan shader cache hit; reusing generated SPIR-V and per-shader .cpp files."
@@ -47,4 +55,10 @@ diff --git a/libs/llama.kt/scripts/bootstrap.sh b/libs/llama.kt/scripts/bootstra
 +  : > "$VK_SHADER_CACHE_SENTINEL"
 +fi
 +
- cp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" "$CPP_DIR/ggml-vulkan/"
++cp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" "$CPP_DIR/ggml-vulkan/"
++
++# Fix relative include in shader cpp files (they're compiled from shaders/ subdir)
++for f in "$VK_OUT_DIR"/*.cpp; do
++  sed 's|#include "ggml-vulkan-shaders.hpp"|#include "../ggml-vulkan-shaders.hpp"|g' "$f" \
++    > "$CPP_DIR/ggml-vulkan/shaders/$(basename "$f")"
++done
