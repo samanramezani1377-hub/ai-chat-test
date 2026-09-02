@@ -68,6 +68,42 @@ Contract باید عملیات عمومی مانند Load/Unload، Generate/Stre
 
 تعویض Runtime باید بدون بازطراحی Chat، Agent یا UI امکان‌پذیر باشد. Adapter نباید برای هر Token یک لایه پردازش سنگین یا تبدیل غیرضروری ایجاد کند؛ Streaming باید مستقیماً و با کمترین overhead عملی منتقل شود.
 
+## Model independence / Capability Contract — Decision 23
+
+AI Core باید **model-agnostic** باشد. `Qwen3-1.7B Q6_K` مدل مرجع فعلی برای تست و اعتبارسنجی است، نه مدل hard-coded پروژه. مدل‌های آینده، از جمله مدل‌های GGUF دیگر، باید بدون بازطراحی Core، Agent یا UI قابل import و استفاده باشند.
+
+قابلیت‌های مدل و Runtime باید از طریق یک Contract عمومی مانند `ModelCapabilities` به Core ارائه شوند. نمونه مفهومی:
+
+```text
+Model Metadata + Runtime Capabilities
+                 ↓
+      Effective ModelCapabilities
+                 ↓
+          AI Core / Agent / UI
+```
+
+Capabilityهای مهم شامل مواردی مانند context length، thinking، tool calling، streaming، stop sequences و sampling parameters هستند. مقدار capability باید از metadata/runtime واقعی به‌دست آید؛ در نبود اطلاعات قابل اعتماد، سیستم نباید قابلیت را حدس بزند و باید وضعیت Unknown/Unsupported داشته باشد.
+
+`InferenceSettings` نیز عمومی و model-agnostic است. وجود setting در Contract به معنی پشتیبانی آن توسط همه مدل‌ها نیست؛ Runtime باید supported parameters را مشخص کند. `Min-P` نیز یک sampling parameter عمومی باقی می‌ماند و فقط در صورت عدم پشتیبانی Runtime غیرفعال می‌شود.
+
+Thinking، Tool Calling، Streaming و Context Length قابلیت‌های اختیاری هستند. UI و Agent باید بر اساس capability واقعی رفتار کنند و نباید بر اساس نام مدل branch اختصاصی داشته باشند.
+
+ممنوع:
+
+```kotlin
+if (modelName == "Qwen3-1.7B") { ... }
+```
+
+مجاز:
+
+```kotlin
+if (capabilities.supportsThinking) { ... }
+```
+
+پشتیبانی native tool calling مدل نیز با امنیت Action System یکی نیست. هر Action همچنان باید از مسیر Parser → Validation → Permission → Confirmation → Executor → Verifier عبور کند.
+
+جزئیات کامل این Contract در `MODEL_CAPABILITIES.md` تعریف شده است.
+
 ## Conversation / Context — Decision 22
 
 Context ترکیبی و از Source of Truth ساخته می‌شود. اجزای Context عبارت‌اند از:
