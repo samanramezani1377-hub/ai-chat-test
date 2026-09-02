@@ -19,10 +19,9 @@ class AndroidActionCheckpointStore(context: Context) : ActionCheckpointStore {
             .put("input", action.input.toString())
             .put("risk", action.risk.name)
             .put("retryCount", action.retryCount)
+            .put("conversationId", action.conversationId)
             .put("state", encodeState(action.state))
-        check(preferences.edit().putString(action.executionId, json.toString()).commit()) {
-            "Unable to persist action checkpoint"
-        }
+        check(preferences.edit().putString(action.executionId, json.toString()).commit()) { "Unable to persist action checkpoint" }
     }
 
     override suspend fun get(executionId: String): PreparedAction? = decode(preferences.getString(executionId, null))
@@ -43,6 +42,7 @@ class AndroidActionCheckpointStore(context: Context) : ActionCheckpointStore {
             risk = RiskLevel.valueOf(json.getString("risk")),
             state = decodeState(json.getJSONObject("state")),
             retryCount = json.optInt("retryCount", 0).coerceAtLeast(0),
+            conversationId = json.optString("conversationId").ifBlank { null },
         )
     }.getOrNull()
 
@@ -53,10 +53,7 @@ class AndroidActionCheckpointStore(context: Context) : ActionCheckpointStore {
         ActionExecutionState.Executing -> JSONObject().put("type", "executing")
         ActionExecutionState.Rejected -> JSONObject().put("type", "rejected")
         is ActionExecutionState.Failed -> JSONObject().put("type", "failed").put("message", state.message)
-        is ActionExecutionState.Completed -> JSONObject()
-            .put("type", "completed")
-            .put("success", state.verification.success)
-            .put("evidence", state.verification.evidence)
+        is ActionExecutionState.Completed -> JSONObject().put("type", "completed").put("success", state.verification.success).put("evidence", state.verification.evidence)
     }
 
     private fun decodeState(json: JSONObject): ActionExecutionState = when (json.getString("type")) {
@@ -66,9 +63,7 @@ class AndroidActionCheckpointStore(context: Context) : ActionCheckpointStore {
         "executing" -> ActionExecutionState.Executing
         "rejected" -> ActionExecutionState.Rejected
         "failed" -> ActionExecutionState.Failed(json.optString("message", "Action failed"))
-        "completed" -> ActionExecutionState.Completed(
-            VerificationResult(json.optBoolean("success", false), json.optString("evidence").ifBlank { null })
-        )
+        "completed" -> ActionExecutionState.Completed(VerificationResult(json.optBoolean("success", false), json.optString("evidence").ifBlank { null }))
         else -> error("Unknown action checkpoint state")
     }
 }
