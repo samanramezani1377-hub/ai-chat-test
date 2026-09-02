@@ -1,0 +1,48 @@
+diff --git a/scripts/bootstrap.sh b/scripts/bootstrap.sh
+--- a/scripts/bootstrap.sh
++++ b/scripts/bootstrap.sh
+@@ -76,18 +76,26 @@ cmake --build "$VK_BUILD_DIR" --config Release -j$(nproc) > /dev/null 2>&1
+ if [ ! -x "$VK_GEN" ]; then
+   echo "ERROR: vulkan-shaders-gen build failed — cannot generate Vulkan shaders"
+   exit 1
+ fi
+ 
+-echo "  Generating ggml-vulkan-shaders.hpp header..."
+-"$VK_GEN" \
+-  --output-dir "$VK_SPV_DIR" \
+-  --target-hpp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp"
+-echo "  Compiling GLSL shaders to SPIR-V and generating per-shader .cpp files..."
+-for comp in "$VK_SHADERS_SRC"/*.comp; do
+-  base=$(basename "$comp")
++VK_SHADER_CACHE_SENTINEL="$VK_OUT_DIR/.complete"
++if [ -s "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" ] && [ -f "$VK_SHADER_CACHE_SENTINEL" ]; then
++  echo "  Vulkan shader cache hit; reusing generated SPIR-V and per-shader .cpp files."
++else
++  rm -rf "$VK_SPV_DIR" "$VK_OUT_DIR"
++  mkdir -p "$VK_SPV_DIR" "$VK_OUT_DIR"
++  echo "  Generating ggml-vulkan-shaders.hpp header..."
+   "$VK_GEN" \
+-    --glslc "$(which glslc)" \
+-    --source "$comp" \
+     --output-dir "$VK_SPV_DIR" \
+-    --target-hpp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" \
+-    --target-cpp "$VK_OUT_DIR/${base}.cpp"
+-fi
++    --target-hpp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp"
++  echo "  Compiling GLSL shaders to SPIR-V and generating per-shader .cpp files..."
++  for comp in "$VK_SHADERS_SRC"/*.comp; do
++    base=$(basename "$comp")
++    "$VK_GEN" \
++      --glslc "$(which glslc)" \
++      --source "$comp" \
++      --output-dir "$VK_SPV_DIR" \
++      --target-hpp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" \
++      --target-cpp "$VK_OUT_DIR/${base}.cpp"
++  done
++  test -s "$VK_OUT_DIR/ggml-vulkan-shaders.hpp"
++  test "$(find "$VK_OUT_DIR" -maxdepth 1 -type f -name '*.cpp' | wc -l)" -gt 0
++  : > "$VK_SHADER_CACHE_SENTINEL"
++fi
+ 
+ cp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" "$CPP_DIR/ggml-vulkan/"
+*** End Patch
