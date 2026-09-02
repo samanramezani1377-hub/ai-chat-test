@@ -50,6 +50,7 @@ internal fun MainScreen(container: AppContainer) {
     var renameTarget by remember { mutableStateOf<ConversationRecord?>(null) }
     var deleted by remember { mutableStateOf<DeletedConversation?>(null) }
     var recentLimit by remember { mutableIntStateOf(20) }
+    var activeStreamId by remember { mutableStateOf<String?>(null) }
 
     fun loadConversation(record: ConversationRecord) {
         current = record
@@ -105,6 +106,14 @@ internal fun MainScreen(container: AppContainer) {
         }
     }
 
+    fun updateStreamMessage(streamId: String, append: String? = null, replace: String? = null) {
+        if (activeStreamId != streamId) return
+        messages = messages.map { message ->
+            if (message.id != streamId) message
+            else message.copy(text = replace ?: (message.text + append.orEmpty()))
+        }
+    }
+
     fun send() {
         val record = current ?: return
         if (manager == null || generating || approvalBusy) return
@@ -112,21 +121,25 @@ internal fun MainScreen(container: AppContainer) {
         if (text.isEmpty()) return
         composer = ""
         messages = messages + UiMessage(ChatMessage.Role.USER, text, UUID.randomUUID().toString())
+        val streamId = UUID.randomUUID().toString()
+        activeStreamId = streamId
+        messages = messages + UiMessage(ChatMessage.Role.ASSISTANT, "", streamId)
         generating = true
         runtimeStatus = "در حال اجرای Agent"
         diagnostic = null
         execution = ExecutionState(UUID.randomUUID().toString(), "درخواست Agent", "در حال اجرا", System.currentTimeMillis(), requestPreview = text)
         scope.launch(Dispatchers.Default) {
             val session = container.createAgentSession(record.id) { event ->
-                scope.launch(Dispatchers.Main) {
+                withContext(Dispatchers.Main.immediate) {
                     when (event) {
                         AgentEvent.Started -> runtimeStatus = "در حال اجرای Agent"
-                        is AgentEvent.Token -> Unit
+                        is AgentEvent.Token -> updateStreamMessage(streamId, append = event.value)
                         is AgentEvent.ActionPrepared -> execution = execution?.copy(id = event.executionId, action = event.actionId, status = "در حال اجرای عملیات")
                         is AgentEvent.ApprovalRequired -> {
                             execution = execution?.copy(id = event.executionId, status = "نیازمند تأیید", approvalRequired = true)
                             runtimeStatus = "نیازمند تأیید"
                             generating = false
+                            activeStreamId = null
                         }
                         is AgentEvent.ActionExecuted -> execution = execution?.copy(status = "عملیات انجام شد")
                         is AgentEvent.Failed -> {
@@ -139,6 +152,7 @@ internal fun MainScreen(container: AppContainer) {
             } ?: run {
                 withContext(Dispatchers.Main) {
                     generating = false
+                    activeStreamId = null
                     runtimeStatus = "خطا"
                     diagnostic = "Agent Session در دسترس نیست."
                     execution = execution?.copy(status = "ناموفق", finishedAt = System.currentTimeMillis(), error = diagnostic)
@@ -148,14 +162,16 @@ internal fun MainScreen(container: AppContainer) {
             try {
                 val result = session.send(text, InferenceSettings(maxNewTokens = 512), requestedRecentMessages = 24)
                 withContext(Dispatchers.Main) {
+                    updateStreamMessage(streamId, replace = result.generation.text)
                     generating = false
-                    messages = messages + UiMessage(ChatMessage.Role.ASSISTANT, result.generation.text, UUID.randomUUID().toString())
+                    activeStreamId = null
                     execution = execution?.copy(status = if (result.actionPlan != null) "عملیات تکمیل شد" else "پاسخ آماده است", finishedAt = System.currentTimeMillis(), resultPreview = result.generation.text.take(240))
                     if (!execution?.approvalRequired.orFalse()) runtimeStatus = "آماده"
                 }
             } catch (t: Throwable) {
                 withContext(Dispatchers.Main) {
                     generating = false
+                    activeStreamId = null
                     runtimeStatus = "خطا"
                     diagnostic = t.message ?: "Local agent execution failed"
                     execution = execution?.copy(status = "ناموفق", finishedAt = System.currentTimeMillis(), error = diagnostic)
@@ -178,6 +194,9 @@ internal fun MainScreen(container: AppContainer) {
         runtimeStatus = "در حال تأیید عملیات"
         diagnostic = null
         execution = pending.copy(status = "در حال تأیید")
+        val streamId = UUID.randomUUID().toString()
+        activeStreamId = streamId
+        messages = messages + UiMessage(ChatMessage.Role.ASSISTANT, "", streamId)
         scope.launch(Dispatchers.Default) {
             try {
                 val outcome = container.approveAndExecute(pending.id)
@@ -185,6 +204,7 @@ internal fun MainScreen(container: AppContainer) {
                     withContext(Dispatchers.Main) {
                         approvalBusy = false
                         generating = false
+                        activeStreamId = null
                         runtimeStatus = "خطا"
                         diagnostic = outcome.message
                         execution = pending.copy(status = "ناموفق", error = outcome.message, finishedAt = System.currentTimeMillis())
@@ -192,10 +212,10 @@ internal fun MainScreen(container: AppContainer) {
                     return@launch
                 }
                 val session = container.createAgentSession(record.id) { event ->
-                    scope.launch(Dispatchers.Main) {
+                    withContext(Dispatchers.Main.immediate) {
                         when (event) {
                             AgentEvent.Started -> runtimeStatus = "در حال دریافت پاسخ نهایی"
-                            is AgentEvent.Token -> Unit
+                            is AgentEvent.Token -> updateStreamMessage(streamId, append = event.value)
                             is AgentEvent.Failed -> diagnostic = event.message
                             else -> Unit
                         }
@@ -203,9 +223,10 @@ internal fun MainScreen(container: AppContainer) {
                 } ?: error("Agent Session در دسترس نیست.")
                 val result = session.resumeApproved(pending.id, outcome, InferenceSettings(maxNewTokens = 512), requestedRecentMessages = 24)
                 withContext(Dispatchers.Main) {
-                    messages = messages + UiMessage(ChatMessage.Role.ASSISTANT, result.generation.text, UUID.randomUUID().toString())
+                    updateStreamMessage(streamId, replace = result.generation.text)
                     approvalBusy = false
                     generating = false
+                    activeStreamId = null
                     runtimeStatus = "آماده"
                     execution = pending.copy(status = "عملیات تأیید و تکمیل شد", finishedAt = System.currentTimeMillis(), resultPreview = result.generation.text.take(240), approvalRequired = false)
                     conversations = history.recent(recentLimit)
@@ -215,6 +236,7 @@ internal fun MainScreen(container: AppContainer) {
                 withContext(Dispatchers.Main) {
                     approvalBusy = false
                     generating = false
+                    activeStreamId = null
                     runtimeStatus = "خطا"
                     diagnostic = t.message ?: "Approval continuation failed"
                     execution = pending.copy(status = "ناموفق", error = diagnostic, finishedAt = System.currentTimeMillis())
@@ -234,6 +256,7 @@ internal fun MainScreen(container: AppContainer) {
             withContext(Dispatchers.Main) {
                 approvalBusy = false
                 generating = false
+                activeStreamId = null
                 if (rejected) {
                     runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"
                     execution = pending.copy(status = "رد شد", approvalRequired = false, finishedAt = System.currentTimeMillis())
@@ -248,6 +271,7 @@ internal fun MainScreen(container: AppContainer) {
 
     fun stop() {
         if (!generating || approvalBusy) return
+        activeStreamId = null
         scope.launch(Dispatchers.Default) { manager?.stopGeneration() }
         generating = false
         runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"
