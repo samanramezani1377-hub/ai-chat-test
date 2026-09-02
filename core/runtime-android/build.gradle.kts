@@ -8,7 +8,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        minSdk = 26
+        minSdk = 29
         consumerProguardFiles("consumer-rules.pro")
     }
 
@@ -25,8 +25,8 @@ android {
 dependencies {
     implementation(project(":core:domain"))
     implementation(project(":core:runtime"))
+    implementation(project(":llama-kt"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    implementation("org.codeshipping:llama-kotlin-android:0.1.1")
     testImplementation(kotlin("test"))
     testImplementation(kotlin("test-junit5"))
 }
