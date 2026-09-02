@@ -51,7 +51,6 @@ apply_native_patches() {
   local p="$ROOT_DIR/ci/patches"
   cp "$p/0002-abort-callback-mid-graph-cancel.patch" "$LLAMA_KT/patches/0002-abort-callback-mid-graph-cancel.patch"
   rm -f "$LLAMA_KT/patches/0001-vulkan-uma-descriptor-ceildiv.patch"
-
   patch --dry-run -p1 --forward < "$p/0003-cache-vulkan-shader-generation.patch"
   patch -p1 --forward < "$p/0003-cache-vulkan-shader-generation.patch"
   bash "$LLAMA_KT/scripts/bootstrap.sh" 2>&1 | tee "$ROOT_DIR/bootstrap-output.log"
@@ -60,7 +59,6 @@ apply_native_patches() {
 validate_and_bridge() {
   test "$(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)" = "$LLAMA_CPP_SHA"
   for f in llama.h llama.cpp ggml.h; do test -s "$CPP_DIR/$f"; done
-
   cp /tmp/llama.rn-ref/cpp/rn-llama-version.h "$CPP_DIR/rn-llama-version.h"
   test -s "$CPP_DIR/rn-llama-version.h"
 
@@ -81,7 +79,6 @@ validate_and_bridge() {
   done
   mkdir -p "$CPP_DIR/tools/mtmd"
   cp "$LLAMA_CPP_DIR/tools/mtmd/mtmd-internal.h" "$CPP_DIR/tools/mtmd/mtmd-internal.h"
-
   for f in llama.h llama.cpp ggml.h rn-llama-version.h ggml-feats.h llama-kv-cache-dsa-iswa.h llama-kv-cache-msa.h llama-kv-cache-dsv4.h tools/mtmd/mtmd-internal.h; do
     test -s "$CPP_DIR/$f"
   done
@@ -105,7 +102,11 @@ apply_barbet_patches() {
 prepare_submodule
 pin_llama_cpp
 prepare_llama_rn
-apply_native_patches
+if [ "${LLAMA_BOOTSTRAP_CACHE_HIT:-false}" = "true" ]; then
+  echo 'Native bootstrap cache hit; skipping bootstrap.sh.'
+else
+  apply_native_patches
+fi
 validate_and_bridge
 apply_barbet_patches
 
