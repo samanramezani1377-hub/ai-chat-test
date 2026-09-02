@@ -20,17 +20,27 @@ class AgentSessionTest {
         val provider = DefaultContextProvider(store, { "system" }, { "task" }, { "workspace" })
         val orchestrator = AgentOrchestrator(provider, runtime)
         val events = mutableListOf<AgentEvent>()
-        val session = AgentSession(
-            orchestrator = orchestrator,
-            conversationStore = store,
-            eventSink = { event -> events += event }
-        )
+        val session = AgentSession(orchestrator = orchestrator, conversationStore = store, eventSink = { event -> events += event })
 
         session.send("hello", InferenceSettings())
 
         assertEquals(listOf("hello", "answer"), store.messages.map { it.content })
         assertTrue(events.any { it is AgentEvent.Token && it.value == "answer" })
         assertTrue(events.last() is AgentEvent.Completed)
+    }
+
+    @Test
+    fun sendUsesSuppliedInferenceSettingsInsteadOfGlobalSnapshot() = kotlinx.coroutines.test.runTest {
+        val store = TestStore()
+        val runtime = TestRuntime()
+        val provider = DefaultContextProvider(store, { "system" }, { "task" }, { "workspace" })
+        val session = AgentSession(AgentOrchestrator(provider, runtime), store)
+        val supplied = InferenceSettings(temperature = 0.15, maxNewTokens = 77, recentMessages = 3, maxActionSteps = 1)
+
+        session.send("settings", supplied)
+
+        assertEquals(0.15, runtime.lastRequest!!.temperature)
+        assertEquals(77, runtime.lastRequest!!.maxNewTokens)
     }
 
     private class TestStore : ConversationStore {
@@ -43,9 +53,11 @@ class AgentSessionTest {
     }
 
     private class TestRuntime : ModelRuntime {
+        var lastRequest: GenerationRequest? = null
         override suspend fun load(model: com.woogit.aicore.domain.ModelDescriptor) = Unit
         override suspend fun unload() = Unit
         override suspend fun generate(request: GenerationRequest, onToken: suspend (String) -> Unit): GenerationResult {
+            lastRequest = request
             onToken("answer")
             return GenerationResult("answer")
         }
