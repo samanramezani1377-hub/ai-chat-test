@@ -20,8 +20,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: false
 
       - name: Setup Java 21
         uses: actions/setup-java@v5
@@ -32,59 +30,48 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Restore native dependency cache
-        id: native-cache
-        continue-on-error: true
+      - name: Install NDK
+        run: sdkmanager "ndk;27.2.12479018"
+
+      - name: Restore Vulkan SDK
         uses: actions/cache/restore@v4
         with:
           path: |
             /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
-            /tmp/llama.rn-ref
-            ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
             $HOME/vulkan-sdk
-          key: ci-native-5-${{ runner.os }}-${{ github.run_id }}-vulkan-1.4.321.1-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-ndk-27.2.12479018
+          key: ci-vulkan-${{ runner.os }}-${{ github.run_id }}-1.4.321.1
           restore-keys: |
-            ci-native-5-${{ runner.os }}-vulkan-1.4.321.1-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-ndk-27.2.12479018-
+            ci-vulkan-${{ runner.os }}-1.4.321.1-
 
-      - name: Restore native bootstrap cache
-        id: bootstrap-cache
-        continue-on-error: true
-        uses: actions/cache/restore@v4
-        with:
-          path: libs/llama.kt/llama-kt/src/main/cpp
-          key: ci-bootstrap-5-${{ runner.os }}-${{ github.run_id }}-llama-kt-5a20956b1fe2f40d07252f079c31bcaa08250e6b-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-${{ hashFiles('ci/bootstrap-llama.sh', 'ci/patches/*.patch') }}
-          restore-keys: |
-            ci-bootstrap-5-${{ runner.os }}-llama-kt-5a20956b1fe2f40d07252f079c31bcaa08250e6b-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-${{ hashFiles('ci/bootstrap-llama.sh', 'ci/patches/*.patch') }}-
+      - name: Prepare Vulkan SDK
+        run: bash ci/prepare-vulkan.sh
 
-      - name: Prepare pinned native dependencies
-        id: prepare-native
-        shell: bash
-        env:
-          LLAMA_BOOTSTRAP_CACHE_HIT: ${{ steps.bootstrap-cache.outcome == 'success' && steps.bootstrap-cache.outputs.cache-matched-key != '' && 'true' || 'false' }}
-        run: bash ci/bootstrap-llama.sh
-
-      - name: Save native dependency cache
-        if: success() && (steps.native-cache.outcome != 'success' || steps.native-cache.outputs.cache-matched-key == '' || steps.prepare-native.outputs.native_deps_rebuilt == 'true')
+      - name: Save Vulkan SDK cache
+        if: success()
         uses: actions/cache/save@v4
-        continue-on-error: true
         with:
           path: |
             /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
-            /tmp/llama.rn-ref
-            ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
             $HOME/vulkan-sdk
-          key: ci-native-5-${{ runner.os }}-${{ github.run_id }}-vulkan-1.4.321.1-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-ndk-27.2.12479018
+          key: ci-vulkan-${{ runner.os }}-${{ github.run_id }}-1.4.321.1
 
-      - name: Save native bootstrap cache
-        if: success() && (steps.bootstrap-cache.outcome != 'success' || steps.bootstrap-cache.outputs.cache-matched-key == '' || steps.prepare-native.outputs.llama_bootstrap_rebuilt == 'true')
-        uses: actions/cache/save@v4
-        continue-on-error: true
+      - name: Restore native CMake cache
+        uses: actions/cache/restore@v4
         with:
-          path: libs/llama.kt/llama-kt/src/main/cpp
-          key: ci-bootstrap-5-${{ runner.os }}-${{ github.run_id }}-llama-kt-5a20956b1fe2f40d07252f079c31bcaa08250e6b-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-${{ hashFiles('ci/bootstrap-llama.sh', 'ci/patches/*.patch') }}
+          path: core/runtime-android/.cxx
+          key: ci-llama-cpp-${{ runner.os }}-${{ github.run_id }}-${{ hashFiles('core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp') }}
+          restore-keys: |
+            ci-llama-cpp-${{ runner.os }}-${{ hashFiles('core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp') }}-
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build and test
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest --stacktrace
+
+      - name: Save native CMake cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: core/runtime-android/.cxx
+          key: ci-llama-cpp-${{ runner.os }}-${{ github.run_id }}-${{ hashFiles('core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp') }}
