@@ -43,7 +43,11 @@ jobs:
           LLAMA_CPP_REV=c5fc7e34885ba31217e330809437afa993d27745
           cd libs/llama.kt
           test -d third_party/llama.cpp
-          git -C third_party/llama.cpp fetch --depth=1 origin "$LLAMA_CPP_REV"
+          # The nested submodule is shallow and is also managed by the parent
+          # submodule. Unshallow it before changing its checked-out revision so
+          # Git cannot race on the shallow boundary while updating the index.
+          git -C third_party/llama.cpp fetch --unshallow origin
+          git -C third_party/llama.cpp fetch origin "$LLAMA_CPP_REV"
           git -C third_party/llama.cpp checkout --detach "$LLAMA_CPP_REV"
           git update-index --add --cacheinfo 160000,"$LLAMA_CPP_REV",third_party/llama.cpp
           test "$(git -C third_party/llama.cpp rev-parse HEAD)" = "$LLAMA_CPP_REV"
