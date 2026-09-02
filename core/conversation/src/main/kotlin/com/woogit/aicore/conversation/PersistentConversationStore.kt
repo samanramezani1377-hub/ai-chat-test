@@ -34,65 +34,61 @@ interface ConversationHistoryRepository {
 }
 
 class InMemoryConversationHistoryRepository : ConversationHistoryRepository {
+    private val lock = Any()
     private val records = LinkedHashMap<String, ConversationRecord>()
     private val messages = LinkedHashMap<String, MutableList<ConversationMessage>>()
     private val deletedMessages = LinkedHashMap<String, List<ConversationMessage>>()
 
-    @Synchronized
-    override suspend fun recent(limit: Int): List<ConversationRecord> {
+    override suspend fun recent(limit: Int): List<ConversationRecord> = synchronized(lock) {
         require(limit >= 0) { "limit must be non-negative" }
-        return records.values.sortedByDescending { it.updatedAtEpochMs }.take(limit)
+        records.values.sortedByDescending { it.updatedAtEpochMs }.take(limit)
     }
 
-    @Synchronized
-    override suspend fun create(title: String, nowEpochMs: Long): ConversationRecord {
+    override suspend fun create(title: String, nowEpochMs: Long): ConversationRecord = synchronized(lock) {
         val record = ConversationRecord(java.util.UUID.randomUUID().toString(), title.trim().ifEmpty { "گفت‌وگوی جدید" }, nowEpochMs, 0)
         records[record.id] = record
         messages[record.id] = mutableListOf()
-        return record
+        record
     }
 
-    @Synchronized
-    override suspend fun rename(id: String, title: String, nowEpochMs: Long): Boolean {
-        val current = records[id] ?: return false
+    override suspend fun rename(id: String, title: String, nowEpochMs: Long): Boolean = synchronized(lock) {
+        val current = records[id] ?: return@synchronized false
         records[id] = current.copy(title = title.trim().ifEmpty { current.title }, updatedAtEpochMs = nowEpochMs)
-        return true
+        true
     }
 
-    @Synchronized
-    override suspend fun delete(id: String): ConversationRecord? {
-        val record = records.remove(id) ?: return null
+    override suspend fun delete(id: String): ConversationRecord? = synchronized(lock) {
+        val record = records.remove(id) ?: return@synchronized null
         deletedMessages[id] = messages.remove(id)?.toList() ?: emptyList()
-        return record
+        record
     }
 
-    @Synchronized
-    override suspend fun restore(record: ConversationRecord): Boolean {
-        if (records.containsKey(record.id)) return false
+    override suspend fun restore(record: ConversationRecord): Boolean = synchronized(lock) {
+        if (records.containsKey(record.id)) return@synchronized false
         records[record.id] = record
         messages[record.id] = deletedMessages.remove(record.id)?.toMutableList() ?: mutableListOf()
-        return true
+        true
     }
 
-    @Synchronized
-    override suspend fun purge(id: String): Boolean = deletedMessages.remove(id) != null
+    override suspend fun purge(id: String): Boolean = synchronized(lock) {
+        deletedMessages.remove(id) != null
+    }
 
-    @Synchronized
-    override suspend fun touch(id: String, messageCount: Int, nowEpochMs: Long): Boolean {
-        val current = records[id] ?: return false
+    override suspend fun touch(id: String, messageCount: Int, nowEpochMs: Long): Boolean = synchronized(lock) {
+        val current = records[id] ?: return@synchronized false
         records[id] = current.copy(updatedAtEpochMs = nowEpochMs, messageCount = messageCount)
-        return true
+        true
     }
 
-    @Synchronized
-    override suspend fun messages(id: String): List<ConversationMessage> = messages[id]?.toList() ?: emptyList()
+    override suspend fun messages(id: String): List<ConversationMessage> = synchronized(lock) {
+        messages[id]?.toList() ?: emptyList()
+    }
 
-    @Synchronized
-    override suspend fun append(id: String, message: ConversationMessage, nowEpochMs: Long): Boolean {
-        val current = records[id] ?: return false
+    override suspend fun append(id: String, message: ConversationMessage, nowEpochMs: Long): Boolean = synchronized(lock) {
+        val current = records[id] ?: return@synchronized false
         val list = messages.getOrPut(id) { mutableListOf() }
         list += message
         records[id] = current.copy(updatedAtEpochMs = nowEpochMs, messageCount = list.size)
-        return true
+        true
     }
 }
