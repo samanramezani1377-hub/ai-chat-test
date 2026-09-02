@@ -70,11 +70,19 @@ jobs:
 
       - name: Restore llama.kt bootstrap output cache
         id: bootstrap-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: /tmp/llama-kt-bootstrap-cache
-          key: ci-bootstrap-1-llama-kt-5a20956b1fe2f40d07252f079c31bcaa08250e6b-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-vulkan-1.4.321.1-ndk-27.2.12479018-${{ hashFiles('ci/patches/0002-abort-callback-mid-graph-cancel.patch') }}
-          save-always: true
+          key: ci-bootstrap-2-llama-kt-5a20956b1fe2f40d07252f079c31bcaa08250e6b-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-vulkan-1.4.321.1-ndk-27.2.12479018-${{ hashFiles('ci/patches/0002-abort-callback-mid-graph-cancel.patch') }}
+
+      - name: Restore Vulkan shader generation cache
+        id: shader-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /tmp/llama-kt-vk-shaders-spv
+            /tmp/llama-kt-vk-shaders-out
+          key: ci-vulkan-shaders-1-${{ runner.os }}-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-vulkan-1.4.321.1
 
       - name: Prepare NDK, Vulkan SDK and llama.rn sources in parallel
         shell: bash
@@ -188,19 +196,31 @@ jobs:
           else
             echo 'Bootstrap cache miss; running pinned llama.kt bootstrap'
             apply_downstream_patch
+            patch -p1 --forward < ci/patches/0003-cache-vulkan-shader-generation.patch
             bash libs/llama.kt/scripts/bootstrap.sh 2>&1 | tee bootstrap-output.log
             test "$(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
           fi
 
-          # llama.rn's llama.cpp patch deliberately makes llama.cpp consume this
-          # fallback version header. llama.kt's bootstrap omitted it from its
-          # glue-copy list, so make the generated native tree self-contained.
           test -s /tmp/llama.rn-ref/cpp/rn-llama-version.h
           cp /tmp/llama.rn-ref/cpp/rn-llama-version.h "$CPP_DIR/rn-llama-version.h"
           test -s "$CPP_DIR/rn-llama-version.h"
 
-          # Only stage the bootstrap output after the required rn-llama version
-          # header is present, so future cache hits contain a complete tree.
+          # llama.kt's pinned bootstrap still expects the removed json-partial and
+          # regex-partial files. The pinned llama.cpp revision provides json.h/json.cpp
+          # instead, so keep the generated tree compatible without making the local
+          # downstream abort patch depend on those stale bootstrap files.
+          if [ -f "$CPP_DIR/common/json-partial.cpp" ]; then
+            sed -i 's/LM_LM_GGML_ASSERT/LM_GGML_ASSERT/g' "$CPP_DIR/common/json-partial.cpp"
+          fi
+          cat > "$CPP_DIR/common/json.h" <<'EOF'
+#include "../../../../../third_party/llama.cpp/common/json.h"
+EOF
+          cat > "$CPP_DIR/common/json.cpp" <<'EOF'
+#include "../../../../../third_party/llama.cpp/common/json.cpp"
+EOF
+          test -s "$CPP_DIR/common/json.h"
+          test -s "$CPP_DIR/common/json.cpp"
+
           if [ ! -f "$BOOTSTRAP_CACHE_DIR/.complete" ]; then
             rm -rf "$BOOTSTRAP_CACHE_DIR"
             mkdir -p "$BOOTSTRAP_CACHE_DIR/cpp"
@@ -210,7 +230,6 @@ jobs:
           fi
 
           test "$(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
-
           test -f "$LLAMA_CPP_DIR/ggml/src/ggml-feats.h"
           cp "$LLAMA_CPP_DIR/ggml/src/ggml-feats.h" "$CPP_DIR/ggml-feats.h"
           sed -i 's/GGML_/LM_GGML_/g; s/ggml_/lm_ggml_/g' "$CPP_DIR/ggml-feats.h"
@@ -228,13 +247,21 @@ jobs:
           test -f "$LLAMA_CPP_DIR/tools/mtmd/mtmd-internal.h"
           cp "$LLAMA_CPP_DIR/tools/mtmd/mtmd-internal.h" "$CPP_DIR/tools/mtmd/mtmd-internal.h"
           test -s "$CPP_DIR/tools/mtmd/mtmd-internal.h"
-
           test -s "$CPP_DIR/llama-kv-cache-dsa-iswa.h"
           test -s "$CPP_DIR/llama-kv-cache-msa.h"
           test -s "$CPP_DIR/llama-kv-cache-dsv4.h"
           test -s "$CPP_DIR/ggml-feats.h"
           test -s "$CPP_DIR/tools/mtmd/mtmd-internal.h"
           test -s "$CPP_DIR/rn-llama-version.h"
+
+      - name: Save Vulkan shader generation cache
+        if: success() && steps.shader-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /tmp/llama-kt-vk-shaders-spv
+            /tmp/llama-kt-vk-shaders-out
+          key: ${{ steps.shader-cache.outputs.cache-primary-key }}
 
       - name: Apply llama.rn Barbet compatibility patches
         run: |
