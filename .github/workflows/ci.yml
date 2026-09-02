@@ -35,6 +35,13 @@ jobs:
       - name: Install NDK 27.2
         run: sdkmanager "ndk;27.2.12479018"
 
+      - name: Prepare llama.rn sources for llama.kt bootstrap
+        run: |
+          rm -rf /tmp/llama.rn-ref
+          git clone --depth 1 https://github.com/mybigday/llama.rn /tmp/llama.rn-ref
+          test -f /tmp/llama.rn-ref/cpp/rn-llama.cpp
+          test -f /tmp/llama.rn-ref/cpp/rn-llama.h
+
       - name: Bootstrap llama.cpp sources
         run: bash libs/llama.kt/scripts/bootstrap.sh
 
