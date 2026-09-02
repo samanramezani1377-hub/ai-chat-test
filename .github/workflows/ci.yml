@@ -40,16 +40,13 @@ jobs:
       - name: Pin llama.cpp revision used by llama.kt bootstrap
         run: |
           set -euo pipefail
-          LLAMA_CPP_TAG=b10156
-          LLAMA_CPP_REV=91f8c9c5fb038c086e13e9cd823c29b33b07ba54
+          LLAMA_CPP_REV=c5fc7e34885ba31217e330809437afa993d27745
           cd libs/llama.kt
           test -d third_party/llama.cpp
-          git -C third_party/llama.cpp fetch --depth=1 origin "refs/tags/$LLAMA_CPP_TAG:refs/tags/$LLAMA_CPP_TAG"
-          git -C third_party/llama.cpp checkout --detach "$LLAMA_CPP_TAG"
-
+          git -C third_party/llama.cpp fetch --depth=1 origin "$LLAMA_CPP_REV"
+          git -C third_party/llama.cpp checkout --detach "$LLAMA_CPP_REV"
           git update-index --add --cacheinfo 160000,"$LLAMA_CPP_REV",third_party/llama.cpp
           git -c user.name='CI' -c user.email='ci@localhost' commit -m 'ci: pin llama.cpp for bootstrap' --no-verify
-
           test "$(git -C third_party/llama.cpp rev-parse HEAD)" = "$LLAMA_CPP_REV"
           test "$(git ls-tree HEAD third_party/llama.cpp | awk '{print $3}')" = "$LLAMA_CPP_REV"
 
@@ -67,6 +64,7 @@ jobs:
 
       - name: Prepare pinned llama.rn sources for llama.kt bootstrap
         run: |
+          set -euo pipefail
           rm -rf /tmp/llama.rn-ref
           git clone --filter=blob:none --no-checkout https://github.com/mybigday/llama.rn /tmp/llama.rn-ref
           git -C /tmp/llama.rn-ref fetch --depth 1 origin 7afb5c8934aea7fa41f4522662f03b3461916927
@@ -83,14 +81,13 @@ jobs:
         run: |
           set -o pipefail
           bash libs/llama.kt/scripts/bootstrap.sh 2>&1 | tee bootstrap-output.log
-          test "$(git -C libs/llama.kt/third_party/llama.cpp rev-parse HEAD)" = "91f8c9c5fb038c086e13e9cd823c29b33b07ba54"
+          test "$(git -C libs/llama.kt/third_party/llama.cpp rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
 
       - name: Apply llama.rn Barbet compatibility patches
         run: |
           set -euo pipefail
           cd libs/llama.kt/llama-kt/src/main/cpp
           patches=/tmp/llama.rn-ref/scripts/patches
-
           apply_if_missing() {
             local marker="$1"
             local patch_file="$2"
@@ -101,12 +98,10 @@ jobs:
             patch -p0 --forward < "$patch_file"
             grep -Fq "$marker" "$3"
           }
-
           apply_if_missing 'LLM_ARCH_BARBET,' "$patches/barbet-llama-arch.h.patch" llama-arch.h
           apply_if_missing '{ LLM_ARCH_BARBET,           "barbet"           },' "$patches/barbet-llama-arch.cpp.patch" llama-arch.cpp
           apply_if_missing 'case LLM_ARCH_BARBET:' "$patches/barbet-llama-model.cpp.patch" llama-model.cpp
           apply_if_missing 'struct llama_model_barbet : public llama_model_base' "$patches/barbet-models.h.patch" models/models.h
-
           if [ -f "$patches/../vendor/models/barbet.cpp" ]; then
             cp "$patches/../vendor/models/barbet.cpp" models/barbet.cpp
           else
