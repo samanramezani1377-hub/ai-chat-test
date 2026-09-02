@@ -25,20 +25,26 @@ class AndroidActionCheckpointStore(context: Context) : ActionCheckpointStore {
         }
     }
 
-    override suspend fun get(executionId: String): PreparedAction? {
-        val raw = preferences.getString(executionId, null) ?: return null
-        return runCatching {
-            val json = JSONObject(raw)
-            PreparedAction(
-                executionId = json.getString("executionId"),
-                actionId = json.getString("actionId"),
-                input = json.getString("input"),
-                risk = RiskLevel.valueOf(json.getString("risk")),
-                state = decodeState(json.getJSONObject("state")),
-                retryCount = json.optInt("retryCount", 0).coerceAtLeast(0),
-            )
-        }.getOrNull()
-    }
+    override suspend fun get(executionId: String): PreparedAction? = decode(preferences.getString(executionId, null))
+
+    override suspend fun list(): List<PreparedAction> = preferences.all.values
+        .asSequence()
+        .filterIsInstance<String>()
+        .mapNotNull(::decode)
+        .toList()
+
+    private fun decode(raw: String?): PreparedAction? = runCatching {
+        if (raw == null) return null
+        val json = JSONObject(raw)
+        PreparedAction(
+            executionId = json.getString("executionId"),
+            actionId = json.getString("actionId"),
+            input = json.getString("input"),
+            risk = RiskLevel.valueOf(json.getString("risk")),
+            state = decodeState(json.getJSONObject("state")),
+            retryCount = json.optInt("retryCount", 0).coerceAtLeast(0),
+        )
+    }.getOrNull()
 
     private fun encodeState(state: ActionExecutionState): JSONObject = when (state) {
         ActionExecutionState.Prepared -> JSONObject().put("type", "prepared")
