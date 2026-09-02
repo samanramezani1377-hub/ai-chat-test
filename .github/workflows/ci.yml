@@ -74,6 +74,37 @@ jobs:
       - name: Bootstrap llama.cpp sources
         run: bash libs/llama.kt/scripts/bootstrap.sh
 
+      - name: Apply llama.rn Barbet compatibility patches
+        run: |
+          set -euo pipefail
+          cd libs/llama.kt/llama-kt/src/main/cpp
+          patches=/tmp/llama.rn-ref/scripts/patches
+
+          apply_if_missing() {
+            local marker="$1"
+            local patch_file="$2"
+            if grep -Fq "$marker" "$3"; then
+              echo "Already present: $marker"
+              return
+            fi
+            patch -p0 --forward < "$patch_file"
+            grep -Fq "$marker" "$3"
+          }
+
+          apply_if_missing 'LLM_ARCH_BARBET,' "$patches/barbet-llama-arch.h.patch" llama-arch.h
+          apply_if_missing '{ LLM_ARCH_BARBET,           "barbet"           },' "$patches/barbet-llama-arch.cpp.patch" llama-arch.cpp
+          apply_if_missing 'case LLM_ARCH_BARBET:' "$patches/barbet-llama-model.cpp.patch" llama-model.cpp
+          apply_if_missing 'struct llama_model_barbet : public llama_model_base' "$patches/barbet-models.h.patch" models/models.h
+
+          if [ -f "$patches/../vendor/models/barbet.cpp" ]; then
+            cp "$patches/../vendor/models/barbet.cpp" models/barbet.cpp
+          else
+            test -f /tmp/llama.rn-ref/cpp/models/barbet.cpp
+            cp /tmp/llama.rn-ref/cpp/models/barbet.cpp models/barbet.cpp
+          fi
+          test -s models/barbet.cpp
+          grep -Fq 'llama_model_barbet::load_arch_hparams' models/barbet.cpp
+
       - name: Build OpenCL loader
         run: bash libs/llama.kt/scripts/build-opencl.sh
 
