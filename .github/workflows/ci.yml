@@ -66,6 +66,13 @@ jobs:
             /tmp/llama.rn-ref
           key: ci-native-1-vulkan-1.4.321.1-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927
 
+      - name: Restore llama.kt bootstrap output cache
+        id: bootstrap-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/llama-kt-bootstrap-cache
+          key: ci-bootstrap-1-llama-kt-5a20956b1fe2f40d07252f079c31bcaa08250e6b-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-vulkan-1.4.321.1-ndk-27.2.12479018-${{ hashFiles('ci/patches/0002-abort-callback-mid-graph-cancel.patch') }}
+
       - name: Prepare NDK, Vulkan SDK and llama.rn sources in parallel
         shell: bash
         run: |
@@ -132,10 +139,14 @@ jobs:
           done
           exit "$failed"
 
-      - name: Bootstrap llama.cpp and apply downstream patch in parallel
+      - name: Bootstrap llama.cpp and apply downstream patch
         shell: bash
         run: |
           set -euo pipefail
+
+          BOOTSTRAP_CACHE_DIR=/tmp/llama-kt-bootstrap-cache
+          CPP_DIR=libs/llama.kt/llama-kt/src/main/cpp
+          LLAMA_CPP_DIR=libs/llama.kt/third_party/llama.cpp
 
           apply_downstream_patch() {
             echo '::group::Apply downstream llama.rn abort patch'
@@ -144,33 +155,44 @@ jobs:
             echo '::endgroup::'
           }
 
-          bootstrap_llama() {
-            echo '::group::Bootstrap llama.cpp sources'
+          if [ -d "$BOOTSTRAP_CACHE_DIR" ] && [ -f "$BOOTSTRAP_CACHE_DIR/.complete" ]; then
+            echo 'Bootstrap cache hit; restoring generated llama.kt native sources'
+            rm -rf "$CPP_DIR"
+            mkdir -p "$CPP_DIR"
+            cp -a "$BOOTSTRAP_CACHE_DIR/cpp/." "$CPP_DIR/"
+          else
+            echo 'Bootstrap cache miss; running pinned llama.kt bootstrap'
+            apply_downstream_patch
             set -o pipefail
             bash libs/llama.kt/scripts/bootstrap.sh 2>&1 | tee bootstrap-output.log
-            test "$(git -C libs/llama.kt/third_party/llama.cpp rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
-            test -f libs/llama.kt/third_party/llama.cpp/ggml/src/ggml-feats.h
-            cp libs/llama.kt/third_party/llama.cpp/ggml/src/ggml-feats.h libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
-            sed -i 's/GGML_/LM_GGML_/g; s/ggml_/lm_ggml_/g' libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
-            test -s libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
-            grep -Fq 'lm_ggml_feats_arch64_runtime_t' libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
-            grep -Fq 'lm_ggml_feats_get_arch64_runtime' libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
-            test -f libs/llama.kt/third_party/llama.cpp/tools/mtmd/mtmd-internal.h
-            cp libs/llama.kt/third_party/llama.cpp/tools/mtmd/mtmd-internal.h libs/llama.kt/llama-kt/src/main/cpp/tools/mtmd/mtmd-internal.h
-            test -s libs/llama.kt/llama-kt/src/main/cpp/tools/mtmd/mtmd-internal.h
-            echo '::endgroup::'
-          }
 
-          apply_downstream_patch & patch_pid=$!
-          bootstrap_llama & bootstrap_pid=$!
+            test "$(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
 
-          failed=0
-          for pid in "$patch_pid" "$bootstrap_pid"; do
-            if ! wait "$pid"; then
-              failed=1
-            fi
-          done
-          exit "$failed"
+            test -f "$LLAMA_CPP_DIR/ggml/src/ggml-feats.h"
+            cp "$LLAMA_CPP_DIR/ggml/src/ggml-feats.h" "$CPP_DIR/ggml-feats.h"
+            sed -i 's/GGML_/LM_GGML_/g; s/ggml_/lm_ggml_/g' "$CPP_DIR/ggml-feats.h"
+            test -s "$CPP_DIR/ggml-feats.h"
+            grep -Fq 'lm_ggml_feats_arch64_runtime_t' "$CPP_DIR/ggml-feats.h"
+            grep -Fq 'lm_ggml_feats_get_arch64_runtime' "$CPP_DIR/ggml-feats.h"
+
+            test -f "$LLAMA_CPP_DIR/src/llama-kv-cache-dsa-iswa.h"
+            cp "$LLAMA_CPP_DIR/src/llama-kv-cache-dsa-iswa.h" "$CPP_DIR/llama-kv-cache-dsa-iswa.h"
+            test -s "$CPP_DIR/llama-kv-cache-dsa-iswa.h"
+
+            test -f "$LLAMA_CPP_DIR/tools/mtmd/mtmd-internal.h"
+            cp "$LLAMA_CPP_DIR/tools/mtmd/mtmd-internal.h" "$CPP_DIR/tools/mtmd/mtmd-internal.h"
+            test -s "$CPP_DIR/tools/mtmd/mtmd-internal.h"
+
+            rm -rf "$BOOTSTRAP_CACHE_DIR"
+            mkdir -p "$BOOTSTRAP_CACHE_DIR/cpp"
+            cp -a "$CPP_DIR/." "$BOOTSTRAP_CACHE_DIR/cpp/"
+            : > "$BOOTSTRAP_CACHE_DIR/.complete"
+          fi
+
+          test "$(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
+          test -s "$CPP_DIR/llama-kv-cache-dsa-iswa.h"
+          test -s "$CPP_DIR/ggml-feats.h"
+          test -s "$CPP_DIR/tools/mtmd/mtmd-internal.h"
 
       - name: Apply llama.rn Barbet compatibility patches
         run: |
