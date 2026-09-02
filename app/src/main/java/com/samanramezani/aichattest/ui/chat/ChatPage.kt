@@ -27,9 +27,9 @@ internal fun ChatPage(messages: List<UiMessage>, composer: String, generating: B
             if (generating) item { Text(if (approvalBusy) "در حال پردازش تأیید…" else "در حال اجرای Agent…", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             if (!generating && execution != null) item { ActionSummary(execution, onWorkspace, onApprove, onReject, approvalBusy) }
         }
-        Surface(Modifier.fillMaxWidth().padding(bottom = 12.dp), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), tonalElevation = 2.dp) {
-            Row(Modifier.padding(8.dp), verticalAlignment = Alignment.Bottom) {
-                TextField(value = composer, onValueChange = onComposer, modifier = Modifier.weight(1f), placeholder = { Text("پیام خود را بنویسید…") }, maxLines = 6)
+        Surface(Modifier.fillMaxWidth().padding(bottom = 12.dp), shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), tonalElevation = 2.dp) {
+            Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.Bottom) {
+                TextField(value = composer, onValueChange = onComposer, modifier = Modifier.weight(1f), placeholder = { Text("پیام خود را بنویسید…") }, maxLines = 6, shape = RoundedCornerShape(50))
                 Spacer(Modifier.width(8.dp))
                 FilledIconButton(onClick = if (generating) onStop else onSend, enabled = if (approvalBusy) false else generating || composer.isNotBlank(), modifier = Modifier.size(48.dp).semantics { contentDescription = if (generating) "توقف تولید" else "ارسال پیام" }) { Icon(if (generating) Icons.Default.Stop else Icons.Default.Send, if (generating) "توقف تولید" else "ارسال پیام") }
             }
