@@ -52,7 +52,10 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         MetricRow("زمان تولید", runtime.generation?.generationTimeMs?.let { "$it ms" } ?: "N/A")
         MetricRow("توکن ورودی", runtime.generation?.inputTokens?.toString() ?: "N/A")
         MetricRow("توکن خروجی", runtime.generation?.outputTokens?.toString() ?: "N/A")
-        MetricRow("سرعت", runtime.generation?.let(::generationSpeed) ?: "N/A")
+        MetricRow("سرعت", runtime.generation?.let { generation ->
+            val seconds = generation.generationTimeMs?.toDouble()?.div(1000.0)
+            if (seconds == null || seconds <= 0.0) "N/A" else "%.2f tok/s".format(generation.outputTokens / seconds)
+        } ?: "N/A")
 
         Text("Runtime", style = MaterialTheme.typography.titleLarge)
         MetricRow("مدل", runtime.model?.displayName ?: "N/A")
@@ -127,12 +130,6 @@ private fun MetricRow(label: String, value: String) {
         Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, Modifier.weight(1f))
     }
-}
-
-private fun generationSpeed(generation: RuntimeGeneration): String {
-    val seconds = generation.generationTimeMs?.toDouble()?.div(1000.0) ?: return "N/A"
-    if (seconds <= 0.0) return "N/A"
-    return "%.2f tok/s".format(generation.outputTokens / seconds)
 }
 
 private fun copyToClipboard(context: Context, label: String, text: String) {
