@@ -25,15 +25,16 @@ class AgentSession(
     private val actionExecutor: (suspend (ActionPlan) -> ActionExecutionOutcome)? = null,
     private val eventSink: suspend (AgentEvent) -> Unit = {},
     private val contextProvider: ContextProvider = DefaultContextProvider(conversationStore, systemContext = { null }, persistentTaskContext = { null }, workspaceContext = { null }),
-    /** User-configurable Agent step limit. The default is intentionally 4. */
-    private val maxActionSteps: Int = 4,
+    /** Optional runtime override. When absent, the persisted Agent setting is used; its default is 4. */
+    private val maxActionSteps: Int? = null,
     private val conversationId: String? = null,
 ) {
-    init { require(maxActionSteps >= 0) { "maxActionSteps must be non-negative" } }
+    init { require(maxActionSteps == null || maxActionSteps >= 0) { "maxActionSteps must be non-negative" } }
 
     suspend fun send(content: String, settings: InferenceSettings, requestedRecentMessages: Int = 10): AgentSessionResult.Reply {
         require(content.isNotBlank()) { "content must not be blank" }
         val effectiveSettings = InferenceSettingsStore.current
+        val effectiveMaxActionSteps = maxActionSteps ?: effectiveSettings.maxActionSteps
         conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.USER, content, System.currentTimeMillis()))
         eventSink(AgentEvent.Started)
         return try {
@@ -42,7 +43,7 @@ class AgentSession(
             var actionResult: String? = null
             var steps = 0
             var resultPersisted = false
-            while (actionPlanCoordinator != null && steps < maxActionSteps) {
+            while (actionPlanCoordinator != null && steps < effectiveMaxActionSteps) {
                 conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
                 resultPersisted = true
                 plan = actionPlanCoordinator.prepare(contextProvider.build(requestedRecentMessages), conversationId) ?: break
@@ -57,7 +58,7 @@ class AgentSession(
                 eventSink(AgentEvent.ActionExecuted(plan.prepared.executionId))
                 conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(plan), System.currentTimeMillis()))
                 steps++
-                // Success is valid only when the real action result has also been verified.
+                // A successful Action is accepted only after real verification.
                 if (!outcome.success || !outcome.verified) {
                     result = orchestrator.generate(effectiveSettings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
                     resultPersisted = false
