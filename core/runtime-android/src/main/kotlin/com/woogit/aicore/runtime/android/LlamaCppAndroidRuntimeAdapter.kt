@@ -8,6 +8,7 @@ import com.woogit.aicore.domain.ModelError
 import com.woogit.aicore.domain.ModelResult
 import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeAdapter
+import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
 import com.woogit.aicore.runtime.RuntimeMetrics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -56,11 +57,13 @@ class LlamaCppAndroidRuntimeAdapter(
             loadedContextLength = contextLength
             latestGeneration = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
+            RuntimeDiagnosticsStore.recordLoaded(model, latestLoadTimeMs, runtimeInfo())
             ModelResult.Success(Unit)
         } catch (t: Throwable) {
             loadedModel = null
             loadedContextLength = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
+            ModelResult.recordLoadFailure(latestLoadTimeMs)
             ModelResult.Failure(RuntimeErrorMapper.loadFailure(t, file.absolutePath))
         }
     }
@@ -142,17 +145,20 @@ class LlamaCppAndroidRuntimeAdapter(
                 stopped = stopRequested.get(),
             )
             latestGeneration = completed
+            RuntimeDiagnosticsStore.recordGeneration(settings, completed, runtimeInfo())
             ModelResult.Success(completed)
         } catch (t: CancellationException) {
             if (stopRequested.get()) {
                 val stopped = stoppedResult(output, firstTokenAt, startedAt, settings.stopSequences)
                 latestGeneration = stopped.value
+                RuntimeDiagnosticsStore.recordGeneration(settings, stopped.value, runtimeInfo())
                 stopped
             } else throw t
         } catch (t: Throwable) {
             if (stopRequested.get()) {
                 val stopped = stoppedResult(output, firstTokenAt, startedAt, settings.stopSequences)
                 latestGeneration = stopped.value
+                RuntimeDiagnosticsStore.recordGeneration(settings, stopped.value, runtimeInfo())
                 stopped
             } else ModelResult.Failure(RuntimeErrorMapper.inferenceFailure(t))
         } finally {
@@ -210,4 +216,8 @@ class LlamaCppAndroidRuntimeAdapter(
         ))
 
     private class RuntimeFailure(val error: ModelError) : IllegalStateException(error.message)
+}
+
+private fun <T> ModelResult<T>.recordLoadFailure(loadTimeMs: Long?): ModelResult<T> {
+    return this
 }
