@@ -22,7 +22,8 @@ data class PreparedAction(
     val input: Any,
     val risk: com.woogit.aicore.domain.RiskLevel,
     val state: ActionExecutionState = ActionExecutionState.Prepared,
-    val retryCount: Int = 0
+    val retryCount: Int = 0,
+    val conversationId: String? = null,
 )
 
 interface ActionApprovalPolicy { fun requiresApproval(risk: com.woogit.aicore.domain.RiskLevel): Boolean }
@@ -48,7 +49,6 @@ class InMemoryActionCheckpointStore : ActionCheckpointStore {
     override suspend fun list(): List<PreparedAction> = synchronized(values) { values.values.toList() }
 }
 
-/** Independent verification hook. Implementations must verify the external side effect, not just the return value. */
 fun interface ActionResultVerifier {
     suspend fun verify(action: PreparedAction, result: Any): VerificationResult
 }
@@ -66,9 +66,9 @@ class ActionLifecycle(
     private suspend fun trace(id: String, type: ActionTraceType, message: String? = null) = traceSink?.record(ActionTraceEvent(id, type, message))
     private suspend fun logError(executionId: String?, actionId: String?, raw: String, userMessage: String) = errorLogSink?.record(ActionErrorLog(executionId, actionId, userMessage, raw))
 
-    suspend fun prepare(actionId: String, input: Any): PreparedAction {
+    suspend fun prepare(actionId: String, input: Any, conversationId: String? = null): PreparedAction {
         val action = registry.find(actionId) ?: error("Action not found: $actionId")
-        return PreparedAction(actionId = action.id, input = input, risk = action.risk).also {
+        return PreparedAction(actionId = action.id, input = input, risk = action.risk, conversationId = conversationId).also {
             checkpointStore.save(it)
             trace(it.executionId, ActionTraceType.PREPARED, it.actionId)
         }
@@ -91,7 +91,8 @@ class ActionLifecycle(
     }
 
     suspend fun checkpoint(executionId: String): PreparedAction = checkpointStore.get(executionId) ?: error("Prepared action not found: $executionId")
-    suspend fun pendingApprovals(): List<PreparedAction> = checkpointStore.list().filter { it.state == ActionExecutionState.AwaitingApproval }
+    suspend fun pendingApprovals(conversationId: String? = null): List<PreparedAction> = checkpointStore.list()
+        .filter { it.state == ActionExecutionState.AwaitingApproval && (conversationId == null || it.conversationId == conversationId) }
 
     suspend fun approve(executionId: String): PreparedAction {
         val prepared = checkpoint(executionId)
