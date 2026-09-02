@@ -47,6 +47,12 @@ data class RuntimeInfo(
 interface Action<in I, out O> {
     val id: String
     val risk: RiskLevel
+    val schemaVersion: Int get() = 1
+    val permission: String get() = "action:$id"
+    val confirmationRequired: Boolean get() = risk == RiskLevel.SENSITIVE
+    val stateChanging: Boolean get() = risk != RiskLevel.LOW
+    val reversible: Boolean get() = false
+    val idempotent: Boolean get() = !stateChanging
     suspend fun execute(input: I): O
 }
 
