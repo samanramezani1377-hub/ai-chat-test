@@ -32,6 +32,7 @@ import com.woogit.aicore.conversation.InMemoryConversationHistoryRepository
 import com.woogit.aicore.domain.ActionRegistry
 import com.woogit.aicore.domain.CapabilityProvider
 import com.woogit.aicore.domain.ModelResult
+import com.woogit.aicore.domain.VerificationResult
 import com.woogit.aicore.domain.Verifier
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
@@ -80,9 +81,15 @@ class AppContainer(context: Context? = null) {
     private val checkpointStore = appContext?.let { AndroidActionCheckpointStore(it) } ?: InMemoryActionCheckpointStore()
     private val actionTraceSink = InMemoryActionTraceSink()
     private val actionErrorLogSink = InMemoryActionErrorLogSink()
-    private val verifier = Verifier<Any> { result ->
-        if (result.toString().isBlank()) com.woogit.aicore.domain.VerificationResult(false, "Action returned an empty result")
-        else com.woogit.aicore.domain.VerificationResult(true, result.toString())
+    private val verifier = object : Verifier<Any> {
+        override suspend fun verify(result: Any): VerificationResult {
+            val text = result.toString()
+            return if (text.isBlank()) {
+                VerificationResult(false, "Action returned an empty result")
+            } else {
+                VerificationResult(true, text)
+            }
+        }
     }
     private val lifecycle = ActionLifecycle(
         actionRegistry,
