@@ -26,8 +26,10 @@ class LlamaCppAndroidRuntimeAdapter(
     private val stopRequested = AtomicBoolean(false)
     @Volatile private var latestGeneration: GenerationResult? = null
     @Volatile private var loadedContextLength: Int? = null
+    @Volatile private var latestLoadTimeMs: Long? = null
 
     override fun lastGeneration(): GenerationResult? = latestGeneration
+    override fun lastLoadTimeMs(): Long? = latestLoadTimeMs
 
     override suspend fun load(model: ModelDescriptor) {
         loadResult(model).let { result ->
@@ -40,6 +42,7 @@ class LlamaCppAndroidRuntimeAdapter(
         unload()
         val file = model.path.toFile()
         if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
+        val startedAt = System.nanoTime()
         return try {
             val contextLength = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
             loadedModel = LlamaModel.load(
@@ -52,10 +55,12 @@ class LlamaCppAndroidRuntimeAdapter(
             )
             loadedContextLength = contextLength
             latestGeneration = null
+            latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
             ModelResult.Success(Unit)
         } catch (t: Throwable) {
             loadedModel = null
             loadedContextLength = null
+            latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
             ModelResult.Failure(RuntimeErrorMapper.loadFailure(t, file.absolutePath))
         }
     }
@@ -164,6 +169,9 @@ class LlamaCppAndroidRuntimeAdapter(
         name = "llama.cpp-android",
         version = runCatching { LlamaModel.getVersion() }.getOrDefault("unknown"),
         backend = if (gpuLayers > 0) "GPU" else "CPU/NEON",
+        threads = defaultThreads.coerceAtLeast(1),
+        gpuLayers = gpuLayers.coerceAtLeast(0),
+        contextLength = loadedContextLength ?: defaultContextLength,
     )
 
     private fun buildPrompt(messages: List<ChatMessage>): String = Qwen3PromptFormatter.format(messages)
