@@ -58,6 +58,14 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Restore CI dependency caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
+            /tmp/llama.rn-ref
+          key: ci-native-1-vulkan-1.4.321.1-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927
+
       - name: Prepare NDK, Vulkan SDK and llama.rn sources in parallel
         shell: bash
         run: |
@@ -74,7 +82,11 @@ jobs:
             VULKAN_VERSION=1.4.321.1
             VULKAN_ARCHIVE="vulkansdk-linux-x86_64-${VULKAN_VERSION}.tar.xz"
             VULKAN_SHA256=f22a3625bd4d7a32e7a0d926ace16d5278c149e938dac63cecc00537626cbf73
-            curl -L --fail --retry 3 -o "/tmp/${VULKAN_ARCHIVE}" "https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/linux/${VULKAN_ARCHIVE}"
+            if [ ! -s "/tmp/${VULKAN_ARCHIVE}" ]; then
+              curl -L --fail --retry 3 -o "/tmp/${VULKAN_ARCHIVE}" "https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/linux/${VULKAN_ARCHIVE}"
+            else
+              echo "Using cached Vulkan archive: /tmp/${VULKAN_ARCHIVE}"
+            fi
             echo "${VULKAN_SHA256}  /tmp/${VULKAN_ARCHIVE}" | sha256sum -c -
             rm -rf "$HOME/vulkan-sdk"
             mkdir -p "$HOME/vulkan-sdk"
@@ -92,10 +104,16 @@ jobs:
 
           prepare_llama_rn() {
             echo '::group::Prepare pinned llama.rn sources'
-            rm -rf /tmp/llama.rn-ref
-            git clone --filter=blob:none --no-checkout https://github.com/mybigday/llama.rn /tmp/llama.rn-ref
-            git -C /tmp/llama.rn-ref fetch --depth 1 origin 7afb5c8934aea7fa41f4522662f03b3461916927
-            git -C /tmp/llama.rn-ref checkout --detach 7afb5c8934aea7fa41f4522662f03b3461916927
+            if [ -d /tmp/llama.rn-ref/.git ]; then
+              echo 'Using cached llama.rn repository'
+              git -C /tmp/llama.rn-ref fetch --depth 1 origin 7afb5c8934aea7fa41f4522662f03b3461916927
+              git -C /tmp/llama.rn-ref checkout --detach 7afb5c8934aea7fa41f4522662f03b3461916927
+            else
+              rm -rf /tmp/llama.rn-ref
+              git clone --filter=blob:none --no-checkout https://github.com/mybigday/llama.rn /tmp/llama.rn-ref
+              git -C /tmp/llama.rn-ref fetch --depth 1 origin 7afb5c8934aea7fa41f4522662f03b3461916927
+              git -C /tmp/llama.rn-ref checkout --detach 7afb5c8934aea7fa41f4522662f03b3461916927
+            fi
             test "$(git -C /tmp/llama.rn-ref rev-parse HEAD)" = "7afb5c8934aea7fa41f4522662f03b3461916927"
             test -f /tmp/llama.rn-ref/cpp/rn-llama.cpp
             test -f /tmp/llama.rn-ref/cpp/rn-llama.h
