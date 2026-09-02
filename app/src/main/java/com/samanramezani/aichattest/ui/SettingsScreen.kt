@@ -15,6 +15,8 @@ import com.woogit.aicore.domain.InferenceSettingsStore
 import com.woogit.aicore.domain.ModelDescriptor
 
 private const val PREFS = "inference_settings"
+private const val KEY_SCHEMA_VERSION = "schema_version"
+private const val CURRENT_SCHEMA_VERSION = 2
 private const val KEY_TEMPERATURE = "temperature"
 private const val KEY_TOP_P = "top_p"
 private const val KEY_TOP_K = "top_k"
@@ -22,6 +24,7 @@ private const val KEY_MIN_P = "min_p"
 private const val KEY_REPEAT = "repeat_penalty"
 private const val KEY_MAX_TOKENS = "max_new_tokens"
 private const val KEY_CONTEXT = "context_length"
+private const val KEY_RECENT_MESSAGES = "recent_messages"
 private const val KEY_SEED = "seed"
 private const val KEY_STOPS = "stop_sequences"
 private const val KEY_MAX_ACTION_STEPS = "max_action_steps"
@@ -43,7 +46,7 @@ fun SettingsScreen(
         item { when (section) {
             "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
             "استنتاج" -> InferenceControls()
-            "زمینه" -> SettingsInfo("زمینه", "مدیریت System Context، Summary، پیام‌های اخیر و Workspace Context در Core به‌صورت مستقل قابل تغییر تعریف نشده است. Context Length در بخش استنتاج کنترل می‌شود.")
+            "زمینه" -> ContextControls()
             "عامل" -> AgentControls()
             "فضای کار" -> SettingsInfo("فضای کار", "Workspace محیط اجرای واقعی Actionهاست. تنظیمات مسیر یا دسترسی عمومی قابل تغییر نیست تا مرز امنیتی Workspace شکسته نشود.")
             "لاگ و عیب‌یابی" -> SettingsInfo("لاگ و عیب‌یابی", "گزارش Runtime، TTFT، زمان تولید، تنظیمات، Runtime Trace و Action Trace از داده واقعی جمع می‌شوند. گزارش کامل و گزارش خطا از صفحه عیب‌یابی قابل کپی هستند.")
@@ -92,6 +95,29 @@ private fun InferenceControls() {
 }
 
 @Composable
+private fun ContextControls() {
+    val context = LocalContext.current
+    var settings by remember { mutableStateOf(loadSettings(context)) }
+    var dirty by remember { mutableStateOf(false) }
+    fun update(value: InferenceSettings) { settings = value; dirty = true }
+    fun apply() { saveSettings(context, settings); dirty = false }
+
+    Column(verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
+        Text("زمینه", style = MaterialTheme.typography.titleLarge)
+        Text("تعداد پیام‌های اخیر که Context Builder برای درخواست بعدی در نظر می‌گیرد قابل تنظیم است. Summary، Persistent Task Context و Workspace Context همچنان مالکیت جداگانه در Core دارند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        UiSurface {
+            Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Recent Messages: ${settings.recentMessages}")
+                Slider(value = settings.recentMessages.toFloat(), onValueChange = { update(settings.copy(recentMessages = it.toInt().coerceIn(0, 50))) }, valueRange = 0f..50f, steps = 49)
+                Text("پیش‌فرض: ۱۰ · بازه قابل تنظیم: ۰ تا ۵۰", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Button(onClick = ::apply, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget), enabled = dirty) { Text("اعمال تنظیمات زمینه") }
+        Text(if (dirty) "تغییرات ذخیره نشده‌اند." else "تنظیمات زمینه ذخیره و برای Context بعدی آماده‌اند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
 private fun AgentControls() {
     val context = LocalContext.current
     var settings by remember { mutableStateOf(loadSettings(context)) }
@@ -105,12 +131,7 @@ private fun AgentControls() {
         UiSurface {
             Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Max Action Steps: ${settings.maxActionSteps}")
-                Slider(
-                    value = settings.maxActionSteps.toFloat(),
-                    onValueChange = { update(settings.copy(maxActionSteps = it.toInt().coerceIn(0, 16))) },
-                    valueRange = 0f..16f,
-                    steps = 15,
-                )
+                Slider(value = settings.maxActionSteps.toFloat(), onValueChange = { update(settings.copy(maxActionSteps = it.toInt().coerceIn(0, 16))) }, valueRange = 0f..16f, steps = 15)
                 Text("پیش‌فرض: ۴ · بازه قابل تنظیم: ۰ تا ۱۶", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -121,8 +142,9 @@ private fun AgentControls() {
 
 private fun loadSettings(context: Context): InferenceSettings {
     val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    migrateSettings(p)
     val d = InferenceSettings()
-    return d.copy(
+    val loaded = d.copy(
         temperature = p.getFloat(KEY_TEMPERATURE, d.temperature.toFloat()).toDouble(),
         topP = if (p.contains(KEY_TOP_P)) p.getFloat(KEY_TOP_P, (d.topP ?: 0.9).toFloat()).toDouble() else d.topP,
         topK = if (p.contains(KEY_TOP_K)) p.getInt(KEY_TOP_K, d.topK ?: 40) else d.topK,
@@ -130,14 +152,26 @@ private fun loadSettings(context: Context): InferenceSettings {
         repeatPenalty = if (p.contains(KEY_REPEAT)) p.getFloat(KEY_REPEAT, (d.repeatPenalty ?: 1.1).toFloat()).toDouble() else d.repeatPenalty,
         maxNewTokens = p.getInt(KEY_MAX_TOKENS, d.maxNewTokens),
         contextLength = if (p.contains(KEY_CONTEXT)) p.getInt(KEY_CONTEXT, d.contextLength ?: 4096) else d.contextLength,
+        recentMessages = p.getInt(KEY_RECENT_MESSAGES, d.recentMessages).coerceAtLeast(0),
         seed = if (p.contains(KEY_SEED)) p.getLong(KEY_SEED, d.seed ?: 0L) else d.seed,
         stopSequences = p.getString(KEY_STOPS, null)?.split("\u001f")?.filter { it.isNotEmpty() } ?: d.stopSequences,
         maxActionSteps = p.getInt(KEY_MAX_ACTION_STEPS, d.maxActionSteps).coerceAtLeast(0),
     )
+    InferenceSettingsStore.current = loaded
+    return loaded
+}
+
+private fun migrateSettings(p: android.content.SharedPreferences) {
+    val version = p.getInt(KEY_SCHEMA_VERSION, 0)
+    if (version < 2) {
+        if (!p.contains(KEY_RECENT_MESSAGES)) p.edit().putInt(KEY_RECENT_MESSAGES, 10).apply()
+        p.edit().putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION).apply()
+    }
 }
 
 private fun saveSettings(context: Context, settings: InferenceSettings) {
     context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        .putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
         .putFloat(KEY_TEMPERATURE, settings.temperature.toFloat())
         .apply { settings.topP?.let { putFloat(KEY_TOP_P, it.toFloat()) } ?: remove(KEY_TOP_P) }
         .apply { settings.topK?.let { putInt(KEY_TOP_K, it) } ?: remove(KEY_TOP_K) }
@@ -145,6 +179,7 @@ private fun saveSettings(context: Context, settings: InferenceSettings) {
         .apply { settings.repeatPenalty?.let { putFloat(KEY_REPEAT, it.toFloat()) } ?: remove(KEY_REPEAT) }
         .putInt(KEY_MAX_TOKENS, settings.maxNewTokens)
         .apply { settings.contextLength?.let { putInt(KEY_CONTEXT, it) } ?: remove(KEY_CONTEXT) }
+        .putInt(KEY_RECENT_MESSAGES, settings.recentMessages.coerceAtLeast(0))
         .apply { settings.seed?.let { putLong(KEY_SEED, it) } ?: remove(KEY_SEED) }
         .putString(KEY_STOPS, settings.stopSequences.joinToString("\u001f"))
         .putInt(KEY_MAX_ACTION_STEPS, settings.maxActionSteps.coerceAtLeast(0))
