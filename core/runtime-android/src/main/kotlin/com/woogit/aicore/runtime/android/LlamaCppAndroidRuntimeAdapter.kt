@@ -42,16 +42,12 @@ class LlamaCppAndroidRuntimeAdapter(
         currentCoroutineContext().ensureActive()
         unload()
         val file = model.path.toFile()
-        if (!file.isFile || !file.canRead()) {
-            return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
-        }
+        if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
         val startedAt = System.nanoTime()
         return try {
             val requested = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
             val result = NativeLlamaCpp.load(file.absolutePath, requested)
-            if (result != 0) {
-                return ModelResult.Failure(ModelError.Inference("llama.cpp failed to load the model (code=$result)"))
-            }
+            if (result != 0) return ModelResult.Failure(ModelError.Inference("llama.cpp failed to load the model (code=$result)"))
             val info = NativeLlamaCpp.runtimeInfo()
             selectedBackend = info.substringBefore(';').ifBlank { "CPU/NEON" }
             selectedGpuLayers = if (selectedBackend.contains("Vulkan", ignoreCase = true)) 99 else 0
@@ -94,23 +90,12 @@ class LlamaCppAndroidRuntimeAdapter(
         catch (t: Throwable) { return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation")) }
 
         stopRequested.set(false)
-        RuntimeDiagnosticsStore.recordTrace(
-            RuntimeTraceEvent.Type.GENERATION_STARTED,
-            "context=${loadedContextLength} backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads",
-        )
+        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "context=${loadedContextLength} backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
         val startedAt = System.nanoTime()
         var firstTokenAt: Long? = null
         val output = StringBuilder()
         val pending = StringBuilder()
         val maxStopLength = settings.stopSequences.maxOfOrNull { it.length } ?: 0
-        var emittedChars = 0
-
-        fun emitSafe(text: String) {
-            if (text.isNotEmpty()) {
-                output.append(text)
-                emittedChars += text.length
-            }
-        }
 
         return try {
             NativeLlamaCpp.generate(
@@ -130,7 +115,10 @@ class LlamaCppAndroidRuntimeAdapter(
                 if (stop != null) {
                     val index = pending.indexOf(stop)
                     val visible = pending.substring(0, index)
-                    emitSafe(visible)
+                    if (visible.isNotEmpty()) {
+                        onToken(visible)
+                        output.append(visible)
+                    }
                     pending.setLength(0)
                     stopRequested.set(true)
                     NativeLlamaCpp.stop()
@@ -140,23 +128,17 @@ class LlamaCppAndroidRuntimeAdapter(
                         val safe = pending.substring(0, safeCount)
                         pending.delete(0, safeCount)
                         onToken(safe)
-                        emitSafe(safe)
+                        output.append(safe)
                     }
                 }
             }
             if (!stopRequested.get() && pending.isNotEmpty()) {
                 onToken(pending.toString())
-                emitSafe(pending.toString())
+                output.append(pending)
                 pending.setLength(0)
             }
 
-            val completed = GenerationResult(
-                text = output.toString(),
-                outputTokens = null,
-                firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
-                generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
-                stopped = stopRequested.get(),
-            )
+            val completed = GenerationResult(output.toString(), null, firstTokenAt?.let { (it - startedAt) / 1_000_000 }, (System.nanoTime() - startedAt) / 1_000_000, stopRequested.get())
             latestGeneration = completed
             RuntimeDiagnosticsStore.recordGeneration(settings, completed, runtimeInfo())
             ModelResult.Success(completed)
