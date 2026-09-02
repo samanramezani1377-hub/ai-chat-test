@@ -4,7 +4,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -12,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.samanramezani.aichattest.ui.components.SimplePage
 import com.samanramezani.aichattest.ui.state.ExecutionState
 import com.woogit.aicore.actions.ActionTraceStore
 import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
@@ -42,8 +42,8 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
 
     SimplePage("عیب‌یابی") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { copyToClipboard(context, "گزارش عیب‌یابی", report) }, Modifier.weight(1f)) { Text("کپی گزارش کامل") }
-            OutlinedButton(onClick = { copyToClipboard(context, "گزارش خطا", errorReport) }, Modifier.weight(1f)) { Text("کپی خطا") }
+            Button(onClick = { copyToClipboard(context, "گزارش عیب‌یابی", report) }, modifier = Modifier.weight(1f)) { Text("کپی گزارش کامل") }
+            OutlinedButton(onClick = { copyToClipboard(context, "گزارش خطا", errorReport) }, modifier = Modifier.weight(1f)) { Text("کپی خطا") }
         }
 
         Text("عملکرد Runtime", style = MaterialTheme.typography.titleLarge)
@@ -52,7 +52,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         MetricRow("زمان تولید", runtime.generation?.generationTimeMs?.let { "$it ms" } ?: "N/A")
         MetricRow("توکن ورودی", runtime.generation?.inputTokens?.toString() ?: "N/A")
         MetricRow("توکن خروجی", runtime.generation?.outputTokens?.toString() ?: "N/A")
-        MetricRow("سرعت", runtime.generation?.let { speed(it) } ?: "N/A")
+        MetricRow("سرعت", runtime.generation?.let(::generationSpeed) ?: "N/A")
 
         Text("Runtime", style = MaterialTheme.typography.titleLarge)
         MetricRow("مدل", runtime.model?.displayName ?: "N/A")
@@ -93,7 +93,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         Text("Runtime Trace", style = MaterialTheme.typography.titleLarge)
         if (runtime.trace.isEmpty()) Text("Trace Runtime ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         else runtime.trace.forEach { event ->
-            UiSurface {
+            Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
                 Column(Modifier.padding(10.dp)) {
                     Text(event.type.toString(), style = MaterialTheme.typography.labelLarge)
                     Text(DateFormat.getDateTimeInstance().format(Date(event.timestampMs)), style = MaterialTheme.typography.bodySmall)
@@ -105,7 +105,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         Text("Action Trace", style = MaterialTheme.typography.titleLarge)
         if (selectedActionTraces.isEmpty()) Text("Trace عملیات برای این Execution ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         else selectedActionTraces.forEach { event ->
-            UiSurface {
+            Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
                 Column(Modifier.padding(10.dp)) {
                     Text(event.type.toString(), style = MaterialTheme.typography.labelLarge)
                     Text(DateFormat.getDateTimeInstance().format(Date(event.timestampMs)), style = MaterialTheme.typography.bodySmall)
@@ -127,4 +127,15 @@ private fun MetricRow(label: String, value: String) {
         Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, Modifier.weight(1f))
     }
+}
+
+private fun generationSpeed(generation: RuntimeGeneration): String {
+    val seconds = generation.generationTimeMs?.toDouble()?.div(1000.0) ?: return "N/A"
+    if (seconds <= 0.0) return "N/A"
+    return "%.2f tok/s".format(generation.outputTokens / seconds)
+}
+
+private fun copyToClipboard(context: Context, label: String, text: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+    clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
 }
