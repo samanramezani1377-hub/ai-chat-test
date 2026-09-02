@@ -57,16 +57,24 @@ diff --git a/llama-kt/src/main/cpp/rn-completion.cpp b/llama-kt/src/main/cpp/rn-
 +
      // Initialize context shift flag
      LOG_INFO("ctx_shift: %s", params.ctx_shift ? "enabled" : "disabled");
-
-diff --git a/llama-kt/src/main/cpp/common/json.h b/llama-kt/src/main/cpp/common/json.h
+ diff --git a/llama-kt/src/main/cpp/common/json.h b/llama-kt/src/main/cpp/common/json.h
 new file mode 100644
 --- /dev/null
 +++ b/llama-kt/src/main/cpp/common/json.h
 @@ -0,0 +1 @@
 +#include "../../../../../third_party/llama.cpp/common/json.h"
-diff --git a/llama-kt/src/main/cpp/common/json.cpp b/llama-kt/src/main/cpp/common/json.cpp
+ diff --git a/llama-kt/src/main/cpp/common/json.cpp b/llama-kt/src/main/cpp/common/json.cpp
 new file mode 100644
 --- /dev/null
 +++ b/llama-kt/src/main/cpp/common/json.cpp
 @@ -0,0 +1 @@
 +#include "../../../../../third_party/llama.cpp/common/json.cpp"
+ diff --git a/llama-kt/src/main/cpp/common/json-partial.cpp b/llama-kt/src/main/cpp/common/json-partial.cpp
+--- a/llama-kt/src/main/cpp/common/json-partial.cpp
++++ b/llama-kt/src/main/cpp/common/json-partial.cpp
+@@ -94 +94 @@
+-            LM_LM_GGML_ASSERT(!stack.empty() && stack.back().type == COMMON_JSON_STACK_ELEMENT_OBJECT);
++            LM_GGML_ASSERT(!stack.empty() && stack.back().type == COMMON_JSON_STACK_ELEMENT_OBJECT);
+@@ -108 +108 @@
+-            LM_LM_GGML_ASSERT(!stack.empty() && stack.back().type == COMMON_JSON_STACK_ELEMENT_ARRAY);
++            LM_GGML_ASSERT(!stack.empty() && stack.back().type == COMMON_JSON_STACK_ELEMENT_ARRAY);
