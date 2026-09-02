@@ -23,6 +23,14 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Align llama.cpp revision used by llama.kt
+        run: |
+          set -euo pipefail
+          test -d libs/llama.kt/third_party/llama.cpp
+          git -C libs/llama.kt/third_party/llama.cpp fetch --depth=1 origin 91f8c9c5fb038c086e13e9cd823c29b33b07ba54
+          git -C libs/llama.kt/third_party/llama.cpp checkout --detach 91f8c9c5fb038c086e13e9cd823c29b33b07ba54
+          test "$(git -C libs/llama.kt/third_party/llama.cpp rev-parse HEAD)" = "91f8c9c5fb038c086e13e9cd823c29b33b07ba54"
+
       - name: Setup Java 21
         uses: actions/setup-java@v5
         with:
