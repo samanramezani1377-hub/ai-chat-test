@@ -28,7 +28,7 @@ class LocalModelService(
 ) : ModelLifecycleManager {
     /** Runtime state transitions are always protected by this mutex. */
     private val runtimeMutex = Mutex()
-    /** Generation is serialized independently; lock ordering is generation -> runtime, never the reverse. */
+    /** All lifecycle operations are serialized by this mutex. */
     private val generationMutex = Mutex()
     private var activeId: String? = null
     @Volatile private var generationJob: Job? = null
@@ -63,9 +63,9 @@ class LocalModelService(
         }
     }
 
-    override suspend fun activate(id: String): ModelResult<ModelDescriptor> {
-        stopGeneration()
-        return generationMutex.withLock {
+    override suspend fun activate(id: String): ModelResult<ModelDescriptor> =
+        generationMutex.withLock {
+            stopGenerationUnsafe()
             runtimeMutex.withLock {
                 val model = when (val result = repository.get(id)) {
                     is ModelResult.Success -> result.value
@@ -99,7 +99,6 @@ class LocalModelService(
                 }
             }
         }
-    }
 
     suspend fun generate(
         messages: List<ChatMessage>,
@@ -140,14 +139,20 @@ class LocalModelService(
         }
     }
 
-    suspend fun stopGeneration() {
-        generationJob?.cancel()
-        runCatching { runtime.stopGeneration() }
+    suspend fun stopGeneration() = generationMutex.withLock {
+        stopGenerationUnsafe()
     }
 
-    override suspend fun deactivate(): ModelResult<Unit> {
-        stopGeneration()
-        return generationMutex.withLock {
+    private suspend fun stopGenerationUnsafe() {
+        generationJob?.cancel()
+        runtimeMutex.withLock {
+            runCatching { runtime.stopGeneration() }
+        }
+    }
+
+    override suspend fun deactivate(): ModelResult<Unit> =
+        generationMutex.withLock {
+            stopGenerationUnsafe()
             runtimeMutex.withLock {
                 try {
                     runtime.unload()
@@ -160,13 +165,12 @@ class LocalModelService(
                 }
             }
         }
-    }
 
     override suspend fun unload(): ModelResult<Unit> = deactivate()
 
-    suspend fun deleteModel(id: String): ModelResult<Unit> {
-        stopGeneration()
-        return generationMutex.withLock {
+    suspend fun deleteModel(id: String): ModelResult<Unit> =
+        generationMutex.withLock {
+            stopGenerationUnsafe()
             runtimeMutex.withLock {
                 val active = repository.getActive()
                 if (active is ModelResult.Success && active.value?.id == id) {
@@ -182,7 +186,6 @@ class LocalModelService(
                 repository.unregister(id)
             }
         }
-    }
 
     fun activeModelId(): String? = activeId
 }
