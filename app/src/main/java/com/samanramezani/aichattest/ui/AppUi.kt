@@ -9,18 +9,24 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import com.samanramezani.aichattest.AppContainer
+import com.woogit.aicore.observability.ErrorReport
+import kotlinx.coroutines.launch
 
 @Composable
 fun AppUi() {
@@ -28,7 +34,7 @@ fun AppUi() {
     var sidebarOpen by remember { mutableStateOf(false) }
     var quickMenuOpen by remember { mutableStateOf(false) }
     var text by remember { mutableStateOf("") }
-    val recent = remember { mutableStateListOf("گفت‌وگوی فعلی", "گفت‌وگوی ۱", "گفت‌وگوی ۲", "گفت‌وگوی ۳", "گفت‌وگوی ۴") }
+    val recent = remember { mutableStateListOf("گفت‌وگوی فعلی", "گفت‌وگوی ۱", "گفت‌وگوی ۲") }
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         Surface(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize()) {
@@ -43,7 +49,7 @@ fun AppUi() {
                     }
                 }
                 if (quickMenuOpen) QuickMenu({ destination = AppDestination.Diagnostics; quickMenuOpen = false }, { destination = AppDestination.Settings; quickMenuOpen = false })
-                if (sidebarOpen) Sidebar(destination, recent, { destination = it; sidebarOpen = false }, { sidebarOpen = false }, { repeat(5) { recent.add("گفت‌وگوی ${recent.size}") } })
+                if (sidebarOpen) Sidebar(destination, recent, { destination = it; sidebarOpen = false }, { sidebarOpen = false }, { recent.add("گفت‌وگوی ${recent.size + 1}") })
             }
         }
     }
@@ -80,7 +86,7 @@ enum class AppDestination { Chat, Work, Diagnostics, Settings, About }
                 item { Nav("درباره برنامه", destination == AppDestination.About) { onDestination(AppDestination.About) } }
                 item { Text("اخیر", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 10.dp)) }
                 items(recent) { title -> Row(Modifier.fillMaxWidth().padding(vertical = 7.dp)) { Text("●  $title", Modifier.weight(1f)); Text("اکنون", style = MaterialTheme.typography.labelSmall) } }
-                item { TextButton(onClick = onMore, Modifier.fillMaxWidth()) { Text("مشاهده بیشتر") } }
+                item { TextButton(onClick = onMore, Modifier.fillMaxWidth()) { Text("گفت‌وگوی جدید") } }
             }
         }
     }
@@ -88,13 +94,11 @@ enum class AppDestination { Chat, Work, Diagnostics, Settings, About }
 
 @Composable private fun Nav(text: String, active: Boolean, onClick: () -> Unit) { Text(text, style = if (active) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(12.dp)) }
 
-@Composable private fun QuickMenu(onLog: () -> Unit, onSettings: () -> Unit) { Surface(Modifier.padding(start = 12.dp, top = 76.dp).width(180.dp), tonalElevation = 6.dp, shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(8.dp)) { TextButton(onClick = onLog, Modifier.fillMaxWidth()) { Text("لاگ") }; TextButton(onClick = onSettings, Modifier.fillMaxWidth()) { Text("تنظیمات") } } } }
+@Composable private fun QuickMenu(onLog: () -> Unit, onSettings: () -> Unit) { Surface(Modifier.padding(start = 12.dp, top = 76.dp).width(180.dp), tonalElevation = 6.dp, shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(8.dp)) { TextButton(onClick = onLog, Modifier.fillMaxWidth()) { Text("لاگ و عیب‌یابی") }; TextButton(onClick = onSettings, Modifier.fillMaxWidth()) { Text("تنظیمات") } } } }
 
 @Composable private fun Chat(text: String, onText: (String) -> Unit) {
     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            item { Text("گفت‌وگوی فعال", style = MaterialTheme.typography.headlineSmall) }
-        }
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) { item { Text("گفت‌وگوی فعال", style = MaterialTheme.typography.headlineSmall) } }
         Surface(Modifier.fillMaxWidth().padding(bottom = 14.dp), tonalElevation = 3.dp, shape = RoundedCornerShape(24.dp)) {
             Row(Modifier.padding(8.dp), verticalAlignment = Alignment.Bottom) {
                 OutlinedTextField(text, onText, Modifier.weight(1f), placeholder = { Text("پیام خود را بنویسید…") }, maxLines = 6, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default))
@@ -104,9 +108,58 @@ enum class AppDestination { Chat, Work, Diagnostics, Settings, About }
     }
 }
 
+@Composable private fun Diagnostics() {
+    val container = AppContainer.latest
+    val scope = rememberCoroutineScope()
+    var reports by remember { mutableStateOf<List<ErrorReport>>(emptyList()) }
+    var selected by remember { mutableStateOf<String?>(null) }
+    var copied by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+
+    fun refresh() { scope.launch { reports = container?.recentErrors(100).orEmpty() } }
+    LaunchedEffect(container) { refresh() }
+
+    Column(Modifier.fillMaxSize().padding(18.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("مرکز خطا و عیب‌یابی", style = MaterialTheme.typography.headlineMedium)
+                Text("Observability مرکزی؛ لاگ موازی در UI ساخته نمی‌شود.", style = MaterialTheme.typography.bodySmall)
+            }
+            IconButton(onClick = { refresh() }) { Icon(Icons.Default.Refresh, "به‌روزرسانی") }
+        }
+        if (copied) Text("گزارش کامل در کلیپ‌بورد کپی شد.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+        Spacer(Modifier.height(10.dp))
+        if (reports.isEmpty()) {
+            Card(Modifier.fillMaxWidth()) { Text("هنوز خطای ثبت‌شده‌ای وجود ندارد.", Modifier.padding(18.dp)) }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(reports, key = { it.reportId }) { report ->
+                    Card(Modifier.fillMaxWidth().clickable { selected = if (selected == report.reportId) null else report.reportId }) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(report.userMessageFa, style = MaterialTheme.typography.titleMedium)
+                            Text("${report.component} · ${report.errorCode} · ${report.severity}", style = MaterialTheme.typography.labelMedium)
+                            Text("Event: ${report.eventId}", style = MaterialTheme.typography.labelSmall)
+                            if (selected == report.reportId) {
+                                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                                Text("خطای فنی: ${report.rawMachineError}", style = MaterialTheme.typography.bodySmall)
+                                Text("Task: ${report.taskId ?: "-"} · Action: ${report.actionId ?: "-"}", style = MaterialTheme.typography.bodySmall)
+                                Text("Execution: ${report.executionState ?: "-"} · Recovery: ${report.recoveryState ?: "-"} · Verification: ${report.verificationState ?: "-"}", style = MaterialTheme.typography.bodySmall)
+                                TextButton(onClick = {
+                                    scope.launch {
+                                        val value = container?.copyErrorReport(report.reportId)
+                                        if (value != null) { clipboard.setText(AnnotatedString(value)); copied = true }
+                                    }
+                                }) { Text("کپی گزارش کامل برای Agent / Developer") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable private fun Workspace() = Screen("فضای کار", listOf("خلاصه اجرای جاری", "Timeline مرکزی", "Event / Action", "تاریخچه عملکرد"))
-@Composable private fun Diagnostics() = Screen("عیب‌یابی", listOf("خطاها", "گزارش Execution / Trace", "عملکرد", "گزارش کار حساس"))
 @Composable private fun Settings() = Screen("تنظیمات", listOf("هوش مصنوعی", "مدل", "استنتاج", "زمینه", "عامل", "فضای کار", "لاگ و عیب‌یابی", "عملکرد", "امنیت و تأیید", "Qwen3-1.7B · GGUF · Q6_K"))
 @Composable private fun About() = Screen("درباره برنامه", listOf("اطلاعات نسخه و مشخصات برنامه"))
-
 @Composable private fun Screen(title: String, rows: List<String>) { LazyColumn(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { item { Text(title, style = MaterialTheme.typography.headlineMedium) }; items(rows) { Text(it, style = MaterialTheme.typography.titleMedium, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) } } }
