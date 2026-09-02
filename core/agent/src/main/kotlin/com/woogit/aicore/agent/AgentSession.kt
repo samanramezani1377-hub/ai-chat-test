@@ -6,6 +6,7 @@ import com.woogit.aicore.conversation.ConversationStore
 import com.woogit.aicore.conversation.DefaultContextProvider
 import com.woogit.aicore.domain.GenerationResult
 import com.woogit.aicore.domain.InferenceSettings
+import com.woogit.aicore.domain.InferenceSettingsStore
 import java.util.UUID
 
 sealed interface AgentSessionResult {
@@ -31,10 +32,11 @@ class AgentSession(
 
     suspend fun send(content: String, settings: InferenceSettings, requestedRecentMessages: Int = 10): AgentSessionResult.Reply {
         require(content.isNotBlank()) { "content must not be blank" }
+        val effectiveSettings = InferenceSettingsStore.current
         conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.USER, content, System.currentTimeMillis()))
         eventSink(AgentEvent.Started)
         return try {
-            var result = orchestrator.generate(settings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+            var result = orchestrator.generate(effectiveSettings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
             var plan: ActionPlan? = null
             var actionResult: String? = null
             var steps = 0
@@ -55,7 +57,7 @@ class AgentSession(
                 conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(plan), System.currentTimeMillis()))
                 steps++
                 if (!outcome.success) break
-                result = orchestrator.generate(settings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+                result = orchestrator.generate(effectiveSettings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
                 resultPersisted = false
             }
             if (!resultPersisted) conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
@@ -69,10 +71,11 @@ class AgentSession(
 
     suspend fun resumeApproved(executionId: String, outcome: ActionExecutionOutcome, settings: InferenceSettings, requestedRecentMessages: Int = 24): AgentSessionResult.Reply {
         require(executionId.isNotBlank()) { "executionId must not be blank" }
+        val effectiveSettings = InferenceSettingsStore.current
         eventSink(AgentEvent.Started)
         conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(executionId), System.currentTimeMillis()))
         return try {
-            val result = orchestrator.generate(settings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+            val result = orchestrator.generate(effectiveSettings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
             conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
             eventSink(AgentEvent.Completed)
             AgentSessionResult.Reply(result, null, outcome.message)
