@@ -24,6 +24,7 @@ private const val KEY_MAX_TOKENS = "max_new_tokens"
 private const val KEY_CONTEXT = "context_length"
 private const val KEY_SEED = "seed"
 private const val KEY_STOPS = "stop_sequences"
+private const val KEY_MAX_ACTION_STEPS = "max_action_steps"
 
 private val aiSections = listOf("مدل", "استنتاج", "زمینه", "عامل")
 private val appSections = listOf("فضای کار", "لاگ و عیب‌یابی", "عملکرد", "امنیت و تأیید")
@@ -43,7 +44,7 @@ fun SettingsScreen(
             "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
             "استنتاج" -> InferenceControls()
             "زمینه" -> SettingsInfo("زمینه", "مدیریت System Context، Summary، پیام‌های اخیر و Workspace Context در Core به‌صورت مستقل قابل تغییر تعریف نشده است. Context Length در بخش استنتاج کنترل می‌شود.")
-            "عامل" -> SettingsInfo("عامل", "چرخه Agent شامل تولید، تشخیص Action، تأیید، اجرا، شکست و Recovery است. محدودیت Action Steps در API داخلی Agent کنترل می‌شود و در حال حاضر تنظیم عمومی کاربر ندارد.")
+            "عامل" -> AgentControls()
             "فضای کار" -> SettingsInfo("فضای کار", "Workspace محیط اجرای واقعی Actionهاست. تنظیمات مسیر یا دسترسی عمومی قابل تغییر نیست تا مرز امنیتی Workspace شکسته نشود.")
             "لاگ و عیب‌یابی" -> SettingsInfo("لاگ و عیب‌یابی", "گزارش Runtime، TTFT، زمان تولید، تنظیمات، Runtime Trace و Action Trace از داده واقعی جمع می‌شوند. گزارش کامل و گزارش خطا از صفحه عیب‌یابی قابل کپی هستند.")
             "عملکرد" -> SettingsInfo("عملکرد", "Performance بدون مقدار ساختگی از Runtime اندازه‌گیری می‌شود. برای تشخیص TTFT و سرعت تولید، صفحه عیب‌یابی آخرین metrics واقعی را نمایش می‌دهد.")
@@ -90,6 +91,34 @@ private fun InferenceControls() {
     }
 }
 
+@Composable
+private fun AgentControls() {
+    val context = LocalContext.current
+    var settings by remember { mutableStateOf(loadSettings(context)) }
+    var dirty by remember { mutableStateOf(false) }
+    fun update(value: InferenceSettings) { settings = value; dirty = true }
+    fun apply() { saveSettings(context, settings); dirty = false }
+
+    Column(verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
+        Text("عامل", style = MaterialTheme.typography.titleLarge)
+        Text("حداکثر تعداد Action واقعی که Agent برای هر درخواست می‌تواند اجرا کند. مقدار پیش‌فرض ۴ است و فقط برای جلوگیری از چرخه‌های بی‌نهایت استفاده می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        UiSurface {
+            Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Max Action Steps: ${settings.maxActionSteps}")
+                Slider(
+                    value = settings.maxActionSteps.toFloat(),
+                    onValueChange = { update(settings.copy(maxActionSteps = it.toInt().coerceIn(0, 16))) },
+                    valueRange = 0f..16f,
+                    steps = 15,
+                )
+                Text("پیش‌فرض: ۴ · بازه قابل تنظیم: ۰ تا ۱۶", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Button(onClick = ::apply, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget), enabled = dirty) { Text("اعمال تنظیمات عامل") }
+        Text(if (dirty) "تغییرات ذخیره نشده‌اند." else "تنظیمات عامل ذخیره و برای اجرای بعدی آماده‌اند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
 private fun loadSettings(context: Context): InferenceSettings {
     val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     val d = InferenceSettings()
@@ -103,6 +132,7 @@ private fun loadSettings(context: Context): InferenceSettings {
         contextLength = if (p.contains(KEY_CONTEXT)) p.getInt(KEY_CONTEXT, d.contextLength ?: 4096) else d.contextLength,
         seed = if (p.contains(KEY_SEED)) p.getLong(KEY_SEED, d.seed ?: 0L) else d.seed,
         stopSequences = p.getString(KEY_STOPS, null)?.split("\u001f")?.filter { it.isNotEmpty() } ?: d.stopSequences,
+        maxActionSteps = p.getInt(KEY_MAX_ACTION_STEPS, d.maxActionSteps).coerceAtLeast(0),
     )
 }
 
@@ -117,6 +147,7 @@ private fun saveSettings(context: Context, settings: InferenceSettings) {
         .apply { settings.contextLength?.let { putInt(KEY_CONTEXT, it) } ?: remove(KEY_CONTEXT) }
         .apply { settings.seed?.let { putLong(KEY_SEED, it) } ?: remove(KEY_SEED) }
         .putString(KEY_STOPS, settings.stopSequences.joinToString("\u001f"))
+        .putInt(KEY_MAX_ACTION_STEPS, settings.maxActionSteps.coerceAtLeast(0))
         .apply()
     InferenceSettingsStore.current = settings
 }
