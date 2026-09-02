@@ -45,11 +45,9 @@ internal fun AppTheme(content: @Composable () -> Unit) {
 internal fun AppHeader(destination: AppDestination, status: String, model: ModelDescriptor?, onDestination: (AppDestination) -> Unit, onQuick: () -> Unit, onSidebar: () -> Unit, onRuntime: () -> Unit) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .92f), tonalElevation = 1.dp) {
         Row(Modifier.fillMaxWidth().heightIn(min = 68.dp).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                HeaderNav("گفت‌وگو", destination == AppDestination.CHAT) { onDestination(AppDestination.CHAT) }
-                HeaderNav("کار", destination == AppDestination.WORK) { onDestination(AppDestination.WORK) }
-                IconButton(onClick = onQuick, modifier = Modifier.size(48.dp).semantics { contentDescription = "منوی سریع" }) { Icon(Icons.Default.MoreVert, "منوی سریع") }
-            }
+            // The app is RTL. Keep the hamburger at the visual right, status in the center,
+            // and the three navigation/action buttons at the visual left.
+            IconButton(onClick = onSidebar, modifier = Modifier.size(48.dp).semantics { contentDescription = "باز کردن نوار کناری" }) { Icon(Icons.Default.Menu, "باز کردن نوار کناری") }
             Spacer(Modifier.weight(1f))
             TextButton(onClick = onRuntime, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "جزئیات وضعیت Runtime" }) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -58,7 +56,11 @@ internal fun AppHeader(destination: AppDestination, status: String, model: Model
                 }
             }
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = onSidebar, modifier = Modifier.size(48.dp).semantics { contentDescription = "باز کردن نوار کناری" }) { Icon(Icons.Default.Menu, "باز کردن نوار کناری") }
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                HeaderNav("گفت‌وگو", destination == AppDestination.CHAT) { onDestination(AppDestination.CHAT) }
+                HeaderNav("کار", destination == AppDestination.WORK) { onDestination(AppDestination.WORK) }
+                IconButton(onClick = onQuick, modifier = Modifier.size(48.dp).semantics { contentDescription = "منوی سریع" }) { Icon(Icons.Default.MoreVert, "منوی سریع") }
+            }
         }
     }
 }
