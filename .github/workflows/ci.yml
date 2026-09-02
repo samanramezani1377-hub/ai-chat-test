@@ -23,32 +23,6 @@ jobs:
         with:
           submodules: false
 
-      - name: Initialize pinned llama.kt submodule
-        run: |
-          set -euo pipefail
-          git submodule sync -- libs/llama.kt
-          git submodule update --init --depth=1 libs/llama.kt || {
-            rm -rf libs/llama.kt .git/modules/libs/llama.kt
-            git clone --depth=1 https://github.com/hokanosekai/llama.kt libs/llama.kt
-            git -C libs/llama.kt fetch --depth=1 origin 5a20956b1fe2f40d07252f079c31bcaa08250e6b
-            git -C libs/llama.kt checkout --detach 5a20956b1fe2f40d07252f079c31bcaa08250e6b
-          }
-          test "$(git -C libs/llama.kt rev-parse HEAD)" = "5a20956b1fe2f40d07252f079c31bcaa08250e6b"
-          git -C libs/llama.kt submodule sync --recursive
-          git -C libs/llama.kt submodule update --init --recursive
-
-      - name: Pin llama.cpp revision used by llama.kt bootstrap
-        run: |
-          set -euo pipefail
-          LLAMA_CPP_REV=c5fc7e34885ba31217e330809437afa993d27745
-          cd libs/llama.kt
-          test -d third_party/llama.cpp
-          git -C third_party/llama.cpp fetch origin "$LLAMA_CPP_REV"
-          git -C third_party/llama.cpp checkout --detach "$LLAMA_CPP_REV"
-          git update-index --add --cacheinfo 160000,"$LLAMA_CPP_REV",third_party/llama.cpp
-          test "$(git -C third_party/llama.cpp rev-parse HEAD)" = "$LLAMA_CPP_REV"
-          test "$(git ls-files -s third_party/llama.cpp | awk '{print $2}')" = "$LLAMA_CPP_REV"
-
       - name: Setup Java 21
         uses: actions/setup-java@v5
         with:
@@ -58,7 +32,22 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Restore CI dependency caches
+      - name: Prepare pinned llama.kt submodule
+        shell: bash
+        run: |
+          set -euo pipefail
+          git submodule sync -- libs/llama.kt
+          git submodule update --init --depth=1 libs/llama.kt || {
+            rm -rf libs/llama.kt .git/modules/libs/llama.kt
+            git clone --depth=1 https://github.com/hokanosekai/llama.kt libs/llama.kt
+            git -C libs/llama.kt fetch --depth=1 origin 5a20956b1fe2f40d07252f079c31bcaa08250e6b
+            git -C libs/llama.kt checkout --detach 5a20956b1fe2f40d07252f079c31bcaa08250e6b
+          }
+          test "$(git -C libs/llama.kt rev-parse HEAD)" = 5a20956b1fe2f40d07252f079c31bcaa08250e6b
+          git -C libs/llama.kt submodule sync --recursive
+          git -C libs/llama.kt submodule update --init --recursive
+
+      - name: Restore native dependency caches
         id: native-cache
         uses: actions/cache/restore@v4
         with:
@@ -66,98 +55,69 @@ jobs:
             /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
             /tmp/llama.rn-ref
             ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
-          key: ci-native-2-${{ runner.os }}-vulkan-1.4.321.1-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-ndk-27.2.12479018
+            $HOME/vulkan-sdk
+          key: ci-native-3-${{ runner.os }}-vulkan-1.4.321.1-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-ndk-27.2.12479018
 
-      - name: Restore Vulkan shader generation cache
-        id: shader-cache
+      - name: Restore native bootstrap cache
+        id: bootstrap-cache
         uses: actions/cache/restore@v4
         with:
-          path: |
-            /tmp/llama-kt-vk-shaders-spv
-            /tmp/llama-kt-vk-shaders-out
-          key: ci-vulkan-shaders-1-${{ runner.os }}-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-vulkan-1.4.321.1
+          path: libs/llama.kt/llama-kt/src/main/cpp
+          key: ci-bootstrap-1-${{ runner.os }}-llama-kt-5a20956b1fe2f40d07252f079c31bcaa08250e6b-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-${{ hashFiles('ci/bootstrap-llama.sh', 'ci/patches/*.patch') }}
 
-      - name: Prepare NDK, Vulkan SDK and llama.rn sources in parallel
+      - name: Prepare NDK, Vulkan SDK and llama.rn
         shell: bash
         run: |
           set -euo pipefail
           install_ndk() {
-            echo '::group::Install NDK 27.2'
             NDK_PATH="${ANDROID_HOME}/ndk/27.2.12479018"
-            if [ -x "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" ]; then
-              echo "Using cached NDK: ${NDK_PATH}"
-            else
-              rm -rf "${NDK_PATH}"
+            if [ ! -x "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" ]; then
+              rm -rf "$NDK_PATH"
               sdkmanager "ndk;27.2.12479018"
             fi
-            test -x "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
-            echo '::endgroup::'
+            test -x "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
           }
           install_vulkan() {
-            echo '::group::Install pinned Vulkan SDK'
-            VULKAN_VERSION=1.4.321.1
-            VULKAN_ARCHIVE="vulkansdk-linux-x86_64-${VULKAN_VERSION}.tar.xz"
-            VULKAN_SHA256=f22a3625bd4d7a32e7a0d926ace16d5278c149e938dac63cecc00537626cbf73
-            VULKAN_ARCHIVE_PATH="/tmp/${VULKAN_ARCHIVE}"
-            VULKAN_PART_PATH="${VULKAN_ARCHIVE_PATH}.part"
-            if [ -s "${VULKAN_ARCHIVE_PATH}" ]; then
-              echo "Using cached Vulkan archive: ${VULKAN_ARCHIVE_PATH}"
-            else
-              rm -f "${VULKAN_PART_PATH}"
-              curl -fL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 1800 \
-                --speed-limit 10240 --speed-time 120 \
-                -o "${VULKAN_PART_PATH}" \
-                "https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/linux/${VULKAN_ARCHIVE}"
-              echo "${VULKAN_SHA256}  ${VULKAN_PART_PATH}" | sha256sum -c -
-              mv -f "${VULKAN_PART_PATH}" "${VULKAN_ARCHIVE_PATH}"
+            V=1.4.321.1
+            A="/tmp/vulkansdk-linux-x86_64-${V}.tar.xz"
+            S=f22a3625bd4d7a32e7a0d926ace16d5278c149e938dac63cecc00537626cbf73
+            if [ ! -s "$A" ]; then
+              curl -fL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 1800 -o "$A.part" "https://sdk.lunarg.com/sdk/download/${V}/linux/vulkansdk-linux-x86_64-${V}.tar.xz"
+              echo "$S  $A.part" | sha256sum -c -
+              mv -f "$A.part" "$A"
             fi
-            echo "${VULKAN_SHA256}  ${VULKAN_ARCHIVE_PATH}" | sha256sum -c -
-            rm -rf "$HOME/vulkan-sdk"
-            mkdir -p "$HOME/vulkan-sdk"
-            tar -xf "${VULKAN_ARCHIVE_PATH}" -C "$HOME/vulkan-sdk"
-            VULKAN_SDK_PATH="$HOME/vulkan-sdk/${VULKAN_VERSION}/x86_64"
-            export VULKAN_SDK="$VULKAN_SDK_PATH"
-            export PATH="$VULKAN_SDK/bin:$PATH"
-            export LD_LIBRARY_PATH="$VULKAN_SDK/lib:${LD_LIBRARY_PATH:-}"
-            glslc --version
-            printf 'VULKAN_SDK=%s\n' "$VULKAN_SDK_PATH" >> "$GITHUB_ENV"
-            printf 'PATH=%s\n' "$VULKAN_SDK_PATH/bin:$PATH" >> "$GITHUB_ENV"
-            printf 'LD_LIBRARY_PATH=%s\n' "$VULKAN_SDK_PATH/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
-            echo '::endgroup::'
+            echo "$S  $A" | sha256sum -c -
+            if [ ! -x "$HOME/vulkan-sdk/${V}/x86_64/bin/glslc" ]; then
+              rm -rf "$HOME/vulkan-sdk"
+              mkdir -p "$HOME/vulkan-sdk"
+              tar -xf "$A" -C "$HOME/vulkan-sdk"
+            fi
+            VULKAN_SDK="$HOME/vulkan-sdk/${V}/x86_64"
+            test -x "$VULKAN_SDK/bin/glslc"
+            printf 'VULKAN_SDK=%s\nPATH=%s/bin:%s\nLD_LIBRARY_PATH=%s/lib:%s\n' "$VULKAN_SDK" "$VULKAN_SDK" "$PATH" "$VULKAN_SDK" "${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
           }
           prepare_llama_rn() {
-            echo '::group::Prepare pinned llama.rn sources'
-            LLAMA_RN_SHA=7afb5c8934aea7fa41f4522662f03b3461916927
-            if [ -d /tmp/llama.rn-ref/.git ]; then
-              echo 'Using cached llama.rn repository'
-              if git -C /tmp/llama.rn-ref rev-parse --verify "${LLAMA_RN_SHA}^{commit}" >/dev/null 2>&1; then
-                git -C /tmp/llama.rn-ref checkout --detach "$LLAMA_RN_SHA"
-              else
-                git -C /tmp/llama.rn-ref fetch --depth 1 origin "$LLAMA_RN_SHA"
-                git -C /tmp/llama.rn-ref checkout --detach "$LLAMA_RN_SHA"
-              fi
-            else
-              rm -rf /tmp/llama.rn-ref
-              git clone --filter=blob:none --no-checkout https://github.com/mybigday/llama.rn /tmp/llama.rn-ref
-              git -C /tmp/llama.rn-ref fetch --depth 1 origin "$LLAMA_RN_SHA"
-              git -C /tmp/llama.rn-ref checkout --detach "$LLAMA_RN_SHA"
+            R=/tmp/llama.rn-ref
+            SHA=7afb5c8934aea7fa41f4522662f03b3461916927
+            if [ ! -d "$R/.git" ]; then
+              rm -rf "$R"
+              git clone --filter=blob:none --no-checkout https://github.com/mybigday/llama.rn "$R"
             fi
-            test "$(git -C /tmp/llama.rn-ref rev-parse HEAD)" = "$LLAMA_RN_SHA"
-            test -f /tmp/llama.rn-ref/cpp/rn-llama-version.h
-            test -f /tmp/llama.rn-ref/cpp/rn-llama.cpp
-            test -f /tmp/llama.rn-ref/cpp/rn-llama.h
-            echo '::endgroup::'
+            if ! git -C "$R" rev-parse --verify "${SHA}^{commit}" >/dev/null 2>&1; then
+              git -C "$R" fetch --depth=1 origin "$SHA"
+            fi
+            git -C "$R" checkout --detach "$SHA"
+            test "$(git -C "$R" rev-parse HEAD)" = "$SHA"
+            test -s "$R/cpp/rn-llama-version.h"
           }
-          install_ndk & ndk_pid=$!
-          install_vulkan & vulkan_pid=$!
-          prepare_llama_rn & llama_rn_pid=$!
+          install_ndk & p1=$!
+          install_vulkan & p2=$!
+          prepare_llama_rn & p3=$!
           failed=0
-          for pid in "$ndk_pid" "$vulkan_pid" "$llama_rn_pid"; do
-            if ! wait "$pid"; then failed=1; fi
-          done
+          for p in "$p1" "$p2" "$p3"; do wait "$p" || failed=1; done
           exit "$failed"
 
-      - name: Save CI dependency caches
+      - name: Save native dependency caches
         if: success() && steps.native-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
@@ -165,96 +125,21 @@ jobs:
             /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
             /tmp/llama.rn-ref
             ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+            $HOME/vulkan-sdk
           key: ${{ steps.native-cache.outputs.cache-primary-key }}
 
-      - name: Bootstrap llama.cpp and apply downstream patch
+      - name: Bootstrap pinned native dependencies
         shell: bash
-        run: |
-          set -euo pipefail
-          CPP_DIR=libs/llama.kt/llama-kt/src/main/cpp
-          LLAMA_CPP_DIR=libs/llama.kt/third_party/llama.cpp
-          echo 'Running fresh pinned llama.kt bootstrap; bootstrap output cache is intentionally disabled for debugging'
-          cp ci/patches/0002-abort-callback-mid-graph-cancel.patch libs/llama.kt/patches/0002-abort-callback-mid-graph-cancel.patch
-          rm -f libs/llama.kt/patches/0001-vulkan-uma-descriptor-ceildiv.patch
-          echo 'Validating Vulkan shader cache patch before applying it...'
-          patch --dry-run -p1 --forward < ci/patches/0003-cache-vulkan-shader-generation.patch
-          patch -p1 --forward < ci/patches/0003-cache-vulkan-shader-generation.patch
-          bash libs/llama.kt/scripts/bootstrap.sh 2>&1 | tee bootstrap-output.log
+        env:
+          LLAMA_BOOTSTRAP_CACHE_HIT: ${{ steps.bootstrap-cache.outputs.cache-hit == 'true' && 'true' || 'false' }}
+        run: bash ci/bootstrap-llama.sh
 
-          test "$(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
-          echo "Validated llama.cpp revision: $(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)"
-          test -s "$CPP_DIR/llama.h"
-          test -s "$CPP_DIR/llama.cpp"
-          test -s "$CPP_DIR/ggml.h"
-          echo 'Validated fresh llama.kt native tree: llama.h llama.cpp ggml.h'
-
-          test -s /tmp/llama.rn-ref/cpp/rn-llama-version.h
-          cp /tmp/llama.rn-ref/cpp/rn-llama-version.h "$CPP_DIR/rn-llama-version.h"
-          test -s "$CPP_DIR/rn-llama-version.h"
-
-          if [ -f "$CPP_DIR/common/json-partial.cpp" ]; then
-            sed -i 's/LM_LM_GGML_ASSERT/LM_GGML_ASSERT/g' "$CPP_DIR/common/json-partial.cpp"
-          fi
-          cat > "$CPP_DIR/common/json.h" <<'EOF'
-          #include "../../../../../third_party/llama.cpp/common/json.h"
-          EOF
-          cat > "$CPP_DIR/common/json.cpp" <<'EOF'
-          #include "../../../../../third_party/llama.cpp/common/json.cpp"
-          EOF
-          test -s "$CPP_DIR/common/json.h"
-          test -s "$CPP_DIR/common/json.cpp"
-
-          test "$(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
-          test -f "$LLAMA_CPP_DIR/ggml/src/ggml-feats.h"
-          cp "$LLAMA_CPP_DIR/ggml/src/ggml-feats.h" "$CPP_DIR/ggml-feats.h"
-          sed -i 's/GGML_/LM_GGML_/g; s/ggml_/lm_ggml_/g' "$CPP_DIR/ggml-feats.h"
-          test -s "$CPP_DIR/ggml-feats.h"
-          grep -Fq 'lm_ggml_feats_arch64_runtime_t' "$CPP_DIR/ggml-feats.h"
-          grep -Fq 'lm_ggml_feats_get_arch64_runtime' "$CPP_DIR/ggml-feats.h"
-
-          for header in llama-kv-cache-dsa-iswa.h llama-kv-cache-msa.h llama-kv-cache-dsv4.h; do
-            test -f "$LLAMA_CPP_DIR/src/$header"
-            cp "$LLAMA_CPP_DIR/src/$header" "$CPP_DIR/$header"
-            sed -i 's/GGML_/LM_GGML_/g; s/ggml_/lm_ggml_/g' "$CPP_DIR/$header"
-            test -s "$CPP_DIR/$header"
-          done
-
-          test -f "$LLAMA_CPP_DIR/tools/mtmd/mtmd-internal.h"
-          cp "$LLAMA_CPP_DIR/tools/mtmd/mtmd-internal.h" "$CPP_DIR/tools/mtmd/mtmd-internal.h"
-          test -s "$CPP_DIR/tools/mtmd/mtmd-internal.h"
-          test -s "$CPP_DIR/llama-kv-cache-dsa-iswa.h"
-          test -s "$CPP_DIR/llama-kv-cache-msa.h"
-          test -s "$CPP_DIR/llama-kv-cache-dsv4.h"
-          test -s "$CPP_DIR/ggml-feats.h"
-          test -s "$CPP_DIR/tools/mtmd/mtmd-internal.h"
-          test -s "$CPP_DIR/rn-llama-version.h"
-          echo 'Fresh bootstrap validation completed successfully'
-
-      - name: Save Vulkan shader generation cache
-        if: success() && steps.shader-cache.outputs.cache-hit != 'true'
+      - name: Save native bootstrap cache
+        if: success() && steps.bootstrap-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: |
-            /tmp/llama-kt-vk-shaders-spv
-            /tmp/llama-kt-vk-shaders-out
-          key: ${{ steps.shader-cache.outputs.cache-primary-key }}
-
-      - name: Apply llama.rn Barbet compatibility patches
-        run: |
-          set -euo pipefail
-          cd libs/llama.kt/llama-kt/src/main/cpp
-          patches=/tmp/llama.rn-ref/scripts/patches
-          apply_if_missing() {
-            local marker="$1"
-            local patch_file="$2"
-            if grep -Fq "$marker" "$3"; then return; fi
-            patch -p0 --forward < "$patch_file"
-            grep -Fq "$marker" "$3"
-          }
-          apply_if_missing 'LLM_ARCH_BARBET,' "$patches/barbet-llama-arch.h.patch" llama-arch.h
-          apply_if_missing '{ LLM_ARCH_BARBET,           "barbet"           },' "$patches/barbet-llama-arch.cpp.patch" llama-arch.cpp
-          apply_if_missing 'case LLM_ARCH_BARBET:' "$patches/barbet-llama-model.cpp.patch" llama-model.cpp
-          apply_if_missing 'case LLM_TENSOR_CONVNEXT_NORM:' "$patches/barbet-llama-model-loader.cpp.patch" llama-model-loader.cpp
+          path: libs/llama.kt/llama-kt/src/main/cpp
+          key: ${{ steps.bootstrap-cache.outputs.cache-primary-key }}
 
       - name: Build and test
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest --stacktrace
