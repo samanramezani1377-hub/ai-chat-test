@@ -5,6 +5,7 @@ import com.woogit.aicore.domain.GenerationResult
 import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.domain.RuntimeInfo
+import com.woogit.aicore.runtime.RuntimeTraceEvent
 
 internal data class RuntimeDiagnostic(
     val model: ModelDescriptor?,
@@ -16,7 +17,8 @@ internal data class RuntimeDiagnostic(
     val error: String?,
     val rawError: String? = null,
     val executionId: String? = null,
-    val trace: List<ActionTraceEvent> = emptyList(),
+    val actionTrace: List<ActionTraceEvent> = emptyList(),
+    val runtimeTrace: List<RuntimeTraceEvent> = emptyList(),
 )
 
 internal fun RuntimeDiagnostic.report(): String = buildString {
@@ -55,9 +57,13 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     if (!error.isNullOrBlank()) appendLine("Error: $error")
     if (!rawError.isNullOrBlank()) appendLine("Raw Error: $rawError")
     appendLine()
-    appendLine("Trace")
-    if (trace.isEmpty()) appendLine("N/A")
-    else trace.forEach { event -> appendLine("${event.timestampMs} | ${event.type} | ${event.message ?: ""}".trimEnd()) }
+    appendLine("Runtime Trace")
+    if (runtimeTrace.isEmpty()) appendLine("N/A")
+    else runtimeTrace.forEach { event -> appendLine("${event.timestampMs} | ${event.type} | ${event.message ?: ""}".trimEnd()) }
+    appendLine()
+    appendLine("Action Trace")
+    if (actionTrace.isEmpty()) appendLine("N/A")
+    else actionTrace.forEach { event -> appendLine("${event.timestampMs} | ${event.type} | ${event.message ?: ""}".trimEnd()) }
 }
 
 internal fun RuntimeDiagnostic.errorReport(): String = buildString {
