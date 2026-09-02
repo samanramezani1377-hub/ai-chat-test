@@ -29,7 +29,7 @@ interface ConversationHistoryRepository {
     /** Permanently removes retained data for a conversation after the undo window expires. */
     suspend fun purge(id: String): Boolean
     suspend fun touch(id: String, messageCount: Int, nowEpochMs: Long = System.currentTimeMillis()): Boolean
-    suspend fun messages(id: String): List<ConversationMessage>
+    fun messages(id: String): List<ConversationMessage>
     suspend fun append(id: String, message: ConversationMessage, nowEpochMs: Long = System.currentTimeMillis()): Boolean
 }
 
@@ -80,7 +80,7 @@ class InMemoryConversationHistoryRepository : ConversationHistoryRepository {
         true
     }
 
-    override suspend fun messages(id: String): List<ConversationMessage> = synchronized(lock) {
+    override fun messages(id: String): List<ConversationMessage> = synchronized(lock) {
         messages[id]?.toList() ?: emptyList()
     }
 
