@@ -45,4 +45,3 @@ diff --git a/scripts/bootstrap.sh b/scripts/bootstrap.sh
 +fi
  
  cp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" "$CPP_DIR/ggml-vulkan/"
-*** End Patch
