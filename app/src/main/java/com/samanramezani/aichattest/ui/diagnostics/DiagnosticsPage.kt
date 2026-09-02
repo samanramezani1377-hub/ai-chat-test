@@ -54,7 +54,8 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         MetricRow("توکن خروجی", runtime.generation?.outputTokens?.toString() ?: "N/A")
         MetricRow("سرعت", runtime.generation?.let { generation ->
             val seconds = generation.generationTimeMs?.toDouble()?.div(1000.0)
-            if (seconds == null || seconds <= 0.0) "N/A" else "%.2f tok/s".format(generation.outputTokens / seconds)
+            val outputTokens = generation.outputTokens
+            if (seconds == null || seconds <= 0.0 || outputTokens == null) "N/A" else "%.2f tok/s".format(outputTokens / seconds)
         } ?: "N/A")
 
         Text("Runtime", style = MaterialTheme.typography.titleLarge)
