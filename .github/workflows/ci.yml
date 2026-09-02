@@ -59,12 +59,14 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Restore CI dependency caches
-        uses: actions/cache@v4
+        id: native-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
             /tmp/llama.rn-ref
-          key: ci-native-1-vulkan-1.4.321.1-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927
+            ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+          key: ci-native-2-${{ runner.os }}-vulkan-1.4.321.1-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-ndk-27.2.12479018
 
       - name: Restore llama.kt bootstrap output cache
         id: bootstrap-cache
@@ -80,7 +82,14 @@ jobs:
           set -euo pipefail
           install_ndk() {
             echo '::group::Install NDK 27.2'
-            sdkmanager "ndk;27.2.12479018"
+            NDK_PATH="${ANDROID_HOME}/ndk/27.2.12479018"
+            if [ -x "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" ]; then
+              echo "Using cached NDK: ${NDK_PATH}"
+            else
+              rm -rf "${NDK_PATH}"
+              sdkmanager "ndk;27.2.12479018"
+            fi
+            test -x "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
             echo '::endgroup::'
           }
           install_vulkan() {
@@ -88,15 +97,23 @@ jobs:
             VULKAN_VERSION=1.4.321.1
             VULKAN_ARCHIVE="vulkansdk-linux-x86_64-${VULKAN_VERSION}.tar.xz"
             VULKAN_SHA256=f22a3625bd4d7a32e7a0d926ace16d5278c149e938dac63cecc00537626cbf73
-            if [ ! -s "/tmp/${VULKAN_ARCHIVE}" ]; then
-              curl -L --fail --retry 3 -o "/tmp/${VULKAN_ARCHIVE}" "https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/linux/${VULKAN_ARCHIVE}"
+            VULKAN_ARCHIVE_PATH="/tmp/${VULKAN_ARCHIVE}"
+            VULKAN_PART_PATH="${VULKAN_ARCHIVE_PATH}.part"
+            if [ -s "${VULKAN_ARCHIVE_PATH}" ]; then
+              echo "Using cached Vulkan archive: ${VULKAN_ARCHIVE_PATH}"
             else
-              echo "Using cached Vulkan archive: /tmp/${VULKAN_ARCHIVE}"
+              rm -f "${VULKAN_PART_PATH}"
+              curl -fL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 1800 \
+                --speed-limit 10240 --speed-time 120 \
+                -o "${VULKAN_PART_PATH}" \
+                "https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/linux/${VULKAN_ARCHIVE}"
+              echo "${VULKAN_SHA256}  ${VULKAN_PART_PATH}" | sha256sum -c -
+              mv -f "${VULKAN_PART_PATH}" "${VULKAN_ARCHIVE_PATH}"
             fi
-            echo "${VULKAN_SHA256}  /tmp/${VULKAN_ARCHIVE}" | sha256sum -c -
+            echo "${VULKAN_SHA256}  ${VULKAN_ARCHIVE_PATH}" | sha256sum -c -
             rm -rf "$HOME/vulkan-sdk"
             mkdir -p "$HOME/vulkan-sdk"
-            tar -xf "/tmp/${VULKAN_ARCHIVE}" -C "$HOME/vulkan-sdk"
+            tar -xf "${VULKAN_ARCHIVE_PATH}" -C "$HOME/vulkan-sdk"
             VULKAN_SDK_PATH="$HOME/vulkan-sdk/${VULKAN_VERSION}/x86_64"
             export VULKAN_SDK="$VULKAN_SDK_PATH"
             export PATH="$VULKAN_SDK/bin:$PATH"
@@ -109,17 +126,22 @@ jobs:
           }
           prepare_llama_rn() {
             echo '::group::Prepare pinned llama.rn sources'
+            LLAMA_RN_SHA=7afb5c8934aea7fa41f4522662f03b3461916927
             if [ -d /tmp/llama.rn-ref/.git ]; then
               echo 'Using cached llama.rn repository'
-              git -C /tmp/llama.rn-ref fetch --depth 1 origin 7afb5c8934aea7fa41f4522662f03b3461916927
-              git -C /tmp/llama.rn-ref checkout --detach 7afb5c8934aea7fa41f4522662f03b3461916927
+              if git -C /tmp/llama.rn-ref rev-parse --verify "${LLAMA_RN_SHA}^{commit}" >/dev/null 2>&1; then
+                git -C /tmp/llama.rn-ref checkout --detach "$LLAMA_RN_SHA"
+              else
+                git -C /tmp/llama.rn-ref fetch --depth 1 origin "$LLAMA_RN_SHA"
+                git -C /tmp/llama.rn-ref checkout --detach "$LLAMA_RN_SHA"
+              fi
             else
               rm -rf /tmp/llama.rn-ref
               git clone --filter=blob:none --no-checkout https://github.com/mybigday/llama.rn /tmp/llama.rn-ref
-              git -C /tmp/llama.rn-ref fetch --depth 1 origin 7afb5c8934aea7fa41f4522662f03b3461916927
-              git -C /tmp/llama.rn-ref checkout --detach 7afb5c8934aea7fa41f4522662f03b3461916927
+              git -C /tmp/llama.rn-ref fetch --depth 1 origin "$LLAMA_RN_SHA"
+              git -C /tmp/llama.rn-ref checkout --detach "$LLAMA_RN_SHA"
             fi
-            test "$(git -C /tmp/llama.rn-ref rev-parse HEAD)" = "7afb5c8934aea7fa41f4522662f03b3461916927"
+            test "$(git -C /tmp/llama.rn-ref rev-parse HEAD)" = "$LLAMA_RN_SHA"
             test -f /tmp/llama.rn-ref/cpp/rn-llama.cpp
             test -f /tmp/llama.rn-ref/cpp/rn-llama.h
             echo '::endgroup::'
@@ -132,6 +154,16 @@ jobs:
             if ! wait "$pid"; then failed=1; fi
           done
           exit "$failed"
+
+      - name: Save CI dependency caches
+        if: success() && steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
+            /tmp/llama.rn-ref
+            ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
 
       - name: Bootstrap llama.cpp and apply downstream patch
         shell: bash
@@ -158,9 +190,6 @@ jobs:
             bash libs/llama.kt/scripts/bootstrap.sh 2>&1 | tee bootstrap-output.log
             test "$(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
 
-            # Persist the raw bootstrap result immediately after bootstrap.sh succeeds.
-            # This is deliberately before any project-specific header validation/copying,
-            # so a later failure cannot force the expensive Vulkan shader compilation again.
             rm -rf "$BOOTSTRAP_CACHE_DIR"
             mkdir -p "$BOOTSTRAP_CACHE_DIR/cpp"
             cp -a "$CPP_DIR/." "$BOOTSTRAP_CACHE_DIR/cpp/"
@@ -177,9 +206,6 @@ jobs:
           grep -Fq 'lm_ggml_feats_arch64_runtime_t' "$CPP_DIR/ggml-feats.h"
           grep -Fq 'lm_ggml_feats_get_arch64_runtime' "$CPP_DIR/ggml-feats.h"
 
-          # The pinned llama.cpp graph references these KV-cache implementations.
-          # Bootstrap does not export all of their headers, so copy them explicitly
-          # and apply the same LM_GGML namespace rewrite used for the generated tree.
           for header in llama-kv-cache-dsa-iswa.h llama-kv-cache-msa.h llama-kv-cache-dsv4.h; do
             test -f "$LLAMA_CPP_DIR/src/$header"
             cp "$LLAMA_CPP_DIR/src/$header" "$CPP_DIR/$header"
@@ -191,9 +217,6 @@ jobs:
           cp "$LLAMA_CPP_DIR/tools/mtmd/mtmd-internal.h" "$CPP_DIR/tools/mtmd/mtmd-internal.h"
           test -s "$CPP_DIR/tools/mtmd/mtmd-internal.h"
 
-          # The cache intentionally stores the raw bootstrap output. Project-specific
-          # compatibility headers above are regenerated on every run from the pinned
-          # llama.cpp revision, keeping the cache independent from those fixups.
           test -s "$CPP_DIR/llama-kv-cache-dsa-iswa.h"
           test -s "$CPP_DIR/llama-kv-cache-msa.h"
           test -s "$CPP_DIR/llama-kv-cache-dsv4.h"
