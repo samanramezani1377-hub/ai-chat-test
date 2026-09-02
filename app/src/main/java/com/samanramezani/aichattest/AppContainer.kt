@@ -2,14 +2,18 @@ package com.samanramezani.aichattest
 
 import android.content.Context
 import android.os.Build
+import com.woogit.aicore.actions.ActionErrorLog
 import com.woogit.aicore.actions.ActionExecutionService
 import com.woogit.aicore.actions.ActionExecutionState
 import com.woogit.aicore.actions.ActionLifecycle
+import com.woogit.aicore.actions.ActionTraceEvent
 import com.woogit.aicore.actions.ApprovalController
 import com.woogit.aicore.actions.BuiltinActionVerifier
 import com.woogit.aicore.actions.DefaultActionRegistry
 import com.woogit.aicore.actions.DefaultActionRetryPolicy
 import com.woogit.aicore.actions.InMemoryActionCheckpointStore
+import com.woogit.aicore.actions.InMemoryActionErrorLogSink
+import com.woogit.aicore.actions.InMemoryActionTraceSink
 import com.woogit.aicore.actions.PreparedAction
 import com.woogit.aicore.actions.registerBuiltinFileActions
 import com.woogit.aicore.actions.registerProviderActions
@@ -74,11 +78,21 @@ class AppContainer(context: Context? = null) {
         override fun supports(capability: String): Boolean = capability in setOf("filesystem", "runtime", "device", "utility")
     }
     private val checkpointStore = appContext?.let { AndroidActionCheckpointStore(it) } ?: InMemoryActionCheckpointStore()
+    private val actionTraceSink = InMemoryActionTraceSink()
+    private val actionErrorLogSink = InMemoryActionErrorLogSink()
     private val verifier = Verifier<Any> { result ->
         if (result.toString().isBlank()) com.woogit.aicore.domain.VerificationResult(false, "Action returned an empty result")
         else com.woogit.aicore.domain.VerificationResult(true, result.toString())
     }
-    private val lifecycle = ActionLifecycle(actionRegistry, capabilityProvider, checkpointStore, retryPolicy = DefaultActionRetryPolicy(2), actionResultVerifier = workspaceRoot?.let { BuiltinActionVerifier(it) })
+    private val lifecycle = ActionLifecycle(
+        actionRegistry,
+        capabilityProvider,
+        checkpointStore,
+        retryPolicy = DefaultActionRetryPolicy(2),
+        traceSink = actionTraceSink,
+        errorLogSink = actionErrorLogSink,
+        actionResultVerifier = workspaceRoot?.let { BuiltinActionVerifier(it) },
+    )
     private val coordinator = ActionPlanCoordinator(lifecycle, ProtocolActionIntentPlanner())
 
     private fun executionOutcome(state: ActionExecutionState): ActionExecutionOutcome = when (state) {
@@ -90,6 +104,8 @@ class AppContainer(context: Context? = null) {
     private val actionExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan -> lifecycle.executeApproved(plan.prepared.executionId, verifier).let(::executionOutcome) }
 
     suspend fun pendingApproval(conversationId: String): PreparedAction? = lifecycle.pendingApprovals(conversationId).maxByOrNull { it.executionId }
+    fun actionTraces(): List<ActionTraceEvent> = actionTraceSink.snapshot()
+    fun actionErrors(): List<ActionErrorLog> = actionErrorLogSink.snapshot()
 
     suspend fun approveAndExecute(executionId: String, conversationId: String? = null): ActionExecutionOutcome = runCatching {
         val prepared = lifecycle.checkpoint(executionId)
