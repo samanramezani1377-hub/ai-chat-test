@@ -41,6 +41,14 @@ import java.nio.file.Files
 
 /** Application composition root. Implementations are wired here, never inside UI screens. */
 class AppContainer(context: Context? = null) {
+    companion object {
+        @Volatile
+        var latest: AppContainer? = null
+            private set
+    }
+
+    init { latest = this }
+
     private val appContext = context?.applicationContext
     private val workspaceRoot = appContext?.filesDir?.toPath()?.resolve("workspace")
 
@@ -108,6 +116,7 @@ class AppContainer(context: Context? = null) {
     private val actionExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan -> lifecycle.executeApproved(plan.prepared.executionId, verifier).let(::executionOutcome) }
 
     suspend fun pendingApproval(conversationId: String): PreparedAction? = lifecycle.pendingApprovals(conversationId).maxByOrNull { it.executionId }
+    suspend fun executionCheckpoint(executionId: String): PreparedAction? = runCatching { lifecycle.checkpoint(executionId) }.getOrNull()
     suspend fun reconcileInterruptedActions(): List<PreparedAction> = lifecycle.markInterruptedExecutionsUnknown()
     suspend fun retryAction(executionId: String, conversationId: String? = null): ActionExecutionOutcome = runCatching {
         val prepared = lifecycle.checkpoint(executionId)
