@@ -72,18 +72,17 @@ jobs:
         with:
           path: /tmp/llama-kt-bootstrap-cache
           key: ci-bootstrap-1-llama-kt-5a20956b1fe2f40d07252f079c31bcaa08250e6b-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-llama-rn-7afb5c8934aea7fa41f4522662f03b3461916927-vulkan-1.4.321.1-ndk-27.2.12479018-${{ hashFiles('ci/patches/0002-abort-callback-mid-graph-cancel.patch') }}
+          save-always: true
 
       - name: Prepare NDK, Vulkan SDK and llama.rn sources in parallel
         shell: bash
         run: |
           set -euo pipefail
-
           install_ndk() {
             echo '::group::Install NDK 27.2'
             sdkmanager "ndk;27.2.12479018"
             echo '::endgroup::'
           }
-
           install_vulkan() {
             echo '::group::Install pinned Vulkan SDK'
             VULKAN_VERSION=1.4.321.1
@@ -108,7 +107,6 @@ jobs:
             printf 'LD_LIBRARY_PATH=%s\n' "$VULKAN_SDK_PATH/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
             echo '::endgroup::'
           }
-
           prepare_llama_rn() {
             echo '::group::Prepare pinned llama.rn sources'
             if [ -d /tmp/llama.rn-ref/.git ]; then
@@ -126,16 +124,12 @@ jobs:
             test -f /tmp/llama.rn-ref/cpp/rn-llama.h
             echo '::endgroup::'
           }
-
           install_ndk & ndk_pid=$!
           install_vulkan & vulkan_pid=$!
           prepare_llama_rn & llama_rn_pid=$!
-
           failed=0
           for pid in "$ndk_pid" "$vulkan_pid" "$llama_rn_pid"; do
-            if ! wait "$pid"; then
-              failed=1
-            fi
+            if ! wait "$pid"; then failed=1; fi
           done
           exit "$failed"
 
@@ -143,18 +137,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           BOOTSTRAP_CACHE_DIR=/tmp/llama-kt-bootstrap-cache
           CPP_DIR=libs/llama.kt/llama-kt/src/main/cpp
           LLAMA_CPP_DIR=libs/llama.kt/third_party/llama.cpp
-
           apply_downstream_patch() {
-            echo '::group::Apply downstream llama.rn abort patch'
             cp ci/patches/0002-abort-callback-mid-graph-cancel.patch libs/llama.kt/patches/0002-abort-callback-mid-graph-cancel.patch
             rm -f libs/llama.kt/patches/0001-vulkan-uma-descriptor-ceildiv.patch
-            echo '::endgroup::'
           }
-
           if [ -d "$BOOTSTRAP_CACHE_DIR" ] && [ -f "$BOOTSTRAP_CACHE_DIR/.complete" ]; then
             echo 'Bootstrap cache hit; restoring generated llama.kt native sources'
             rm -rf "$CPP_DIR"
@@ -163,9 +152,7 @@ jobs:
           else
             echo 'Bootstrap cache miss; running pinned llama.kt bootstrap'
             apply_downstream_patch
-            set -o pipefail
             bash libs/llama.kt/scripts/bootstrap.sh 2>&1 | tee bootstrap-output.log
-
             test "$(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
 
             test -f "$LLAMA_CPP_DIR/ggml/src/ggml-feats.h"
@@ -175,9 +162,15 @@ jobs:
             grep -Fq 'lm_ggml_feats_arch64_runtime_t' "$CPP_DIR/ggml-feats.h"
             grep -Fq 'lm_ggml_feats_get_arch64_runtime' "$CPP_DIR/ggml-feats.h"
 
-            test -f "$LLAMA_CPP_DIR/src/llama-kv-cache-dsa-iswa.h"
-            cp "$LLAMA_CPP_DIR/src/llama-kv-cache-dsa-iswa.h" "$CPP_DIR/llama-kv-cache-dsa-iswa.h"
-            test -s "$CPP_DIR/llama-kv-cache-dsa-iswa.h"
+            # The pinned llama.cpp graph references both KV-cache implementations.
+            # Bootstrap does not export these headers, so copy and apply the same
+            # LM_GGML namespace rewrite used for the rest of the generated tree.
+            for header in llama-kv-cache-dsa-iswa.h llama-kv-cache-msa.h; do
+              test -f "$LLAMA_CPP_DIR/src/$header"
+              cp "$LLAMA_CPP_DIR/src/$header" "$CPP_DIR/$header"
+              sed -i 's/GGML_/LM_GGML_/g; s/ggml_/lm_ggml_/g' "$CPP_DIR/$header"
+              test -s "$CPP_DIR/$header"
+            done
 
             test -f "$LLAMA_CPP_DIR/tools/mtmd/mtmd-internal.h"
             cp "$LLAMA_CPP_DIR/tools/mtmd/mtmd-internal.h" "$CPP_DIR/tools/mtmd/mtmd-internal.h"
@@ -188,9 +181,9 @@ jobs:
             cp -a "$CPP_DIR/." "$BOOTSTRAP_CACHE_DIR/cpp/"
             : > "$BOOTSTRAP_CACHE_DIR/.complete"
           fi
-
           test "$(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
           test -s "$CPP_DIR/llama-kv-cache-dsa-iswa.h"
+          test -s "$CPP_DIR/llama-kv-cache-msa.h"
           test -s "$CPP_DIR/ggml-feats.h"
           test -s "$CPP_DIR/tools/mtmd/mtmd-internal.h"
 
@@ -202,10 +195,7 @@ jobs:
           apply_if_missing() {
             local marker="$1"
             local patch_file="$2"
-            if grep -Fq "$marker" "$3"; then
-              echo "Already present: $marker"
-              return
-            fi
+            if grep -Fq "$marker" "$3"; then return; fi
             patch -p0 --forward < "$patch_file"
             grep -Fq "$marker" "$3"
           }
