@@ -138,20 +138,35 @@ class LlamaCppAndroidRuntimeAdapter(
                 pending.setLength(0)
             }
 
-            val completed = GenerationResult(output.toString(), null, firstTokenAt?.let { (it - startedAt) / 1_000_000 }, (System.nanoTime() - startedAt) / 1_000_000, stopRequested.get())
+            val completed = GenerationResult(
+                text = output.toString(),
+                firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
+                generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
+                stopped = stopRequested.get(),
+            )
             latestGeneration = completed
             RuntimeDiagnosticsStore.recordGeneration(settings, completed, runtimeInfo())
             ModelResult.Success(completed)
         } catch (t: CancellationException) {
             if (stopRequested.get()) {
-                val stopped = GenerationResult(output.toString(), null, firstTokenAt?.let { (it - startedAt) / 1_000_000 }, (System.nanoTime() - startedAt) / 1_000_000, true)
+                val stopped = GenerationResult(
+                    text = output.toString(),
+                    firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
+                    generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
+                    stopped = true,
+                )
                 latestGeneration = stopped
                 RuntimeDiagnosticsStore.recordGeneration(settings, stopped, runtimeInfo())
                 ModelResult.Success(stopped)
             } else throw t
         } catch (t: Throwable) {
             if (stopRequested.get()) {
-                val stopped = GenerationResult(output.toString(), null, firstTokenAt?.let { (it - startedAt) / 1_000_000 }, (System.nanoTime() - startedAt) / 1_000_000, true)
+                val stopped = GenerationResult(
+                    text = output.toString(),
+                    firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
+                    generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
+                    stopped = true,
+                )
                 latestGeneration = stopped
                 RuntimeDiagnosticsStore.recordGeneration(settings, stopped, runtimeInfo())
                 ModelResult.Success(stopped)
