@@ -9,6 +9,13 @@ data class ActionErrorLog(
     val timestampMs: Long = System.currentTimeMillis()
 )
 
+/** Compatibility aliases used by the workspace UI. */
+val ActionErrorLog.userMessage: String
+    get() = userMessageFa
+
+val ActionErrorLog.rawError: String
+    get() = rawMachineError
+
 fun interface ActionErrorLogSink {
     suspend fun record(error: ActionErrorLog)
 }
