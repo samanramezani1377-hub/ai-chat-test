@@ -11,7 +11,7 @@ internal data class RuntimeDiagnostic(
     val runtime: RuntimeInfo,
     val loadTimeMs: Long?,
     val generation: GenerationResult?,
-    val settings: InferenceSettings,
+    val settings: InferenceSettings?,
     val status: String,
     val error: String?,
     val rawError: String? = null,
@@ -39,15 +39,16 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Output Tokens: ${generation?.outputTokens ?: "N/A"}")
     appendLine("Tokens/sec: ${tokensPerSecond(generation)?.let { "%.2f".format(it) } ?: "N/A"}")
     appendLine()
-    appendLine("Temperature: ${settings.temperature}")
-    appendLine("Top-P: ${settings.topP ?: "N/A"}")
-    appendLine("Top-K: ${settings.topK ?: "N/A"}")
-    appendLine("Min-P: ${settings.minP ?: "N/A"}")
-    appendLine("Repeat Penalty: ${settings.repeatPenalty ?: "N/A"}")
-    appendLine("Max New Tokens: ${settings.maxNewTokens}")
-    appendLine("Context Setting: ${settings.contextLength ?: "N/A"}")
-    appendLine("Stop Sequences: ${settings.stopSequences.size}")
-    appendLine("Seed: ${settings.seed ?: "N/A"}")
+    val current = settings
+    appendLine("Temperature: ${current?.temperature ?: "N/A"}")
+    appendLine("Top-P: ${current?.topP ?: "N/A"}")
+    appendLine("Top-K: ${current?.topK ?: "N/A"}")
+    appendLine("Min-P: ${current?.minP ?: "N/A"}")
+    appendLine("Repeat Penalty: ${current?.repeatPenalty ?: "N/A"}")
+    appendLine("Max New Tokens: ${current?.maxNewTokens ?: "N/A"}")
+    appendLine("Context Setting: ${current?.contextLength ?: "N/A"}")
+    appendLine("Stop Sequences: ${current?.stopSequences?.size ?: "N/A"}")
+    appendLine("Seed: ${current?.seed ?: "N/A"}")
     appendLine()
     appendLine("Status: $status")
     appendLine("Execution: ${executionId ?: "N/A"}")
@@ -55,13 +56,8 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     if (!rawError.isNullOrBlank()) appendLine("Raw Error: $rawError")
     appendLine()
     appendLine("Trace")
-    if (trace.isEmpty()) {
-        appendLine("N/A")
-    } else {
-        trace.forEach { event ->
-            appendLine("${event.timestampMs} | ${event.type} | ${event.message ?: ""}".trimEnd())
-        }
-    }
+    if (trace.isEmpty()) appendLine("N/A")
+    else trace.forEach { event -> appendLine("${event.timestampMs} | ${event.type} | ${event.message ?: ""}".trimEnd()) }
 }
 
 internal fun RuntimeDiagnostic.errorReport(): String = buildString {
