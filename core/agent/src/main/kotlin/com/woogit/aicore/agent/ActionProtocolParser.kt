@@ -14,7 +14,7 @@ class ActionProtocolParser {
         val requestId = string(json, "actionId") ?: return null
         if (action.isBlank() || requestId.isBlank()) return null
 
-        val arguments = object(json, "arguments") ?: return null
+        val arguments = objectValue(json, "arguments") ?: return null
         return ActionIntent(
             actionId = action,
             requestId = requestId,
@@ -44,7 +44,7 @@ class ActionProtocolParser {
         return json.substring(start, index)
     }
 
-    private fun object(json: String, key: String): String? {
+    private fun objectValue(json: String, key: String): String? {
         val marker = Regex("\\\"${Regex.escape(key)}\\\"\\s*:").find(json) ?: return null
         var start = marker.range.last + 1
         while (start < json.length && json[start].isWhitespace()) start++
@@ -95,7 +95,11 @@ class ActionProtocolParser {
         var i = 0
         while (i < value.length) {
             val c = value[i]
-            if (c != '\\') { out.append(c); i++; continue }
+            if (c != '\\') {
+                out.append(c)
+                i++
+                continue
+            }
             if (++i >= value.length) return null
             when (val escaped = value[i]) {
                 '"', '\\', '/' -> out.append(escaped)
