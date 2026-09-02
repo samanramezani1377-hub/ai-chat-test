@@ -63,7 +63,6 @@ class LlamaCppAndroidRuntimeAdapter(
             loadedModel = null
             loadedContextLength = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
-            ModelResult.recordLoadFailure(latestLoadTimeMs)
             ModelResult.Failure(RuntimeErrorMapper.loadFailure(t, file.absolutePath))
         }
     }
@@ -216,8 +215,4 @@ class LlamaCppAndroidRuntimeAdapter(
         ))
 
     private class RuntimeFailure(val error: ModelError) : IllegalStateException(error.message)
-}
-
-private fun <T> ModelResult<T>.recordLoadFailure(loadTimeMs: Long?): ModelResult<T> {
-    return this
 }
