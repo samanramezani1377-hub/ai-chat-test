@@ -32,7 +32,7 @@ internal fun ChatPage(messages: List<UiMessage>, composer: String, generating: B
                 TextField(value = composer, onValueChange = onComposer, modifier = Modifier.weight(1f), placeholder = { Text("پیام خود را بنویسید…") }, maxLines = 6, shape = RoundedCornerShape(50))
                 Spacer(Modifier.width(8.dp))
                 FilledIconButton(onClick = if (generating) onStop else onSend, enabled = if (approvalBusy) false else generating || composer.isNotBlank(), modifier = Modifier.size(48.dp).semantics { contentDescription = if (generating) "توقف تولید" else "ارسال پیام" }) {
-                    Icon(if (generating) Icons.Default.Stop else Icons.Default.ArrowUpward, if (generating) "توقف تولید" else "ارسال پیام", modifier = Modifier.size(20.dp))
+                    Icon(if (generating) Icons.Default.Stop else Icons.Default.ArrowUpward, if (generating) "توقف تولید" else "ارسال پیام", modifier = Modifier.size(18.dp))
                 }
             }
         }
