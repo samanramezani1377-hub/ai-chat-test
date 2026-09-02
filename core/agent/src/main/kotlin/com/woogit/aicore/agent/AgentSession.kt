@@ -23,13 +23,9 @@ class AgentSession(
     private val actionPlanCoordinator: ActionPlanCoordinator? = null,
     private val actionExecutor: (suspend (ActionPlan) -> ActionExecutionOutcome)? = null,
     private val eventSink: suspend (AgentEvent) -> Unit = {},
-    private val contextProvider: ContextProvider = DefaultContextProvider(
-        conversationStore,
-        systemContext = { null },
-        persistentTaskContext = { null },
-        workspaceContext = { null }
-    ),
+    private val contextProvider: ContextProvider = DefaultContextProvider(conversationStore, systemContext = { null }, persistentTaskContext = { null }, workspaceContext = { null }),
     private val maxActionSteps: Int = 4,
+    private val conversationId: String? = null,
 ) {
     init { require(maxActionSteps >= 0) { "maxActionSteps must be non-negative" } }
 
@@ -46,7 +42,7 @@ class AgentSession(
             while (actionPlanCoordinator != null && steps < maxActionSteps) {
                 conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
                 resultPersisted = true
-                plan = actionPlanCoordinator.prepare(contextProvider.build(requestedRecentMessages)) ?: break
+                plan = actionPlanCoordinator.prepare(contextProvider.build(requestedRecentMessages), conversationId) ?: break
                 eventSink(AgentEvent.ActionPrepared(plan.prepared.executionId, plan.prepared.actionId))
                 if (plan.prepared.risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE) {
                     eventSink(AgentEvent.ApprovalRequired(plan.prepared.executionId))
@@ -71,7 +67,6 @@ class AgentSession(
         }
     }
 
-    /** Continues an existing conversation after a sensitive action was approved and executed externally. */
     suspend fun resumeApproved(executionId: String, outcome: ActionExecutionOutcome, settings: InferenceSettings, requestedRecentMessages: Int = 24): AgentSessionResult.Reply {
         require(executionId.isNotBlank()) { "executionId must not be blank" }
         eventSink(AgentEvent.Started)
