@@ -1,5 +1,6 @@
 package com.samanramezani.aichattest.ui.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -107,6 +108,7 @@ internal fun Sidebar(current: ConversationRecord?, conversations: List<Conversat
 @Composable private fun SectionLabel(text: String) { Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 14.dp, bottom = 3.dp)) }
 @Composable private fun SideNav(text: String, active: Boolean, onClick: () -> Unit) { TextButton(onClick = onClick, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (active) "● $text" else text, Modifier.fillMaxWidth()) } }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable private fun RecentConversation(record: ConversationRecord, active: Boolean, onOpen: () -> Unit, onLongPress: () -> Unit, onDelete: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     val time = remember(record.updatedAtEpochMs) { DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(record.updatedAtEpochMs)) }
