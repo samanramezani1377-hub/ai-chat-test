@@ -25,11 +25,11 @@ class AgentSession(
     private val actionExecutor: (suspend (ActionPlan) -> ActionExecutionOutcome)? = null,
     private val eventSink: suspend (AgentEvent) -> Unit = {},
     private val contextProvider: ContextProvider = DefaultContextProvider(conversationStore, systemContext = { null }, persistentTaskContext = { null }, workspaceContext = { null }),
-    /** Null means no artificial agent-step cap; a user/runtime setting may provide the cap explicitly. */
-    private val maxActionSteps: Int? = null,
+    /** User-configurable Agent step limit. The default is intentionally 4. */
+    private val maxActionSteps: Int = 4,
     private val conversationId: String? = null,
 ) {
-    init { require(maxActionSteps == null || maxActionSteps >= 0) { "maxActionSteps must be non-negative" } }
+    init { require(maxActionSteps >= 0) { "maxActionSteps must be non-negative" } }
 
     suspend fun send(content: String, settings: InferenceSettings, requestedRecentMessages: Int = 10): AgentSessionResult.Reply {
         require(content.isNotBlank()) { "content must not be blank" }
@@ -42,7 +42,7 @@ class AgentSession(
             var actionResult: String? = null
             var steps = 0
             var resultPersisted = false
-            while (actionPlanCoordinator != null && (maxActionSteps == null || steps < maxActionSteps)) {
+            while (actionPlanCoordinator != null && steps < maxActionSteps) {
                 conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
                 resultPersisted = true
                 plan = actionPlanCoordinator.prepare(contextProvider.build(requestedRecentMessages), conversationId) ?: break
@@ -57,8 +57,7 @@ class AgentSession(
                 eventSink(AgentEvent.ActionExecuted(plan.prepared.executionId))
                 conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(plan), System.currentTimeMillis()))
                 steps++
-                // A real Agent result is successful only after verification. Never let an
-                // unverified executor result drive another model step or be reported as success.
+                // Success is valid only when the real action result has also been verified.
                 if (!outcome.success || !outcome.verified) {
                     result = orchestrator.generate(effectiveSettings, requestedRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
                     resultPersisted = false
@@ -78,7 +77,7 @@ class AgentSession(
 
     suspend fun resumeApproved(executionId: String, outcome: ActionExecutionOutcome, settings: InferenceSettings, requestedRecentMessages: Int = 24): AgentSessionResult.Reply {
         require(executionId.isNotBlank()) { "executionId must not be blank" }
-        require(outcome.verified) { "Approved action result must be verified before resuming the agent" }
+        require(outcome.success && outcome.verified) { "Approved action result must be successful and verified before resuming the agent" }
         val effectiveSettings = InferenceSettingsStore.current
         eventSink(AgentEvent.Started)
         conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(executionId), System.currentTimeMillis()))
