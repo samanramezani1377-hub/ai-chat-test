@@ -34,6 +34,10 @@ prepare_toolchains() {
   test -x "$ndk_path/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
 
   local archive="/tmp/vulkansdk-linux-x86_64-${VULKAN_VERSION}.tar.xz"
+  if [ -s "$archive" ] && ! echo "${VULKAN_SHA256}  ${archive}" | sha256sum -c - >/dev/null 2>&1; then
+    echo 'Cached Vulkan archive is invalid; rebuilding it.'
+    rm -f "$archive"
+  fi
   if [ ! -s "$archive" ]; then
     curl -fL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 1800 \
       -o "$archive.part" \
@@ -50,8 +54,12 @@ prepare_toolchains() {
     tar -xf "$archive" -C "$HOME/vulkan-sdk"
   fi
   test -x "$vulkan_sdk/bin/glslc"
-  printf 'VULKAN_SDK=%s\nPATH=%s/bin:%s\nLD_LIBRARY_PATH=%s/lib:%s\n' \
-    "$vulkan_sdk" "$vulkan_sdk" "$PATH" "$vulkan_sdk" "${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+  export VULKAN_SDK="$vulkan_sdk"
+  export PATH="$VULKAN_SDK/bin:$PATH"
+  export LD_LIBRARY_PATH="$VULKAN_SDK/lib:${LD_LIBRARY_PATH:-}"
+  printf 'VULKAN_SDK=%s\nPATH=%s\nLD_LIBRARY_PATH=%s\n' \
+    "$VULKAN_SDK" "$PATH" "$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
 }
 
 pin_llama_cpp() {
@@ -67,14 +75,23 @@ prepare_llama_rn() {
   local ref=/tmp/llama.rn-ref
   if [ -d "$ref/.git" ]; then
     if ! git -C "$ref" rev-parse --verify "${LLAMA_RN_SHA}^{commit}" >/dev/null 2>&1; then
-      git -C "$ref" fetch --depth=1 origin "$LLAMA_RN_SHA"
+      git -C "$ref" fetch --depth=1 origin "$LLAMA_RN_SHA" || {
+        rm -rf "$ref"
+        git clone --filter=blob:none --no-checkout https://github.com/mybigday/llama.rn "$ref"
+        git -C "$ref" fetch --depth=1 origin "$LLAMA_RN_SHA"
+      }
     fi
   else
     rm -rf "$ref"
     git clone --filter=blob:none --no-checkout https://github.com/mybigday/llama.rn "$ref"
     git -C "$ref" fetch --depth=1 origin "$LLAMA_RN_SHA"
   fi
-  git -C "$ref" checkout --detach "$LLAMA_RN_SHA"
+  git -C "$ref" checkout --detach "$LLAMA_RN_SHA" || {
+    rm -rf "$ref"
+    git clone --filter=blob:none --no-checkout https://github.com/mybigday/llama.rn "$ref"
+    git -C "$ref" fetch --depth=1 origin "$LLAMA_RN_SHA"
+    git -C "$ref" checkout --detach "$LLAMA_RN_SHA"
+  }
   test "$(git -C "$ref" rev-parse HEAD)" = "$LLAMA_RN_SHA"
   test -s "$ref/cpp/rn-llama-version.h"
 }
@@ -86,6 +103,16 @@ apply_native_patches() {
   patch --dry-run -p1 --forward < "$p/0003-cache-vulkan-shader-generation.patch"
   patch -p1 --forward < "$p/0003-cache-vulkan-shader-generation.patch"
   bash "$LLAMA_KT/scripts/bootstrap.sh" 2>&1 | tee "$ROOT_DIR/bootstrap-output.log"
+}
+
+bootstrap_cache_is_valid() {
+  test -s "$CPP_DIR/llama.h" &&
+  test -s "$CPP_DIR/llama.cpp" &&
+  test -s "$CPP_DIR/ggml.h" &&
+  test -s "$CPP_DIR/rn-llama-version.h" &&
+  test -s "$CPP_DIR/ggml-feats.h" &&
+  grep -Fq 'LLM_ARCH_BARBET' "$CPP_DIR/llama-arch.h" &&
+  grep -Fq 'LLM_ARCH_BARBET' "$CPP_DIR/llama-arch.cpp"
 }
 
 validate_and_bridge() {
@@ -135,11 +162,17 @@ prepare_submodule
 prepare_toolchains
 pin_llama_cpp
 prepare_llama_rn
-if [ "${LLAMA_BOOTSTRAP_CACHE_HIT:-false}" = "true" ]; then
-  echo 'Native bootstrap cache hit; skipping bootstrap.sh.'
+
+if [ "${LLAMA_BOOTSTRAP_CACHE_HIT:-false}" = "true" ] && bootstrap_cache_is_valid; then
+  echo 'Valid native bootstrap cache restored; skipping bootstrap.sh.'
 else
+  if [ "${LLAMA_BOOTSTRAP_CACHE_HIT:-false}" = "true" ]; then
+    echo 'Native bootstrap cache is invalid; discarding it and rebuilding.'
+    rm -rf "$CPP_DIR"
+  fi
   apply_native_patches
 fi
+
 validate_and_bridge
 apply_barbet_patches
 
