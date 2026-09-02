@@ -32,22 +32,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Prepare pinned llama.kt submodule
-        shell: bash
-        run: |
-          set -euo pipefail
-          git submodule sync -- libs/llama.kt
-          git submodule update --init --depth=1 libs/llama.kt || {
-            rm -rf libs/llama.kt .git/modules/libs/llama.kt
-            git clone --depth=1 https://github.com/hokanosekai/llama.kt libs/llama.kt
-            git -C libs/llama.kt fetch --depth=1 origin 5a20956b1fe2f40d07252f079c31bcaa08250e6b
-            git -C libs/llama.kt checkout --detach 5a20956b1fe2f40d07252f079c31bcaa08250e6b
-          }
-          test "$(git -C libs/llama.kt rev-parse HEAD)" = 5a20956b1fe2f40d07252f079c31bcaa08250e6b
-          git -C libs/llama.kt submodule sync --recursive
-          git -C libs/llama.kt submodule update --init --recursive
-
-      - name: Restore native dependency caches
+      - name: Restore native dependency cache
         id: native-cache
         uses: actions/cache/restore@v4
         with:
@@ -63,61 +48,15 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: libs/llama.kt/llama-kt/src/main/cpp
-          key: ci-bootstrap-1-${{ runner.os }}-llama-kt-5a20956b1fe2f40d07252f079c31bcaa08250e6b-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-${{ hashFiles('ci/bootstrap-llama.sh', 'ci/patches/*.patch') }}
+          key: ci-bootstrap-2-${{ runner.os }}-llama-kt-5a20956b1fe2f40d07252f079c31bcaa08250e6b-llama-cpp-c5fc7e34885ba31217e330809437afa993d27745-${{ hashFiles('ci/bootstrap-llama.sh', 'ci/patches/*.patch') }}
 
-      - name: Prepare NDK, Vulkan SDK and llama.rn
+      - name: Prepare pinned native dependencies
         shell: bash
-        run: |
-          set -euo pipefail
-          install_ndk() {
-            NDK_PATH="${ANDROID_HOME}/ndk/27.2.12479018"
-            if [ ! -x "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" ]; then
-              rm -rf "$NDK_PATH"
-              sdkmanager "ndk;27.2.12479018"
-            fi
-            test -x "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
-          }
-          install_vulkan() {
-            V=1.4.321.1
-            A="/tmp/vulkansdk-linux-x86_64-${V}.tar.xz"
-            S=f22a3625bd4d7a32e7a0d926ace16d5278c149e938dac63cecc00537626cbf73
-            if [ ! -s "$A" ]; then
-              curl -fL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 1800 -o "$A.part" "https://sdk.lunarg.com/sdk/download/${V}/linux/vulkansdk-linux-x86_64-${V}.tar.xz"
-              echo "$S  $A.part" | sha256sum -c -
-              mv -f "$A.part" "$A"
-            fi
-            echo "$S  $A" | sha256sum -c -
-            if [ ! -x "$HOME/vulkan-sdk/${V}/x86_64/bin/glslc" ]; then
-              rm -rf "$HOME/vulkan-sdk"
-              mkdir -p "$HOME/vulkan-sdk"
-              tar -xf "$A" -C "$HOME/vulkan-sdk"
-            fi
-            VULKAN_SDK="$HOME/vulkan-sdk/${V}/x86_64"
-            test -x "$VULKAN_SDK/bin/glslc"
-            printf 'VULKAN_SDK=%s\nPATH=%s/bin:%s\nLD_LIBRARY_PATH=%s/lib:%s\n' "$VULKAN_SDK" "$VULKAN_SDK" "$PATH" "$VULKAN_SDK" "${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
-          }
-          prepare_llama_rn() {
-            R=/tmp/llama.rn-ref
-            SHA=7afb5c8934aea7fa41f4522662f03b3461916927
-            if [ ! -d "$R/.git" ]; then
-              rm -rf "$R"
-              git clone --filter=blob:none --no-checkout https://github.com/mybigday/llama.rn "$R"
-            fi
-            if ! git -C "$R" rev-parse --verify "${SHA}^{commit}" >/dev/null 2>&1; then
-              git -C "$R" fetch --depth=1 origin "$SHA"
-            fi
-            git -C "$R" checkout --detach "$SHA"
-            test "$(git -C "$R" rev-parse HEAD)" = "$SHA"
-            test -s "$R/cpp/rn-llama-version.h"
-          }
-          install_ndk & p1=$!
-          install_vulkan & p2=$!
-          prepare_llama_rn & p3=$!
-          failed=0
-          for p in "$p1" "$p2" "$p3"; do wait "$p" || failed=1; done
-          exit "$failed"
+        env:
+          LLAMA_BOOTSTRAP_CACHE_HIT: ${{ steps.bootstrap-cache.outputs.cache-hit == 'true' && 'true' || 'false' }}
+        run: bash ci/bootstrap-llama.sh
 
-      - name: Save native dependency caches
+      - name: Save native dependency cache
         if: success() && steps.native-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
@@ -128,18 +67,15 @@ jobs:
             $HOME/vulkan-sdk
           key: ${{ steps.native-cache.outputs.cache-primary-key }}
 
-      - name: Bootstrap pinned native dependencies
-        shell: bash
-        env:
-          LLAMA_BOOTSTRAP_CACHE_HIT: ${{ steps.bootstrap-cache.outputs.cache-hit == 'true' && 'true' || 'false' }}
-        run: bash ci/bootstrap-llama.sh
-
       - name: Save native bootstrap cache
         if: success() && steps.bootstrap-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: libs/llama.kt/llama-kt/src/main/cpp
           key: ${{ steps.bootstrap-cache.outputs.cache-primary-key }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Build and test
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest --stacktrace
