@@ -64,11 +64,13 @@ jobs:
           restore-keys: |
             ci-llama-cpp-${{ runner.os }}-${{ hashFiles('core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp') }}-
 
-      - name: Setup Gradle
+      - name: Setup Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
 
       - name: Build and test
-        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest --stacktrace
+        run: gradle :app:assembleDebug :app:testDebugUnitTest --stacktrace
 
       - name: Save native CMake cache
         if: success()
