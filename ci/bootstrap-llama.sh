@@ -113,7 +113,6 @@ apply_native_patches() {
     python3 - "$script" <<'PY'
 import sys
 from pathlib import Path
-
 path = Path(sys.argv[1])
 text = path.read_text()
 start = text.find('echo "  Generating ggml-vulkan-shaders.hpp header..."')
@@ -121,7 +120,6 @@ end_marker = '# 3. Bundle Vulkan C++ binding headers (vulkan.hpp — not in NDK 
 end = text.find(end_marker, start)
 if start < 0 or end < 0:
     raise SystemExit('ERROR: Vulkan shader generation block was not found; refusing to modify unknown upstream code.')
-
 new_block = r'''VK_SHADER_CACHE_SENTINEL="$VK_OUT_DIR/.complete"
 if [ -s "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" ] && [ -f "$VK_SHADER_CACHE_SENTINEL" ]; then
   echo "  Vulkan shader cache hit; reusing generated SPIR-V and per-shader .cpp files."
@@ -146,13 +144,10 @@ else
   test "$(find "$VK_OUT_DIR" -maxdepth 1 -type f -name '*.cpp' | wc -l)" -gt 0
   : > "$VK_SHADER_CACHE_SENTINEL"
 fi
-
 cp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" "$CPP_DIR/ggml-vulkan/"
-
 for f in "$VK_OUT_DIR"/*.cpp; do
   sed 's|#include "ggml-vulkan-shaders.hpp"|#include "../ggml-vulkan-shaders.hpp"|g' "$f" > "$CPP_DIR/ggml-vulkan/shaders/$(basename "$f")"
 done
-
 '''
 text = text[:start] + new_block + text[end:]
 path.write_text(text)
@@ -161,10 +156,6 @@ PY
 
   grep -Fq "$marker" "$script"
 
-  # llama.kt 5a20956 still carries its historical 0001 UMA patch, but the
-  # pinned llama.cpp revision already contains the upstream fix merged from
-  # PR #25245. Remove only that obsolete patch after verifying the exact
-  # overflow-safe macro is present; otherwise keep the fail-fast behavior.
   local vulkan_cpp="$LLAMA_CPP_DIR/ggml/src/ggml-vulkan/ggml-vulkan.cpp"
   local uma_patch="$LLAMA_KT/patches/0001-vulkan-uma-descriptor-ceildiv.patch"
   if grep -Fq '#define CEIL_DIV(M, N) (((M) / (N)) + (((M) % (N)) != 0))' "$vulkan_cpp"; then
@@ -209,6 +200,10 @@ apply_barbet_patches() {
   apply_if_missing() {
     local marker="$1" patch_file="$2" target="$3"
     if grep -Fq "$marker" "$target"; then return 0; fi
+    if [ ! -f "$patch_file" ]; then
+      echo "WARNING: optional Barbet patch $(basename "$patch_file") is absent in pinned llama.rn; skipping."
+      return 0
+    fi
     patch -p0 --forward < "$patch_file"
     grep -Fq "$marker" "$target"
   }
