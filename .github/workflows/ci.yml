@@ -40,16 +40,13 @@ jobs:
       - name: Pin llama.cpp revision used by llama.kt bootstrap
         run: |
           set -euo pipefail
+          LLAMA_CPP_TAG=b10156
           LLAMA_CPP_REV=91f8c9c5fb038c086e13e9cd823c29b33b07ba54
           cd libs/llama.kt
           test -d third_party/llama.cpp
-          git fetch --depth=1 origin "$LLAMA_CPP_REV"
-          git -C third_party/llama.cpp fetch --depth=1 origin "$LLAMA_CPP_REV"
-          git -C third_party/llama.cpp checkout --detach "$LLAMA_CPP_REV"
+          git -C third_party/llama.cpp fetch --depth=1 origin "refs/tags/$LLAMA_CPP_TAG:refs/tags/$LLAMA_CPP_TAG"
+          git -C third_party/llama.cpp checkout --detach "$LLAMA_CPP_TAG"
 
-          # bootstrap.sh reads the llama.cpp gitlink from llama.kt HEAD.
-          # Update that gitlink in a local CI-only commit so bootstrap cannot
-          # silently reset the working tree back to the old revision.
           git update-index --add --cacheinfo 160000,"$LLAMA_CPP_REV",third_party/llama.cpp
           git -c user.name='CI' -c user.email='ci@localhost' commit -m 'ci: pin llama.cpp for bootstrap' --no-verify
 
