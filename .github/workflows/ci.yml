@@ -21,7 +21,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
+
+      - name: Initialize pinned llama.kt submodule
+        run: |
+          set -euo pipefail
+          git submodule sync -- libs/llama.kt
+          git submodule update --init --depth=1 libs/llama.kt || {
+            rm -rf libs/llama.kt .git/modules/libs/llama.kt
+            git clone --depth=1 https://github.com/hokanosekai/llama.kt libs/llama.kt
+            git -C libs/llama.kt fetch --depth=1 origin 5a20956b1fe2f40d07252f079c31bcaa08250e6b
+            git -C libs/llama.kt checkout --detach 5a20956b1fe2f40d07252f079c31bcaa08250e6b
+          }
+          test "$(git -C libs/llama.kt rev-parse HEAD)" = "5a20956b1fe2f40d07252f079c31bcaa08250e6b"
+          git -C libs/llama.kt submodule sync --recursive
+          git -C libs/llama.kt submodule update --init --depth=1 --recursive
 
       - name: Align llama.cpp revision used by llama.kt
         run: |
