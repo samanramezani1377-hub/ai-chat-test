@@ -84,11 +84,7 @@ class AppContainer(context: Context? = null) {
     private val verifier = object : Verifier<Any> {
         override suspend fun verify(result: Any): VerificationResult {
             val text = result.toString()
-            return if (text.isBlank()) {
-                VerificationResult(false, "Action returned an empty result")
-            } else {
-                VerificationResult(true, text)
-            }
+            return if (text.isBlank()) VerificationResult(false, "Action returned an empty result") else VerificationResult(true, text)
         }
     }
     private val lifecycle = ActionLifecycle(
@@ -113,6 +109,11 @@ class AppContainer(context: Context? = null) {
 
     suspend fun pendingApproval(conversationId: String): PreparedAction? = lifecycle.pendingApprovals(conversationId).maxByOrNull { it.executionId }
     suspend fun reconcileInterruptedActions(): List<PreparedAction> = lifecycle.markInterruptedExecutionsUnknown()
+    suspend fun retryAction(executionId: String, conversationId: String? = null): ActionExecutionOutcome = runCatching {
+        val prepared = lifecycle.checkpoint(executionId)
+        if (conversationId != null) require(prepared.conversationId == conversationId) { "Retry belongs to another conversation" }
+        lifecycle.retryFailed(executionId, verifier).let(::executionOutcome)
+    }.getOrElse { ActionExecutionOutcome(false, false, it.message ?: "Retry failed", errorCode = "RETRY_FAILED") }
     fun actionTraces(): List<ActionTraceEvent> = actionTraceSink.snapshot()
     fun actionErrors(): List<ActionErrorLog> = actionErrorLogSink.snapshot()
 
