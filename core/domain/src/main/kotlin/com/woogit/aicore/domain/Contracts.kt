@@ -41,7 +41,10 @@ data class InferenceSettings(
 data class RuntimeInfo(
     val name: String,
     val version: String,
-    val backend: String?
+    val backend: String?,
+    val threads: Int? = null,
+    val gpuLayers: Int? = null,
+    val contextLength: Int? = null,
 )
 
 enum class ActionArgumentType { STRING, INTEGER, NUMBER, BOOLEAN, OBJECT, ARRAY }
