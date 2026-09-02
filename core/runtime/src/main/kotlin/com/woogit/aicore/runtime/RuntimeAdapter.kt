@@ -12,6 +12,7 @@ interface RuntimeAdapter : ModelRuntime
 /** Optional metrics exposed by real runtime implementations. */
 interface RuntimeMetrics {
     fun lastGeneration(): GenerationResult?
+    fun lastLoadTimeMs(): Long? = null
 }
 
 /**
