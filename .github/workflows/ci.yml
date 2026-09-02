@@ -61,7 +61,49 @@ jobs:
           gradle-version: '9.7.1'
 
       - name: Build and test
-        run: gradle build --parallel --no-daemon
+        run: |
+          set -o pipefail
+          gradle build --parallel --no-daemon 2>&1 | tee build-output.log
+
+      - name: Generate AI-readable build failure report
+        if: failure()
+        run: |
+          {
+            echo "# CI Build Failure Report"
+            echo
+            echo "## Execution"
+            echo "- Workflow: ${GITHUB_WORKFLOW}"
+            echo "- Run ID: ${GITHUB_RUN_ID}"
+            echo "- Run number: ${GITHUB_RUN_NUMBER}"
+            echo "- Event: ${GITHUB_EVENT_NAME}"
+            echo "- Ref: ${GITHUB_REF}"
+            echo "- Commit: ${GITHUB_SHA}"
+            echo "- Runner OS: ${RUNNER_OS}"
+            echo "- Runner architecture: ${RUNNER_ARCH}"
+            echo
+            echo "## Failed step"
+            echo "- Step: Build and test"
+            echo "- Command: gradle build --parallel --no-daemon"
+            echo
+            echo "## AI diagnosis input"
+            echo "The following is the complete stdout/stderr captured from the failed Build and test step."
+            echo "Use the first error and its surrounding context as the primary diagnostic signal."
+            echo "Do not treat warnings as the root cause unless no error is present."
+            echo
+            echo "## Build log"
+            echo '```text'
+            cat build-output.log
+            echo '```'
+          } > ai-build-failure-report.md
+
+      - name: Upload AI-readable build failure report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-build-failure-report
+          path: ai-build-failure-report.md
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload APK artifacts
         if: success()
