@@ -25,7 +25,9 @@ internal fun ChatPage(messages: List<UiMessage>, composer: String, generating: B
             if (messages.isEmpty()) item { Column(Modifier.fillMaxWidth().padding(top = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text("گفت‌وگو", style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(6.dp)); Text("پیام خود را بنویسید و گفتگو را شروع کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
             items(messages, key = { it.id }) { MessageRow(it) }
             if (generating) item { Text(if (approvalBusy) "در حال پردازش تأیید…" else "در حال اجرای Agent…", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            if (!generating && execution != null) item { ActionSummary(execution, onWorkspace, onApprove, onReject, approvalBusy) }
+            // An Agent execution is created before generation starts. It is not an Action.
+            // Never render the Action summary until ActionPrepared has supplied a real action id.
+            if (!generating && execution != null && execution.action != "درخواست Agent") item { ActionSummary(execution, onWorkspace, onApprove, onReject, approvalBusy) }
         }
         Surface(Modifier.fillMaxWidth().padding(bottom = 12.dp), shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), tonalElevation = 2.dp) {
             Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.Bottom) {
