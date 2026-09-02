@@ -8,6 +8,7 @@ import com.woogit.aicore.domain.ModelError
 import com.woogit.aicore.domain.ModelResult
 import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeAdapter
+import com.woogit.aicore.runtime.RuntimeMetrics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -20,40 +21,34 @@ class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 4096,
     private val defaultThreads: Int = 4,
     private val gpuLayers: Int = 0,
-) : RuntimeAdapter {
+) : RuntimeAdapter, RuntimeMetrics {
     private var loadedModel: LlamaModel? = null
     private val stopRequested = AtomicBoolean(false)
+    @Volatile private var latestGeneration: GenerationResult? = null
+
+    override fun lastGeneration(): GenerationResult? = latestGeneration
 
     override suspend fun load(model: ModelDescriptor) {
         loadResult(model).let { result ->
-            if (result is ModelResult.Failure) {
-                throw RuntimeFailure(result.error)
-            }
+            if (result is ModelResult.Failure) throw RuntimeFailure(result.error)
         }
     }
 
     suspend fun loadResult(model: ModelDescriptor): ModelResult<Unit> {
         currentCoroutineContext().ensureActive()
         unload()
-
         val file = model.path.toFile()
-        if (!file.isFile || !file.canRead()) {
-            return ModelResult.Failure(
-                ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}")
-            )
-        }
-
+        if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
         return try {
             loadedModel = LlamaModel.load(
                 modelPath = file.absolutePath,
                 config = LlamaConfig(
-                    contextSize = model.metadata.contextLength?.toInt()
-                        ?.takeIf { it > 0 }
-                        ?: defaultContextLength,
+                    contextSize = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength,
                     threads = defaultThreads.coerceAtLeast(1),
                     gpuLayers = gpuLayers.coerceAtLeast(0),
                 ),
             )
+            latestGeneration = null
             ModelResult.Success(Unit)
         } catch (t: Throwable) {
             loadedModel = null
@@ -67,35 +62,25 @@ class LlamaCppAndroidRuntimeAdapter(
         loadedModel = null
     }
 
-    override suspend fun generate(
-        request: GenerationRequest,
-        onToken: suspend (String) -> Unit,
-    ): GenerationResult {
-        return when (val result = generateResult(request, onToken)) {
+    override suspend fun generate(request: GenerationRequest, onToken: suspend (String) -> Unit): GenerationResult =
+        when (val result = generateResult(request, onToken)) {
             is ModelResult.Success -> result.value
             is ModelResult.Failure -> throw RuntimeFailure(result.error)
         }
-    }
 
-    suspend fun generateResult(
-        request: GenerationRequest,
-        onToken: suspend (String) -> Unit,
-    ): ModelResult<GenerationResult> {
+    suspend fun generateResult(request: GenerationRequest, onToken: suspend (String) -> Unit): ModelResult<GenerationResult> {
         currentCoroutineContext().ensureActive()
-        val model = loadedModel
-            ?: return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
-
-        val prompt = try {
-            buildPrompt(model, request.messages)
-        } catch (t: Throwable) {
-            return ModelResult.Failure(
-                ModelError.Inference(t.message ?: "Invalid conversation")
-            )
+        val model = loadedModel ?: return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
+        val prompt = try { buildPrompt(model, request.messages) } catch (t: Throwable) {
+            return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation"))
         }
-
         val settings = request.settings
+        val effectiveContext = settings.contextLength?.takeIf { it > 0 }?.let { requested ->
+            val modelMax = runCatching { model.contextSize }.getOrNull()?.takeIf { it > 0 }
+            if (modelMax != null) requested.coerceAtMost(modelMax) else requested
+        } ?: defaultContextLength
         val config = LlamaConfig(
-            contextSize = settings.contextLength?.takeIf { it > 0 } ?: defaultContextLength,
+            contextSize = effectiveContext,
             threads = defaultThreads.coerceAtLeast(1),
             temperature = settings.temperature.toFloat().coerceAtLeast(0f),
             topP = (settings.topP ?: 0.9).toFloat().coerceIn(0f, 1f),
@@ -106,7 +91,6 @@ class LlamaCppAndroidRuntimeAdapter(
             seed = settings.seed?.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong())?.toInt() ?: -1,
             gpuLayers = gpuLayers.coerceAtLeast(0),
         )
-
         stopRequested.set(false)
         val startedAt = System.nanoTime()
         var firstTokenAt: Long? = null
@@ -118,10 +102,8 @@ class LlamaCppAndroidRuntimeAdapter(
             model.generateStream(prompt, config).collect { chunk ->
                 currentCoroutineContext().ensureActive()
                 if (chunk.isEmpty() || stopRequested.get()) return@collect
-
                 if (firstTokenAt == null) firstTokenAt = System.nanoTime()
                 output.append(chunk)
-
                 val stopIndex = firstStopIndex(output, settings.stopSequences)
                 if (stopIndex >= 0) {
                     emitRange(output, emittedLength, stopIndex, onToken)
@@ -130,9 +112,6 @@ class LlamaCppAndroidRuntimeAdapter(
                     model.cancelGeneration()
                     return@collect
                 }
-
-                // Keep enough trailing text buffered to detect a stop sequence split
-                // across two native token callbacks without delaying the visible stream.
                 val holdBack = (maxStopLength - 1).coerceAtLeast(0)
                 val safeEnd = (output.length - holdBack).coerceAtLeast(emittedLength)
                 if (safeEnd > emittedLength) {
@@ -140,36 +119,31 @@ class LlamaCppAndroidRuntimeAdapter(
                     emittedLength = safeEnd
                 }
             }
-
             if (!stopRequested.get() && emittedLength < output.length) {
                 emitRange(output, emittedLength, output.length, onToken)
                 emittedLength = output.length
             }
-
-            ModelResult.Success(
-                GenerationResult(
-                    text = trimAtStop(output.toString(), settings.stopSequences),
-                    outputTokens = null,
-                    firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
-                    generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
-                    stopped = stopRequested.get(),
-                )
+            val completed = GenerationResult(
+                text = trimAtStop(output.toString(), settings.stopSequences),
+                outputTokens = null,
+                firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
+                generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
+                stopped = stopRequested.get(),
             )
+            latestGeneration = completed
+            ModelResult.Success(completed)
         } catch (t: CancellationException) {
             if (stopRequested.get()) {
-                stoppedResult(output, firstTokenAt, startedAt, settings.stopSequences)
-            } else {
-                throw t
-            }
+                val stopped = stoppedResult(output, firstTokenAt, startedAt, settings.stopSequences)
+                latestGeneration = stopped.value
+                stopped
+            } else throw t
         } catch (t: Throwable) {
-            // The native runtime reports explicit cancellation as a library exception,
-            // while coroutine cancellation uses CancellationException. Both are normal
-            // outcomes when the user presses Stop.
             if (stopRequested.get()) {
-                stoppedResult(output, firstTokenAt, startedAt, settings.stopSequences)
-            } else {
-                ModelResult.Failure(RuntimeErrorMapper.inferenceFailure(t))
-            }
+                val stopped = stoppedResult(output, firstTokenAt, startedAt, settings.stopSequences)
+                latestGeneration = stopped.value
+                stopped
+            } else ModelResult.Failure(RuntimeErrorMapper.inferenceFailure(t))
         } finally {
             stopRequested.set(false)
         }
@@ -189,19 +163,10 @@ class LlamaCppAndroidRuntimeAdapter(
     private fun buildPrompt(model: LlamaModel, messages: List<ChatMessage>): String {
         val json = org.json.JSONArray().apply {
             messages.forEach { message ->
-                put(
-                    org.json.JSONObject()
-                        .put("role", message.role.toTemplateRole())
-                        .put("content", message.content)
-                )
+                put(org.json.JSONObject().put("role", message.role.toTemplateRole()).put("content", message.content))
             }
         }
-
-        return runCatching {
-            model.applyChatTemplate(json.toString(), true)
-        }.getOrElse {
-            Qwen3PromptFormatter.format(messages)
-        }
+        return runCatching { model.applyChatTemplate(json.toString(), true) }.getOrElse { Qwen3PromptFormatter.format(messages) }
     }
 
     private fun ChatMessage.Role.toTemplateRole(): String = when (this) {
@@ -211,12 +176,7 @@ class LlamaCppAndroidRuntimeAdapter(
         ChatMessage.Role.TOOL -> "tool"
     }
 
-    private suspend fun emitRange(
-        text: StringBuilder,
-        start: Int,
-        end: Int,
-        onToken: suspend (String) -> Unit,
-    ) {
+    private suspend fun emitRange(text: StringBuilder, start: Int, end: Int, onToken: suspend (String) -> Unit) {
         if (end > start) onToken(text.substring(start, end))
     }
 
@@ -240,20 +200,16 @@ class LlamaCppAndroidRuntimeAdapter(
         return if (first >= 0) text.substring(0, first) else text
     }
 
-    private fun stoppedResult(
-        output: StringBuilder,
-        firstTokenAt: Long?,
-        startedAt: Long,
-        stops: List<String>,
-    ): ModelResult.Success<GenerationResult> = ModelResult.Success(
-        GenerationResult(
-            text = trimAtStop(output.toString(), stops),
-            outputTokens = null,
-            firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
-            generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
-            stopped = true,
+    private fun stoppedResult(output: StringBuilder, firstTokenAt: Long?, startedAt: Long, stops: List<String>): ModelResult.Success<GenerationResult> =
+        ModelResult.Success(
+            GenerationResult(
+                text = trimAtStop(output.toString(), stops),
+                outputTokens = null,
+                firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
+                generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
+                stopped = true,
+            )
         )
-    )
 
     private class RuntimeFailure(val error: ModelError) : IllegalStateException(error.message)
 }
