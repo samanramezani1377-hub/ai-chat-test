@@ -8,6 +8,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.woogit.aicore.domain.InferenceSettings
+import com.woogit.aicore.domain.InferenceSettingsStore
 import com.woogit.aicore.domain.ModelDescriptor
 
 private val aiSections = listOf("مدل", "استنتاج", "زمینه", "عامل")
@@ -26,14 +28,69 @@ fun SettingsScreen(
         item { HorizontalDivider() }
         item { when (section) {
             "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
-            "استنتاج" -> UnavailableSection("استنتاج", "پارامترهای دما، حداکثر توکن، Top-K، Top-P، Min-P، جریمه تکرار، Seed و دنباله‌های توقف تا اتصال کنترل واقعی به Runtime قابل ویرایش نیستند.")
-            "زمینه" -> UnavailableSection("زمینه", "مدیریت System Context، Summary، پیام‌های اخیر و Workspace Context هنوز کنترل تغییرپذیر متصل به Core ندارد.")
-            "عامل" -> UnavailableSection("عامل", "کنترل آماده‌سازی، تأیید، اجرا، شکست و Recovery فقط با Action API واقعی ارائه می‌شود.")
-            "فضای کار" -> UnavailableSection("فضای کار", "Workspace محل نمایش Timeline و کنترل‌های Contextual است و تنظیم تغییرپذیر مستقلی در Core فعلی ندارد.")
-            "لاگ و عیب‌یابی" -> UnavailableSection("لاگ و عیب‌یابی", "نمایش جزئیات کامل خطا فقط وقتی ارائه می‌شود که تنظیم واقعی Debug در Core پشتیبانی شود.")
-            "عملکرد" -> UnavailableSection("عملکرد", "Metricهای Performance فقط از داده واقعی Runtime نمایش داده می‌شوند و مقدار ساختگی استفاده نمی‌شود.")
-            "امنیت و تأیید" -> UnavailableSection("امنیت و تأیید", "کنترل تأیید فقط برای Action واقعی با ریسک حساس و در وضعیت نیازمند تأیید نمایش داده می‌شود.")
+            "استنتاج" -> InferenceControls()
+            "زمینه" -> UnavailableSection("زمینه", "مدیریت System Context، Summary، پیام‌های اخیر و Workspace Context هنوز کنترل تغییرپذیر مستقلی در Core ندارد.")
+            "عامل" -> UnavailableSection("عامل", "چرخه آماده‌سازی، تأیید، اجرا، شکست و Recovery از Action API واقعی کنترل می‌شود.")
+            "فضای کار" -> UnavailableSection("فضای کار", "Workspace محل اجرای عملیات واقعی است؛ تنظیم مستقل قابل تغییر در Core فعلی تعریف نشده است.")
+            "لاگ و عیب‌یابی" -> DiagnosticsSettingsInfo()
+            "عملکرد" -> PerformanceSettingsInfo()
+            "امنیت و تأیید" -> UnavailableSection("امنیت و تأیید", "تأیید Actionهای حساس فقط در وضعیت واقعی نیازمند تأیید فعال می‌شود.")
         } }
+    }
+}
+
+@Composable
+private fun InferenceControls() {
+    var settings by remember { mutableStateOf(InferenceSettingsStore.current) }
+    fun update(value: InferenceSettings) {
+        settings = value
+        InferenceSettingsStore.current = value
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
+        Text("استنتاج", style = MaterialTheme.typography.titleLarge)
+        Text("این مقادیر مستقیماً برای Generation بعدی به Runtime محلی ارسال می‌شوند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        UiSurface {
+            Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Temperature: %.2f".format(settings.temperature))
+                Slider(value = settings.temperature.toFloat(), onValueChange = { update(settings.copy(temperature = it.toDouble())) }, valueRange = 0f..2f)
+                Text("Top-P: %.2f".format(settings.topP ?: 0.9))
+                Slider(value = (settings.topP ?: 0.9).toFloat(), onValueChange = { update(settings.copy(topP = it.toDouble())) }, valueRange = 0f..1f)
+                Text("Top-K: ${settings.topK ?: 40}")
+                Slider(value = (settings.topK ?: 40).toFloat(), onValueChange = { update(settings.copy(topK = it.toInt())) }, valueRange = 0f..128f)
+                Text("Min-P: %.2f".format(settings.minP ?: 0.0))
+                Slider(value = (settings.minP ?: 0.0).toFloat(), onValueChange = { update(settings.copy(minP = it.toDouble())) }, valueRange = 0f..1f)
+                Text("Repeat Penalty: %.2f".format(settings.repeatPenalty ?: 1.1))
+                Slider(value = (settings.repeatPenalty ?: 1.1).toFloat(), onValueChange = { update(settings.copy(repeatPenalty = it.toDouble())) }, valueRange = 0.8f..2f)
+                Text("Max New Tokens: ${settings.maxNewTokens}")
+                Slider(value = settings.maxNewTokens.toFloat(), onValueChange = { update(settings.copy(maxNewTokens = it.toInt().coerceAtLeast(1))) }, valueRange = 64f..2048f, steps = 31)
+                Text("Context Length: ${settings.contextLength ?: 4096}")
+                Slider(value = (settings.contextLength ?: 4096).toFloat(), onValueChange = { update(settings.copy(contextLength = it.toInt().coerceAtLeast(256))) }, valueRange = 256f..8192f, steps = 31)
+            }
+        }
+        Button(onClick = { update(InferenceSettings()) }, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("بازنشانی مقادیر پیش‌فرض") }
+    }
+}
+
+@Composable
+private fun DiagnosticsSettingsInfo() {
+    UiSurface {
+        Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text("لاگ و عیب‌یابی", style = MaterialTheme.typography.titleLarge)
+            Text("گزارش Runtime، TTFT، زمان تولید، تنظیمات، Runtime Trace و Action Trace از داده واقعی جمع می‌شوند.")
+            Text("گزارش کامل و گزارش خطا از صفحه عیب‌یابی قابل کپی هستند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun PerformanceSettingsInfo() {
+    UiSurface {
+        Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text("عملکرد", style = MaterialTheme.typography.titleLarge)
+            Text("Performance بدون مقدار ساختگی از Runtime اندازه‌گیری می‌شود.")
+            Text("Load Time، TTFT، Generation Time، Token Count و Tokens/sec در صورت ارائه واقعی Runtime نمایش داده می‌شوند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -48,4 +105,4 @@ fun SettingsScreen(
 @Composable private fun EmptyState() { UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("مدل محلی واردشده‌ای وجود ندارد.", style = MaterialTheme.typography.titleMedium); Text("از انتخاب فایل مدل برای واردکردن یک فایل GGUF استفاده کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
 @Composable private fun ErrorSurface(message: String) { Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.errorContainer) { Text(message, Modifier.padding(UiTokens.compactPadding), color = MaterialTheme.colorScheme.onErrorContainer) } }
 @Composable private fun ModelCard(model: ModelDescriptor, active: Boolean, onActivate: (String) -> Unit, onDelete: (String) -> Unit) { var expanded by remember { mutableStateOf(false) }; UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) { Column(Modifier.weight(1f)) { Text(model.displayName, style = MaterialTheme.typography.titleMedium); Text("GGUF · ${model.quantization}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Text(if (active) "فعال" else "غیرفعال", style = MaterialTheme.typography.labelLarge) }; Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { if (!active) OutlinedButton(onClick = { onActivate(model.id) }, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text("فعال‌سازی") }; TextButton(onClick = { expanded = !expanded }, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text(if (expanded) "بستن" else "جزئیات") }; TextButton(onClick = { onDelete(model.id) }, Modifier.heightIn(min = UiTokens.minimumTouchTarget), colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("حذف") } }; if (expanded) { HorizontalDivider(); Text("شناسه مدل: ${model.id}", style = MaterialTheme.typography.bodySmall); Text("وضعیت: ${model.state}", style = MaterialTheme.typography.bodySmall); Text("کمّیت‌سازی: ${model.quantization}", style = MaterialTheme.typography.bodySmall) } } } }
-@Composable private fun UnavailableSection(title: String, message: String) { UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) { Text(title, style = MaterialTheme.typography.titleLarge); Text("خارج از دسترس", style = MaterialTheme.typography.labelLarge); Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+@Composable private fun UnavailableSection(title: String, message: String) { UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) { Text(title, style = MaterialTheme.typography.titleLarge); Text("اطلاعات فعلی", style = MaterialTheme.typography.labelLarge); Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
