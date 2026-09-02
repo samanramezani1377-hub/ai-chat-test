@@ -5,13 +5,11 @@ import com.woogit.aicore.actions.PreparedAction
 import com.woogit.aicore.conversation.ConversationContext
 import com.woogit.aicore.domain.RiskLevel
 
-/** Structured intent is never an execution authorization. */
 data class ActionIntent(
     val actionId: String,
     val input: Any,
     val requestedCapability: String? = null,
     val explanation: String? = null,
-    /** Protocol-level request identifier, separate from the registered action name. */
     val requestId: String = actionId,
 )
 
@@ -35,9 +33,9 @@ class ActionPlanCoordinator(
     private val lifecycle: ActionLifecycle,
     private val planner: ActionIntentPlanner
 ) {
-    suspend fun prepare(context: ConversationContext): ActionPlan? {
+    suspend fun prepare(context: ConversationContext, conversationId: String? = null): ActionPlan? {
         val intent = planner.plan(context) ?: return null
-        val prepared = lifecycle.prepare(intent.actionId, intent.input)
+        val prepared = lifecycle.prepare(intent.actionId, intent.input, conversationId)
         val validated = lifecycle.validate(prepared, intent.requestedCapability)
         return ActionPlan(intent, validated)
     }
