@@ -151,8 +151,6 @@ internal fun MainScreen(container: AppContainer) {
         generating = true
         runtimeStatus = "در حال اجرای Agent"
         diagnostic = null
-        // This is an Agent execution, not an Action yet. The real Action id is assigned only
-        // after the current model generation produces a valid ActionPlan.
         execution = ExecutionState(UUID.randomUUID().toString(), "در حال تولید پاسخ", "در حال تولید پاسخ مدل", System.currentTimeMillis(), requestPreview = text)
         RuntimeExecutionForegroundService.start(context)
         scope.launch(Dispatchers.Default) {
@@ -372,9 +370,10 @@ internal fun MainScreen(container: AppContainer) {
                     Column(Modifier.fillMaxSize()) {
                         AppHeader(destination, runtimeStatus, activeModel, { destination = it; quickMenuOpen = false }, { quickMenuOpen = !quickMenuOpen }, { quickMenuOpen = false; sidebarOpen = !sidebarOpen }, { runtimeDetailsOpen = !runtimeDetailsOpen })
                         when (destination) {
-                            AppDestination.CHAT -> ChatPage(messages, composer, { composer = it }, ::send, generating, ::stop)
+                            AppDestination.CHAT -> ChatPage(messages, composer, generating, approvalBusy, { composer = it }, ::send, ::stop, execution, ::approveExecution, ::rejectExecution, { destination = AppDestination.WORK })
+                            AppDestination.WORK -> WorkspacePage(execution, activeModel, { destination = AppDestination.DIAGNOSTICS })
                             AppDestination.WORKSPACE -> WorkspacePage(execution, activeModel, { destination = AppDestination.DIAGNOSTICS })
-                            AppDestination.DIAGNOSTICS -> DiagnosticsPage(container, execution, activeModel)
+                            AppDestination.DIAGNOSTICS -> DiagnosticsPage(diagnostic, execution)
                             AppDestination.SETTINGS -> SettingsScreen(models, activeModel, runtimeStatus, diagnostic, { picker.launch(arrayOf("application/octet-stream", "application/*")) }, ::deactivateModel, ::refreshModels)
                             AppDestination.ABOUT -> AboutPage()
                         }
