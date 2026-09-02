@@ -7,14 +7,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.samanramezani.aichattest.ui.state.ExecutionState
 import com.woogit.aicore.actions.ActionTraceStore
-import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
 import java.text.DateFormat
 import java.util.Date
@@ -23,8 +22,8 @@ import java.util.Date
 internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
     val context = LocalContext.current
     val runtime by RuntimeDiagnosticsStore.snapshot.collectAsState()
-    val traces by ActionTraceStore.events.collectAsState()
-    val selectedTraces = traces.filter { execution == null || it.executionId == execution.id }
+    val actionTraces by ActionTraceStore.events.collectAsState()
+    val selectedActionTraces = actionTraces.filter { execution == null || it.executionId == execution.id }
     val diagnostic = RuntimeDiagnostic(
         model = runtime.model,
         runtime = runtime.runtime,
@@ -35,7 +34,8 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         error = error ?: execution?.error,
         rawError = execution?.error,
         executionId = execution?.id,
-        trace = selectedTraces,
+        actionTrace = selectedActionTraces,
+        runtimeTrace = runtime.trace,
     )
     val report = diagnostic.report()
     val errorReport = diagnostic.errorReport()
@@ -90,9 +90,21 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             execution.error?.let { Text("Error: $it", color = MaterialTheme.colorScheme.error) }
         }
 
-        Text("Trace", style = MaterialTheme.typography.titleLarge)
-        if (selectedTraces.isEmpty()) Text("Trace برای این Execution ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        else selectedTraces.forEach { event ->
+        Text("Runtime Trace", style = MaterialTheme.typography.titleLarge)
+        if (runtime.trace.isEmpty()) Text("Trace Runtime ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        else runtime.trace.forEach { event ->
+            UiSurface {
+                Column(Modifier.padding(10.dp)) {
+                    Text(event.type.toString(), style = MaterialTheme.typography.labelLarge)
+                    Text(DateFormat.getDateTimeInstance().format(Date(event.timestampMs)), style = MaterialTheme.typography.bodySmall)
+                    event.message?.let { Text(it) }
+                }
+            }
+        }
+
+        Text("Action Trace", style = MaterialTheme.typography.titleLarge)
+        if (selectedActionTraces.isEmpty()) Text("Trace عملیات برای این Execution ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        else selectedActionTraces.forEach { event ->
             UiSurface {
                 Column(Modifier.padding(10.dp)) {
                     Text(event.type.toString(), style = MaterialTheme.typography.labelLarge)
