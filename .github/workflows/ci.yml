@@ -93,6 +93,9 @@ jobs:
       - name: Apply downstream llama.rn abort patch
         run: |
           cp ci/patches/0002-abort-callback-mid-graph-cancel.patch libs/llama.kt/patches/0002-abort-callback-mid-graph-cancel.patch
+          # CEIL_DIV is already overflow-safe in the pinned llama.cpp revision;
+          # the old llama.kt copy of this patch targets pre-fix generated sources.
+          rm -f libs/llama.kt/patches/0001-vulkan-uma-descriptor-ceildiv.patch
 
       - name: Bootstrap llama.cpp sources
         run: |
