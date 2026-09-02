@@ -105,13 +105,17 @@ jobs:
           set -o pipefail
           bash libs/llama.kt/scripts/bootstrap.sh 2>&1 | tee bootstrap-output.log
           test "$(git -C libs/llama.kt/third_party/llama.cpp rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
-          # The pinned llama.cpp revision keeps this ARM runtime header under
-          # ggml/src, while llama.kt's bootstrap does not copy it into the
-          # flattened native source tree. cpu-feats.cpp includes it directly.
+          # bootstrap rewrites ggml symbols to the LM_GGML namespace. Keep the
+          # copied ARM runtime feature header in that same namespace; copying it
+          # after bootstrap otherwise bypasses the rewrite and breaks cpu-feats.cpp.
           test -f libs/llama.kt/third_party/llama.cpp/ggml/src/ggml-feats.h
           cp libs/llama.kt/third_party/llama.cpp/ggml/src/ggml-feats.h \
              libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
+          sed -i 's/GGML_/LM_GGML_/g; s/ggml_/lm_ggml_/g' \
+            libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
           test -s libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
+          grep -Fq 'lm_ggml_feats_arch64_runtime_t' libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
+          grep -Fq 'lm_ggml_feats_get_arch64_runtime' libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
 
       - name: Apply llama.rn Barbet compatibility patches
         run: |
