@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.samanramezani.aichattest"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.samanramezani.aichattest"
