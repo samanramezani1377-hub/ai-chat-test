@@ -63,10 +63,10 @@ diff --git a/llama-kt/src/main/cpp/rn-completion.cpp b/llama-kt/src/main/cpp/rn-
 +--- /dev/null
 ++++ b/llama-kt/src/main/cpp/common/json.h
 +@@ -0,0 +1 @@
-++../../../../third_party/llama.cpp/common/json.h
+++../../../../../third_party/llama.cpp/common/json.h
 +diff --git a/llama-kt/src/main/cpp/common/json.cpp b/llama-kt/src/main/cpp/common/json.cpp
 +new file mode 120000
 +--- /dev/null
 ++++ b/llama-kt/src/main/cpp/common/json.cpp
 +@@ -0,0 +1 @@
-++../../../../third_party/llama.cpp/common/json.cpp
+++../../../../../third_party/llama.cpp/common/json.cpp
