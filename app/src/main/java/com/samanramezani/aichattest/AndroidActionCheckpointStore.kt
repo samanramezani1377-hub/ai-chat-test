@@ -8,7 +8,7 @@ import com.woogit.aicore.domain.RiskLevel
 import com.woogit.aicore.domain.VerificationResult
 import org.json.JSONObject
 
-/** Durable checkpoint store for prepared/approved/executing action state. */
+/** Durable checkpoint store for action state across process death. */
 class AndroidActionCheckpointStore(context: Context) : ActionCheckpointStore {
     private val preferences = context.applicationContext.getSharedPreferences("action_checkpoints", Context.MODE_PRIVATE)
 
@@ -51,6 +51,7 @@ class AndroidActionCheckpointStore(context: Context) : ActionCheckpointStore {
         ActionExecutionState.AwaitingApproval -> JSONObject().put("type", "awaiting_approval")
         ActionExecutionState.Approved -> JSONObject().put("type", "approved")
         ActionExecutionState.Executing -> JSONObject().put("type", "executing")
+        ActionExecutionState.Unknown -> JSONObject().put("type", "unknown")
         ActionExecutionState.Rejected -> JSONObject().put("type", "rejected")
         is ActionExecutionState.Failed -> JSONObject().put("type", "failed").put("message", state.message)
         is ActionExecutionState.Completed -> JSONObject().put("type", "completed").put("success", state.verification.success).put("evidence", state.verification.evidence)
@@ -61,6 +62,7 @@ class AndroidActionCheckpointStore(context: Context) : ActionCheckpointStore {
         "awaiting_approval" -> ActionExecutionState.AwaitingApproval
         "approved" -> ActionExecutionState.Approved
         "executing" -> ActionExecutionState.Executing
+        "unknown" -> ActionExecutionState.Unknown
         "rejected" -> ActionExecutionState.Rejected
         "failed" -> ActionExecutionState.Failed(json.optString("message", "Action failed"))
         "completed" -> ActionExecutionState.Completed(VerificationResult(json.optBoolean("success", false), json.optString("evidence").ifBlank { null }))
