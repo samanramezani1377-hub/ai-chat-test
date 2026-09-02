@@ -1,16 +1,29 @@
 package com.samanramezani.aichattest.ui
 
+import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.InferenceSettingsStore
 import com.woogit.aicore.domain.ModelDescriptor
+
+private const val PREFS = "inference_settings"
+private const val KEY_TEMPERATURE = "temperature"
+private const val KEY_TOP_P = "top_p"
+private const val KEY_TOP_K = "top_k"
+private const val KEY_MIN_P = "min_p"
+private const val KEY_REPEAT = "repeat_penalty"
+private const val KEY_MAX_TOKENS = "max_new_tokens"
+private const val KEY_CONTEXT = "context_length"
+private const val KEY_SEED = "seed"
+private const val KEY_STOPS = "stop_sequences"
 
 private val aiSections = listOf("مدل", "استنتاج", "زمینه", "عامل")
 private val appSections = listOf("فضای کار", "لاگ و عیب‌یابی", "عملکرد", "امنیت و تأیید")
@@ -29,27 +42,27 @@ fun SettingsScreen(
         item { when (section) {
             "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
             "استنتاج" -> InferenceControls()
-            "زمینه" -> UnavailableSection("زمینه", "مدیریت System Context، Summary، پیام‌های اخیر و Workspace Context هنوز کنترل تغییرپذیر مستقلی در Core ندارد.")
-            "عامل" -> UnavailableSection("عامل", "چرخه آماده‌سازی، تأیید، اجرا، شکست و Recovery از Action API واقعی کنترل می‌شود.")
-            "فضای کار" -> UnavailableSection("فضای کار", "Workspace محل اجرای عملیات واقعی است؛ تنظیم مستقل قابل تغییر در Core فعلی تعریف نشده است.")
-            "لاگ و عیب‌یابی" -> DiagnosticsSettingsInfo()
-            "عملکرد" -> PerformanceSettingsInfo()
-            "امنیت و تأیید" -> UnavailableSection("امنیت و تأیید", "تأیید Actionهای حساس فقط در وضعیت واقعی نیازمند تأیید فعال می‌شود.")
+            "زمینه" -> SettingsInfo("زمینه", "مدیریت System Context، Summary، پیام‌های اخیر و Workspace Context در Core به‌صورت مستقل قابل تغییر تعریف نشده است. Context Length در بخش استنتاج کنترل می‌شود.")
+            "عامل" -> SettingsInfo("عامل", "چرخه Agent شامل تولید، تشخیص Action، تأیید، اجرا، شکست و Recovery است. محدودیت Action Steps در API داخلی Agent کنترل می‌شود و در حال حاضر تنظیم عمومی کاربر ندارد.")
+            "فضای کار" -> SettingsInfo("فضای کار", "Workspace محیط اجرای واقعی Actionهاست. تنظیمات مسیر یا دسترسی عمومی قابل تغییر نیست تا مرز امنیتی Workspace شکسته نشود.")
+            "لاگ و عیب‌یابی" -> SettingsInfo("لاگ و عیب‌یابی", "گزارش Runtime، TTFT، زمان تولید، تنظیمات، Runtime Trace و Action Trace از داده واقعی جمع می‌شوند. گزارش کامل و گزارش خطا از صفحه عیب‌یابی قابل کپی هستند.")
+            "عملکرد" -> SettingsInfo("عملکرد", "Performance بدون مقدار ساختگی از Runtime اندازه‌گیری می‌شود. برای تشخیص TTFT و سرعت تولید، صفحه عیب‌یابی آخرین metrics واقعی را نمایش می‌دهد.")
+            "امنیت و تأیید" -> SettingsInfo("امنیت و تأیید", "Actionهای حساس قبل از اجرا نیازمند تأیید هستند. این سیاست بخشی از مسیر واقعی Agent است و برای جلوگیری از دور زدن کنترل امنیتی، خاموش‌کردن عمومی آن ارائه نشده است.")
         } }
     }
 }
 
 @Composable
 private fun InferenceControls() {
-    var settings by remember { mutableStateOf(InferenceSettingsStore.current) }
-    fun update(value: InferenceSettings) {
-        settings = value
-        InferenceSettingsStore.current = value
-    }
+    val context = LocalContext.current
+    var settings by remember { mutableStateOf(loadSettings(context)) }
+    var dirty by remember { mutableStateOf(false) }
+    fun update(value: InferenceSettings) { settings = value; dirty = true }
+    fun apply() { saveSettings(context, settings); dirty = false }
 
     Column(verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
         Text("استنتاج", style = MaterialTheme.typography.titleLarge)
-        Text("این مقادیر مستقیماً برای Generation بعدی به Runtime محلی ارسال می‌شوند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("این مقادیر مستقیماً برای Generation بعدی به Runtime محلی ارسال می‌شوند و روی دستگاه ذخیره می‌شوند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         UiSurface {
             Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Temperature: %.2f".format(settings.temperature))
@@ -66,32 +79,51 @@ private fun InferenceControls() {
                 Slider(value = settings.maxNewTokens.toFloat(), onValueChange = { update(settings.copy(maxNewTokens = it.toInt().coerceAtLeast(1))) }, valueRange = 64f..2048f, steps = 31)
                 Text("Context Length: ${settings.contextLength ?: 4096}")
                 Slider(value = (settings.contextLength ?: 4096).toFloat(), onValueChange = { update(settings.copy(contextLength = it.toInt().coerceAtLeast(256))) }, valueRange = 256f..8192f, steps = 31)
+                Text("Seed: ${settings.seed ?: "تصادفی"}")
             }
         }
-        Button(onClick = { update(InferenceSettings()) }, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("بازنشانی مقادیر پیش‌فرض") }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
+            Button(onClick = ::apply, Modifier.weight(1f).heightIn(min = UiTokens.minimumTouchTarget), enabled = dirty) { Text("اعمال تنظیمات") }
+            OutlinedButton(onClick = { settings = InferenceSettings(); apply() }, Modifier.weight(1f).heightIn(min = UiTokens.minimumTouchTarget)) { Text("بازنشانی") }
+        }
+        Text(if (dirty) "تغییرات ذخیره نشده‌اند." else "تنظیمات ذخیره و برای Generation بعدی آماده‌اند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
-@Composable
-private fun DiagnosticsSettingsInfo() {
-    UiSurface {
-        Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text("لاگ و عیب‌یابی", style = MaterialTheme.typography.titleLarge)
-            Text("گزارش Runtime، TTFT، زمان تولید، تنظیمات، Runtime Trace و Action Trace از داده واقعی جمع می‌شوند.")
-            Text("گزارش کامل و گزارش خطا از صفحه عیب‌یابی قابل کپی هستند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
+private fun loadSettings(context: Context): InferenceSettings {
+    val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val d = InferenceSettings()
+    return d.copy(
+        temperature = p.getFloat(KEY_TEMPERATURE, d.temperature.toFloat()).toDouble(),
+        topP = if (p.contains(KEY_TOP_P)) p.getFloat(KEY_TOP_P, (d.topP ?: 0.9).toFloat()).toDouble() else d.topP,
+        topK = if (p.contains(KEY_TOP_K)) p.getInt(KEY_TOP_K, d.topK ?: 40) else d.topK,
+        minP = if (p.contains(KEY_MIN_P)) p.getFloat(KEY_MIN_P, (d.minP ?: 0.0).toFloat()).toDouble() else d.minP,
+        repeatPenalty = if (p.contains(KEY_REPEAT)) p.getFloat(KEY_REPEAT, (d.repeatPenalty ?: 1.1).toFloat()).toDouble() else d.repeatPenalty,
+        maxNewTokens = p.getInt(KEY_MAX_TOKENS, d.maxNewTokens),
+        contextLength = if (p.contains(KEY_CONTEXT)) p.getInt(KEY_CONTEXT, d.contextLength ?: 4096) else d.contextLength,
+        seed = if (p.contains(KEY_SEED)) p.getLong(KEY_SEED, d.seed ?: 0L) else d.seed,
+        stopSequences = p.getString(KEY_STOPS, null)?.split("\u001f")?.filter { it.isNotEmpty() } ?: d.stopSequences,
+    )
+}
+
+private fun saveSettings(context: Context, settings: InferenceSettings) {
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        .putFloat(KEY_TEMPERATURE, settings.temperature.toFloat())
+        .apply { settings.topP?.let { putFloat(KEY_TOP_P, it.toFloat()) } ?: remove(KEY_TOP_P) }
+        .apply { settings.topK?.let { putInt(KEY_TOP_K, it) } ?: remove(KEY_TOP_K) }
+        .apply { settings.minP?.let { putFloat(KEY_MIN_P, it.toFloat()) } ?: remove(KEY_MIN_P) }
+        .apply { settings.repeatPenalty?.let { putFloat(KEY_REPEAT, it.toFloat()) } ?: remove(KEY_REPEAT) }
+        .putInt(KEY_MAX_TOKENS, settings.maxNewTokens)
+        .apply { settings.contextLength?.let { putInt(KEY_CONTEXT, it) } ?: remove(KEY_CONTEXT) }
+        .apply { settings.seed?.let { putLong(KEY_SEED, it) } ?: remove(KEY_SEED) }
+        .putString(KEY_STOPS, settings.stopSequences.joinToString("\u001f"))
+        .apply()
+    InferenceSettingsStore.current = settings
 }
 
 @Composable
-private fun PerformanceSettingsInfo() {
-    UiSurface {
-        Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text("عملکرد", style = MaterialTheme.typography.titleLarge)
-            Text("Performance بدون مقدار ساختگی از Runtime اندازه‌گیری می‌شود.")
-            Text("Load Time، TTFT، Generation Time، Token Count و Tokens/sec در صورت ارائه واقعی Runtime نمایش داده می‌شوند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
+private fun SettingsInfo(title: String, message: String) {
+    UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) { Text(title, style = MaterialTheme.typography.titleLarge); Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
 }
 
 @Composable private fun SettingsGroup(title: String, sections: List<String>, selected: String, onSelect: (String) -> Unit) {
@@ -105,4 +137,3 @@ private fun PerformanceSettingsInfo() {
 @Composable private fun EmptyState() { UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("مدل محلی واردشده‌ای وجود ندارد.", style = MaterialTheme.typography.titleMedium); Text("از انتخاب فایل مدل برای واردکردن یک فایل GGUF استفاده کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
 @Composable private fun ErrorSurface(message: String) { Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.errorContainer) { Text(message, Modifier.padding(UiTokens.compactPadding), color = MaterialTheme.colorScheme.onErrorContainer) } }
 @Composable private fun ModelCard(model: ModelDescriptor, active: Boolean, onActivate: (String) -> Unit, onDelete: (String) -> Unit) { var expanded by remember { mutableStateOf(false) }; UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) { Column(Modifier.weight(1f)) { Text(model.displayName, style = MaterialTheme.typography.titleMedium); Text("GGUF · ${model.quantization}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Text(if (active) "فعال" else "غیرفعال", style = MaterialTheme.typography.labelLarge) }; Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { if (!active) OutlinedButton(onClick = { onActivate(model.id) }, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text("فعال‌سازی") }; TextButton(onClick = { expanded = !expanded }, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text(if (expanded) "بستن" else "جزئیات") }; TextButton(onClick = { onDelete(model.id) }, Modifier.heightIn(min = UiTokens.minimumTouchTarget), colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("حذف") } }; if (expanded) { HorizontalDivider(); Text("شناسه مدل: ${model.id}", style = MaterialTheme.typography.bodySmall); Text("وضعیت: ${model.state}", style = MaterialTheme.typography.bodySmall); Text("کمّیت‌سازی: ${model.quantization}", style = MaterialTheme.typography.bodySmall) } } } }
-@Composable private fun UnavailableSection(title: String, message: String) { UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) { Text(title, style = MaterialTheme.typography.titleLarge); Text("اطلاعات فعلی", style = MaterialTheme.typography.labelLarge); Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
