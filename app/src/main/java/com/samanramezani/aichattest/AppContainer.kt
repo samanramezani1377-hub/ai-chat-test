@@ -30,6 +30,7 @@ import com.woogit.aicore.domain.CapabilityProvider
 import com.woogit.aicore.domain.ModelResult
 import com.woogit.aicore.domain.Verifier
 import com.woogit.aicore.runtime.RuntimeAdapter
+import com.woogit.aicore.runtime.RuntimeMetrics
 import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
 import java.nio.file.Files
 
@@ -60,7 +61,9 @@ class AppContainer(context: Context? = null) {
                 },
                 performanceStats = {
                     val info = modelRuntime.runtimeInfo()
-                    "runtime=${info.name}, backend=${info.backend ?: "unknown"}"
+                    val metrics = (modelRuntime as? RuntimeMetrics)?.lastGeneration()
+                    if (metrics == null) "runtime=${info.name}, backend=${info.backend ?: "unknown"}, generation=none"
+                    else "runtime=${info.name}, backend=${info.backend ?: "unknown"}, generationMs=${metrics.generationTimeMs ?: "n/a"}, firstTokenMs=${metrics.firstTokenTimeMs ?: "n/a"}, outputTokens=${metrics.outputTokens ?: "n/a"}, stopped=${metrics.stopped}"
                 },
                 deviceInfo = { "manufacturer=${Build.MANUFACTURER}, model=${Build.MODEL}, sdk=${Build.VERSION.SDK_INT}" },
             )
