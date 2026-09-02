@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "com.woogit.aicore.runtime.android"
     compileSdk = 36
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         minSdk = 29
