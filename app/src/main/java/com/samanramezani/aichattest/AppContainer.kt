@@ -120,6 +120,9 @@ class AppContainer(context: Context? = null) {
     private val actionExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan ->
         lifecycle.executeApproved(plan.prepared.executionId, verifier).let(::executionOutcome)
     }
+    private val actionRetryExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan ->
+        lifecycle.retryFailed(plan.prepared.executionId, verifier).let(::executionOutcome)
+    }
 
     suspend fun pendingApproval(conversationId: String): PreparedAction? = lifecycle.pendingApprovals(conversationId).maxByOrNull { it.executionId }
     suspend fun executionCheckpoint(executionId: String): PreparedAction? = runCatching { lifecycle.checkpoint(executionId) }.getOrNull()
@@ -130,7 +133,7 @@ class AppContainer(context: Context? = null) {
         if (conversationId != null) require(prepared.conversationId == conversationId) { "Retry belongs to another conversation" }
         lifecycle.retryFailed(executionId, verifier).let(::executionOutcome)
     }.getOrElse {
-        reportError("Action", "RETRY_FAILED", "تلاش مجدد عملیات ناموفق بود.", it, executionId)
+        reportError("Action", "RETRY_FAILED", "تلاش مجدد عملیات ناموفق بود.", it, executionId = executionId)
         ActionExecutionOutcome(false, false, it.message ?: "Retry failed", errorCode = "RETRY_FAILED")
     }
 
@@ -143,7 +146,7 @@ class AppContainer(context: Context? = null) {
         val approved = lifecycle.approve(executionId)
         lifecycle.executeApproved(approved.executionId, verifier).let(::executionOutcome)
     }.getOrElse {
-        reportError("Approval", "APPROVAL_FAILED", "تأیید و اجرای عملیات انجام نشد.", it, executionId)
+        reportError("Approval", "APPROVAL_FAILED", "تأیید و اجرای عملیات انجام نشد.", it, executionId = executionId)
         ActionExecutionOutcome(false, false, it.message ?: "Approval failed", errorCode = "APPROVAL_FAILED")
     }
 
@@ -154,7 +157,7 @@ class AppContainer(context: Context? = null) {
         lifecycle.reject(prepared)
         true
     }.getOrElse {
-        reportError("Approval", "REJECT_FAILED", "رد کردن عملیات انجام نشد.", it, executionId)
+        reportError("Approval", "REJECT_FAILED", "رد کردن عملیات انجام نشد.", it, executionId = executionId)
         false
     }
 
@@ -163,7 +166,7 @@ class AppContainer(context: Context? = null) {
     suspend fun traceForExecution(executionId: String): List<ExecutionTraceEvent> = observability.traces(executionId)
 
     suspend fun recordRuntimeFailure(message: String, raw: String = message, taskId: String? = null) {
-        reportError("Runtime", "RUNTIME_FAILED", "اجرای مدل با خطا مواجه شد.", IllegalStateException(raw), taskId = taskId)
+        reportError("Runtime", "RUNTIME_FAILED", message.ifBlank { "اجرای مدل با خطا مواجه شد." }, IllegalStateException(raw), taskId = taskId)
     }
 
     fun createAgentSession(conversationId: String, eventSink: suspend (AgentEvent) -> Unit = {}): AgentSession? {
@@ -180,6 +183,7 @@ class AppContainer(context: Context? = null) {
             conversationStore = store,
             actionPlanCoordinator = coordinator,
             actionExecutor = actionExecutor,
+            actionRetryExecutor = actionRetryExecutor,
             eventSink = { event ->
                 when (event) {
                     AgentEvent.Started -> observability.trace("agent:$conversationId", ExecutionTraceEvent.Phase.PREPARED, taskId = conversationId, message = "Agent started")
