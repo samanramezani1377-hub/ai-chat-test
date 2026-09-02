@@ -1,5 +1,7 @@
 package com.woogit.aicore.actions
 
+import kotlinx.coroutines.CancellationException
+
 /** Final user decision over an already prepared execution. The UI cannot alter its input. */
 sealed interface ApprovalDecision {
     data object Approved : ApprovalDecision
@@ -17,7 +19,8 @@ class ApprovalController(private val lifecycle: ActionLifecycle) {
         val prepared = lifecycle.approve(executionId)
         ApprovalResult(executionId, ApprovalDecision.Approved, prepared.state)
     } catch (t: Throwable) {
-        ApprovalResult(executionId, ApprovalDecision.Approved, ActionExecutionState.Failed(t.message ?: "Approval failed"))
+        if (t is CancellationException) throw t
+        ApprovalResult(executionId, ApprovalDecision.Rejected, ActionExecutionState.Failed(t.message ?: "Approval failed"))
     }
 
     suspend fun reject(executionId: String): ApprovalResult = try {
@@ -26,6 +29,7 @@ class ApprovalController(private val lifecycle: ActionLifecycle) {
         val rejected = lifecycle.reject(prepared)
         ApprovalResult(executionId, ApprovalDecision.Rejected, rejected.state)
     } catch (t: Throwable) {
+        if (t is CancellationException) throw t
         ApprovalResult(executionId, ApprovalDecision.Rejected, ActionExecutionState.Failed(t.message ?: "Rejection failed"))
     }
 }
