@@ -57,7 +57,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         Text("Runtime", style = MaterialTheme.typography.titleLarge)
         MetricRow("مدل", runtime.model?.displayName ?: "N/A")
         MetricRow("فرمت", runtime.model?.format?.toString() ?: "N/A")
-        MetricRow("Quantization", runtime.model?.quantization ?: "N/A")
+        MetricRow("Quantization", runtime.model?.quantization?.toString() ?: "N/A")
         MetricRow("Runtime", runtime.runtime.name)
         MetricRow("نسخه", runtime.runtime.version)
         MetricRow("Backend", runtime.runtime.backend ?: "N/A")
@@ -126,25 +126,5 @@ private fun MetricRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, Modifier.weight(1f))
-    }
-}
-
-private fun speed(result: com.woogit.aicore.domain.GenerationResult): String {
-    val tokens = result.outputTokens ?: return "N/A"
-    val ms = result.generationTimeMs ?: return "N/A"
-    if (tokens <= 0 || ms <= 0) return "N/A"
-    return "%.2f tok/s".format(tokens.toDouble() / (ms / 1000.0))
-}
-
-private fun copyToClipboard(context: Context, label: String, text: String) {
-    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
-}
-
-@Composable
-private fun SimplePage(title: String, content: @Composable ColumnScope.() -> Unit) {
-    LazyColumn(Modifier.fillMaxSize().padding(20.dp), contentPadding = PaddingValues(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text(title, style = MaterialTheme.typography.headlineMedium) }
-        item { Column(verticalArrangement = Arrangement.spacedBy(10.dp), content = content) }
     }
 }
