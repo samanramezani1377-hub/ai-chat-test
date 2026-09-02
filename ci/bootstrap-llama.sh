@@ -11,6 +11,8 @@ LLAMA_RN_SHA=7afb5c8934aea7fa41f4522662f03b3461916927
 VULKAN_VERSION=1.4.321.1
 VULKAN_SHA256=f22a3625bd4d7a32e7a0d926ace16d5278c149e938dac63cecc00537626cbf73
 NDK_VERSION=27.2.12479018
+NATIVE_DEPS_REBUILT=false
+LLAMA_BOOTSTRAP_REBUILT=false
 
 prepare_submodule() {
   git -C "$ROOT_DIR" submodule sync -- libs/llama.kt
@@ -28,8 +30,10 @@ prepare_submodule() {
 prepare_toolchains() {
   local ndk_path="${ANDROID_HOME}/ndk/${NDK_VERSION}"
   if [ ! -x "$ndk_path/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" ]; then
+    echo 'NDK cache is missing or invalid; reinstalling NDK.'
     rm -rf "$ndk_path"
     sdkmanager "ndk;${NDK_VERSION}"
+    NATIVE_DEPS_REBUILT=true
   fi
   test -x "$ndk_path/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
 
@@ -37,6 +41,7 @@ prepare_toolchains() {
   if [ -s "$archive" ] && ! echo "${VULKAN_SHA256}  ${archive}" | sha256sum -c - >/dev/null 2>&1; then
     echo 'Cached Vulkan archive is invalid; rebuilding it.'
     rm -f "$archive"
+    NATIVE_DEPS_REBUILT=true
   fi
   if [ ! -s "$archive" ]; then
     curl -fL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 1800 \
@@ -44,14 +49,17 @@ prepare_toolchains() {
       "https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/linux/vulkansdk-linux-x86_64-${VULKAN_VERSION}.tar.xz"
     echo "${VULKAN_SHA256}  ${archive}.part" | sha256sum -c -
     mv -f "$archive.part" "$archive"
+    NATIVE_DEPS_REBUILT=true
   fi
   echo "${VULKAN_SHA256}  ${archive}" | sha256sum -c -
 
   local vulkan_sdk="$HOME/vulkan-sdk/${VULKAN_VERSION}/x86_64"
   if [ ! -x "$vulkan_sdk/bin/glslc" ]; then
+    echo 'Vulkan SDK cache is missing or invalid; extracting a fresh copy.'
     rm -rf "$HOME/vulkan-sdk"
     mkdir -p "$HOME/vulkan-sdk"
     tar -xf "$archive" -C "$HOME/vulkan-sdk"
+    NATIVE_DEPS_REBUILT=true
   fi
   test -x "$vulkan_sdk/bin/glslc"
 
@@ -79,18 +87,21 @@ prepare_llama_rn() {
         rm -rf "$ref"
         git clone --filter=blob:none --no-checkout https://github.com/mybigday/llama.rn "$ref"
         git -C "$ref" fetch --depth=1 origin "$LLAMA_RN_SHA"
+        NATIVE_DEPS_REBUILT=true
       }
     fi
   else
     rm -rf "$ref"
     git clone --filter=blob:none --no-checkout https://github.com/mybigday/llama.rn "$ref"
     git -C "$ref" fetch --depth=1 origin "$LLAMA_RN_SHA"
+    NATIVE_DEPS_REBUILT=true
   fi
   git -C "$ref" checkout --detach "$LLAMA_RN_SHA" || {
     rm -rf "$ref"
     git clone --filter=blob:none --no-checkout https://github.com/mybigday/llama.rn "$ref"
     git -C "$ref" fetch --depth=1 origin "$LLAMA_RN_SHA"
     git -C "$ref" checkout --detach "$LLAMA_RN_SHA"
+    NATIVE_DEPS_REBUILT=true
   }
   test "$(git -C "$ref" rev-parse HEAD)" = "$LLAMA_RN_SHA"
   test -s "$ref/cpp/rn-llama-version.h"
@@ -103,6 +114,7 @@ apply_native_patches() {
   patch --dry-run -p1 --forward < "$p/0003-cache-vulkan-shader-generation.patch"
   patch -p1 --forward < "$p/0003-cache-vulkan-shader-generation.patch"
   bash "$LLAMA_KT/scripts/bootstrap.sh" 2>&1 | tee "$ROOT_DIR/bootstrap-output.log"
+  LLAMA_BOOTSTRAP_REBUILT=true
 }
 
 bootstrap_cache_is_valid() {
@@ -176,4 +188,6 @@ fi
 validate_and_bridge
 apply_barbet_patches
 
+printf 'native_deps_rebuilt=%s\n' "$NATIVE_DEPS_REBUILT" >> "$GITHUB_OUTPUT"
+printf 'llama_bootstrap_rebuilt=%s\n' "$LLAMA_BOOTSTRAP_REBUILT" >> "$GITHUB_OUTPUT"
 echo 'Pinned native dependency preparation completed.'
