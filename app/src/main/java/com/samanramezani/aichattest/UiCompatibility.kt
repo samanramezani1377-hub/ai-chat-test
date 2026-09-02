@@ -1,11 +1,14 @@
 package com.samanramezani.aichattest
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import com.woogit.aicore.domain.ModelDescriptor
+import com.samanramezani.aichattest.ui.state.ExecutionState
 
 internal fun Boolean?.orFalse(): Boolean = this == true
 
-/** Compatibility bridge for the pre-refactor MainScreen call shape. */
 @Composable
 internal fun ApprovalDialog(
     execution: ExecutionState?,
@@ -13,20 +16,16 @@ internal fun ApprovalDialog(
     onReject: () -> Unit,
 ) {
     if (execution?.approvalRequired != true) return
-    androidx.compose.material3.AlertDialog(
+    AlertDialog(
         onDismissRequest = {},
-        title = { androidx.compose.material3.Text("تأیید عملیات") },
+        title = { Text("تأیید عملیات") },
         text = {
-            androidx.compose.foundation.layout.Column {
-                androidx.compose.material3.Text(execution.action)
-                androidx.compose.material3.Text("این عملیات قبل از اجرا به تأیید شما نیاز دارد.")
+            Column {
+                Text(execution.action)
+                Text("این عملیات قبل از اجرا به تأیید شما نیاز دارد.")
             }
         },
-        confirmButton = {
-            androidx.compose.material3.TextButton(onClick = onApprove) { androidx.compose.material3.Text("تأیید و اجرا") }
-        },
-        dismissButton = {
-            androidx.compose.material3.TextButton(onClick = onReject) { androidx.compose.material3.Text("رد") }
-        },
+        confirmButton = { TextButton(onClick = onApprove) { Text("تأیید و اجرا") } },
+        dismissButton = { TextButton(onClick = onReject) { Text("رد") } },
     )
 }
