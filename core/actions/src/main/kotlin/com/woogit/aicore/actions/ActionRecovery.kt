@@ -25,7 +25,8 @@ class ActionRecovery(
             ActionExecutionState.Prepared,
             ActionExecutionState.AwaitingApproval -> RecoveryDecision.RequiresUserIntervention
             ActionExecutionState.Approved -> RecoveryDecision.SafeToRetry
-            ActionExecutionState.Executing -> stateVerifier.inspect(executionId)
+            ActionExecutionState.Executing,
+            ActionExecutionState.Unknown -> stateVerifier.inspect(executionId)
             is ActionExecutionState.Failed -> RecoveryDecision.RequiresVerification
             ActionExecutionState.Rejected -> RecoveryDecision.RequiresUserIntervention
         }
