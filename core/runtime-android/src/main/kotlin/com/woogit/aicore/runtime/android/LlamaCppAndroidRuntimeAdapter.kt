@@ -1,6 +1,5 @@
 package com.woogit.aicore.runtime.android
 
-import com.woogit.aicore.domain.ChatMessage
 import com.woogit.aicore.domain.GenerationRequest
 import com.woogit.aicore.domain.GenerationResult
 import com.woogit.aicore.domain.ModelDescriptor
@@ -11,28 +10,20 @@ import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
 import com.woogit.aicore.runtime.RuntimeMetrics
 import com.woogit.aicore.runtime.RuntimeTraceEvent
-import com.tensai.llamakt.ChatMessage as EngineChatMessage
-import com.tensai.llamakt.LlamaEngine
-import com.tensai.llamakt.SamplingParams
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.channels.awaitClose
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Android llama.cpp runtime with conservative CPU+GPU offload and CPU fallback. */
+/** Direct llama.cpp Android runtime. GPU/Vulkan is attempted first and CPU remains the fallback. */
 class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 4096,
 ) : RuntimeAdapter, RuntimeMetrics {
-    private var engine: LlamaEngine? = null
     private val stopRequested = AtomicBoolean(false)
-    @Volatile private var selectedGpuLayers: Int = 0
-    @Volatile private var selectedCpuThreads: Int = 2
-    @Volatile private var selectedBackend: String = "CPU/NEON"
+    @Volatile private var selectedGpuLayers = 0
+    @Volatile private var selectedCpuThreads = 2
+    @Volatile private var selectedBackend = "CPU/NEON"
     @Volatile private var loadedContextLength: Int? = null
     @Volatile private var latestGeneration: GenerationResult? = null
     @Volatile private var latestLoadTimeMs: Long? = null
@@ -57,60 +48,23 @@ class LlamaCppAndroidRuntimeAdapter(
 
         val startedAt = System.nanoTime()
         return try {
-            val metadata = LlamaEngine.readMetadata(file.absolutePath)
-            val contextLength = model.metadata.contextLength?.toInt()?.takeIf { it > 0 }
-                ?: metadata?.contextLength?.toInt()?.takeIf { it > 0 }
-                ?: defaultContextLength
-
-            val probe = LlamaEngine()
-            val hasGpu = probe.availableBackends().any { backend ->
-                backend.type.equals("gpu", ignoreCase = true) ||
-                    backend.type.equals("igpu", ignoreCase = true) ||
-                    backend.description.contains("vulkan", ignoreCase = true) ||
-                    backend.description.contains("opencl", ignoreCase = true)
-            }
-            val plan = HybridResourcePolicy.choose(
-                blockCount = metadata?.blockCount ?: 0L,
-                hasGpu = hasGpu,
-                availableProcessors = Runtime.getRuntime().availableProcessors(),
-                bigCoreCount = LlamaEngine.detectBigCoreCount(),
-            )
-
-            fun createAndLoad(gpuLayers: Int): LlamaEngine {
-                val candidate = LlamaEngine()
-                candidate.load(
-                    path = file.absolutePath,
-                    nGpuLayers = gpuLayers,
-                    nCtx = contextLength,
-                    nThreads = plan.cpuThreads,
-                )
-                return candidate
+            val requested = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
+            val result = NativeLlamaCpp.load(file.absolutePath, requested)
+            if (result != 0) {
+                return ModelResult.Failure(ModelError.Inference("llama.cpp failed to load the model (code=$result)"))
             }
 
-            val loaded = try {
-                createAndLoad(plan.gpuLayers)
-            } catch (gpuFailure: Throwable) {
-                if (plan.gpuLayers == 0) throw gpuFailure
-                RuntimeDiagnosticsStore.recordTrace(
-                    RuntimeTraceEvent.Type.GENERATION_FAILED,
-                    "GPU load failed; falling back to CPU: ${gpuFailure.message}",
-                )
-                createAndLoad(0)
-            }
-
-            engine = loaded
-            val active = loaded.activeBackend()
-            selectedGpuLayers = if (plan.gpuLayers > 0 && !active.equals("CPU", ignoreCase = true)) plan.gpuLayers else 0
-            selectedCpuThreads = plan.cpuThreads
-            selectedBackend = if (selectedGpuLayers > 0) "Hybrid(CPU+$active)" else "CPU/NEON"
-            loadedContextLength = contextLength
+            val info = NativeLlamaCpp.runtimeInfo()
+            selectedBackend = info.substringBefore(';').ifBlank { "CPU/NEON" }
+            selectedGpuLayers = if (selectedBackend.contains("Vulkan", ignoreCase = true)) 99 else 0
+            selectedCpuThreads = 2
+            loadedContextLength = NativeLlamaCpp.contextLength().takeIf { it > 0 } ?: requested
             latestGeneration = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
             RuntimeDiagnosticsStore.recordLoaded(model, latestLoadTimeMs, runtimeInfo())
             ModelResult.Success(Unit)
         } catch (t: Throwable) {
-            engine?.free()
-            engine = null
+            NativeLlamaCpp.unload()
             selectedGpuLayers = 0
             selectedBackend = "CPU/NEON"
             loadedContextLength = null
@@ -121,8 +75,8 @@ class LlamaCppAndroidRuntimeAdapter(
 
     override suspend fun unload() {
         stopRequested.set(true)
-        engine?.free()
-        engine = null
+        NativeLlamaCpp.unload()
+        stopRequested.set(false)
         selectedGpuLayers = 0
         selectedBackend = "CPU/NEON"
         loadedContextLength = null
@@ -136,60 +90,49 @@ class LlamaCppAndroidRuntimeAdapter(
 
     suspend fun generateResult(request: GenerationRequest, onToken: suspend (String) -> Unit): ModelResult<GenerationResult> {
         currentCoroutineContext().ensureActive()
-        val runtime = engine ?: return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
+        if (loadedContextLength == null) {
+            return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
+        }
+
         val settings = request.settings
-        val requestedContext = settings.contextLength?.takeIf { it > 0 }
-        val effectiveContext = when {
-            requestedContext == null -> loadedContextLength ?: defaultContextLength
-            loadedContextLength != null -> requestedContext.coerceAtMost(loadedContextLength!!)
-            else -> requestedContext
-        }
-        val promptMessages = request.messages.map { message ->
-            EngineChatMessage(role = message.role.name.lowercase(), content = message.content)
-        }
         val prompt = try {
-            runtime.formatChat(promptMessages, enableThinking = true)
+            Qwen3PromptFormatter.format(request.messages)
         } catch (t: Throwable) {
             return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation"))
         }
 
-        val params = SamplingParams(
-            nPredict = settings.maxNewTokens.coerceAtLeast(1),
-            temperature = settings.temperature.toFloat().coerceAtLeast(0f),
-            topK = (settings.topK ?: 40).coerceAtLeast(0),
-            topP = (settings.topP ?: 0.9).toFloat().coerceIn(0f, 1f),
-            minP = (settings.minP ?: 0.05).toFloat().coerceIn(0f, 1f),
-            stopSequences = settings.stopSequences,
-        )
-
         stopRequested.set(false)
-        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "context=$effectiveContext backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
+        RuntimeDiagnosticsStore.recordTrace(
+            RuntimeTraceEvent.Type.GENERATION_STARTED,
+            "context=${loadedContextLength} backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads",
+        )
         val startedAt = System.nanoTime()
         var firstTokenAt: Long? = null
         val output = StringBuilder()
 
         return try {
-            val stream = callbackFlow {
-                val worker = launch(Dispatchers.Default) {
-                    try {
-                        runtime.completion(prompt, params) { token ->
-                            if (firstTokenAt == null) firstTokenAt = System.nanoTime()
-                            trySend(token)
-                        }
-                        close()
-                    } catch (t: Throwable) {
-                        close(t)
-                    }
-                }
-                awaitClose {
-                    if (!worker.isCompleted) runtime.interrupt()
-                    worker.cancel()
-                }
-            }
-            stream.collect { chunk ->
+            NativeLlamaCpp.generate(
+                prompt = prompt,
+                maxTokens = settings.maxNewTokens.coerceAtLeast(1),
+                temperature = settings.temperature.toFloat().coerceAtLeast(0f),
+                topK = (settings.topK ?: 40).coerceAtLeast(0),
+                topP = (settings.topP ?: 0.9).toFloat().coerceIn(0f, 1f),
+                minP = (settings.minP ?: 0.05).toFloat().coerceIn(0f, 1f),
+            ).collect { chunk ->
                 currentCoroutineContext().ensureActive()
-                if (!chunk.isEmpty() && !stopRequested.get()) {
-                    output.append(chunk)
+                if (chunk.isEmpty() || stopRequested.get()) return@collect
+                if (firstTokenAt == null) firstTokenAt = System.nanoTime()
+
+                output.append(chunk)
+                val stop = settings.stopSequences.firstOrNull { output.contains(it) }
+                if (stop != null) {
+                    stopRequested.set(true)
+                    NativeLlamaCpp.stop()
+                    val visible = output.toString().substringBefore(stop)
+                    output.setLength(0)
+                    output.append(visible)
+                    onToken(visible)
+                } else {
                     onToken(chunk)
                 }
             }
@@ -207,8 +150,7 @@ class LlamaCppAndroidRuntimeAdapter(
         } catch (t: CancellationException) {
             if (stopRequested.get()) {
                 val stopped = GenerationResult(
-                    text = output.toString(),
-                    outputTokens = null,
+                    text = output.toString(), outputTokens = null,
                     firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
                     generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
                     stopped = true,
@@ -220,8 +162,7 @@ class LlamaCppAndroidRuntimeAdapter(
         } catch (t: Throwable) {
             if (stopRequested.get()) {
                 val stopped = GenerationResult(
-                    text = output.toString(),
-                    outputTokens = null,
+                    text = output.toString(), outputTokens = null,
                     firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
                     generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
                     stopped = true,
@@ -241,12 +182,12 @@ class LlamaCppAndroidRuntimeAdapter(
     override suspend fun stopGeneration() {
         stopRequested.set(true)
         RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STOPPED)
-        engine?.interrupt()
+        NativeLlamaCpp.stop()
     }
 
     override fun runtimeInfo(): RuntimeInfo = RuntimeInfo(
-        name = "llama.cpp-android-hybrid",
-        version = "llama.kt@54ac0e85",
+        name = "llama.cpp-android-direct",
+        version = "c5fc7e34885ba31217e330809437afa993d27745",
         backend = selectedBackend,
         threads = selectedCpuThreads,
         gpuLayers = selectedGpuLayers,
