@@ -106,15 +106,59 @@ prepare_llama_rn() {
 
 apply_native_patches() {
   local script="$LLAMA_KT/scripts/bootstrap.sh"
-  local patch_file="$ROOT_DIR/ci/patches/0003-cache-vulkan-shader-generation.patch"
   local marker='Vulkan shader cache hit; reusing generated SPIR-V and per-shader .cpp files.'
 
-  if grep -Fq "$marker" "$script"; then
-    echo 'Vulkan shader cache patch already present; skipping patch application.'
-  else
-    echo 'Applying Vulkan shader cache patch...'
-    patch --dry-run -p1 --forward < "$patch_file"
-    patch -p1 --forward < "$patch_file"
+  if ! grep -Fq "$marker" "$script"; then
+    echo 'Applying Vulkan shader cache transformation...'
+    python3 - "$script" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text()
+start = text.find('echo "  Generating ggml-vulkan-shaders.hpp header..."')
+end_marker = '# 3. Bundle Vulkan C++ binding headers (vulkan.hpp — not in NDK sysroot)'
+end = text.find(end_marker, start)
+if start < 0 or end < 0:
+    raise SystemExit('ERROR: Vulkan shader generation block was not found; refusing to modify unknown upstream code.')
+
+new_block = r'''VK_SHADER_CACHE_SENTINEL="$VK_OUT_DIR/.complete"
+if [ -s "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" ] && [ -f "$VK_SHADER_CACHE_SENTINEL" ]; then
+  echo "  Vulkan shader cache hit; reusing generated SPIR-V and per-shader .cpp files."
+else
+  rm -rf "$VK_SPV_DIR" "$VK_OUT_DIR"
+  mkdir -p "$VK_SPV_DIR" "$VK_OUT_DIR"
+  echo "  Generating ggml-vulkan-shaders.hpp header..."
+  "$VK_GEN" \
+    --output-dir "$VK_SPV_DIR" \
+    --target-hpp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp"
+  echo "  Compiling GLSL shaders to SPIR-V and generating per-shader .cpp files..."
+  for comp in "$VK_SHADERS_SRC"/*.comp; do
+    base=$(basename "$comp")
+    "$VK_GEN" \
+      --glslc "$(which glslc)" \
+      --source "$comp" \
+      --output-dir "$VK_SPV_DIR" \
+      --target-hpp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" \
+      --target-cpp "$VK_OUT_DIR/${base}.cpp"
+  done
+  test -s "$VK_OUT_DIR/ggml-vulkan-shaders.hpp"
+  test "$(find "$VK_OUT_DIR" -maxdepth 1 -type f -name '*.cpp' | wc -l)" -gt 0
+  : > "$VK_SHADER_CACHE_SENTINEL"
+fi
+
+cp "$VK_OUT_DIR/ggml-vulkan-shaders.hpp" "$CPP_DIR/ggml-vulkan/"
+
+# Fix relative include in shader cpp files (they're compiled from shaders/ subdir)
+for f in "$VK_OUT_DIR"/*.cpp; do
+  sed 's|#include "ggml-vulkan-shaders.hpp"|#include "../ggml-vulkan-shaders.hpp"|g' "$f" > "$CPP_DIR/ggml-vulkan/shaders/$(basename "$f")"
+done
+
+'''
+text = text[:start] + new_block + text[end:]
+path.write_text(text)
+PY
   fi
 
   grep -Fq "$marker" "$script"
