@@ -142,10 +142,10 @@ class ActionLifecycle(
             completed
         } catch (t: Throwable) {
             val raw = t.message ?: t::class.simpleName.orEmpty()
-            checkpointStore.save(prepared.copy(state = ActionExecutionState.Unknown))
+            checkpointStore.save(prepared.copy(state = ActionExecutionState.Failed(raw)))
             trace(executionId, ActionTraceType.EXECUTION_FAILED, raw)
-            logError(executionId, prepared.actionId, raw, "وضعیت اجرای عملیات نامشخص است؛ ابتدا نتیجه واقعی باید بررسی شود.")
-            ActionExecutionState.Unknown
+            logError(executionId, prepared.actionId, raw, "اجرای عملیات با خطا مواجه شد.")
+            ActionExecutionState.Failed(raw)
         }
     }
 
