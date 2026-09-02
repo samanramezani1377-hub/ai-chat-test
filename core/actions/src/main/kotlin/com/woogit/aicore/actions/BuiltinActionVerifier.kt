@@ -7,15 +7,15 @@ import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.time.Instant
 
-/** Verifies observable postconditions of builtin actions instead of trusting their return strings. */
+/** Verifies observable postconditions of builtin actions instead of trusting return strings. */
 class BuiltinActionVerifier(private val workspaceRoot: Path) : ActionResultVerifier {
     private val workspace = WorkspacePathResolver(workspaceRoot)
 
     override suspend fun verify(action: PreparedAction, result: Any): VerificationResult = when (action.actionId) {
-        "create_file" -> verifyCreate(action, result)
+        "create_file" -> verifyCreate(action)
         "read_file" -> verifyRead(action, result)
-        "list_files" -> verifyList(result)
-        "delete_file" -> verifyDelete(action, result)
+        "list_files" -> verifyList(action, result)
+        "delete_file" -> verifyDelete(action)
         "calculate" -> verifyCalculate(result)
         "get_time" -> verifyTime(result)
         "get_model_info", "get_performance_stats", "get_device_info" ->
@@ -24,7 +24,7 @@ class BuiltinActionVerifier(private val workspaceRoot: Path) : ActionResultVerif
         else -> VerificationResult(false, "No independent verifier registered for action: ${action.actionId}")
     }
 
-    private fun verifyCreate(action: PreparedAction, result: Any): VerificationResult {
+    private fun verifyCreate(action: PreparedAction): VerificationResult {
         val name = runCatching { ActionArguments.string(action.input, "file_name") }.getOrNull()
             ?: return VerificationResult(false, "Missing file_name for verification")
         val content = runCatching { ActionArguments.string(action.input, "content") }.getOrNull()
@@ -51,10 +51,22 @@ class BuiltinActionVerifier(private val workspaceRoot: Path) : ActionResultVerif
         else VerificationResult(false, "Read result does not match current file contents")
     }
 
-    private fun verifyList(result: Any): VerificationResult =
-        VerificationResult(result.toString().lines().all { it.isBlank() || !it.contains("..${java.io.File.separator}") }, "verified:list_files")
+    private fun verifyList(action: PreparedAction, result: Any): VerificationResult {
+        val requested = runCatching { ActionArguments.string(action.input, "path") }.getOrNull().orEmpty()
+        val directory = runCatching { workspace.resolve(requested.ifBlank { "." }) }.getOrNull()
+            ?: return VerificationResult(false, "Invalid list directory")
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) return VerificationResult(false, "List directory no longer exists")
+        val lines = result.toString().lines().filter { it.isNotBlank() }
+        return if (lines.all { line ->
+            runCatching {
+                val entry = workspace.resolve(line)
+                entry.parent == directory && !Files.isSymbolicLink(entry)
+            }.getOrDefault(false)
+        }) VerificationResult(true, "verified:list_files:${lines.size} entries")
+        else VerificationResult(false, "List result contains an unsafe or invalid workspace path")
+    }
 
-    private fun verifyDelete(action: PreparedAction, result: Any): VerificationResult {
+    private fun verifyDelete(action: PreparedAction): VerificationResult {
         val name = runCatching { ActionArguments.string(action.input, "file_name") }.getOrNull()
             ?: return VerificationResult(false, "Missing file_name for verification")
         val path = runCatching { workspace.resolve(name) }.getOrNull()
