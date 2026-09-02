@@ -39,8 +39,8 @@ class AgentSessionTest {
 
         session.send("settings", supplied)
 
-        assertEquals(0.15, runtime.lastRequest!!.temperature)
-        assertEquals(77, runtime.lastRequest!!.maxNewTokens)
+        assertEquals(0.15, runtime.lastRequest!!.settings.temperature)
+        assertEquals(77, runtime.lastRequest!!.settings.maxNewTokens)
     }
 
     private class TestStore : ConversationStore {
