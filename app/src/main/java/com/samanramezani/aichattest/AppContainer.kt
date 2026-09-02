@@ -73,19 +73,12 @@ class AppContainer(context: Context? = null) {
     private val capabilityProvider: CapabilityProvider = object : CapabilityProvider {
         override fun supports(capability: String): Boolean = capability in setOf("filesystem", "runtime", "device", "utility")
     }
-
     private val checkpointStore = appContext?.let { AndroidActionCheckpointStore(it) } ?: InMemoryActionCheckpointStore()
     private val verifier = Verifier<Any> { result ->
         if (result.toString().isBlank()) com.woogit.aicore.domain.VerificationResult(false, "Action returned an empty result")
         else com.woogit.aicore.domain.VerificationResult(true, result.toString())
     }
-    private val lifecycle = ActionLifecycle(
-        actionRegistry,
-        capabilityProvider,
-        checkpointStore,
-        retryPolicy = DefaultActionRetryPolicy(2),
-        actionResultVerifier = workspaceRoot?.let { BuiltinActionVerifier(it) },
-    )
+    private val lifecycle = ActionLifecycle(actionRegistry, capabilityProvider, checkpointStore, retryPolicy = DefaultActionRetryPolicy(2), actionResultVerifier = workspaceRoot?.let { BuiltinActionVerifier(it) })
     private val coordinator = ActionPlanCoordinator(lifecycle, ProtocolActionIntentPlanner())
 
     private fun executionOutcome(state: ActionExecutionState): ActionExecutionOutcome = when (state) {
@@ -94,19 +87,20 @@ class AppContainer(context: Context? = null) {
         else -> ActionExecutionOutcome(false, false, "Action was not executed", errorCode = "NOT_EXECUTED")
     }
 
-    private val actionExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan ->
-        lifecycle.executeApproved(plan.prepared.executionId, verifier).let(::executionOutcome)
-    }
+    private val actionExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan -> lifecycle.executeApproved(plan.prepared.executionId, verifier).let(::executionOutcome) }
 
-    suspend fun pendingApproval(): PreparedAction? = lifecycle.pendingApprovals().maxByOrNull { it.executionId }
+    suspend fun pendingApproval(conversationId: String): PreparedAction? = lifecycle.pendingApprovals(conversationId).maxByOrNull { it.executionId }
 
-    suspend fun approveAndExecute(executionId: String): ActionExecutionOutcome = runCatching {
+    suspend fun approveAndExecute(executionId: String, conversationId: String? = null): ActionExecutionOutcome = runCatching {
+        val prepared = lifecycle.checkpoint(executionId)
+        if (conversationId != null) require(prepared.conversationId == conversationId) { "Approval belongs to another conversation" }
         val approved = lifecycle.approve(executionId)
         lifecycle.executeApproved(approved.executionId, verifier).let(::executionOutcome)
     }.getOrElse { ActionExecutionOutcome(false, false, it.message ?: "Approval failed", errorCode = "APPROVAL_FAILED") }
 
-    suspend fun reject(executionId: String): Boolean = runCatching {
+    suspend fun reject(executionId: String, conversationId: String? = null): Boolean = runCatching {
         val prepared = lifecycle.checkpoint(executionId)
+        if (conversationId != null) require(prepared.conversationId == conversationId) { "Approval belongs to another conversation" }
         check(prepared.state == ActionExecutionState.AwaitingApproval) { "Action is not awaiting approval" }
         lifecycle.reject(prepared)
         true
@@ -121,6 +115,7 @@ class AppContainer(context: Context? = null) {
             actionPlanCoordinator = coordinator,
             actionExecutor = actionExecutor,
             eventSink = eventSink,
+            conversationId = conversationId,
         )
     }
 
