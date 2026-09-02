@@ -32,15 +32,17 @@ class ActionProtocolParser {
         return decodeJsonString(json.substring(index + 1, end))
     }
 
-    private fun stringOrNumber(json: String, key: String): String? =
-        string(json, key) ?: run {
-            val marker = Regex("\\\"${Regex.escape(key)}\\\"\\s*:").find(json) ?: return null
-            var index = marker.range.last + 1
-            while (index < json.length && json[index].isWhitespace()) index++
-            val start = index
-            while (index < json.length && json[index].isDigit()) index++
-            if (index == start) null else json.substring(start, index)
-        }
+    private fun stringOrNumber(json: String, key: String): String? {
+        string(json, key)?.let { return it }
+
+        val marker = Regex("\\\"${Regex.escape(key)}\\\"\\s*:").find(json) ?: return null
+        var index = marker.range.last + 1
+        while (index < json.length && json[index].isWhitespace()) index++
+        val start = index
+        while (index < json.length && json[index].isDigit()) index++
+        if (index == start) return null
+        return json.substring(start, index)
+    }
 
     private fun object(json: String, key: String): String? {
         val marker = Regex("\\\"${Regex.escape(key)}\\\"\\s*:").find(json) ?: return null
