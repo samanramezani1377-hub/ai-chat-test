@@ -144,6 +144,7 @@ jobs:
             test "$(git -C /tmp/llama.rn-ref rev-parse HEAD)" = "$LLAMA_RN_SHA"
             test -f /tmp/llama.rn-ref/cpp/rn-llama.cpp
             test -f /tmp/llama.rn-ref/cpp/rn-llama.h
+            test -f /tmp/llama.rn-ref/cpp/rn-llama-version.h
             echo '::endgroup::'
           }
           install_ndk & ndk_pid=$!
@@ -189,7 +190,18 @@ jobs:
             apply_downstream_patch
             bash libs/llama.kt/scripts/bootstrap.sh 2>&1 | tee bootstrap-output.log
             test "$(git -C "$LLAMA_CPP_DIR" rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
+          fi
 
+          # llama.rn's llama.cpp patch deliberately makes llama.cpp consume this
+          # fallback version header. llama.kt's bootstrap omitted it from its
+          # glue-copy list, so make the generated native tree self-contained.
+          test -s /tmp/llama.rn-ref/cpp/rn-llama-version.h
+          cp /tmp/llama.rn-ref/cpp/rn-llama-version.h "$CPP_DIR/rn-llama-version.h"
+          test -s "$CPP_DIR/rn-llama-version.h"
+
+          # Only stage the bootstrap output after the required rn-llama version
+          # header is present, so future cache hits contain a complete tree.
+          if [ ! -f "$BOOTSTRAP_CACHE_DIR/.complete" ]; then
             rm -rf "$BOOTSTRAP_CACHE_DIR"
             mkdir -p "$BOOTSTRAP_CACHE_DIR/cpp"
             cp -a "$CPP_DIR/." "$BOOTSTRAP_CACHE_DIR/cpp/"
@@ -222,6 +234,7 @@ jobs:
           test -s "$CPP_DIR/llama-kv-cache-dsv4.h"
           test -s "$CPP_DIR/ggml-feats.h"
           test -s "$CPP_DIR/tools/mtmd/mtmd-internal.h"
+          test -s "$CPP_DIR/rn-llama-version.h"
 
       - name: Apply llama.rn Barbet compatibility patches
         run: |
