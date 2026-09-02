@@ -1,6 +1,6 @@
 package com.woogit.aicore.actions
 
-/** Development trace for the complete action lifecycle. Keep raw technical details here. */
+/** Single lifecycle trace contract for action execution. */
 enum class ActionTraceType {
     PREPARED,
     VALIDATED,
@@ -12,7 +12,9 @@ enum class ActionTraceType {
     VERIFICATION_FAILED,
     EXECUTION_FAILED,
     RETRY_REQUESTED,
-    RETRY_REJECTED
+    RETRY_REJECTED,
+    RECOVERY_REQUIRED,
+    RECOVERED
 }
 
 data class ActionTraceEvent(
