@@ -61,6 +61,24 @@ jobs:
       - name: Install NDK 27.2
         run: sdkmanager "ndk;27.2.12479018"
 
+      - name: Install pinned Vulkan SDK for shader generation
+        run: |
+          set -euo pipefail
+          VULKAN_VERSION=1.4.321.1
+          VULKAN_ARCHIVE="vulkansdk-linux-x86_64-${VULKAN_VERSION}.tar.xz"
+          VULKAN_SHA256=f22a3625bd4d7a32e7a0d926ace16d5278c149e938dac63cecc00537626cbf73
+          curl -L --fail --retry 3 -o "/tmp/${VULKAN_ARCHIVE}" "https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/linux/${VULKAN_ARCHIVE}"
+          echo "${VULKAN_SHA256}  /tmp/${VULKAN_ARCHIVE}" | sha256sum -c -
+          rm -rf "$HOME/vulkan-sdk"
+          mkdir -p "$HOME/vulkan-sdk"
+          tar -xf "/tmp/${VULKAN_ARCHIVE}" -C "$HOME/vulkan-sdk"
+          echo "VULKAN_SDK=$HOME/vulkan-sdk/${VULKAN_VERSION}/x86_64" >> "$GITHUB_ENV"
+          echo "PATH=$HOME/vulkan-sdk/${VULKAN_VERSION}/x86_64/bin:$PATH" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$HOME/vulkan-sdk/${VULKAN_VERSION}/x86_64/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          export VULKAN_SDK="$HOME/vulkan-sdk/${VULKAN_VERSION}/x86_64"
+          export PATH="$VULKAN_SDK/bin:$PATH"
+          glslc --version
+
       - name: Prepare pinned llama.rn sources for llama.kt bootstrap
         run: |
           set -euo pipefail
