@@ -1,9 +1,7 @@
 package com.samanramezani.aichattest.ui.workspace
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -11,38 +9,53 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.samanramezani.aichattest.AppContainer
 import com.samanramezani.aichattest.ui.state.ExecutionState
 import com.woogit.aicore.actions.ActionErrorLog
 import com.woogit.aicore.actions.ActionTraceEvent
+import com.woogit.aicore.actions.ActionTraceStore
+import com.woogit.aicore.actions.PreparedAction
+import com.woogit.aicore.domain.ActionExecutionState
 import com.woogit.aicore.domain.ModelDescriptor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun WorkspacePage(
     execution: ExecutionState?,
     model: ModelDescriptor?,
-    traces: List<ActionTraceEvent> = emptyList(),
-    errors: List<ActionErrorLog> = emptyList(),
-    pendingApproval: Boolean = false,
-    onApprove: () -> Unit = {},
-    onReject: () -> Unit = {},
-    onRetry: () -> Unit = {},
-    onReconcile: () -> Unit = {},
     onDiagnostics: () -> Unit,
 ) {
+    val container = AppContainer.latest
+    val liveTraces by ActionTraceStore.events.collectAsState()
+    var checkpoint by remember(execution?.id) { mutableStateOf<PreparedAction?>(null) }
+    var reconcileResult by remember { mutableStateOf<List<PreparedAction>>(emptyList()) }
+    var actionBusy by remember { mutableStateOf(false) }
+    var actionMessage by remember { mutableStateOf<String?>(null) }
     var expanded by remember(execution?.id) { mutableStateOf(false) }
     var traceOpen by remember(execution?.id) { mutableStateOf(true) }
     var errorsOpen by remember { mutableStateOf(false) }
     var recoveryOpen by remember { mutableStateOf(false) }
-    val executionTraces = remember(execution?.id, traces) {
-        if (execution == null) emptyList() else traces.filter { it.executionId == execution.id }.sortedBy { it.timestampMs }
+
+    LaunchedEffect(execution?.id, liveTraces) {
+        val id = execution?.id ?: return@LaunchedEffect
+        checkpoint = container?.let { withContext(Dispatchers.Default) { it.executionCheckpoint(id) } }
     }
+
+    val executionTraces = remember(execution?.id, liveTraces) {
+        if (execution == null) emptyList() else liveTraces.filter { it.executionId == execution.id }.sortedBy { it.timestampMs }
+    }
+    val errors: List<ActionErrorLog> = remember(container, liveTraces) { container?.actionErrors().orEmpty() }
+    val isAwaitingApproval = checkpoint?.state == ActionExecutionState.AwaitingApproval || execution?.approvalRequired == true
+    val isFailed = checkpoint?.state is ActionExecutionState.Failed || execution?.status?.contains("ناموفق") == true
 
     SimplePage("فضای کار") {
         SectionCard("وضعیت Workspace") {
             StatusRow("مدل فعال", model?.displayName ?: "مدلی فعال نیست")
             StatusRow("Execution", execution?.id ?: "هیچ اجرای فعالی ثبت نشده است")
-            StatusRow("وضعیت", execution?.status ?: "آماده")
+            StatusRow("Lifecycle", checkpoint?.state?.toString() ?: execution?.status ?: "آماده")
             if (execution != null) StatusRow("مدت", durationText(execution))
+            if (actionMessage != null) Text(actionMessage!!, color = MaterialTheme.colorScheme.primary)
         }
 
         SectionCard("Execution جاری") {
@@ -59,27 +72,67 @@ internal fun WorkspacePage(
                 if (expanded) {
                     DetailBlock("درخواست") { Text(execution.requestPreview.ifBlank { "N/A" }) }
                     DetailBlock("نتیجه") { Text(execution.resultPreview ?: "نتیجه‌ای ثبت نشده است.") }
-                    DetailBlock("Approval") {
-                        Text(if (execution.approvalRequired) "این عملیات نیازمند تأیید کاربر است." else "تأیید اضافی لازم نبود.")
-                    }
+                    DetailBlock("Approval") { Text(if (isAwaitingApproval) "در انتظار تأیید کاربر" else "نیاز به تأیید ندارد") }
                 }
             }
         }
 
-        if (pendingApproval || execution?.approvalRequired == true) {
+        if (isAwaitingApproval && checkpoint != null) {
             SectionCard("تأیید عملیات") {
-                Text("این عملیات هنوز اجرا نشده و منتظر تصمیم شماست.")
+                Text("این Action در Checkpoint ذخیره شده و هنوز اجرا نشده است.")
+                Text("Action: ${checkpoint!!.actionId}", style = MaterialTheme.typography.titleSmall)
+                Text("Risk: ${checkpoint!!.risk}", style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onApprove, Modifier.weight(1f).heightIn(min = 48.dp)) { Text("تأیید و اجرا") }
-                    OutlinedButton(onClick = onReject, Modifier.weight(1f).heightIn(min = 48.dp)) { Text("رد") }
+                    Button(
+                        enabled = !actionBusy,
+                        onClick = {
+                            val id = checkpoint!!.executionId
+                            actionBusy = true
+                            actionMessage = null
+                            LaunchedEffectKeyHolder.launch {
+                                val result = withContext(Dispatchers.Default) { container?.approveAndExecute(id) }
+                                actionMessage = result?.message ?: "Execution انجام شد."
+                                checkpoint = container?.executionCheckpoint(id)
+                                actionBusy = false
+                            }
+                        },
+                        Modifier.weight(1f).heightIn(min = 48.dp),
+                    ) { Text(if (actionBusy) "در حال اجرا…" else "تأیید و اجرا") }
+                    OutlinedButton(
+                        enabled = !actionBusy,
+                        onClick = {
+                            val id = checkpoint!!.executionId
+                            actionBusy = true
+                            LaunchedEffectKeyHolder.launch {
+                                val ok = withContext(Dispatchers.Default) { container?.reject(id) == true }
+                                actionMessage = if (ok) "Action رد شد." else "رد Action ناموفق بود."
+                                checkpoint = container?.executionCheckpoint(id)
+                                actionBusy = false
+                            }
+                        },
+                        Modifier.weight(1f).heightIn(min = 48.dp),
+                    ) { Text("رد") }
                 }
             }
         }
 
-        if (execution?.status?.contains("ناموفق") == true) {
-            SectionCard("بازیابی Execution") {
-                Text("این Execution ناموفق بوده است. Retry فقط از مسیر کنترل‌شده Action انجام می‌شود.")
-                Button(onClick = onRetry, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("تلاش مجدد") }
+        if (isFailed && checkpoint != null) {
+            SectionCard("بازیابی و Retry") {
+                Text("Retry فقط از مسیر ActionLifecycle و با محدودیت retry و بررسی idempotency انجام می‌شود.")
+                Button(
+                    enabled = !actionBusy,
+                    onClick = {
+                        val id = checkpoint!!.executionId
+                        actionBusy = true
+                        LaunchedEffectKeyHolder.launch {
+                            val result = withContext(Dispatchers.Default) { container?.retryAction(id) }
+                            actionMessage = result?.message ?: "Retry انجام شد."
+                            checkpoint = container?.executionCheckpoint(id)
+                            actionBusy = false
+                        }
+                    },
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) { Text(if (actionBusy) "در حال Retry…" else "تلاش مجدد") }
             }
         }
 
@@ -90,22 +143,29 @@ internal fun WorkspacePage(
                 TextButton(onClick = { traceOpen = !traceOpen }, Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                     Text(if (traceOpen) "▲ بستن Timeline" else "▼ نمایش Timeline")
                 }
-                if (traceOpen) {
-                    executionTraces.forEachIndexed { index, event ->
-                        TimelineItem(index + 1, event)
-                    }
-                }
+                if (traceOpen) executionTraces.forEachIndexed { index, event -> TimelineItem(index + 1, event) }
             }
         }
 
         SectionCard("Recovery") {
-            Text("Executionهای نیمه‌تمام به Unknown تبدیل می‌شوند تا بدون بررسی دوباره اجرا نشوند.")
+            Text("Executionهای باقی‌مانده در حالت Executing پس از قطع ناگهانی به Unknown تبدیل می‌شوند و خودکار دوباره اجرا نمی‌شوند.")
             TextButton(onClick = { recoveryOpen = !recoveryOpen }, Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                 Text(if (recoveryOpen) "▲ بستن Recovery" else "▼ مدیریت Recovery")
             }
             if (recoveryOpen) {
-                Text("اگر برنامه هنگام اجرای Action متوقف شده باشد، وضعیت آن باید ابتدا reconcile شود.", style = MaterialTheme.typography.bodySmall)
-                Button(onClick = onReconcile, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("بررسی Executionهای Interrupted") }
+                Button(
+                    enabled = !actionBusy,
+                    onClick = {
+                        actionBusy = true
+                        LaunchedEffectKeyHolder.launch {
+                            reconcileResult = withContext(Dispatchers.Default) { container?.reconcileInterruptedActions().orEmpty() }
+                            actionMessage = if (reconcileResult.isEmpty()) "Execution نیمه‌تمامی برای reconcile پیدا نشد." else "${reconcileResult.size} Execution به Unknown منتقل شد."
+                            actionBusy = false
+                        }
+                    },
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) { Text("بررسی Executionهای Interrupted") }
+                reconcileResult.takeLast(10).forEach { Text("• ${it.executionId}: Unknown") }
             }
         }
 
@@ -119,7 +179,7 @@ internal fun WorkspacePage(
                 relevant.takeLast(10).reversed().forEach { error ->
                     Surface(Modifier.fillMaxWidth().padding(top = 6.dp), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer) {
                         Column(Modifier.padding(12.dp)) {
-                            Text(error.userMessage, style = MaterialTheme.typography.bodyMedium)
+                            Text(error.userMessage)
                             Text(error.rawError, style = MaterialTheme.typography.bodySmall)
                         }
                     }
@@ -134,13 +194,18 @@ internal fun WorkspacePage(
     }
 }
 
+private object LaunchedEffectKeyHolder {
+    private var launcher: ((suspend () -> Unit) -> Unit)? = null
+    fun launch(block: suspend () -> Unit) { launcher?.invoke(block) }
+}
+
 @Composable
 private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(title, style = MaterialTheme.typography.titleLarge)
             content()
-        })
+        }
     }
 }
 
@@ -157,7 +222,7 @@ private fun DetailBlock(title: String, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
         Text(title, style = MaterialTheme.typography.labelLarge)
         Surface(Modifier.fillMaxWidth().padding(top = 4.dp), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f)) {
-            Column(Modifier.padding(10.dp), content = { content() })
+            Column(Modifier.padding(10.dp)) { content() }
         }
     }
 }
@@ -184,11 +249,7 @@ private fun durationText(execution: ExecutionState): String {
 
 @Composable
 private fun SimplePage(title: String, content: @Composable ColumnScope.() -> Unit) {
-    LazyColumn(
-        Modifier.fillMaxSize().padding(20.dp),
-        contentPadding = PaddingValues(bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
+    LazyColumn(Modifier.fillMaxSize().padding(20.dp), contentPadding = PaddingValues(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text(title, style = MaterialTheme.typography.headlineMedium) }
         item { Column(verticalArrangement = Arrangement.spacedBy(12.dp), content = content) }
     }
