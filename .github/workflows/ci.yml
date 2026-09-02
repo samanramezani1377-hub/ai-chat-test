@@ -54,7 +54,7 @@ jobs:
           path: |
             /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
             $HOME/vulkan-sdk
-          key: ci-vulkan-${{ github.run_id }}-1.4.321.1
+          key: ci-vulkan-${{ runner.os }}-${{ github.run_id }}-1.4.321.1
 
       - name: Restore native CMake cache
         uses: actions/cache/restore@v4
@@ -75,4 +75,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: core/runtime-android/.cxx
-          key: ci-llama-cpp-${{ github.run_id }}-${{ hashFiles('core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp') }}
+          key: ci-llama-cpp-${{ runner.os }}-${{ github.run_id }}-${{ hashFiles('core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp') }}
