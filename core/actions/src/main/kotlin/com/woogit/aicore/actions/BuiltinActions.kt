@@ -12,81 +12,81 @@ import java.time.format.DateTimeFormatter
 
 private const val MAX_FILE_BYTES = 1_048_576L
 
-/** Minimal argument reader retained for the current dependency-free core. */
+/** Strictly extracts a named JSON string and decodes standard JSON escapes. */
 internal object ActionArguments {
     fun string(input: Any, name: String): String {
         val raw = input.toString()
-        val pattern = Regex("\\\"${Regex.escape(name)}\\\"\\s*:\\s*\\\"((?:\\\\.|[^\\\"])*)\\\"")
-        val value = pattern.find(raw)?.groupValues?.get(1)
+        val marker = Regex("\\\"${Regex.escape(name)}\\\"\\s*:").find(raw)
             ?: throw IllegalArgumentException("Missing string argument: $name")
-        return value
-            .replace("\\\\\\\"", "\\\"")
-            .replace("\\\\\\\\", "\\\\")
+        var start = marker.range.last + 1
+        while (start < raw.length && raw[start].isWhitespace()) start++
+        require(start < raw.length && raw[start] == '\"') { "Argument must be a JSON string: $name" }
+        var index = start + 1
+        var escaped = false
+        while (index < raw.length) {
+            val c = raw[index]
+            if (!escaped && c == '"') return decode(raw.substring(start + 1, index), name)
+            if (escaped) escaped = false else if (c == '\\') escaped = true
+            index++
+        }
+        throw IllegalArgumentException("Unterminated string argument: $name")
+    }
+
+    private fun decode(value: String, name: String): String {
+        val out = StringBuilder(value.length)
+        var i = 0
+        while (i < value.length) {
+            val c = value[i]
+            if (c != '\\') { out.append(c); i++; continue }
+            if (++i >= value.length) throw IllegalArgumentException("Invalid escape in argument: $name")
+            when (val escaped = value[i]) {
+                '"', '\\', '/' -> out.append(escaped)
+                'b' -> out.append('\b')
+                'f' -> out.append('\u000C')
+                'n' -> out.append('\n')
+                'r' -> out.append('\r')
+                't' -> out.append('\t')
+                'u' -> {
+                    require(i + 4 < value.length) { "Invalid unicode escape in argument: $name" }
+                    val code = value.substring(i + 1, i + 5).toIntOrNull(16)
+                        ?: throw IllegalArgumentException("Invalid unicode escape in argument: $name")
+                    out.append(code.toChar())
+                    i += 4
+                }
+                else -> throw IllegalArgumentException("Invalid escape in argument: $name")
+            }
+            i++
+        }
+        return out.toString()
     }
 }
 
 private class ExpressionParser(private val source: String) {
     private var index = 0
     fun parse(): Double {
-        skipWhitespace()
-        val value = expression()
-        skipWhitespace()
+        skipWhitespace(); val value = expression(); skipWhitespace()
         require(index == source.length) { "Unexpected token at position $index" }
         require(value.isFinite()) { "Result is not finite" }
         return value
     }
     private fun expression(): Double {
         var value = term()
-        while (true) {
-            skipWhitespace()
-            value = when {
-                consume('+') -> value + term()
-                consume('-') -> value - term()
-                else -> return value
-            }
-        }
+        while (true) { skipWhitespace(); value = when { consume('+') -> value + term(); consume('-') -> value - term(); else -> return value } }
     }
     private fun term(): Double {
         var value = unary()
-        while (true) {
-            skipWhitespace()
-            value = when {
-                consume('*') -> value * unary()
-                consume('/') -> {
-                    val divisor = unary()
-                    require(divisor != 0.0) { "Division by zero" }
-                    value / divisor
-                }
-                else -> return value
-            }
-        }
+        while (true) { skipWhitespace(); value = when { consume('*') -> value * unary(); consume('/') -> { val divisor = unary(); require(divisor != 0.0) { "Division by zero" }; value / divisor }; else -> return value } }
     }
-    private fun unary(): Double {
-        skipWhitespace()
-        return when {
-            consume('+') -> unary()
-            consume('-') -> -unary()
-            else -> primary()
-        }
-    }
+    private fun unary(): Double { skipWhitespace(); return when { consume('+') -> unary(); consume('-') -> -unary(); else -> primary() } }
     private fun primary(): Double {
         skipWhitespace()
-        if (consume('(')) {
-            val value = expression()
-            skipWhitespace()
-            require(consume(')')) { "Missing ')'" }
-            return value
-        }
+        if (consume('(')) { val value = expression(); skipWhitespace(); require(consume(')')) { "Missing ')'" }; return value }
         val start = index
         while (index < source.length && (source[index].isDigit() || source[index] == '.')) index++
         require(index > start) { "Expected number at position $index" }
-        return source.substring(start, index).toDoubleOrNull()
-            ?: throw IllegalArgumentException("Invalid number")
+        return source.substring(start, index).toDoubleOrNull() ?: throw IllegalArgumentException("Invalid number")
     }
-    private fun consume(char: Char): Boolean {
-        if (index < source.length && source[index] == char) { index++; return true }
-        return false
-    }
+    private fun consume(char: Char): Boolean { if (index < source.length && source[index] == char) { index++; return true }; return false }
     private fun skipWhitespace() { while (index < source.length && source[index].isWhitespace()) index++ }
 }
 
@@ -101,10 +101,7 @@ class CalculateAction : Action<Any, Any> {
     }
 }
 
-class GetTimeAction(
-    private val clock: () -> Instant = { Instant.now() },
-    private val zoneId: ZoneId = ZoneId.systemDefault(),
-) : Action<Any, Any> {
+class GetTimeAction(private val clock: () -> Instant = { Instant.now() }, private val zoneId: ZoneId = ZoneId.systemDefault()) : Action<Any, Any> {
     override val id = "get_time"
     override val risk = RiskLevel.LOW
     override suspend fun execute(input: Any): Any {
@@ -115,14 +112,12 @@ class GetTimeAction(
 
 class WorkspacePathResolver(private val root: Path) {
     private val rootPath: Path
-
     init {
         Files.createDirectories(root)
         require(Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) { "Workspace root is not a directory" }
         require(!Files.isSymbolicLink(root)) { "Workspace root must not be a symbolic link" }
         rootPath = root.toAbsolutePath().normalize().toRealPath(LinkOption.NOFOLLOW_LINKS)
     }
-
     fun resolve(relativePath: String): Path {
         require(relativePath.isNotBlank()) { "Path must not be blank" }
         val candidate = rootPath.resolve(relativePath).normalize()
@@ -130,17 +125,12 @@ class WorkspacePathResolver(private val root: Path) {
         validateNoSymlinkTraversal(candidate)
         return candidate
     }
-
     fun relative(path: Path): String = rootPath.relativize(path.toAbsolutePath().normalize()).toString()
-
     private fun validateNoSymlinkTraversal(candidate: Path) {
         var current = rootPath
-        val relative = rootPath.relativize(candidate)
-        for (part in relative) {
+        for (part in rootPath.relativize(candidate)) {
             current = current.resolve(part)
-            if (Files.exists(current, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(current)) {
-                throw IllegalArgumentException("Symbolic links are not allowed inside workspace paths")
-            }
+            if (Files.exists(current, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(current)) throw IllegalArgumentException("Symbolic links are not allowed inside workspace paths")
         }
     }
 }
@@ -179,9 +169,7 @@ class ListFilesAction(private val workspace: WorkspacePathResolver) : Action<Any
         val relative = runCatching { ActionArguments.string(input, "path") }.getOrNull().orEmpty()
         val directory = workspace.resolve(relative.ifBlank { "." })
         require(Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) { "Directory not found" }
-        Files.list(directory).use { stream ->
-            return stream.filter { !Files.isSymbolicLink(it) }.map(workspace::relative).sorted().toList().joinToString("\n")
-        }
+        Files.list(directory).use { stream -> return stream.filter { !Files.isSymbolicLink(it) }.map(workspace::relative).sorted().toList().joinToString("\n") }
     }
 }
 
