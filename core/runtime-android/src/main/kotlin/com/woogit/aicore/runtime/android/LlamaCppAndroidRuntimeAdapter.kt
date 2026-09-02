@@ -76,7 +76,7 @@ class LlamaCppAndroidRuntimeAdapter(
     suspend fun generateResult(request: GenerationRequest, onToken: suspend (String) -> Unit): ModelResult<GenerationResult> {
         currentCoroutineContext().ensureActive()
         val model = loadedModel ?: return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
-        val prompt = try { buildPrompt(model, request.messages) } catch (t: Throwable) {
+        val prompt = try { buildPrompt(request.messages) } catch (t: Throwable) {
             return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation"))
         }
         val settings = request.settings
@@ -166,19 +166,7 @@ class LlamaCppAndroidRuntimeAdapter(
         backend = if (gpuLayers > 0) "GPU" else "CPU/NEON",
     )
 
-    private fun buildPrompt(model: LlamaModel, messages: List<ChatMessage>): String {
-        val json = org.json.JSONArray().apply {
-            messages.forEach { message -> put(org.json.JSONObject().put("role", message.role.toTemplateRole()).put("content", message.content)) }
-        }
-        return runCatching { model.applyChatTemplate(json.toString(), true) }.getOrElse { Qwen3PromptFormatter.format(messages) }
-    }
-
-    private fun ChatMessage.Role.toTemplateRole(): String = when (this) {
-        ChatMessage.Role.SYSTEM -> "system"
-        ChatMessage.Role.USER -> "user"
-        ChatMessage.Role.ASSISTANT -> "assistant"
-        ChatMessage.Role.TOOL -> "tool"
-    }
+    private fun buildPrompt(messages: List<ChatMessage>): String = Qwen3PromptFormatter.format(messages)
 
     private suspend fun emitRange(text: StringBuilder, start: Int, end: Int, onToken: suspend (String) -> Unit) {
         if (end > start) onToken(text.substring(start, end))
