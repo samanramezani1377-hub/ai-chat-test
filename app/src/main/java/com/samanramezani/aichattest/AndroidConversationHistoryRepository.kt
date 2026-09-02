@@ -59,7 +59,7 @@ class AndroidConversationHistoryRepository(context: Context) : ConversationHisto
         writeAll(current.toMutableList().also { it[index] = current[index].copy(updatedAtEpochMs = nowEpochMs, messageCount = messageCount) }); true
     }
 
-    override suspend fun messages(id: String): List<ConversationMessage> = synchronized(lock) { readMessages(id) }
+    override fun messages(id: String): List<ConversationMessage> = synchronized(lock) { readMessages(id) }
 
     override suspend fun append(id: String, message: ConversationMessage, nowEpochMs: Long): Boolean = synchronized(lock) {
         val current = readAll(); val index = current.indexOfFirst { it.id == id }
