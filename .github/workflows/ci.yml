@@ -35,9 +35,6 @@ jobs:
           }
           test "$(git -C libs/llama.kt rev-parse HEAD)" = "5a20956b1fe2f40d07252f079c31bcaa08250e6b"
           git -C libs/llama.kt submodule sync --recursive
-          # Do not make the nested llama.cpp checkout shallow. Git 2.55 on the
-          # hosted runner can race on .git/shallow when a second fetch changes
-          # the nested submodule revision.
           git -C libs/llama.kt submodule update --init --recursive
 
       - name: Pin llama.cpp revision used by llama.kt bootstrap
@@ -96,8 +93,6 @@ jobs:
       - name: Apply downstream llama.rn abort patch
         run: |
           cp ci/patches/0002-abort-callback-mid-graph-cancel.patch libs/llama.kt/patches/0002-abort-callback-mid-graph-cancel.patch
-          # CEIL_DIV is already overflow-safe in the pinned llama.cpp revision;
-          # the old llama.kt copy of this patch targets pre-fix generated sources.
           rm -f libs/llama.kt/patches/0001-vulkan-uma-descriptor-ceildiv.patch
 
       - name: Bootstrap llama.cpp sources
@@ -105,17 +100,15 @@ jobs:
           set -o pipefail
           bash libs/llama.kt/scripts/bootstrap.sh 2>&1 | tee bootstrap-output.log
           test "$(git -C libs/llama.kt/third_party/llama.cpp rev-parse HEAD)" = "c5fc7e34885ba31217e330809437afa993d27745"
-          # bootstrap rewrites ggml symbols to the LM_GGML namespace. Keep the
-          # copied ARM runtime feature header in that same namespace; copying it
-          # after bootstrap otherwise bypasses the rewrite and breaks cpu-feats.cpp.
           test -f libs/llama.kt/third_party/llama.cpp/ggml/src/ggml-feats.h
-          cp libs/llama.kt/third_party/llama.cpp/ggml/src/ggml-feats.h \
-             libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
-          sed -i 's/GGML_/LM_GGML_/g; s/ggml_/lm_ggml_/g' \
-            libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
+          cp libs/llama.kt/third_party/llama.cpp/ggml/src/ggml-feats.h libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
+          sed -i 's/GGML_/LM_GGML_/g; s/ggml_/lm_ggml_/g' libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
           test -s libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
           grep -Fq 'lm_ggml_feats_arch64_runtime_t' libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
           grep -Fq 'lm_ggml_feats_get_arch64_runtime' libs/llama.kt/llama-kt/src/main/cpp/ggml-feats.h
+          test -f libs/llama.kt/third_party/llama.cpp/tools/mtmd/mtmd-internal.h
+          cp libs/llama.kt/third_party/llama.cpp/tools/mtmd/mtmd-internal.h libs/llama.kt/llama-kt/src/main/cpp/tools/mtmd/mtmd-internal.h
+          test -s libs/llama.kt/llama-kt/src/main/cpp/tools/mtmd/mtmd-internal.h
 
       - name: Apply llama.rn Barbet compatibility patches
         run: |
