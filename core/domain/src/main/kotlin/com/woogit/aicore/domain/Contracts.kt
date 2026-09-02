@@ -27,15 +27,21 @@ data class ChatMessage(val role: Role, val content: String) {
 }
 
 data class InferenceSettings(
+    /** Balanced default for local instruction-following models. */
     val temperature: Double = 0.7,
+    /** Practical response size that keeps mobile inference responsive. */
     val maxNewTokens: Int = 512,
-    val topK: Int? = null,
-    val topP: Double? = null,
-    val minP: Double? = null,
-    val repeatPenalty: Double? = null,
+    /** Common local-LLM sampling defaults; nullable means explicitly disabled only when chosen by the user. */
+    val topK: Int? = 40,
+    val topP: Double? = 0.9,
+    val minP: Double? = 0.0,
+    val repeatPenalty: Double? = 1.1,
+    /** Null means use a non-deterministic seed. */
     val seed: Long? = null,
+    /** No forced stop strings by default; the model/runtime decides when generation naturally ends. */
     val stopSequences: List<String> = emptyList(),
-    val contextLength: Int? = null,
+    /** Conservative local default; runtime capability may further constrain this value. */
+    val contextLength: Int? = 4096,
     /** Number of recent conversation messages included in generated context. */
     val recentMessages: Int = 10,
     /** Maximum number of real Action steps the Agent may execute for one request. */
