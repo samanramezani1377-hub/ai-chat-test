@@ -134,13 +134,20 @@ class AppContainer(context: Context? = null) {
     fun createAgentSession(conversationId: String, eventSink: suspend (AgentEvent) -> Unit = {}): AgentSession? {
         if (appContext == null || modelManager == null) return null
         val store = HistoryConversationStore(conversationHistory, conversationId)
+        val contextProvider = DefaultContextProvider(
+            conversationStore = store,
+            systemContext = { null },
+            persistentTaskContext = { null },
+            workspaceContext = { workspaceRoot?.toString() },
+        )
         return AgentSession(
-            orchestrator = AgentOrchestrator(contextProvider = DefaultContextProvider(store), runtime = modelRuntime),
+            orchestrator = AgentOrchestrator(contextProvider = contextProvider, runtime = modelRuntime),
             conversationStore = store,
             actionPlanCoordinator = coordinator,
             actionExecutor = actionExecutor,
             eventSink = eventSink,
             conversationId = conversationId,
+            contextProvider = contextProvider,
         )
     }
 
