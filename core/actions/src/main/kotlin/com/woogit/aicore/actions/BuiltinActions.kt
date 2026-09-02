@@ -6,13 +6,13 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 private const val MAX_FILE_BYTES = 1_048_576L
 
-/** Strictly extracts a named JSON string and decodes standard JSON escapes. */
 internal object ActionArguments {
     fun string(input: Any, name: String): String {
         val raw = input.toString()
@@ -138,6 +138,8 @@ class WorkspacePathResolver(private val root: Path) {
 class CreateFileAction(private val workspace: WorkspacePathResolver) : Action<Any, Any> {
     override val id = "create_file"
     override val risk = RiskLevel.NORMAL
+    override val stateChanging = true
+    override val idempotent = true
     override suspend fun execute(input: Any): Any {
         val path = workspace.resolve(ActionArguments.string(input, "file_name"))
         val content = ActionArguments.string(input, "content")
@@ -145,8 +147,28 @@ class CreateFileAction(private val workspace: WorkspacePathResolver) : Action<An
         require(bytes.size <= MAX_FILE_BYTES) { "File content exceeds 1 MiB" }
         Files.createDirectories(path.parent)
         require(!Files.isSymbolicLink(path)) { "Symbolic links cannot be modified" }
-        Files.write(path, bytes)
-        require(Files.size(path) == bytes.size.toLong()) { "File write verification failed" }
+
+        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) { "Existing target is not a regular file" }
+            val existing = Files.readAllBytes(path)
+            require(existing.contentEquals(bytes)) { "File already exists with different content; refusing overwrite" }
+            return "already_exists:${workspace.relative(path)}"
+        }
+
+        val temp = Files.createTempFile(path.parent, ".woogit-", ".tmp")
+        try {
+            Files.write(temp, bytes)
+            require(Files.size(temp) == bytes.size.toLong()) { "File write verification failed" }
+            try {
+                Files.move(temp, path, StandardCopyOption.ATOMIC_MOVE)
+            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                Files.move(temp, path)
+            }
+            require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) { "File creation verification failed" }
+            require(Files.size(path) == bytes.size.toLong()) { "File write verification failed" }
+        } finally {
+            Files.deleteIfExists(temp)
+        }
         return "created:${workspace.relative(path)}"
     }
 }
@@ -176,6 +198,8 @@ class ListFilesAction(private val workspace: WorkspacePathResolver) : Action<Any
 class DeleteFileAction(private val workspace: WorkspacePathResolver) : Action<Any, Any> {
     override val id = "delete_file"
     override val risk = RiskLevel.SENSITIVE
+    override val stateChanging = true
+    override val idempotent = false
     override suspend fun execute(input: Any): Any {
         val path = workspace.resolve(ActionArguments.string(input, "file_name"))
         require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) { "File not found" }
