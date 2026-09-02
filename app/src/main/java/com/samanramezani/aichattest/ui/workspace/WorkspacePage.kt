@@ -63,7 +63,7 @@ internal fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, 
                 Text(execution.status, style = MaterialTheme.typography.bodyLarge)
                 execution.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 Text("شناسه: ${execution.id}", style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { expanded = !expanded }, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (expanded) "▲ بستن جزئیات" else "▼ نمایش جزئیات") }
+                TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (expanded) "▲ بستن جزئیات" else "▼ نمایش جزئیات") }
                 if (expanded) {
                     DetailBlock("درخواست") { Text(execution.requestPreview.ifBlank { "N/A" }) }
                     DetailBlock("نتیجه") { Text(execution.resultPreview ?: "نتیجه‌ای ثبت نشده است.") }
@@ -88,7 +88,7 @@ internal fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, 
                             checkpoint = container?.executionCheckpoint(id)
                             actionBusy = false
                         }
-                    }, Modifier.weight(1f).heightIn(min = 48.dp)) { Text(if (actionBusy) "در حال اجرا…" else "تأیید و اجرا") }
+                    }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(if (actionBusy) "در حال اجرا…" else "تأیید و اجرا") }
                     OutlinedButton(enabled = !actionBusy, onClick = {
                         val id = checkpoint!!.executionId
                         actionBusy = true
@@ -98,7 +98,7 @@ internal fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, 
                             checkpoint = container?.executionCheckpoint(id)
                             actionBusy = false
                         }
-                    }, Modifier.weight(1f).heightIn(min = 48.dp)) { Text("رد") }
+                    }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("رد") }
                 }
             }
         }
@@ -115,21 +115,21 @@ internal fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, 
                         checkpoint = container?.executionCheckpoint(id)
                         actionBusy = false
                     }
-                }, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (actionBusy) "در حال Retry…" else "تلاش مجدد") }
+                }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (actionBusy) "در حال Retry…" else "تلاش مجدد") }
             }
         }
 
         SectionCard("Timeline واقعی Action") {
             if (executionTraces.isEmpty()) Text("هنوز رویداد Lifecycle برای این Execution دریافت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             else {
-                TextButton(onClick = { traceOpen = !traceOpen }, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (traceOpen) "▲ بستن Timeline" else "▼ نمایش Timeline") }
+                TextButton(onClick = { traceOpen = !traceOpen }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (traceOpen) "▲ بستن Timeline" else "▼ نمایش Timeline") }
                 if (traceOpen) executionTraces.forEachIndexed { index, event -> TimelineItem(index + 1, event) }
             }
         }
 
         SectionCard("Recovery") {
             Text("Executionهای باقی‌مانده در حالت Executing پس از قطع ناگهانی به Unknown تبدیل می‌شوند و خودکار دوباره اجرا نمی‌شوند.")
-            TextButton(onClick = { recoveryOpen = !recoveryOpen }, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (recoveryOpen) "▲ بستن Recovery" else "▼ مدیریت Recovery") }
+            TextButton(onClick = { recoveryOpen = !recoveryOpen }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (recoveryOpen) "▲ بستن Recovery" else "▼ مدیریت Recovery") }
             if (recoveryOpen) {
                 Button(enabled = !actionBusy, onClick = {
                     actionBusy = true
@@ -138,13 +138,13 @@ internal fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, 
                         actionMessage = if (reconcileResult.isEmpty()) "Execution نیمه‌تمامی برای reconcile پیدا نشد." else "${reconcileResult.size} Execution به Unknown منتقل شد."
                         actionBusy = false
                     }
-                }, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("بررسی Executionهای Interrupted") }
+                }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("بررسی Executionهای Interrupted") }
                 reconcileResult.takeLast(10).forEach { Text("• ${it.executionId}: Unknown") }
             }
         }
 
         SectionCard("خطاها") {
-            TextButton(onClick = { errorsOpen = !errorsOpen }, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (errorsOpen) "▲ بستن خطاها (${errors.size})" else "▼ نمایش خطاها (${errors.size})") }
+            TextButton(onClick = { errorsOpen = !errorsOpen }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (errorsOpen) "▲ بستن خطاها (${errors.size})" else "▼ نمایش خطاها (${errors.size})") }
             if (errorsOpen) {
                 val relevant = if (execution == null) errors else errors.filter { it.executionId == execution.id }
                 if (relevant.isEmpty()) Text("خطای ثبت‌شده‌ای برای این Execution وجود ندارد.", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -158,7 +158,7 @@ internal fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, 
 
         SectionCard("نتیجه و Diagnostics") {
             Text("برای اطلاعات Runtime، Performance و گزارش خام از صفحه عیب‌یابی استفاده کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedButton(onClick = onDiagnostics, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("مشاهده Diagnostics →") }
+            OutlinedButton(onClick = onDiagnostics, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("مشاهده Diagnostics →") }
         }
     }
 }
