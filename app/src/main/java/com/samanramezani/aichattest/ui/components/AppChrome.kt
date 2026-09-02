@@ -45,8 +45,6 @@ internal fun AppTheme(content: @Composable () -> Unit) {
 internal fun AppHeader(destination: AppDestination, status: String, model: ModelDescriptor?, onDestination: (AppDestination) -> Unit, onQuick: () -> Unit, onSidebar: () -> Unit, onRuntime: () -> Unit) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .92f), tonalElevation = 1.dp) {
         Row(Modifier.fillMaxWidth().heightIn(min = 68.dp).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            // The app is RTL. Keep the hamburger at the visual right, status in the center,
-            // and the three navigation/action buttons at the visual left.
             IconButton(onClick = onSidebar, modifier = Modifier.size(48.dp).semantics { contentDescription = "باز کردن نوار کناری" }) { Icon(Icons.Default.Menu, "باز کردن نوار کناری") }
             Spacer(Modifier.weight(1f))
             TextButton(onClick = onRuntime, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "جزئیات وضعیت Runtime" }) {
@@ -123,7 +121,6 @@ internal fun Sidebar(current: ConversationRecord?, conversations: List<Conversat
                 Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        TextButton(onClick = { menu = !menu }, Modifier.align(Alignment.TopEnd).heightIn(min = 48.dp).semantics { contentDescription = "گزینه‌های ${record.title}" }) { Text("گزینه‌ها") }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(text = { Text("باز کردن") }, onClick = { menu = false; onOpen() })
             DropdownMenuItem(text = { Text("تغییر نام") }, onClick = { menu = false; onLongPress() })
