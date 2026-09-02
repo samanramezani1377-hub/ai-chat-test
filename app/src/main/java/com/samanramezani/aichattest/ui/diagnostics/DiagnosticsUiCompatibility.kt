@@ -10,7 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @Composable
-private fun DiagnosticsUiSurface(content: @Composable () -> Unit) {
+internal fun UiSurface(content: @Composable () -> Unit) {
     Surface(
         Modifier,
         shape = RoundedCornerShape(16.dp),
