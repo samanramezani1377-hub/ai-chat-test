@@ -2,14 +2,12 @@
 #include <signal.h>
 #include <unistd.h>
 
-// Keep the JNI implementation in native_runtime.cpp. Rename its legacy fatal
-// handler installer while including it so Android gets a debuggerd-friendly
-// handler below instead of _exit()-ing from the signal handler.
+// Keep the JNI implementation in native_runtime.cpp. Rename only its fatal
+// handler installer while including it so Android gets the debuggerd-friendly
+// handler below. Do NOT rename llama_model_load_from_file: the legacy wrapper
+// previously did that and recursively called itself after macro expansion.
 #define install_native_fatal_handlers install_native_fatal_handlers_legacy
-extern "C" llama_model * llama_model_load_from_file_for_android(const char * path_model, llama_model_params params);
-#define llama_model_load_from_file llama_model_load_from_file_for_android
 #include "native_runtime.cpp"
-#undef llama_model_load_from_file
 #undef install_native_fatal_handlers
 
 static void android_fatal_signal_handler(int signal_number, siginfo_t * info, void * raw_context) {
@@ -45,11 +43,11 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
         native_write_hex(g_native_fatal_fd, "NATIVE_FATAL_PC=", pc);
         native_write_hex(g_native_fatal_fd, "NATIVE_FATAL_LR=", lr);
         native_write_hex(g_native_fatal_fd, "NATIVE_FATAL_FAULT_ADDR=", info ? (uintptr_t) info->si_addr : 0);
+        fsync(g_native_fatal_fd);
     }
 
-    // Restore the default disposition and re-raise on the crashing thread.
-    // This is critical: _exit() prevents Android debuggerd from producing the
-    // native tombstone/backtrace needed to identify the exact failing function.
+    // Restore the default disposition and re-raise on the crashing thread so
+    // Android debuggerd can generate the native tombstone/backtrace.
     struct sigaction default_action{};
     sigemptyset(&default_action.sa_mask);
     default_action.sa_handler = SIG_DFL;
@@ -68,14 +66,4 @@ static void install_native_fatal_handlers() {
     sigaction(SIGABRT, &action, nullptr);
     sigaction(SIGILL, &action, nullptr);
     sigaction(SIGFPE, &action, nullptr);
-}
-
-extern "C" llama_model * llama_model_load_from_file_for_android(const char * path_model, llama_model_params params) {
-    checkpoint("ANDROID_LLAMA_MODEL_LOAD_ENTER");
-    params.load_mode = LLAMA_LOAD_MODE_MMAP;
-    params.check_tensors = false;
-    checkpoint("ANDROID_LLAMA_MODEL_LOAD_POLICY_MMAP_CHECK_TENSORS_0");
-    llama_model * model = llama_model_load_from_file(path_model, params);
-    checkpoint(model ? "ANDROID_LLAMA_MODEL_LOAD_RETURN_SUCCESS" : "ANDROID_LLAMA_MODEL_LOAD_RETURN_FAILED");
-    return model;
 }
