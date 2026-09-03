@@ -14,7 +14,6 @@ internal object NativeLlamaCpp {
     private const val TAG = "AIChatRuntime"
     private const val PREFLIGHT_FILE = "ai-chat-model-preflight.txt"
     private var nativeInitialized = false
-    private var gpuBackendRequested = false
 
     const val GPU_LAYERS_CPU_ONLY = 0
     const val GPU_LAYERS_70 = 70
@@ -26,25 +25,26 @@ internal object NativeLlamaCpp {
         Log.i(TAG, "ACTIVATION_NATIVE_LIBRARY_LOAD_RETURNED")
     }
 
+    /**
+     * Backend selection is a per-load request. The native side owns the process-wide
+     * backend registry and safely handles first initialization plus late Vulkan loading.
+     * Do not reject CPU -> GPU (or GPU -> CPU model) transitions here: nativeLoad always
+     * releases the previous model/context before loading the newly requested model.
+     */
     private fun ensureNativeInitialized(gpuLayers: Int) {
         val enableGpu = gpuLayers != GPU_LAYERS_CPU_ONLY
         synchronized(this) {
-            if (nativeInitialized) {
-                if (enableGpu != gpuBackendRequested) {
-                    val selected = if (gpuBackendRequested) "GPU" else "CPU"
-                    val requested = if (enableGpu) "GPU" else "CPU"
-                    val message = "Native backend is already initialized as $selected; cannot switch to $requested in the same process. Restart the app to change backend."
-                    Log.e(TAG, "ACTIVATION_NATIVE_BACKEND_MODE_CONFLICT selected=$selected requested=$requested")
-                    throw IllegalStateException(message)
-                }
-                return
-            }
-
-            Log.i(TAG, "ACTIVATION_NATIVE_INIT_REQUESTED gpu=$enableGpu gpu_layers=$gpuLayers")
+            Log.i(
+                TAG,
+                "ACTIVATION_NATIVE_INIT_REQUESTED gpu=$enableGpu gpu_layers=$gpuLayers " +
+                    "previously_initialized=$nativeInitialized"
+            )
             nativeInit(enableGpu)
             nativeInitialized = true
-            gpuBackendRequested = enableGpu
-            Log.i(TAG, "ACTIVATION_NATIVE_INIT_RETURNED gpu=$enableGpu gpu_layers=$gpuLayers")
+            Log.i(
+                TAG,
+                "ACTIVATION_NATIVE_INIT_RETURNED gpu=$enableGpu gpu_layers=$gpuLayers"
+            )
         }
     }
 
