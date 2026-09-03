@@ -125,10 +125,8 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
         fsync(g_native_fatal_fd);
     }
 
-    // Do not terminate with _exit here. That suppresses Android's debuggerd
-    // tombstone/backtrace, which is exactly what is needed to resolve the native
-    // PC/LR into llama.cpp source. Record our compact marker, then hand the same
-    // signal back to the default handler so Android emits the full tombstone.
+    // Preserve the native diagnostic file, then hand the fatal signal back to
+    // Android's default handler so debuggerd can emit the full tombstone/backtrace.
     struct sigaction default_action{};
     sigemptyset(&default_action.sa_mask);
     default_action.sa_handler = SIG_DFL;
@@ -161,12 +159,16 @@ static void checkpoint(const char *event) {
 
 static void model_load_progress(float progress, void *) {
     const int bucket = std::clamp((int)(progress * 100.0f), 0, 100);
-    const int previous = g_model_progress_bucket.load(std::memory_order_relaxed);
-    if (bucket == previous || !g_model_progress_bucket.compare_exchange_strong(const_cast<int &>(previous), bucket)) return;
-    char line[96];
-    snprintf(line, sizeof(line), "MODEL_LOAD_PROGRESS=%d", bucket);
-    append_native_trace(line);
-    LOGI("%s", line);
+    int previous = g_model_progress_bucket.load(std::memory_order_relaxed);
+    while (bucket != previous) {
+        if (g_model_progress_bucket.compare_exchange_weak(previous, bucket, std::memory_order_relaxed)) {
+            char line[96];
+            snprintf(line, sizeof(line), "MODEL_LOAD_PROGRESS=%d", bucket);
+            append_native_trace(line);
+            LOGI("%s", line);
+            return;
+        }
+    }
 }
 
 static void free_all() {
@@ -329,9 +331,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         checkpoint("GPU_DEVICE_SELECTION_DEFAULT");
     }
 
-    // llama.cpp invokes this during tensor loading. Logging progress gives us a
-    // deterministic boundary inside load_tensors(), instead of only knowing that
-    // the outer llama_model_load_from_file() call crashed.
+    // llama.cpp invokes this during tensor loading. This gives us a progress
+    // boundary inside load_tensors(), not just the outer load call boundary.
     g_model_progress_bucket.store(-1, std::memory_order_relaxed);
     mp.progress_callback = model_load_progress;
     mp.progress_callback_user_data = nullptr;
