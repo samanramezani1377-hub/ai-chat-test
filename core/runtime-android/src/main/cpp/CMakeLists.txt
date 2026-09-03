@@ -22,9 +22,6 @@ if (ANDROID AND DEFINED ENV{VULKAN_SDK})
     set(Vulkan_GLSLC_EXECUTABLE "$ENV{VULKAN_SDK}/bin/glslc" CACHE FILEPATH "Vulkan shader compiler" FORCE)
     set(Vulkan_LIBRARY "${CMAKE_ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/29/libvulkan.so" CACHE FILEPATH "Android Vulkan loader" FORCE)
 
-    # The Vulkan SDK archive does not ship a SPIRV-Headers package config on this
-    # revision. llama.cpp requires the CMake package, so point it at the small
-    # header-only compatibility config created by ci/prepare-vulkan.sh.
     set(SPIRV-Headers_DIR "$ENV{VULKAN_SDK}/share/cmake/SPIRV-Headers" CACHE PATH "SPIRV-Headers CMake package" FORCE)
     set(CMAKE_PREFIX_PATH "$ENV{VULKAN_SDK};${CMAKE_PREFIX_PATH}" CACHE STRING "CMake package search path" FORCE)
 endif()
@@ -38,9 +35,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(llama_cpp)
 
 # Downstream fix for Android model loading: this is the upstream llama.cpp
-# change from 5ec4eab69edbfaa4b01bcf1ee1123bb885b8d892. The pinned revision is
-# kept unchanged; we apply the exact loading-memory fix locally and make the
-# operation idempotent so a persistent FetchContent checkout remains valid.
+# change from 5ec4eab69edbfaa4b01bcf1ee1123bb885b8d892.
 set(LLAMA_MODEL_LOADING_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/llama-model-loading-memory.patch")
 if (EXISTS "${LLAMA_MODEL_LOADING_PATCH}")
     execute_process(
@@ -75,8 +70,44 @@ else()
     message(FATAL_ERROR "Missing llama.cpp model-loading patch: ${LLAMA_MODEL_LOADING_PATCH}")
 endif()
 
-# The wrapper intercepts both CPU and GPU model-load calls and enforces mmap
-# plus disabled eager tensor validation for Android's constrained native heap.
+# Diagnostic instrumentation is deliberately a separate downstream patch.
+# It adds stage markers around model creation, device preparation, hparams,
+# vocabulary and tensor loading so the next device run identifies the exact
+# failing stage instead of relying on truncated llama.cpp logs.
+set(LLAMA_MODEL_LOADING_DIAGNOSTICS_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/llama-model-loading-diagnostics.patch")
+if (EXISTS "${LLAMA_MODEL_LOADING_DIAGNOSTICS_PATCH}")
+    execute_process(
+        COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --check "${LLAMA_MODEL_LOADING_DIAGNOSTICS_PATCH}"
+        RESULT_VARIABLE LLAMA_DIAG_PATCH_CHECK_RESULT
+        OUTPUT_QUIET
+        ERROR_QUIET
+    )
+    if (LLAMA_DIAG_PATCH_CHECK_RESULT EQUAL 0)
+        execute_process(
+            COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply "${LLAMA_MODEL_LOADING_DIAGNOSTICS_PATCH}"
+            RESULT_VARIABLE LLAMA_DIAG_PATCH_APPLY_RESULT
+        )
+        if (NOT LLAMA_DIAG_PATCH_APPLY_RESULT EQUAL 0)
+            message(FATAL_ERROR "Failed to apply llama.cpp model-loading diagnostics patch")
+        endif()
+        message(STATUS "Applied llama.cpp Android model-loading diagnostics patch")
+    else()
+        execute_process(
+            COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --reverse --check "${LLAMA_MODEL_LOADING_DIAGNOSTICS_PATCH}"
+            RESULT_VARIABLE LLAMA_DIAG_PATCH_REVERSE_CHECK_RESULT
+            OUTPUT_QUIET
+            ERROR_QUIET
+        )
+        if (LLAMA_DIAG_PATCH_REVERSE_CHECK_RESULT EQUAL 0)
+            message(STATUS "llama.cpp model-loading diagnostics patch already applied")
+        else()
+            message(FATAL_ERROR "llama.cpp source is neither clean nor instrumented with the expected diagnostics patch")
+        endif()
+    endif()
+else()
+    message(FATAL_ERROR "Missing llama.cpp model-loading diagnostics patch: ${LLAMA_MODEL_LOADING_DIAGNOSTICS_PATCH}")
+endif()
+
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp)
 
 target_include_directories(ai_chat_runtime PRIVATE
