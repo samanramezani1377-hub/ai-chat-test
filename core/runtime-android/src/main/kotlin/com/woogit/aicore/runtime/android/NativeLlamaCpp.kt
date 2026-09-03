@@ -1,19 +1,34 @@
 package com.woogit.aicore.runtime.android
 
+import android.util.Log
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 
 internal object NativeLlamaCpp {
+    private const val TAG = "AIChatRuntime"
     private const val GPU_LAYERS = 99
 
     init {
+        Log.i(TAG, "ACTIVATION_NATIVE_LIBRARY_LOAD_STARTED")
         System.loadLibrary("ai_chat_runtime")
+        Log.i(TAG, "ACTIVATION_NATIVE_LIBRARY_LOAD_RETURNED")
         nativeInit()
+        Log.i(TAG, "ACTIVATION_NATIVE_INIT_RETURNED")
     }
 
-    fun load(path: String, contextLength: Int): Int = nativeLoad(path, contextLength, GPU_LAYERS)
+    fun load(path: String, contextLength: Int): Int {
+        Log.i(TAG, "ACTIVATION_KOTLIN_NATIVE_LOAD_STARTED ctx_len=$contextLength gpu_layers=$GPU_LAYERS file=${path.substringAfterLast('/')}")
+        return try {
+            val result = nativeLoad(path, contextLength, GPU_LAYERS)
+            Log.i(TAG, "ACTIVATION_KOTLIN_NATIVE_LOAD_RETURNED result=$result")
+            result
+        } catch (t: Throwable) {
+            Log.e(TAG, "ACTIVATION_KOTLIN_NATIVE_LOAD_THROWN type=${t::class.java.name} message=${t.message}", t)
+            throw t
+        }
+    }
 
     fun generate(
         prompt: String,
