@@ -31,4 +31,25 @@ test -x "$SDK/bin/glslc"
 export VULKAN_SDK="$SDK"
 export PATH="$VULKAN_SDK/bin:$PATH"
 export LD_LIBRARY_PATH="$VULKAN_SDK/lib:${LD_LIBRARY_PATH:-}"
-printf 'VULKAN_SDK=%s\nPATH=%s\nLD_LIBRARY_PATH=%s\n' "$VULKAN_SDK" "$PATH" "$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+
+# ggml-vulkan asks CMake for the SPIRV-Headers package explicitly. The
+# LunarG SDK contains that package, but its CMake package directory is not
+# reliably discovered by the Android toolchain's default search paths.
+SPIRV_HEADERS_DIR=""
+for dir in \
+  "$VULKAN_SDK/Lib/cmake/SPIRV-Headers" \
+  "$VULKAN_SDK/lib/cmake/SPIRV-Headers" \
+  "$VULKAN_SDK/share/cmake/SPIRV-Headers"; do
+  if [[ -f "$dir/SPIRV-HeadersConfig.cmake" ]]; then
+    SPIRV_HEADERS_DIR="$dir"
+    break
+  fi
+done
+
+if [[ -z "$SPIRV_HEADERS_DIR" ]]; then
+  echo "ERROR: Vulkan SDK $VULKAN_VERSION does not contain SPIRV-HeadersConfig.cmake" >&2
+  exit 1
+fi
+
+printf 'VULKAN_SDK=%s\nPATH=%s\nLD_LIBRARY_PATH=%s\nCMAKE_PREFIX_PATH=%s:${CMAKE_PREFIX_PATH:-}\nSPIRV-Headers_DIR=%s\n' \
+  "$VULKAN_SDK" "$PATH" "$LD_LIBRARY_PATH" "$VULKAN_SDK" "$SPIRV_HEADERS_DIR" >> "$GITHUB_ENV"
