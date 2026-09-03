@@ -1,7 +1,7 @@
 diff --git a/src/llama.cpp b/src/llama.cpp
 --- a/src/llama.cpp
 +++ b/src/llama.cpp
-@@ -320,51 +320,65 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
+@@ -320,51 +320,72 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
  
          ml.print_info();
 +        LLAMA_LOG_INFO("ANDROID_DIAG_MODEL_CREATE_BEGIN\n");
@@ -15,7 +15,7 @@ diff --git a/src/llama.cpp b/src/llama.cpp
          if (!ok) {
              return {-1, nullptr};
          }
-@@ -385,6 +399,7 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
+@@ -385,6 +406,7 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
          model->hparams.vocab_only = params.vocab_only;
          model->hparams.no_alloc   = params.no_alloc;
  
@@ -23,7 +23,7 @@ diff --git a/src/llama.cpp b/src/llama.cpp
          try {
              model->load_hparams(ml);
          } catch(const std::exception & e) {
-@@ -392,9 +407,12 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
+@@ -392,9 +414,12 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
              throw std::runtime_error("error loading model hyperparameters: " + std::string(e.what()));
          }
 +        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_HPARAMS_RETURN\n");
@@ -34,7 +34,7 @@ diff --git a/src/llama.cpp b/src/llama.cpp
          try {
              model->load_vocab(ml);
          } catch(const std::exception & e) {
-@@ -402,10 +420,15 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
+@@ -402,10 +427,15 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
              throw std::runtime_error("error loading model vocabulary: " + std::string(e.what()));
          }
 +        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_VOCAB_RETURN\n");
@@ -67,21 +67,102 @@ diff --git a/src/llama.cpp b/src/llama.cpp
 diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
 --- a/src/llama-model-loader.cpp
 +++ b/src/llama-model-loader.cpp
-@@ -1268,12 +1268,14 @@ struct ggml_tensor * llama_model_loader::create_tensor(
+@@ -1080,6 +1080,7 @@ struct ggml_tensor * llama_model_loader::create_tensor(
+         const llama_hparams & hparams, const buft_list_t * buft_list_cpu, const buft_list_t * buft_list_input, const buft_list_t * buft_list_output,
+         const buft_list_t * buft_list_layer, const LLM_TN_IMPL & tn, const std::initializer_list<int64_t> & ne, int flags) {
++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_ENTRY name=%s bid=%d flags=%d ne_count=%zu\n", tn.str().c_str(), tn.bid, flags, ne.size());
+     auto ctx_for_buft = [&](ggml_backend_buffer_type_t buft) -> ggml_context * {
+         auto it = ctx_map.find(buft);
+         if (it == ctx_map.end()) {
+@@ -1104,6 +1105,7 @@ struct ggml_tensor * llama_model_loader::create_tensor(
+                 throw std::runtime_error(format("failed to create ggml context"));
+             }
  
++            LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_CTX_CREATE buft=%p ctx=%p\n", (void *) buft, (void *) ctx);
+             ctx_map.emplace(buft, ctx);
+ 
+             return ctx;
+@@ -1190,6 +1192,7 @@ struct ggml_tensor * llama_model_loader::create_tensor(
+         }
+ 
+         if (!buft) {
++            LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_SELECT_BUFT_BEGIN name=%s type=%s op=%s\n", tn.str().c_str(), ggml_type_name(t_meta->type), ggml_op_name(op));
+             buft = select_weight_buft(hparams, t_meta, op, buft_list);
+             if (!buft) {
+                 throw std::runtime_error(format("failed to find a compatible buffer type for tensor %s", tn.str().c_str()));
+             }
+         }
++
++        LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_BUFT_SELECTED name=%s buft=%p buft_name=%s device=%p\n",
++                tn.str().c_str(), (void *) buft, ggml_backend_buft_name(buft),
++                (void *) ggml_backend_buft_get_device(buft));
+ 
+         // avoid using a host buffer when using mmap
+         auto * buft_dev = ggml_backend_buft_get_device(buft);
+@@ -1248,6 +1251,7 @@ struct ggml_tensor * llama_model_loader::create_tensor(
+         return ret;
+     }
+ 
++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_CHECK_DIMS_BEGIN name=%s\n", tn.str().c_str());
      LLAMA_LOG_DEBUG("%s: loading tensor %s\n", __func__, tn.str().c_str());
-+    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_CREATE_BEGIN name=%s bid=%d flags=%d\n", tn.str().c_str(), tn.bid, flags);
-     const struct ggml_tensor * cur = check_tensor_dims(tn.str(), ne, !(flags & TENSOR_NOT_REQUIRED), flags & TENSOR_ALLOW_RESHAPE);
+-    const struct ggml_tensor * cur = check_tensor_dims(tn.str(), ne, !(flags & TENSOR_NOT_REQUIRED), flags & TENSOR_ALLOW_RESHAPE);
++    const struct ggml_tensor * cur = check_tensor_dims(tn.str(), ne, !(flags & TENSOR_NOT_REQUIRED), flags & TENSOR_ALLOW_RESHAPE);
++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_CHECK_DIMS_RETURN name=%s cur=%p\n", tn.str().c_str(), (void *) cur);
      if (cur == NULL) {
          return NULL;
      }
+@@ -1255,10 +1259,17 @@ struct ggml_tensor * llama_model_loader::create_tensor(
+     ggml_tensor t_meta = *cur;
+     if (flags & TENSOR_ALLOW_RESHAPE) {
++        LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_RESHAPE_BEGIN name=%s\n", tn.str().c_str());
+         for (size_t dim = 0; dim < GGML_MAX_DIMS; dim++) {
+             t_meta.ne[dim] = dim < ne.size() ? ne.begin()[dim] : 1;
+             if (dim == 0) {
+                 t_meta.nb[dim] = ggml_type_size(t_meta.type);
+             } else if (dim == 1) {
+                 t_meta.nb[dim] = ggml_row_size(t_meta.type, t_meta.ne[dim-1]);
+             } else {
+                 t_meta.nb[dim] = t_meta.ne[dim-1]*t_meta.nb[dim-1];
+             }
+         }
++        LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_RESHAPE_RETURN name=%s bytes=%zu\n", tn.str().c_str(), ggml_nbytes(&t_meta));
+     }
+ 
+     GGML_ASSERT(ggml_nbytes(&t_meta) == ggml_nbytes(cur));
++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_NBYTES_OK name=%s bytes=%zu\n", tn.str().c_str(), ggml_nbytes(&t_meta));
+ 
++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_BUFT_BEGIN name=%s\n", tn.str().c_str());
+     ggml_backend_buffer_type_t buft = buft_for_tensor(&t_meta);
++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_BUFT_RETURN name=%s buft=%p name=%s\n", tn.str().c_str(), (void *) buft, buft ? ggml_backend_buft_name(buft) : "<null>");
+     if (buft == nullptr) {
+         return nullptr;
+     }
+ 
++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_CTX_BEGIN name=%s\n", tn.str().c_str());
+     ggml_context * ctx = ctx_for_buft(buft);
++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_CTX_RETURN name=%s ctx=%p\n", tn.str().c_str(), (void *) ctx);
+ 
+     // if duplicated, check if the original tensor was allocated in the same buffer type context and avoid creating a new one
+     if (flags & TENSOR_DUPLICATED) {
++        LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_DUP_LOOKUP_BEGIN name=%s\n", tn.str().c_str());
+         ggml_tensor * t = ggml_get_tensor(ctx, tn.str().c_str());
++        LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_DUP_LOOKUP_RETURN name=%s tensor=%p\n", tn.str().c_str(), (void *) t);
+         if (t) {
+             return t;
+         }
+     }
  
      const bool duplicated = flags & TENSOR_DUPLICATED;
-+    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_DIMS_OK name=%s type=%s bytes=%zu\n", tn.str().c_str(), ggml_type_name(cur->type), ggml_nbytes(cur));
  
-     struct ggml_tensor * tensor = ggml_dup_tensor(ctx, cur);
-     ggml_set_name(tensor, ggml_get_name(cur));
-@@ -1288,6 +1290,7 @@ struct ggml_tensor * llama_model_loader::create_tensor(
++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_DUP_BEGIN name=%s src=%p\n", tn.str().c_str(), (void *) &t_meta);
+     struct ggml_tensor * tensor = ggml_dup_tensor(ctx, &t_meta);
++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_DUP_RETURN name=%s tensor=%p\n", tn.str().c_str(), (void *) tensor);
+     ggml_set_name(tensor, ggml_get_name(&t_meta));
++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_SET_NAME_RETURN name=%s tensor=%p\n", tn.str().c_str(), (void *) tensor);
+ 
+     if (duplicated) {
+         size_data += ggml_nbytes(&t_meta);
+@@ -1279,6 +1299,7 @@ struct ggml_tensor * llama_model_loader::create_tensor(
          n_created++;
      }
  
