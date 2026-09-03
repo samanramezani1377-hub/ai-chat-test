@@ -32,8 +32,12 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install NDK
-        run: sdkmanager "ndk;27.2.12479018"
+      - name: Install NDK and ccache
+        run: |
+          sdkmanager "ndk;27.2.12479018"
+          sudo apt-get update
+          sudo apt-get install -y ccache
+          ccache --version
 
       - name: Restore Vulkan SDK
         uses: actions/cache/restore@v4
@@ -61,9 +65,17 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: core/runtime-android/.cxx
-          key: ci-llama-cpp-${{ runner.os }}-${{ hashFiles('core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp', 'ci/prepare-vulkan.sh') }}
+          key: ci-llama-cpp-${{ runner.os }}-${{ hashFiles('core/runtime-android/build.gradle.kts', 'core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp', 'ci/prepare-vulkan.sh') }}
           restore-keys: |
             ci-llama-cpp-${{ runner.os }}-
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: ci-ccache-${{ runner.os }}-${{ hashFiles('core/runtime-android/build.gradle.kts', 'core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp', 'ci/prepare-vulkan.sh') }}
+          restore-keys: |
+            ci-ccache-${{ runner.os }}-
 
       - name: Setup Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
@@ -72,14 +84,25 @@ jobs:
 
       - name: Build APKs
         id: build-apks
-        run: gradle :app:assembleDebug :app:assembleRelease --stacktrace --parallel
+        run: |
+          export CCACHE_DIR="$HOME/.cache/ccache"
+          ccache --zero-stats
+          gradle :app:assembleDebug :app:assembleRelease --stacktrace --parallel
+          ccache --show-stats
 
       - name: Save native CMake cache
         if: steps.build-apks.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: core/runtime-android/.cxx
-          key: ci-llama-cpp-${{ runner.os }}-${{ hashFiles('core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp', 'ci/prepare-vulkan.sh') }}
+          key: ci-llama-cpp-${{ runner.os }}-${{ hashFiles('core/runtime-android/build.gradle.kts', 'core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp', 'ci/prepare-vulkan.sh') }}
+
+      - name: Save ccache
+        if: steps.build-apks.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: ci-ccache-${{ runner.os }}-${{ hashFiles('core/runtime-android/build.gradle.kts', 'core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp', 'ci/prepare-vulkan.sh') }}
 
       - name: Upload debug APK
         if: success()
