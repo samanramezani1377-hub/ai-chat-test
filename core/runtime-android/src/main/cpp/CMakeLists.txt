@@ -75,7 +75,9 @@ else()
     message(FATAL_ERROR "Missing llama.cpp model-loading patch: ${LLAMA_MODEL_LOADING_PATCH}")
 endif()
 
-add_library(ai_chat_runtime SHARED native_runtime.cpp)
+# The wrapper intercepts both CPU and GPU model-load calls and enforces mmap
+# plus disabled eager tensor validation for Android's constrained native heap.
+add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp)
 
 target_include_directories(ai_chat_runtime PRIVATE
     ${llama_cpp_SOURCE_DIR}/include
