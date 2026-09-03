@@ -59,7 +59,9 @@ class LlamaCppAndroidRuntimeAdapter(
 
     suspend fun loadResult(model: ModelDescriptor): ModelResult<Unit> {
         currentCoroutineContext().ensureActive()
-        unload()
+        // LocalModelService owns lifecycle transitions and performs the single
+        // unload immediately before activation. Do not free the native runtime
+        // again here before entering llama_model_load().
         val file = model.path.toFile()
         if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
         val startedAt = System.nanoTime()
