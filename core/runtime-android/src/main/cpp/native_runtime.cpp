@@ -30,6 +30,9 @@ static std::string g_native_marker_file;
 static std::string g_native_trace_file;
 static int g_native_fatal_fd = -1;
 static std::mutex g_native_marker_mutex;
+static std::mutex g_backend_init_mutex;
+static bool g_backend_initialized = false;
+static bool g_gpu_backend_loaded = false;
 
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
 static int threads() { return std::clamp((int)std::max(1u, std::thread::hardware_concurrency()) - 2, 2, 4); }
@@ -198,32 +201,38 @@ static std::string gguf_preflight(const char *path) {
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jclass) {
-    LOGI("ACTIVATION_NATIVE_INIT_STARTED");
-    jclass system_class = env->FindClass("java/lang/System");
-    if (system_class) {
-        jmethodID get_property = env->GetStaticMethodID(system_class, "getProperty", "(Ljava/lang/String;)Ljava/lang/String;");
-        if (get_property) {
-            jstring key = env->NewStringUTF("java.io.tmpdir");
-            jstring tmp_dir = static_cast<jstring>(env->CallStaticObjectMethod(system_class, get_property, key));
-            env->DeleteLocalRef(key);
-            if (tmp_dir) {
-                const char *dir = env->GetStringUTFChars(tmp_dir, nullptr);
-                if (dir) {
-                    const std::string base(dir);
-                    g_native_marker_file = base + "/ai-chat-last-native-event.txt";
-                    g_native_trace_file = base + "/ai-chat-native-trace.txt";
-                    g_native_fatal_fd = open((base + "/ai-chat-native-trace.txt").c_str(), O_WRONLY | O_CREAT | O_APPEND, 0600);
-                    env->ReleaseStringUTFChars(tmp_dir, dir);
-                }
-                env->DeleteLocalRef(tmp_dir);
-            }
-        }
-        env->DeleteLocalRef(system_class);
-    }
+Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jclass, jboolean enable_gpu) {
+    LOGI("ACTIVATION_NATIVE_INIT_STARTED gpu=%d", enable_gpu ? 1 : 0);
     if (!g_native_marker_file.empty()) {
-        append_native_trace("===== NATIVE INIT =====");
+        append_native_trace(enable_gpu ? "===== NATIVE INIT GPU REQUESTED =====" : "===== NATIVE INIT CPU ONLY =====");
         install_native_fatal_handlers();
+    }
+    if (g_native_marker_file.empty()) {
+        jclass system_class = env->FindClass("java/lang/System");
+        if (system_class) {
+            jmethodID get_property = env->GetStaticMethodID(system_class, "getProperty", "(Ljava/lang/String;)Ljava/lang/String;");
+            if (get_property) {
+                jstring key = env->NewStringUTF("java.io.tmpdir");
+                jstring tmp_dir = static_cast<jstring>(env->CallStaticObjectMethod(system_class, get_property, key));
+                env->DeleteLocalRef(key);
+                if (tmp_dir) {
+                    const char *dir = env->GetStringUTFChars(tmp_dir, nullptr);
+                    if (dir) {
+                        const std::string base(dir);
+                        g_native_marker_file = base + "/ai-chat-last-native-event.txt";
+                        g_native_trace_file = base + "/ai-chat-native-trace.txt";
+                        g_native_fatal_fd = open((base + "/ai-chat-native-trace.txt").c_str(), O_WRONLY | O_CREAT | O_APPEND, 0600);
+                        env->ReleaseStringUTFChars(tmp_dir, dir);
+                    }
+                    env->DeleteLocalRef(tmp_dir);
+                }
+            }
+            env->DeleteLocalRef(system_class);
+        }
+        if (!g_native_marker_file.empty()) {
+            append_native_trace(enable_gpu ? "===== NATIVE INIT GPU REQUESTED =====" : "===== NATIVE INIT CPU ONLY =====");
+            install_native_fatal_handlers();
+        }
     }
     llama_log_set([](enum ggml_log_level level, const char *text, void *) {
         const char *message = text ? text : "<null>";
@@ -231,12 +240,30 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         __android_log_print(priority, LOG_TAG, "%s", message);
         append_native_trace(message);
     }, nullptr);
-    append_native_trace("ACTIVATION_BACKEND_LOAD_ALL_STARTED");
-    ggml_backend_load_all();
-    append_native_trace("ACTIVATION_BACKEND_LOAD_ALL_RETURNED");
-    append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
-    llama_backend_init();
-    append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_RETURNED");
+
+    std::lock_guard<std::mutex> lock(g_backend_init_mutex);
+    if (!g_backend_initialized) {
+        if (enable_gpu) {
+            append_native_trace("ACTIVATION_BACKEND_LOAD_ALL_STARTED");
+            ggml_backend_load_all();
+            append_native_trace("ACTIVATION_BACKEND_LOAD_ALL_RETURNED");
+            g_gpu_backend_loaded = true;
+        } else {
+            append_native_trace("CPU_ONLY_BACKEND_LOAD_SKIPPED");
+            append_native_trace("CPU_ONLY_VULKAN_BACKEND_INITIALIZATION_SKIPPED");
+        }
+        append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
+        llama_backend_init();
+        append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_RETURNED");
+        g_backend_initialized = true;
+    } else if (enable_gpu && !g_gpu_backend_loaded) {
+        append_native_trace("LATE_GPU_BACKEND_LOAD_STARTED");
+        ggml_backend_load_all();
+        append_native_trace("LATE_GPU_BACKEND_LOAD_RETURNED");
+        g_gpu_backend_loaded = true;
+    } else if (!enable_gpu) {
+        append_native_trace(g_gpu_backend_loaded ? "CPU_MODE_AFTER_GPU_INIT_VULKAN_ALREADY_LOADED" : "CPU_ONLY_BACKEND_ALREADY_INITIALIZED");
+    }
 }
 
 extern "C" JNIEXPORT jint JNICALL
