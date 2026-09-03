@@ -7,8 +7,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import com.samanramezani.aichattest.ui.state.ExecutionState
 
-internal fun Boolean?.orFalse(): Boolean = this == true
-
 @Composable
 internal fun ApprovalDialog(
     execution: ExecutionState?,
