@@ -12,6 +12,7 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+#include <ucontext.h>
 #include "llama.h"
 #include "gguf.h"
 
@@ -44,9 +45,50 @@ static void append_native_trace(const char *text) {
     }
 }
 
-static void native_fatal_signal_handler(int signal_number) {
+static const char *native_signal_name(int signal_number) {
+    switch (signal_number) {
+        case SIGSEGV: return "SIGSEGV";
+        case SIGBUS: return "SIGBUS";
+        case SIGABRT: return "SIGABRT";
+        case SIGILL: return "SIGILL";
+        case SIGFPE: return "SIGFPE";
+        default: return "UNKNOWN";
+    }
+}
+
+// Async-signal-safe hexadecimal writer. Do not replace this with streams, printf,
+// allocation, mutexes, or other non-signal-safe APIs: this runs after a fatal fault.
+static void native_write_hex(int fd, const char *label, uintptr_t value) {
+    static constexpr char digits[] = "0123456789abcdef";
+    char buffer[64];
+    size_t pos = 0;
+    while (label[pos] != '\0' && pos < sizeof(buffer) - 20) {
+        buffer[pos] = label[pos];
+        ++pos;
+    }
+    buffer[pos++] = '0';
+    buffer[pos++] = 'x';
+    bool started = false;
+    for (int shift = (int)(sizeof(uintptr_t) * 8 - 4); shift >= 0; shift -= 4) {
+        const unsigned digit = (unsigned)((value >> shift) & 0xfu);
+        if (digit != 0 || started || shift == 0) {
+            buffer[pos++] = digits[digit];
+            started = true;
+        }
+    }
+    buffer[pos++] = '\n';
+    (void)write(fd, buffer, pos);
+}
+
+static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void *raw_context) {
     if (g_native_fatal_fd >= 0) {
         const char prefix[] = "NATIVE_FATAL_SIGNAL=";
+        const char name_prefix[] = "NATIVE_FATAL_SIGNAL_NAME=";
+        const char pc_prefix[] = "NATIVE_FATAL_PC=";
+        const char lr_prefix[] = "NATIVE_FATAL_LR=";
+        const char addr_prefix[] = "NATIVE_FATAL_FAULT_ADDR=";
+        const char newline = '\n';
+
         char value[16];
         int n = 0;
         int value_copy = signal_number;
@@ -60,10 +102,27 @@ static void native_fatal_signal_handler(int signal_number) {
             }
             while (r > 0) value[n++] = reverse[--r];
         }
-        const char newline = '\n';
         (void)write(g_native_fatal_fd, prefix, sizeof(prefix) - 1);
         (void)write(g_native_fatal_fd, value, (size_t)n);
         (void)write(g_native_fatal_fd, &newline, 1);
+        (void)write(g_native_fatal_fd, name_prefix, sizeof(name_prefix) - 1);
+        const char *name = native_signal_name(signal_number);
+        (void)write(g_native_fatal_fd, name, std::strlen(name));
+        (void)write(g_native_fatal_fd, &newline, 1);
+
+        uintptr_t pc = 0;
+        uintptr_t lr = 0;
+#if defined(__aarch64__)
+        if (raw_context) {
+            const ucontext_t *context = static_cast<const ucontext_t *>(raw_context);
+            pc = (uintptr_t)context->uc_mcontext.pc;
+            lr = (uintptr_t)context->uc_mcontext.regs[30];
+        }
+#endif
+        native_write_hex(g_native_fatal_fd, pc_prefix, pc);
+        native_write_hex(g_native_fatal_fd, lr_prefix, lr);
+        native_write_hex(g_native_fatal_fd, addr_prefix,
+                         info ? (uintptr_t)info->si_addr : (uintptr_t)0);
         (void)fsync(g_native_fatal_fd);
     }
     signal(signal_number, SIG_DFL);
@@ -73,9 +132,8 @@ static void native_fatal_signal_handler(int signal_number) {
 static void install_native_fatal_handlers() {
     struct sigaction action{};
     sigemptyset(&action.sa_mask);
-    action.sa_sigaction = nullptr;
-    action.sa_handler = native_fatal_signal_handler;
-    action.sa_flags = 0;
+    action.sa_sigaction = native_fatal_signal_handler;
+    action.sa_flags = SA_SIGINFO;
     sigaction(SIGSEGV, &action, nullptr);
     sigaction(SIGBUS, &action, nullptr);
     sigaction(SIGABRT, &action, nullptr);
