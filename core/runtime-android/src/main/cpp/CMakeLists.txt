@@ -34,6 +34,31 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(llama_cpp)
 
+# The llama.cpp source is cached by CI. Patches are deliberately applied to a
+# deterministic checkout, so a previous run cannot leave one downstream patch
+# applied while the next run tries to apply another patch on top of it.
+execute_process(
+    COMMAND git -C "${llama_cpp_SOURCE_DIR}" reset --hard ${LLAMA_CPP_TAG}
+    RESULT_VARIABLE LLAMA_RESET_RESULT
+    OUTPUT_VARIABLE LLAMA_RESET_OUTPUT
+    ERROR_VARIABLE LLAMA_RESET_ERROR
+)
+if (NOT LLAMA_RESET_RESULT EQUAL 0)
+    message(FATAL_ERROR "Failed to reset cached llama.cpp source to ${LLAMA_CPP_TAG}: ${LLAMA_RESET_ERROR}")
+endif()
+
+execute_process(
+    COMMAND git -C "${llama_cpp_SOURCE_DIR}" clean -fd
+    RESULT_VARIABLE LLAMA_CLEAN_RESULT
+    OUTPUT_VARIABLE LLAMA_CLEAN_OUTPUT
+    ERROR_VARIABLE LLAMA_CLEAN_ERROR
+)
+if (NOT LLAMA_CLEAN_RESULT EQUAL 0)
+    message(FATAL_ERROR "Failed to clean cached llama.cpp source: ${LLAMA_CLEAN_ERROR}")
+endif()
+
+message(STATUS "llama.cpp source reset to pinned revision ${LLAMA_CPP_TAG}")
+
 # Downstream fix for Android model loading: this is the upstream llama.cpp
 # change from 5ec4eab69edbfaa4b01bcf1ee1123bb885b8d892.
 set(LLAMA_MODEL_LOADING_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/llama-model-loading-memory.patch")
@@ -54,17 +79,7 @@ if (EXISTS "${LLAMA_MODEL_LOADING_PATCH}")
         endif()
         message(STATUS "Applied llama.cpp Android model-loading memory patch")
     else()
-        execute_process(
-            COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --reverse --check "${LLAMA_MODEL_LOADING_PATCH}"
-            RESULT_VARIABLE LLAMA_PATCH_REVERSE_CHECK_RESULT
-            OUTPUT_QUIET
-            ERROR_QUIET
-        )
-        if (LLAMA_PATCH_REVERSE_CHECK_RESULT EQUAL 0)
-            message(STATUS "llama.cpp model-loading memory patch already applied")
-        else()
-            message(FATAL_ERROR "llama.cpp source is neither clean nor patched with the expected model-loading fix")
-        endif()
+        message(FATAL_ERROR "Pinned llama.cpp source does not accept the expected model-loading memory patch")
     endif()
 else()
     message(FATAL_ERROR "Missing llama.cpp model-loading patch: ${LLAMA_MODEL_LOADING_PATCH}")
@@ -92,17 +107,7 @@ if (EXISTS "${LLAMA_MODEL_LOADING_DIAGNOSTICS_PATCH}")
         endif()
         message(STATUS "Applied llama.cpp Android model-loading diagnostics patch")
     else()
-        execute_process(
-            COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --reverse --check "${LLAMA_MODEL_LOADING_DIAGNOSTICS_PATCH}"
-            RESULT_VARIABLE LLAMA_DIAG_PATCH_REVERSE_CHECK_RESULT
-            OUTPUT_QUIET
-            ERROR_QUIET
-        )
-        if (LLAMA_DIAG_PATCH_REVERSE_CHECK_RESULT EQUAL 0)
-            message(STATUS "llama.cpp model-loading diagnostics patch already applied")
-        else()
-            message(FATAL_ERROR "llama.cpp source is neither clean nor instrumented with the expected diagnostics patch")
-        endif()
+        message(FATAL_ERROR "Pinned llama.cpp source does not accept the expected model-loading diagnostics patch")
     endif()
 else()
     message(FATAL_ERROR "Missing llama.cpp model-loading diagnostics patch: ${LLAMA_MODEL_LOADING_DIAGNOSTICS_PATCH}")
