@@ -69,6 +69,25 @@ jobs:
           restore-keys: |
             ci-llama-cpp-${{ runner.os }}-
 
+      - name: Restore dedicated Release arm64 native cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-cache/runtime-android-release-arm64
+          key: ci-runtime-android-release-arm64-${{ runner.os }}-${{ hashFiles('core/runtime-android/build.gradle.kts', 'core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp', 'ci/prepare-vulkan.sh') }}
+          restore-keys: |
+            ci-runtime-android-release-arm64-${{ runner.os }}-
+
+      - name: Overlay dedicated Release arm64 native cache
+        if: ${{ hashFiles('core/runtime-android/build.gradle.kts', 'core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp', 'ci/prepare-vulkan.sh') != '' }}
+        run: |
+          if [ -d .ci-cache/runtime-android-release-arm64 ]; then
+            mkdir -p core/runtime-android/.cxx/Release
+            cp -a .ci-cache/runtime-android-release-arm64/. core/runtime-android/.cxx/Release/
+            echo "Restored dedicated Release arm64 native cache into .cxx/Release"
+          else
+            echo "No dedicated Release arm64 native cache found"
+          fi
+
       - name: Restore ccache
         uses: actions/cache/restore@v4
         with:
@@ -90,12 +109,32 @@ jobs:
           gradle :app:assembleDebug :app:assembleRelease --stacktrace --parallel
           ccache --show-stats
 
+      - name: Stage dedicated Release arm64 native cache
+        if: steps.build-apks.outcome == 'success'
+        run: |
+          rm -rf .ci-cache/runtime-android-release-arm64
+          mkdir -p .ci-cache/runtime-android-release-arm64
+          if [ -d core/runtime-android/.cxx/Release ]; then
+            cp -a core/runtime-android/.cxx/Release/. .ci-cache/runtime-android-release-arm64/
+            echo "Staged dedicated Release arm64 native cache"
+          else
+            echo "ERROR: core/runtime-android/.cxx/Release does not exist"
+            exit 1
+          fi
+
       - name: Save native CMake cache
         if: steps.build-apks.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: core/runtime-android/.cxx
           key: ci-llama-cpp-${{ runner.os }}-${{ hashFiles('core/runtime-android/build.gradle.kts', 'core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp', 'ci/prepare-vulkan.sh') }}
+
+      - name: Save dedicated Release arm64 native cache
+        if: steps.build-apks.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci-cache/runtime-android-release-arm64
+          key: ci-runtime-android-release-arm64-${{ runner.os }}-${{ hashFiles('core/runtime-android/build.gradle.kts', 'core/runtime-android/src/main/cpp/CMakeLists.txt', 'core/runtime-android/src/main/cpp/native_runtime.cpp', 'ci/prepare-vulkan.sh') }}
 
       - name: Save ccache
         if: steps.build-apks.outcome == 'success'
