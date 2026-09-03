@@ -6,12 +6,14 @@
     <application
         android:name=".AIChatApplication"
         android:label="AI Chat Test"
+        android:theme="@style/Theme.AIChatTest"
         android:allowBackup="true"
         android:supportsRtl="true"
         android:extractNativeLibs="true">
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
