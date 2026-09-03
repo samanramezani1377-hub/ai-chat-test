@@ -9,6 +9,10 @@
 #include "llama.h"
 
 #define LOG_TAG "AIChatRuntime"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
 static std::atomic_bool g_stop{false};
 static llama_model *g_model = nullptr;
 static llama_context *g_context = nullptr;
@@ -26,42 +30,70 @@ static void free_all() {
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *, jclass) {
+    LOGI("ACTIVATION_NATIVE_INIT_STARTED");
     llama_log_set([](enum ggml_log_level level, const char *text, void *) {
         if (level >= GGML_LOG_LEVEL_ERROR) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "%s", text);
     }, nullptr);
+    LOGI("ACTIVATION_BACKEND_LOAD_ALL_STARTED");
     ggml_backend_load_all();
+    LOGI("ACTIVATION_BACKEND_LOAD_ALL_RETURNED");
+    LOGI("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
     llama_backend_init();
+    LOGI("ACTIVATION_LLAMA_BACKEND_INIT_RETURNED");
 }
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jclass, jstring jpath, jint ctx_len, jint gpu_layers) {
+    LOGI("ACTIVATION_NATIVE_LOAD_STARTED ctx_len=%d gpu_layers=%d", (int)ctx_len, (int)gpu_layers);
+    LOGI("ACTIVATION_FREE_OLD_RUNTIME_STARTED");
     free_all();
+    LOGI("ACTIVATION_FREE_OLD_RUNTIME_RETURNED");
     g_stop.store(false);
+
     const char *path = env->GetStringUTFChars(jpath, nullptr);
+    if (!path) { LOGE("ACTIVATION_PATH_UTF8_FAILED"); return 3; }
+
     llama_model_params mp = llama_model_default_params();
     mp.n_gpu_layers = gpu_layers;
+    LOGI("ACTIVATION_MODEL_LOAD_STARTED gpu_layers=%d", (int)mp.n_gpu_layers);
     g_model = llama_model_load_from_file(path, mp);
+    LOGI("ACTIVATION_MODEL_LOAD_RETURNED success=%d", g_model != nullptr ? 1 : 0);
     env->ReleaseStringUTFChars(jpath, path);
+
     if (!g_model && gpu_layers != 0) {
+        LOGW("ACTIVATION_GPU_MODEL_LOAD_FAILED_STARTING_CPU_FALLBACK");
         path = env->GetStringUTFChars(jpath, nullptr);
+        if (!path) { LOGE("ACTIVATION_CPU_FALLBACK_PATH_UTF8_FAILED"); return 3; }
         mp = llama_model_default_params();
         mp.n_gpu_layers = 0;
+        LOGI("ACTIVATION_CPU_MODEL_LOAD_STARTED");
         g_model = llama_model_load_from_file(path, mp);
+        LOGI("ACTIVATION_CPU_MODEL_LOAD_RETURNED success=%d", g_model != nullptr ? 1 : 0);
         env->ReleaseStringUTFChars(jpath, path);
         g_gpu = false;
-    } else g_gpu = g_model != nullptr && gpu_layers != 0;
-    if (!g_model) return 1;
+    } else {
+        g_gpu = g_model != nullptr && gpu_layers != 0;
+    }
+
+    if (!g_model) { LOGE("ACTIVATION_MODEL_LOAD_FAILED"); return 1; }
+
+    const int trained = llama_model_n_ctx_train(g_model);
+    const int requested = ctx_len > 0 ? ctx_len : 4096;
+    const int effective = std::max(1, std::min(requested, trained));
+    LOGI("ACTIVATION_MODEL_READY trained_ctx=%d requested_ctx=%d effective_ctx=%d backend=%s", trained, requested, effective, g_gpu ? "Vulkan" : "CPU");
 
     llama_context_params cp = llama_context_default_params();
-    const int trained = llama_model_n_ctx_train(g_model);
-    cp.n_ctx = (uint32_t)std::max(1, std::min(ctx_len > 0 ? ctx_len : 4096, trained));
+    cp.n_ctx = (uint32_t)effective;
     cp.n_batch = std::min<uint32_t>(cp.n_ctx, 512);
     cp.n_ubatch = cp.n_batch;
     cp.n_threads = threads();
     cp.n_threads_batch = threads();
+    LOGI("ACTIVATION_CONTEXT_INIT_STARTED ctx=%u batch=%u ubatch=%u threads=%d", cp.n_ctx, cp.n_batch, cp.n_ubatch, cp.n_threads);
     g_context = llama_init_from_model(g_model, cp);
-    if (!g_context) { free_all(); return 2; }
+    LOGI("ACTIVATION_CONTEXT_INIT_RETURNED success=%d", g_context != nullptr ? 1 : 0);
+    if (!g_context) { LOGE("ACTIVATION_CONTEXT_INIT_FAILED"); free_all(); return 2; }
     llama_set_abort_callback(g_context, abort_callback, nullptr);
+    LOGI("ACTIVATION_NATIVE_LOAD_COMPLETED backend=%s ctx=%d", g_gpu ? "Vulkan" : "CPU", (int)llama_n_ctx(g_context));
     return 0;
 }
 
