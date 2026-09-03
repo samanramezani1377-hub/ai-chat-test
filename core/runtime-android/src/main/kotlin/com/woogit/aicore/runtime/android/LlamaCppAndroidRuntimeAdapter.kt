@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Direct llama.cpp Android runtime. GPU/Vulkan is attempted first and CPU remains the fallback. */
 class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 4096,
+    private val gpuLayers: Int = NativeLlamaCpp.GPU_LAYERS_MAX,
 ) : RuntimeAdapter, RuntimeMetrics {
     private val stopRequested = AtomicBoolean(false)
     @Volatile private var selectedGpuLayers = 0
@@ -27,6 +28,10 @@ class LlamaCppAndroidRuntimeAdapter(
     @Volatile private var loadedContextLength: Int? = null
     @Volatile private var latestGeneration: GenerationResult? = null
     @Volatile private var latestLoadTimeMs: Long? = null
+
+    init {
+        require(gpuLayers >= 0) { "gpuLayers must be >= 0" }
+    }
 
     override fun lastGeneration(): GenerationResult? = latestGeneration
     override fun lastLoadTimeMs(): Long? = latestLoadTimeMs
@@ -46,15 +51,23 @@ class LlamaCppAndroidRuntimeAdapter(
         val startedAt = System.nanoTime()
         return try {
             val requested = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
-            val result = NativeLlamaCpp.load(file.absolutePath, requested)
+            RuntimeDiagnosticsStore.recordTrace(
+                RuntimeTraceEvent.Type.MODEL_LOAD_STARTED,
+                "file=${file.name} sizeBytes=${file.length()} requestedContext=$requested gpuLayers=$gpuLayers",
+            )
+            val result = NativeLlamaCpp.load(file.absolutePath, requested, gpuLayers)
             if (result != 0) return ModelResult.Failure(ModelError.Inference("llama.cpp failed to load the model (code=$result)"))
             val info = NativeLlamaCpp.runtimeInfo()
             selectedBackend = info.substringBefore(';').ifBlank { "CPU/NEON" }
-            selectedGpuLayers = if (selectedBackend.contains("Vulkan", ignoreCase = true)) 99 else 0
+            selectedGpuLayers = if (selectedBackend.contains("Vulkan", ignoreCase = true)) gpuLayers else 0
             selectedCpuThreads = 2
             loadedContextLength = NativeLlamaCpp.contextLength().takeIf { it > 0 } ?: requested
             latestGeneration = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
+            RuntimeDiagnosticsStore.recordTrace(
+                RuntimeTraceEvent.Type.MODEL_LOAD_COMPLETED,
+                "backend=$selectedBackend gpuLayers=$selectedGpuLayers context=${loadedContextLength}",
+            )
             RuntimeDiagnosticsStore.recordLoaded(model, latestLoadTimeMs, runtimeInfo())
             ModelResult.Success(Unit)
         } catch (t: Throwable) {
@@ -63,6 +76,7 @@ class LlamaCppAndroidRuntimeAdapter(
             selectedBackend = "CPU/NEON"
             loadedContextLength = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
+            RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.MODEL_LOAD_FAILED, t.message)
             ModelResult.Failure(RuntimeErrorMapper.loadFailure(t, file.absolutePath))
         }
     }
