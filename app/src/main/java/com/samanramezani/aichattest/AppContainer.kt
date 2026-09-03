@@ -36,7 +36,6 @@ import com.woogit.aicore.observability.ExecutionTraceEvent
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
 import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
-import com.woogit.aicore.runtime.android.NativeLlamaCpp
 import java.nio.file.Files
 
 /** Application composition root. Implementations are wired here, never inside UI screens. */
@@ -46,9 +45,9 @@ class AppContainer(context: Context? = null) {
             private set
 
         /** Temporary runtime diagnostic switch. Keep MAX as the normal/default behavior. */
-        private const val TEMP_GPU_LAYER_MODE = NativeLlamaCpp.GPU_LAYERS_MAX
+        private const val TEMP_GPU_LAYER_MODE = LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_MAX
         // For diagnostics only, change TEMP_GPU_LAYER_MODE to one of:
-        // NativeLlamaCpp.GPU_LAYERS_CPU_ONLY (0), NativeLlamaCpp.GPU_LAYERS_70 (70), NativeLlamaCpp.GPU_LAYERS_MAX (99).
+        // LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_CPU_ONLY (0), LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_70 (70), LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_MAX (99).
     }
 
     init { latest = this }
@@ -123,12 +122,8 @@ class AppContainer(context: Context? = null) {
         else -> ActionExecutionOutcome(false, false, "Action was not executed", errorCode = "NOT_EXECUTED")
     }
 
-    private val actionExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan ->
-        lifecycle.executeApproved(plan.prepared.executionId, verifier).let(::executionOutcome)
-    }
-    private val actionRetryExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan ->
-        lifecycle.retryFailed(plan.prepared.executionId, verifier).let(::executionOutcome)
-    }
+    private val actionExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan -> lifecycle.executeApproved(plan.prepared.executionId, verifier).let(::executionOutcome) }
+    private val actionRetryExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan -> lifecycle.retryFailed(plan.prepared.executionId, verifier).let(::executionOutcome) }
 
     suspend fun pendingApproval(conversationId: String): PreparedAction? = lifecycle.pendingApprovals(conversationId).maxByOrNull { it.executionId }
     suspend fun executionCheckpoint(executionId: String): PreparedAction? = runCatching { lifecycle.checkpoint(executionId) }.getOrNull()
@@ -178,12 +173,7 @@ class AppContainer(context: Context? = null) {
     fun createAgentSession(conversationId: String, eventSink: suspend (AgentEvent) -> Unit = {}): AgentSession? {
         if (appContext == null || modelManager == null) return null
         val store = HistoryConversationStore(conversationHistory, conversationId)
-        val contextProvider = DefaultContextProvider(
-            conversationStore = store,
-            systemContext = { null },
-            persistentTaskContext = { null },
-            workspaceContext = { workspaceRoot?.toString() },
-        )
+        val contextProvider = DefaultContextProvider(conversationStore = store, systemContext = { null }, persistentTaskContext = { null }, workspaceContext = { workspaceRoot?.toString() })
         return AgentSession(
             orchestrator = AgentOrchestrator(contextProvider = contextProvider, runtime = modelRuntime),
             conversationStore = store,
@@ -209,28 +199,9 @@ class AppContainer(context: Context? = null) {
 
     val actionExecutionService = ActionExecutionService(lifecycle, ApprovalController(lifecycle))
 
-    private suspend fun reportError(
-        component: String,
-        code: String,
-        userMessageFa: String,
-        throwable: Throwable,
-        actionId: String? = null,
-        taskId: String? = null,
-        executionId: String? = null,
-    ) {
+    private suspend fun reportError(component: String, code: String, userMessageFa: String, throwable: Throwable, actionId: String? = null, taskId: String? = null, executionId: String? = null) {
         val trace = executionId?.let { observability.traces(it) }?.joinToString("\n") { "${it.timestamp} ${it.phase}: ${it.message ?: ""}" }
-        observability.error(
-            appVersion = appVersion,
-            component = component,
-            errorCode = code,
-            userMessageFa = userMessageFa,
-            rawMachineError = throwable.stackTraceToString(),
-            actionId = actionId,
-            taskId = taskId,
-            trace = trace,
-            runtimeInfo = modelRuntime.runtimeInfo().toString(),
-            modelInfo = modelManager?.activeModel()?.toString(),
-        )
+        observability.error(appVersion = appVersion, component = component, errorCode = code, userMessageFa = userMessageFa, rawMachineError = throwable.stackTraceToString(), actionId = actionId, taskId = taskId, trace = trace, runtimeInfo = modelRuntime.runtimeInfo().toString(), modelInfo = modelManager?.activeModel()?.toString())
     }
 }
 
