@@ -16,7 +16,6 @@ data class RuntimeTraceEvent(
     enum class Type { MODEL_LOAD_COMPLETED, GENERATION_STARTED, FIRST_TOKEN, GENERATION_COMPLETED, GENERATION_STOPPED, GENERATION_FAILED }
 }
 
-/** Runtime-owned diagnostics. Values are populated only by real runtime operations. */
 data class RuntimeDiagnosticsSnapshot(
     val model: ModelDescriptor? = null,
     val runtime: RuntimeInfo = RuntimeInfo("unknown", "unknown", null),
@@ -25,6 +24,7 @@ data class RuntimeDiagnosticsSnapshot(
     val settings: InferenceSettings? = null,
     val generationStartedAtMs: Long? = null,
     val trace: List<RuntimeTraceEvent> = emptyList(),
+    val lastNativeEvent: String? = null,
 )
 
 object RuntimeDiagnosticsStore {
@@ -36,28 +36,18 @@ object RuntimeDiagnosticsStore {
         state.value = current.copy(trace = (current.trace + RuntimeTraceEvent(type, message)).takeLast(100))
     }
 
+    fun recordNativeEvent(message: String) {
+        state.value = state.value.copy(lastNativeEvent = message)
+    }
+
     fun recordLoaded(model: ModelDescriptor, loadTimeMs: Long?, runtime: RuntimeInfo) {
-        state.value = state.value.copy(
-            model = model,
-            runtime = runtime,
-            loadTimeMs = loadTimeMs,
-            generation = null,
-            settings = null,
-        )
+        state.value = state.value.copy(model = model, runtime = runtime, loadTimeMs = loadTimeMs, generation = null, settings = null)
         recordTrace(RuntimeTraceEvent.Type.MODEL_LOAD_COMPLETED, loadTimeMs?.let { "loadMs=$it" })
     }
 
     fun recordGeneration(settings: InferenceSettings, result: GenerationResult, runtime: RuntimeInfo) {
-        state.value = state.value.copy(
-            runtime = runtime,
-            generation = result,
-            settings = settings,
-            generationStartedAtMs = System.currentTimeMillis() - (result.generationTimeMs ?: 0L),
-        )
-        recordTrace(
-            if (result.stopped) RuntimeTraceEvent.Type.GENERATION_STOPPED else RuntimeTraceEvent.Type.GENERATION_COMPLETED,
-            "generationMs=${result.generationTimeMs ?: "n/a"}",
-        )
+        state.value = state.value.copy(runtime = runtime, generation = result, settings = settings, generationStartedAtMs = System.currentTimeMillis() - (result.generationTimeMs ?: 0L))
+        recordTrace(if (result.stopped) RuntimeTraceEvent.Type.GENERATION_STOPPED else RuntimeTraceEvent.Type.GENERATION_COMPLETED, "generationMs=${result.generationTimeMs ?: "n/a"}")
     }
 
     fun clearGeneration() {
