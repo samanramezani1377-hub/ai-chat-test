@@ -37,57 +37,9 @@ private enum class InferencePreset(
     val description: String,
     val settings: InferenceSettings,
 ) {
-    FAST(
-        "سریع",
-        "پاسخ سریع‌تر و مصرف کمتر؛ مناسب گفت‌وگوی روزمره و دستگاه‌های ضعیف‌تر.",
-        InferenceSettings(
-            temperature = 0.7,
-            maxNewTokens = 256,
-            topK = 32,
-            topP = 0.9,
-            minP = 0.0,
-            repeatPenalty = 1.1,
-            seed = null,
-            stopSequences = emptyList(),
-            contextLength = 2048,
-            recentMessages = 6,
-            maxActionSteps = 2,
-        ),
-    ),
-    BALANCED(
-        "استاندارد",
-        "تعادل پیشنهادی بین کیفیت، سرعت و مصرف منابع؛ گزینه مناسب برای استفاده معمول.",
-        InferenceSettings(
-            temperature = 0.7,
-            maxNewTokens = 512,
-            topK = 40,
-            topP = 0.9,
-            minP = 0.0,
-            repeatPenalty = 1.1,
-            seed = null,
-            stopSequences = emptyList(),
-            contextLength = 4096,
-            recentMessages = 10,
-            maxActionSteps = 4,
-        ),
-    ),
-    DEEP(
-        "عمیق",
-        "فضای بیشتر برای پاسخ‌های طولانی و چندمرحله‌ای؛ کندتر و پرمصرف‌تر.",
-        InferenceSettings(
-            temperature = 0.65,
-            maxNewTokens = 1024,
-            topK = 50,
-            topP = 0.92,
-            minP = 0.0,
-            repeatPenalty = 1.1,
-            seed = null,
-            stopSequences = emptyList(),
-            contextLength = 8192,
-            recentMessages = 20,
-            maxActionSteps = 6,
-        ),
-    ),
+    FAST("سریع", "پاسخ سریع‌تر و مصرف کمتر؛ مناسب گفت‌وگوی روزمره و دستگاه‌های ضعیف‌تر.", InferenceSettings(temperature = 0.7, maxNewTokens = 256, topK = 32, topP = 0.9, minP = 0.0, repeatPenalty = 1.1, seed = null, stopSequences = emptyList(), contextLength = 2048, recentMessages = 6, maxActionSteps = 2)),
+    BALANCED("استاندارد", "تعادل پیشنهادی بین کیفیت، سرعت و مصرف منابع؛ گزینه مناسب برای استفاده معمول.", InferenceSettings(temperature = 0.7, maxNewTokens = 512, topK = 40, topP = 0.9, minP = 0.0, repeatPenalty = 1.1, seed = null, stopSequences = emptyList(), contextLength = 4096, recentMessages = 10, maxActionSteps = 4)),
+    DEEP("عمیق", "فضای بیشتر برای پاسخ‌های طولانی و چندمرحله‌ای؛ کندتر و پرمصرف‌تر.", InferenceSettings(temperature = 0.65, maxNewTokens = 1024, topK = 50, topP = 0.92, minP = 0.0, repeatPenalty = 1.1, seed = null, stopSequences = emptyList(), contextLength = 8192, recentMessages = 20, maxActionSteps = 6)),
 }
 
 @Composable
@@ -121,64 +73,30 @@ private fun InferenceControls() {
     var dirty by remember { mutableStateOf(false) }
     fun update(value: InferenceSettings) { settings = value; dirty = true }
     fun apply() { saveSettings(context, settings); dirty = false }
-
     Column(verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
         Text("استنتاج", style = MaterialTheme.typography.titleLarge)
         Text("یک پروفایل آماده انتخاب کنید یا بعد از انتخاب، هر مقدار را به‌صورت سفارشی تغییر دهید. انتخاب پروفایل فقط مقادیر همین تنظیمات را تغییر می‌دهد و تا زمان اعمال، روی Runtime اجرا نمی‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-        UiSurface {
-            Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("پروفایل آماده", style = MaterialTheme.typography.titleMedium)
-                Text("سریع · استاندارد · عمیق", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                InferencePresetSelector(settings, ::update)
-            }
-        }
-
-        UiSurface {
-            Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("تنظیمات سفارشی", style = MaterialTheme.typography.titleMedium)
-                Text("هر تغییری در کنترل‌های زیر یعنی تنظیمات سفارشی شما؛ نیازی نیست یکی از پروفایل‌ها را برای همیشه انتخاب کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Temperature: %.2f".format(settings.temperature))
-                Slider(value = settings.temperature.toFloat(), onValueChange = { update(settings.copy(temperature = it.toDouble())) }, valueRange = 0f..2f)
-                Text("Top-P: %.2f".format(settings.topP ?: 0.9))
-                Slider(value = (settings.topP ?: 0.9).toFloat(), onValueChange = { update(settings.copy(topP = it.toDouble())) }, valueRange = 0f..1f)
-                Text("Top-K: ${settings.topK ?: 40}")
-                Slider(value = (settings.topK ?: 40).toFloat(), onValueChange = { update(settings.copy(topK = it.toInt())) }, valueRange = 0f..128f)
-                Text("Min-P: %.2f".format(settings.minP ?: 0.0))
-                Slider(value = (settings.minP ?: 0.0).toFloat(), onValueChange = { update(settings.copy(minP = it.toDouble())) }, valueRange = 0f..1f)
-                Text("Repeat Penalty: %.2f".format(settings.repeatPenalty ?: 1.1))
-                Slider(value = (settings.repeatPenalty ?: 1.1).toFloat(), onValueChange = { update(settings.copy(repeatPenalty = it.toDouble())) }, valueRange = 0.8f..2f)
-                Text("Max New Tokens: ${settings.maxNewTokens}")
-                Slider(value = settings.maxNewTokens.toFloat(), onValueChange = { update(settings.copy(maxNewTokens = it.toInt().coerceAtLeast(1))) }, valueRange = 64f..2048f, steps = 31)
-                Text("Context Length: ${settings.contextLength ?: 4096}")
-                Slider(value = (settings.contextLength ?: 4096).toFloat(), onValueChange = { update(settings.copy(contextLength = it.toInt().coerceAtLeast(256))) }, valueRange = 256f..8192f, steps = 31)
-                Text("Seed: ${settings.seed ?: "تصادفی"}")
-            }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
-            Button(onClick = ::apply, Modifier.weight(1f).heightIn(min = UiTokens.minimumTouchTarget), enabled = dirty) { Text("اعمال تنظیمات") }
-            OutlinedButton(onClick = { settings = InferenceSettings(); apply() }, Modifier.weight(1f).heightIn(min = UiTokens.minimumTouchTarget)) { Text("بازنشانی") }
-        }
+        UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("پروفایل آماده", style = MaterialTheme.typography.titleMedium); Text("سریع · استاندارد · عمیق", color = MaterialTheme.colorScheme.onSurfaceVariant); InferencePresetSelector(settings, ::update) } }
+        UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("تنظیمات سفارشی", style = MaterialTheme.typography.titleMedium)
+            Text("هر تغییری در کنترل‌های زیر یعنی تنظیمات سفارشی شما؛ نیازی نیست یکی از پروفایل‌ها را برای همیشه انتخاب کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Temperature: %.2f".format(settings.temperature)); Slider(value = settings.temperature.toFloat(), onValueChange = { update(settings.copy(temperature = it.toDouble())) }, valueRange = 0f..2f)
+            Text("Top-P: %.2f".format(settings.topP ?: 0.9)); Slider(value = (settings.topP ?: 0.9).toFloat(), onValueChange = { update(settings.copy(topP = it.toDouble())) }, valueRange = 0f..1f)
+            Text("Top-K: ${settings.topK ?: 40}"); Slider(value = (settings.topK ?: 40).toFloat(), onValueChange = { update(settings.copy(topK = it.toInt())) }, valueRange = 0f..128f)
+            Text("Min-P: %.2f".format(settings.minP ?: 0.0)); Slider(value = (settings.minP ?: 0.0).toFloat(), onValueChange = { update(settings.copy(minP = it.toDouble())) }, valueRange = 0f..1f)
+            Text("Repeat Penalty: %.2f".format(settings.repeatPenalty ?: 1.1)); Slider(value = (settings.repeatPenalty ?: 1.1).toFloat(), onValueChange = { update(settings.copy(repeatPenalty = it.toDouble())) }, valueRange = 0.8f..2f)
+            Text("Max New Tokens: ${settings.maxNewTokens}"); Slider(value = settings.maxNewTokens.toFloat(), onValueChange = { update(settings.copy(maxNewTokens = it.toInt().coerceAtLeast(1))) }, valueRange = 64f..2048f, steps = 31)
+            Text("Context Length: ${settings.contextLength ?: 4096}"); Slider(value = (settings.contextLength ?: 4096).toFloat(), onValueChange = { update(settings.copy(contextLength = it.toInt().coerceAtLeast(256))) }, valueRange = 256f..8192f, steps = 31)
+            Text("Seed: ${settings.seed ?: "تصادفی"}")
+        } }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) { Button(onClick = ::apply, Modifier.weight(1f).heightIn(min = UiTokens.minimumTouchTarget), enabled = dirty) { Text("اعمال تنظیمات") }; OutlinedButton(onClick = { settings = InferenceSettings(); apply() }, Modifier.weight(1f).heightIn(min = UiTokens.minimumTouchTarget)) { Text("بازنشانی") } }
         Text(if (dirty) "تغییرات ذخیره نشده‌اند." else "تنظیمات ذخیره و برای Generation بعدی آماده‌اند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
 private fun InferencePresetSelector(settings: InferenceSettings, onSelect: (InferenceSettings) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        InferencePreset.values().forEach { preset ->
-            val selected = settings == preset.settings
-            OutlinedButton(
-                onClick = { onSelect(preset.settings) },
-                modifier = Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget),
-            ) {
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(if (selected) "✓ ${preset.title}" else preset.title, style = MaterialTheme.typography.titleSmall)
-                    Text(preset.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { InferencePreset.values().forEach { preset -> val selected = settings == preset.settings; OutlinedButton(onClick = { onSelect(preset.settings) }, modifier = Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) { Text(if (selected) "✓ ${preset.title}" else preset.title, style = MaterialTheme.typography.titleSmall); Text(preset.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } } }
 }
 
 @Composable
@@ -188,17 +106,10 @@ private fun ContextControls() {
     var dirty by remember { mutableStateOf(false) }
     fun update(value: InferenceSettings) { settings = value; dirty = true }
     fun apply() { saveSettings(context, settings); dirty = false }
-
     Column(verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
         Text("زمینه", style = MaterialTheme.typography.titleLarge)
         Text("تعداد پیام‌های اخیر که Context Builder برای درخواست بعدی در نظر می‌گیرد قابل تنظیم است. Summary، Persistent Task Context و Workspace Context همچنان مالکیت جداگانه در Core دارند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        UiSurface {
-            Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Recent Messages: ${settings.recentMessages}")
-                Slider(value = settings.recentMessages.toFloat(), onValueChange = { update(settings.copy(recentMessages = it.toInt().coerceIn(0, 50))) }, valueRange = 0f..50f, steps = 49)
-                Text("پیش‌فرض: ۱۰ · بازه قابل تنظیم: ۰ تا ۵۰", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
+        UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) { Text("Recent Messages: ${settings.recentMessages}"); Slider(value = settings.recentMessages.toFloat(), onValueChange = { update(settings.copy(recentMessages = it.toInt().coerceIn(0, 50))) }, valueRange = 0f..50f, steps = 49); Text("پیش‌فرض: ۱۰ · بازه قابل تنظیم: ۰ تا ۵۰", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
         Button(onClick = ::apply, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget), enabled = dirty) { Text("اعمال تنظیمات زمینه") }
         Text(if (dirty) "تغییرات ذخیره نشده‌اند." else "تنظیمات زمینه ذخیره و برای Context بعدی آماده‌اند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -211,17 +122,10 @@ private fun AgentControls() {
     var dirty by remember { mutableStateOf(false) }
     fun update(value: InferenceSettings) { settings = value; dirty = true }
     fun apply() { saveSettings(context, settings); dirty = false }
-
     Column(verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
         Text("عامل", style = MaterialTheme.typography.titleLarge)
         Text("حداکثر تعداد Action واقعی که Agent برای هر درخواست می‌تواند اجرا کند. مقدار پیش‌فرض ۴ است و فقط برای جلوگیری از چرخه‌های بی‌نهایت استفاده می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        UiSurface {
-            Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Max Action Steps: ${settings.maxActionSteps}")
-                Slider(value = settings.maxActionSteps.toFloat(), onValueChange = { update(settings.copy(maxActionSteps = it.toInt().coerceIn(0, 16))) }, valueRange = 0f..16f, steps = 15)
-                Text("پیش‌فرض: ۴ · بازه قابل تنظیم: ۰ تا ۱۶", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
+        UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) { Text("Max Action Steps: ${settings.maxActionSteps}"); Slider(value = settings.maxActionSteps.toFloat(), onValueChange = { update(settings.copy(maxActionSteps = it.toInt().coerceIn(0, 16))) }, valueRange = 0f..16f, steps = 15); Text("پیش‌فرض: ۴ · بازه قابل تنظیم: ۰ تا ۱۶", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
         Button(onClick = ::apply, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget), enabled = dirty) { Text("اعمال تنظیمات عامل") }
         Text(if (dirty) "تغییرات ذخیره نشده‌اند." else "تنظیمات عامل ذخیره و برای اجرای بعدی آماده‌اند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -250,10 +154,7 @@ private fun loadSettings(context: Context): InferenceSettings {
 
 private fun migrateSettings(p: android.content.SharedPreferences) {
     val version = p.getInt(KEY_SCHEMA_VERSION, 0)
-    if (version < 2) {
-        if (!p.contains(KEY_RECENT_MESSAGES)) p.edit().putInt(KEY_RECENT_MESSAGES, 10).apply()
-        p.edit().putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION).apply()
-    }
+    if (version < 2) { if (!p.contains(KEY_RECENT_MESSAGES)) p.edit().putInt(KEY_RECENT_MESSAGES, 10).apply(); p.edit().putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION).apply() }
 }
 
 private fun saveSettings(context: Context, settings: InferenceSettings) {
@@ -275,16 +176,26 @@ private fun saveSettings(context: Context, settings: InferenceSettings) {
 }
 
 @Composable
-private fun SettingsInfo(title: String, message: String) {
-    UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) { Text(title, style = MaterialTheme.typography.titleLarge); Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
-}
+private fun SettingsInfo(title: String, message: String) { UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) { Text(title, style = MaterialTheme.typography.titleLarge); Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
 
-@Composable private fun SettingsGroup(title: String, sections: List<String>, selected: String, onSelect: (String) -> Unit) {
-    UiSurface { Column(Modifier.padding(vertical = 8.dp)) { Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = UiTokens.compactPadding, vertical = 8.dp)); sections.forEach { name -> TextButton(onClick = { onSelect(name) }, modifier = Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget).semantics { contentDescription = if (selected == name) "$name، انتخاب شده" else name }, contentPadding = PaddingValues(horizontal = UiTokens.compactPadding, vertical = 8.dp)) { Text(if (selected == name) "● $name" else name, Modifier.fillMaxWidth()) } } } }
-}
+@Composable
+private fun SettingsGroup(title: String, sections: List<String>, selected: String, onSelect: (String) -> Unit) { UiSurface { Column(Modifier.padding(vertical = 8.dp)) { Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = UiTokens.compactPadding, vertical = 8.dp)); sections.forEach { name -> TextButton(onClick = { onSelect(name) }, modifier = Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget).semantics { contentDescription = if (selected == name) "$name، انتخاب شده" else name }, contentPadding = PaddingValues(horizontal = UiTokens.compactPadding, vertical = 8.dp)) { Text(if (selected == name) "● $name" else name, Modifier.fillMaxWidth()) } } } } }
 
-@Composable private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescriptor>, error: String?, onImport: () -> Unit, onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)?, onDelete: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) { Text("مدل", style = MaterialTheme.typography.titleLarge); UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("مدل فعلی", style = MaterialTheme.typography.labelLarge); Text(active?.displayName ?: "مدلی فعال نیست", style = MaterialTheme.typography.titleMedium); Text(if (active != null) "آماده استفاده در گفت‌وگو" else "برای شروع، یک مدل محلی وارد و فعال کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant); if (active != null && onDeactivate != null) OutlinedButton(onClick = onDeactivate, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("خارج‌کردن مدل از حافظه") } } }; Button(onClick = onImport, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("انتخاب فایل مدل از گوشی") }; Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) { Text("مدیریت مدل‌ها", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f)); TextButton(onClick = onRefresh, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text("به‌روزرسانی") } }; if (models.isEmpty()) EmptyState() else models.forEach { model -> ModelCard(model, model.id == active?.id, onActivate, onDelete) }; if (error != null) ErrorSurface(error) }
+@Composable
+private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescriptor>, error: String?, onImport: () -> Unit, onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)?, onDelete: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
+        Text("مدل", style = MaterialTheme.typography.titleLarge)
+        UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("حالت اجرای پیش‌فرض", style = MaterialTheme.typography.labelLarge)
+            Text("CPU / NEON", style = MaterialTheme.typography.titleMedium)
+            Text("برای ایمنی و پایداری، برنامه به‌صورت پیش‌فرض مدل را روی CPU اجرا می‌کند (gpu_layers = 0). استفاده از GPU/Vulkan فقط در حالت انتخاب صریح Runtime انجام می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } }
+        UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("مدل فعلی", style = MaterialTheme.typography.labelLarge); Text(active?.displayName ?: "مدلی فعال نیست", style = MaterialTheme.typography.titleMedium); Text(if (active != null) "آماده استفاده در گفت‌وگو" else "برای شروع، یک مدل محلی وارد و فعال کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant); if (active != null && onDeactivate != null) OutlinedButton(onClick = onDeactivate, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("خارج‌کردن مدل از حافظه") } } }
+        Button(onClick = onImport, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("انتخاب فایل مدل از گوشی") }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) { Text("مدیریت مدل‌ها", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f)); TextButton(onClick = onRefresh, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text("به‌روزرسانی") } }
+        if (models.isEmpty()) EmptyState() else models.forEach { model -> ModelCard(model, model.id == active?.id, onActivate, onDelete) }
+        if (error != null) ErrorSurface(error)
+    }
 }
 
 @Composable private fun EmptyState() { UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("مدل محلی واردشده‌ای وجود ندارد.", style = MaterialTheme.typography.titleMedium); Text("از انتخاب فایل مدل برای واردکردن یک فایل GGUF استفاده کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
