@@ -29,6 +29,7 @@ android {
                     "-DLLAMA_BUILD_UI=OFF",
                     "-DLLAMA_OPENSSL=OFF",
                     "-DGGML_NATIVE=OFF",
+                    "-DGGML_CPU_ARM_ARCH=armv8-a",
                     "-DGGML_OPENMP=OFF",
                     "-DGGML_LLAMAFILE=OFF",
                     "-DGGML_VULKAN=ON",
