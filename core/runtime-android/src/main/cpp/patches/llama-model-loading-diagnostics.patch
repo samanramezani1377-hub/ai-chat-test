@@ -57,4 +57,3 @@ diff --git a/src/llama.cpp b/src/llama.cpp
 +        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_TENSORS_RETURN true\n");
  
          return {0, model_ptr.release()};
-*** End Patch
