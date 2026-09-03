@@ -3,7 +3,7 @@ package com.samanramezani.aichattest.ui
 import androidx.compose.runtime.Composable
 import com.woogit.aicore.domain.ModelDescriptor
 
-/** Compatibility overload for the pre-refactor MainScreen signature. */
+/** Compatibility bridge for the current MainScreen wiring while the UI layer is being consolidated. */
 @Composable
 internal fun SettingsScreen(
     models: List<ModelDescriptor>,
@@ -11,8 +11,10 @@ internal fun SettingsScreen(
     runtimeStatus: String,
     error: String?,
     onImport: () -> Unit,
-    onDeactivate: () -> Unit,
     onRefresh: () -> Unit,
+    onActivate: (String) -> Unit,
+    onDeactivate: () -> Unit,
+    onDelete: (String) -> Unit,
 ) {
     SettingsScreen(
         models = models,
@@ -20,8 +22,8 @@ internal fun SettingsScreen(
         error = error,
         onImport = onImport,
         onRefresh = onRefresh,
-        onActivate = {},
+        onActivate = onActivate,
         onDeactivate = onDeactivate,
-        onDelete = {},
+        onDelete = onDelete,
     )
 }
