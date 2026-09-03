@@ -29,11 +29,21 @@ internal object NativeLlamaCpp {
     private fun ensureNativeInitialized(gpuLayers: Int) {
         val enableGpu = gpuLayers != GPU_LAYERS_CPU_ONLY
         synchronized(this) {
-            if (nativeInitialized && (!enableGpu || gpuBackendRequested)) return
+            if (nativeInitialized) {
+                if (enableGpu != gpuBackendRequested) {
+                    val selected = if (gpuBackendRequested) "GPU" else "CPU"
+                    val requested = if (enableGpu) "GPU" else "CPU"
+                    val message = "Native backend is already initialized as $selected; cannot switch to $requested in the same process. Restart the app to change backend."
+                    Log.e(TAG, "ACTIVATION_NATIVE_BACKEND_MODE_CONFLICT selected=$selected requested=$requested")
+                    throw IllegalStateException(message)
+                }
+                return
+            }
+
             Log.i(TAG, "ACTIVATION_NATIVE_INIT_REQUESTED gpu=$enableGpu gpu_layers=$gpuLayers")
             nativeInit(enableGpu)
             nativeInitialized = true
-            gpuBackendRequested = gpuBackendRequested || enableGpu
+            gpuBackendRequested = enableGpu
             Log.i(TAG, "ACTIVATION_NATIVE_INIT_RETURNED gpu=$enableGpu gpu_layers=$gpuLayers")
         }
     }
@@ -86,6 +96,7 @@ internal object NativeLlamaCpp {
                 appendLine("file_size_mib=${if (file.isFile) file.length() / 1048576.0 else -1.0}")
                 appendLine("requested_context=$contextLength")
                 appendLine("gpu_layers=$gpuLayers")
+                appendLine("backend_mode=${if (gpuLayers == 0) "CPU" else "GPU"}")
                 appendLine("device_mem_total_bytes=${memoryInfo.totalMem}")
                 appendLine("device_mem_available_bytes=${memoryInfo.availMem}")
                 appendLine("device_mem_available_mib=${memoryInfo.availMem / 1048576.0}")
