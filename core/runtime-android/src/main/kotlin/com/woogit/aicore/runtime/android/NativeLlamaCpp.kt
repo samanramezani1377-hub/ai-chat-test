@@ -8,7 +8,11 @@ import kotlinx.coroutines.launch
 
 internal object NativeLlamaCpp {
     private const val TAG = "AIChatRuntime"
-    private const val GPU_LAYERS = 99
+
+    /** Temporary activation diagnostics: switch between CPU-only, 70 layers, and max-offload. */
+    const val GPU_LAYERS_CPU_ONLY = 0
+    const val GPU_LAYERS_70 = 70
+    const val GPU_LAYERS_MAX = 99
 
     init {
         Log.i(TAG, "ACTIVATION_NATIVE_LIBRARY_LOAD_STARTED")
@@ -18,11 +22,12 @@ internal object NativeLlamaCpp {
         Log.i(TAG, "ACTIVATION_NATIVE_INIT_RETURNED")
     }
 
-    fun load(path: String, contextLength: Int): Int {
-        Log.i(TAG, "ACTIVATION_KOTLIN_NATIVE_LOAD_STARTED ctx_len=$contextLength gpu_layers=$GPU_LAYERS file=${path.substringAfterLast('/')}")
+    fun load(path: String, contextLength: Int, gpuLayers: Int): Int {
+        require(gpuLayers >= 0) { "gpuLayers must be >= 0" }
+        Log.i(TAG, "ACTIVATION_KOTLIN_NATIVE_LOAD_STARTED ctx_len=$contextLength gpu_layers=$gpuLayers file=${path.substringAfterLast('/')}")
         return try {
-            val result = nativeLoad(path, contextLength, GPU_LAYERS)
-            Log.i(TAG, "ACTIVATION_KOTLIN_NATIVE_LOAD_RETURNED result=$result")
+            val result = nativeLoad(path, contextLength, gpuLayers)
+            Log.i(TAG, "ACTIVATION_KOTLIN_NATIVE_LOAD_RETURNED result=$result gpu_layers=$gpuLayers")
             result
         } catch (t: Throwable) {
             Log.e(TAG, "ACTIVATION_KOTLIN_NATIVE_LOAD_THROWN type=${t::class.java.name} message=${t.message}", t)
