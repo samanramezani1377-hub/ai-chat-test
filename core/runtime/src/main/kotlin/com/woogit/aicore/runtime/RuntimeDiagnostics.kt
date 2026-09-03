@@ -31,17 +31,23 @@ data class RuntimeDiagnosticsSnapshot(
 object RuntimeDiagnosticsStore {
     private val markerFile = File(System.getProperty("java.io.tmpdir") ?: ".", "ai-chat-last-native-event.txt")
     private val preflightFile = File(System.getProperty("java.io.tmpdir") ?: ".", "ai-chat-model-preflight.txt")
-    private val state = MutableStateFlow(RuntimeDiagnosticsSnapshot(lastNativeEvent = readMarker()))
+    private val nativeTraceFile = File(System.getProperty("java.io.tmpdir") ?: ".", "ai-chat-native-trace.txt")
+    private val state = MutableStateFlow(RuntimeDiagnosticsSnapshot(lastNativeEvent = readNativeDiagnostics()))
     val snapshot: StateFlow<RuntimeDiagnosticsSnapshot> = state.asStateFlow()
 
-    private fun readMarker(): String? = runCatching {
-        val native = markerFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotBlank() }
+    private fun readNativeDiagnostics(): String? = runCatching {
         val preflight = preflightFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotBlank() }
-        listOfNotNull(preflight, native).joinToString("\n===== NATIVE EVENT =====\n").takeIf { it.isNotBlank() }
+        val marker = markerFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotBlank() }
+        val trace = nativeTraceFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotBlank() }
+        listOfNotNull(
+            preflight,
+            marker?.let { "LAST_NATIVE_EVENT=$it" },
+            trace?.let { "===== NATIVE TRACE =====\n$it" },
+        ).joinToString("\n===== NATIVE DIAGNOSTICS =====\n").takeIf { it.isNotBlank() }
     }.getOrNull()
 
     fun refreshNativeEvent() {
-        state.value = state.value.copy(lastNativeEvent = readMarker())
+        state.value = state.value.copy(lastNativeEvent = readNativeDiagnostics())
     }
 
     fun recordTrace(type: RuntimeTraceEvent.Type, message: String? = null) {
