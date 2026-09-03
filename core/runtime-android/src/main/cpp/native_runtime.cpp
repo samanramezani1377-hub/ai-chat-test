@@ -23,14 +23,27 @@ static llama_context *g_context = nullptr;
 static llama_sampler *g_sampler = nullptr;
 static bool g_gpu = false;
 static std::string g_native_marker_file;
+static std::string g_native_trace_file;
 static std::mutex g_native_marker_mutex;
 
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
 static int threads() { return std::clamp((int)std::max(1u, std::thread::hardware_concurrency()) - 2, 2, 4); }
 
+static void append_native_trace(const char *text) {
+    if (!text || !*text || g_native_trace_file.empty()) return;
+    std::lock_guard<std::mutex> lock(g_native_marker_mutex);
+    std::ofstream out(g_native_trace_file, std::ios::app);
+    if (out.is_open()) {
+        out << text;
+        if (text[std::strlen(text) - 1] != '\n') out << '\n';
+        out.flush();
+    }
+}
+
 static void checkpoint(const char *event) {
     LOGI("NATIVE_CHECKPOINT %s", event);
     __android_log_write(ANDROID_LOG_INFO, LOG_TAG, event);
+    append_native_trace(event);
     if (!g_native_marker_file.empty()) {
         std::lock_guard<std::mutex> lock(g_native_marker_mutex);
         std::ofstream out(g_native_marker_file, std::ios::trunc);
@@ -136,7 +149,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
             if (tmp_dir) {
                 const char *dir = env->GetStringUTFChars(tmp_dir, nullptr);
                 if (dir) {
-                    g_native_marker_file = std::string(dir) + "/ai-chat-last-native-event.txt";
+                    const std::string base(dir);
+                    g_native_marker_file = base + "/ai-chat-last-native-event.txt";
+                    g_native_trace_file = base + "/ai-chat-native-trace.txt";
                     env->ReleaseStringUTFChars(tmp_dir, dir);
                 }
                 env->DeleteLocalRef(tmp_dir);
@@ -147,27 +162,36 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
 
     if (!g_native_marker_file.empty()) {
         LOGI("NATIVE_DIAGNOSTICS_MARKER=%s", g_native_marker_file.c_str());
+        LOGI("NATIVE_DIAGNOSTICS_TRACE=%s", g_native_trace_file.c_str());
+        append_native_trace("===== NATIVE INIT =====");
     } else {
         LOGW("NATIVE_DIAGNOSTICS_MARKER_UNAVAILABLE");
     }
 
     llama_log_set([](enum ggml_log_level level, const char *text, void *) {
+        const char *message = text ? text : "<null>";
         const int priority = level >= GGML_LOG_LEVEL_ERROR ? ANDROID_LOG_ERROR :
                              level >= GGML_LOG_LEVEL_WARN ? ANDROID_LOG_WARN : ANDROID_LOG_INFO;
-        __android_log_print(priority, LOG_TAG, "%s", text ? text : "<null>");
+        __android_log_print(priority, LOG_TAG, "%s", message);
+        append_native_trace(message);
     }, nullptr);
     LOGI("ACTIVATION_BACKEND_LOAD_ALL_STARTED");
+    append_native_trace("ACTIVATION_BACKEND_LOAD_ALL_STARTED");
     ggml_backend_load_all();
     LOGI("ACTIVATION_BACKEND_LOAD_ALL_RETURNED");
+    append_native_trace("ACTIVATION_BACKEND_LOAD_ALL_RETURNED");
     LOGI("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
+    append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
     llama_backend_init();
     LOGI("ACTIVATION_LLAMA_BACKEND_INIT_RETURNED");
+    append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_RETURNED");
 }
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jclass, jstring jpath, jint ctx_len, jint gpu_layers) {
     checkpoint("NATIVE_LOAD_STARTED");
     LOGI("ACTIVATION_NATIVE_LOAD_STARTED ctx_len=%d gpu_layers=%d", (int)ctx_len, (int)gpu_layers);
+    append_native_trace((std::string("ACTIVATION_NATIVE_LOAD_STARTED ctx_len=") + std::to_string((int)ctx_len) + " gpu_layers=" + std::to_string((int)gpu_layers)).c_str());
     LOGI("ACTIVATION_FREE_OLD_RUNTIME_STARTED");
     checkpoint("FREE_OLD_RUNTIME_STARTED");
     free_all();
@@ -183,6 +207,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
 
     llama_model_params mp = llama_model_default_params();
     mp.n_gpu_layers = gpu_layers;
+    const std::string params_event = std::string("MODEL_LOAD_PARAMS gpu_layers=") + std::to_string((int)mp.n_gpu_layers) +
+        " use_mmap=" + (mp.use_mmap ? "1" : "0") + " use_mlock=" + (mp.use_mlock ? "1" : "0") +
+        " vocab_only=" + (mp.vocab_only ? "1" : "0");
+    checkpoint(params_event.c_str());
     LOGI("ACTIVATION_MODEL_LOAD_STARTED gpu_layers=%d", (int)mp.n_gpu_layers);
     checkpoint(gpu_layers == 0 ? "MODEL_LOAD_STARTED gpu_layers=0" : "MODEL_LOAD_STARTED gpu_layers=GPU");
     g_model = llama_model_load_from_file(path, mp);
