@@ -13,6 +13,9 @@ android {
         consumerProguardFiles("consumer-rules.pro")
         externalNativeBuild {
             cmake {
+                // Keep the native build strictly single-ABI. The app also packages
+                // arm64-v8a only, and CMake must not configure/build extra ABIs.
+                abiFilters += "arm64-v8a"
                 arguments += listOf(
                     "-DCMAKE_BUILD_TYPE=Release",
                     "-DLLAMA_BUILD_COMMON=OFF",
