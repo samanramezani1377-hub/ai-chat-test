@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -73,7 +74,10 @@ private fun HeaderNav(text: String, active: Boolean, onClick: () -> Unit) {
 
 @Composable
 internal fun QuickMenu(onDiagnostics: () -> Unit, onSettings: () -> Unit) {
-    Surface(Modifier.padding(top = 82.dp, start = 12.dp).widthIn(max = 220.dp), shape = RoundedCornerShape(18.dp), tonalElevation = 6.dp) {
+    // The three-dot action is on the physical left in the RTL header.
+    // Keep the popup anchored to that same physical side rather than resolving
+    // Start/End through RTL.
+    Surface(Modifier.padding(top = 82.dp, end = 12.dp).widthIn(max = 220.dp), shape = RoundedCornerShape(18.dp), tonalElevation = 6.dp) {
         Column(Modifier.padding(8.dp)) {
             TextButton(onClick = onDiagnostics, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Default.BugReport, null); Spacer(Modifier.width(8.dp)); Text("عیب‌یابی") }
             TextButton(onClick = onSettings, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Default.Settings, null); Spacer(Modifier.width(8.dp)); Text("تنظیمات") }
@@ -85,7 +89,7 @@ internal fun QuickMenu(onDiagnostics: () -> Unit, onSettings: () -> Unit) {
 internal fun Sidebar(current: ConversationRecord?, conversations: List<ConversationRecord>, destination: AppDestination, onClose: () -> Unit, onDestination: (AppDestination) -> Unit, onNew: () -> Unit, onOpen: (ConversationRecord) -> Unit, onRename: (ConversationRecord) -> Unit, onDelete: (ConversationRecord) -> Unit, onMore: () -> Unit, canShowMore: Boolean) {
     Box(Modifier.fillMaxSize()) {
         Spacer(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .24f)).clickable(onClick = onClose).semantics { contentDescription = "بستن نوار کناری" })
-        Surface(Modifier.fillMaxHeight().fillMaxWidth(.88f).align(Alignment.CenterEnd), shape = RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp), tonalElevation = 8.dp) {
+        Surface(Modifier.fillMaxHeight().fillMaxWidth(.88f).align(AbsoluteAlignment.CenterRight), shape = RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp), tonalElevation = 8.dp) {
             LazyColumn(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 item { Text("منو", style = MaterialTheme.typography.headlineSmall); Spacer(Modifier.height(8.dp)) }
                 item { Button(onClick = onNew, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp)); Text("گفت‌وگوی جدید") } }
