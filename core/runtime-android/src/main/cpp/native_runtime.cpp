@@ -300,9 +300,6 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
 
     if (gpu_layers == 0) {
         checkpoint("CPU_ONLY_DEVICE_SELECTION_STARTED");
-        // Do not inject an explicit CPU device array here. llama.cpp's native
-        // device selection is the canonical CPU-only path. With Vulkan disabled,
-        // it cannot select a GPU and load_tensors will use the CPU buffer types.
         mp.load_mode = LLAMA_LOAD_MODE_MMAP;
         mp.check_tensors = false;
         checkpoint("CPU_ONLY_CANONICAL_DEVICE_SELECTION");
@@ -356,4 +353,15 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeRuntimeInfo(JNIEnv *env, jclass) {
     const std::string value = std::string(g_gpu ? "Hybrid(CPU+Vulkan)" : "CPU/NEON") + "; llama.cpp=c5fc7e34885ba31217e330809437afa993d27745";
     return env->NewStringUTF(value.c_str());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeContextLength(JNIEnv *, jclass) {
+    if (g_context) {
+        return (jint) llama_n_ctx(g_context);
+    }
+    if (g_model) {
+        return (jint) llama_model_n_ctx_train(g_model);
+    }
+    return 0;
 }
