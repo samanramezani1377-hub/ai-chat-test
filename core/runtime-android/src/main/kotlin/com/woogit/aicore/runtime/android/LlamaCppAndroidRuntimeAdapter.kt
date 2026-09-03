@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Direct llama.cpp Android runtime. GPU/Vulkan is attempted first and CPU remains the fallback. */
 class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 4096,
-    initialGpuLayers: Int = GPU_LAYERS_MAX,
+    gpuLayers: Int = GPU_LAYERS_MAX,
 ) : RuntimeAdapter, RuntimeMetrics {
     companion object {
         const val GPU_LAYERS_CPU_ONLY = 0
@@ -28,7 +28,7 @@ class LlamaCppAndroidRuntimeAdapter(
     }
 
     private val stopRequested = AtomicBoolean(false)
-    @Volatile private var gpuLayers = initialGpuLayers
+    @Volatile private var gpuLayersMode = gpuLayers
     @Volatile private var selectedGpuLayers = 0
     @Volatile private var selectedCpuThreads = 2
     @Volatile private var selectedBackend = "CPU/NEON"
@@ -36,16 +36,16 @@ class LlamaCppAndroidRuntimeAdapter(
     @Volatile private var latestGeneration: GenerationResult? = null
     @Volatile private var latestLoadTimeMs: Long? = null
 
-    init { require(initialGpuLayers >= 0) { "gpuLayers must be >= 0" } }
+    init { require(gpuLayers in setOf(GPU_LAYERS_CPU_ONLY, GPU_LAYERS_70, GPU_LAYERS_MAX)) { "Unsupported diagnostic GPU layer mode: $gpuLayers" } }
 
     fun setGpuLayers(value: Int) {
         require(value in setOf(GPU_LAYERS_CPU_ONLY, GPU_LAYERS_70, GPU_LAYERS_MAX)) { "Unsupported diagnostic GPU layer mode: $value" }
-        gpuLayers = value
+        gpuLayersMode = value
         RuntimeDiagnosticsStore.recordNativeEvent("GPU_LAYER_MODE_SELECTED layers=$value")
         RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "GPU_LAYER_MODE_SELECTED layers=$value (applies on next activation)")
     }
 
-    fun gpuLayers(): Int = gpuLayers
+    fun gpuLayers(): Int = gpuLayersMode
 
     override fun lastGeneration(): GenerationResult? = latestGeneration
     override fun lastLoadTimeMs(): Long? = latestLoadTimeMs
@@ -63,7 +63,7 @@ class LlamaCppAndroidRuntimeAdapter(
         val file = model.path.toFile()
         if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
         val startedAt = System.nanoTime()
-        val requestedGpuLayers = gpuLayers
+        val requestedGpuLayers = gpuLayersMode
         return try {
             val requested = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} context=$requested gpuLayers=$requestedGpuLayers")
@@ -102,19 +102,16 @@ class LlamaCppAndroidRuntimeAdapter(
         loadedContextLength = null
     }
 
-    override suspend fun generate(request: GenerationRequest, onToken: suspend (String) -> Unit): GenerationResult =
-        when (val result = generateResult(request, onToken)) {
-            is ModelResult.Success -> result.value
-            is ModelResult.Failure -> throw RuntimeFailure(result.error)
-        }
+    override suspend fun generate(request: GenerationRequest, onToken: suspend (String) -> Unit): GenerationResult = when (val result = generateResult(request, onToken)) {
+        is ModelResult.Success -> result.value
+        is ModelResult.Failure -> throw RuntimeFailure(result.error)
+    }
 
     suspend fun generateResult(request: GenerationRequest, onToken: suspend (String) -> Unit): ModelResult<GenerationResult> {
         currentCoroutineContext().ensureActive()
         if (loadedContextLength == null) return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
         val settings = request.settings
-        val prompt = try { Qwen3PromptFormatter.format(request.messages) }
-        catch (t: Throwable) { return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation")) }
-
+        val prompt = try { Qwen3PromptFormatter.format(request.messages) } catch (t: Throwable) { return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation")) }
         stopRequested.set(false)
         RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_STARTED context=$loadedContextLength backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
         RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "context=${loadedContextLength} backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
@@ -123,16 +120,8 @@ class LlamaCppAndroidRuntimeAdapter(
         val output = StringBuilder()
         val pending = StringBuilder()
         val maxStopLength = settings.stopSequences.maxOfOrNull { it.length } ?: 0
-
         return try {
-            NativeLlamaCpp.generate(
-                prompt = prompt,
-                maxTokens = settings.maxNewTokens.coerceAtLeast(1),
-                temperature = settings.temperature.toFloat().coerceAtLeast(0f),
-                topK = (settings.topK ?: 40).coerceAtLeast(0),
-                topP = (settings.topP ?: 0.9).toFloat().coerceIn(0f, 1f),
-                minP = (settings.minP ?: 0.05).toFloat().coerceIn(0f, 1f),
-            ).collect { chunk ->
+            NativeLlamaCpp.generate(prompt = prompt, maxTokens = settings.maxNewTokens.coerceAtLeast(1), temperature = settings.temperature.toFloat().coerceAtLeast(0f), topK = (settings.topK ?: 40).coerceAtLeast(0), topP = (settings.topP ?: 0.9).toFloat().coerceIn(0f, 1f), minP = (settings.minP ?: 0.05).toFloat().coerceIn(0f, 1f)).collect { chunk ->
                 currentCoroutineContext().ensureActive()
                 if (chunk.isEmpty() || stopRequested.get()) return@collect
                 if (firstTokenAt == null) firstTokenAt = System.nanoTime()
@@ -147,19 +136,10 @@ class LlamaCppAndroidRuntimeAdapter(
                     NativeLlamaCpp.stop()
                 } else {
                     val safeCount = if (maxStopLength > 0) pending.length - maxStopLength + 1 else pending.length
-                    if (safeCount > 0) {
-                        val safe = pending.substring(0, safeCount)
-                        pending.delete(0, safeCount)
-                        onToken(safe)
-                        output.append(safe)
-                    }
+                    if (safeCount > 0) { val safe = pending.substring(0, safeCount); pending.delete(0, safeCount); onToken(safe); output.append(safe) }
                 }
             }
-            if (!stopRequested.get() && pending.isNotEmpty()) {
-                onToken(pending.toString())
-                output.append(pending)
-                pending.setLength(0)
-            }
+            if (!stopRequested.get() && pending.isNotEmpty()) { onToken(pending.toString()); output.append(pending); pending.setLength(0) }
             val completed = GenerationResult(text = output.toString(), firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 }, generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000, stopped = stopRequested.get())
             latestGeneration = completed
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_RETURNED tokens=${completed.outputTokens ?: "n/a"}")
