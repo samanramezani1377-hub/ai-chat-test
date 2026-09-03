@@ -1,13 +1,18 @@
 package com.woogit.aicore.runtime.android
 
+import android.app.ActivityManager
+import android.content.Context
+import android.os.Debug
 import android.util.Log
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
+import java.io.File
 
 internal object NativeLlamaCpp {
     private const val TAG = "AIChatRuntime"
+    private const val PREFLIGHT_FILE = "ai-chat-model-preflight.txt"
 
     /** Temporary activation diagnostics: switch between CPU-only, 70 layers, and max-offload. */
     const val GPU_LAYERS_CPU_ONLY = 0
@@ -24,6 +29,7 @@ internal object NativeLlamaCpp {
 
     fun load(path: String, contextLength: Int, gpuLayers: Int): Int {
         require(gpuLayers >= 0) { "gpuLayers must be >= 0" }
+        persistModelLoadPreflight(path, contextLength, gpuLayers)
         Log.i(TAG, "ACTIVATION_KOTLIN_NATIVE_LOAD_STARTED ctx_len=$contextLength gpu_layers=$gpuLayers file=${path.substringAfterLast('/')}")
         return try {
             val result = nativeLoad(path, contextLength, gpuLayers)
@@ -32,6 +38,48 @@ internal object NativeLlamaCpp {
         } catch (t: Throwable) {
             Log.e(TAG, "ACTIVATION_KOTLIN_NATIVE_LOAD_THROWN type=${t::class.java.name} message=${t.message}", t)
             throw t
+        }
+    }
+
+    private fun persistModelLoadPreflight(path: String, contextLength: Int, gpuLayers: Int) {
+        runCatching {
+            val file = File(path)
+            val memoryInfo = ActivityManager.MemoryInfo()
+            val activityManager = try {
+                Class.forName("android.app.ActivityThread")
+                    .getMethod("currentApplication")
+                    .invoke(null) as? Context
+            } catch (_: Throwable) {
+                null
+            }
+            activityManager?.getSystemService(ActivityManager::class.java)?.getMemoryInfo(memoryInfo)
+
+            val processMemory = Debug.MemoryInfo()
+            Debug.getMemoryInfo(processMemory)
+
+            val text = buildString {
+                appendLine("MODEL_LOAD_PREFLIGHT")
+                appendLine("path=${file.absolutePath}")
+                appendLine("file_exists=${file.isFile}")
+                appendLine("file_size_bytes=${if (file.isFile) file.length() else -1}")
+                appendLine("file_size_mib=${if (file.isFile) file.length() / 1048576.0 else -1.0}")
+                appendLine("requested_context=$contextLength")
+                appendLine("gpu_layers=$gpuLayers")
+                appendLine("device_mem_total_bytes=${memoryInfo.totalMem}")
+                appendLine("device_mem_available_bytes=${memoryInfo.availMem}")
+                appendLine("device_mem_available_mib=${memoryInfo.availMem / 1048576.0}")
+                appendLine("device_low_memory=${memoryInfo.lowMemory}")
+                appendLine("device_low_memory_threshold_bytes=${memoryInfo.threshold}")
+                appendLine("process_pss_kib=${processMemory.totalPss}")
+                appendLine("process_private_dirty_kib=${processMemory.totalPrivateDirty}")
+            }
+            File(System.getProperty("java.io.tmpdir") ?: ".", PREFLIGHT_FILE).apply {
+                parentFile?.mkdirs()
+                writeText(text)
+            }
+            Log.i(TAG, "MODEL_LOAD_PREFLIGHT_WRITTEN file=${file.absolutePath} size=${file.length()} availMem=${memoryInfo.availMem} pssKiB=${processMemory.totalPss}")
+        }.onFailure {
+            Log.w(TAG, "MODEL_LOAD_PREFLIGHT_FAILED type=${it::class.java.name} message=${it.message}")
         }
     }
 
