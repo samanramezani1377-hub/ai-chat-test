@@ -275,7 +275,29 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     if (!path) { checkpoint("PATH_UTF8_FAILED"); return 3; }
     const std::string preflight = gguf_preflight(path); checkpoint(preflight.c_str());
     llama_model_params mp = llama_model_default_params(); mp.n_gpu_layers = gpu_layers;
-    checkpoint((std::string("MODEL_LOAD_PARAMS gpu_layers=") + std::to_string((int)mp.n_gpu_layers) + " vocab_only=" + (mp.vocab_only ? "1" : "0")).c_str());
+
+    ggml_backend_dev_t cpu_device = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+    if (gpu_layers == 0) {
+        checkpoint("CPU_ONLY_DEVICE_SELECTION_STARTED");
+        if (!cpu_device) {
+            checkpoint("CPU_ONLY_CPU_BACKEND_NOT_AVAILABLE");
+            env->ReleaseStringUTFChars(jpath, path);
+            return 4;
+        }
+        ggml_backend_dev_t cpu_devices[] = { cpu_device, nullptr };
+        mp.devices = cpu_devices;
+        mp.load_mode = LLAMA_LOAD_MODE_NONE;
+        mp.check_tensors = true;
+        checkpoint("CPU_ONLY_CPU_BACKEND_SELECTED");
+        checkpoint("CPU_ONLY_LOAD_MODE_NONE_NO_MMAP");
+        checkpoint("CPU_ONLY_CHECK_TENSORS_ENABLED");
+    } else {
+        checkpoint("GPU_DEVICE_SELECTION_DEFAULT");
+    }
+
+    checkpoint((std::string("MODEL_LOAD_PARAMS gpu_layers=") + std::to_string((int)mp.n_gpu_layers) +
+        " load_mode=" + llama_load_mode_name(mp.load_mode) +
+        " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
     checkpoint(gpu_layers == 0 ? "MODEL_LOAD_STARTED gpu_layers=0" : "MODEL_LOAD_STARTED gpu_layers=GPU");
     g_model = llama_model_load_from_file(path, mp);
     checkpoint(g_model ? "MODEL_LOAD_RETURNED_SUCCESS" : "MODEL_LOAD_RETURNED_FAILED");
@@ -284,7 +306,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         checkpoint("GPU_MODEL_LOAD_FAILED_CPU_FALLBACK_STARTED");
         path = env->GetStringUTFChars(jpath, nullptr); if (!path) return 3;
         mp = llama_model_default_params(); mp.n_gpu_layers = 0;
-        checkpoint("CPU_MODEL_LOAD_STARTED"); g_model = llama_model_load_from_file(path, mp);
+        ggml_backend_dev_t fallback_cpu_devices[] = { ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU), nullptr };
+        mp.devices = fallback_cpu_devices;
+        mp.load_mode = LLAMA_LOAD_MODE_NONE;
+        mp.check_tensors = true;
+        checkpoint("CPU_MODEL_LOAD_STARTED no_mmap check_tensors=1");
+        g_model = llama_model_load_from_file(path, mp);
         checkpoint(g_model ? "CPU_MODEL_LOAD_RETURNED_SUCCESS" : "CPU_MODEL_LOAD_RETURNED_FAILED");
         env->ReleaseStringUTFChars(jpath, path); g_gpu = false;
     } else g_gpu = g_model != nullptr && gpu_layers != 0;
