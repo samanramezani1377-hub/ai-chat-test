@@ -6,6 +6,7 @@ import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -23,6 +24,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
     val context = LocalContext.current
     val runtime by RuntimeDiagnosticsStore.snapshot.collectAsState()
     val actionTraces by ActionTraceStore.events.collectAsState()
+    LaunchedEffect(Unit) { RuntimeDiagnosticsStore.refreshNativeEvent() }
     val selectedActionTraces = actionTraces.filter { execution == null || it.executionId == execution.id }
     val diagnostic = RuntimeDiagnostic(
         model = runtime.model,
