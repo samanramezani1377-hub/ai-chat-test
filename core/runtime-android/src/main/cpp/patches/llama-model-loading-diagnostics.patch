@@ -1,7 +1,7 @@
 diff --git a/src/llama.cpp b/src/llama.cpp
 --- a/src/llama.cpp
 +++ b/src/llama.cpp
-@@ -320,51 +320,72 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
+@@ -320,51 +320,66 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
  
          ml.print_info();
 +        LLAMA_LOG_INFO("ANDROID_DIAG_MODEL_CREATE_BEGIN\n");
@@ -15,7 +15,7 @@ diff --git a/src/llama.cpp b/src/llama.cpp
          if (!ok) {
              return {-1, nullptr};
          }
-@@ -385,6 +406,7 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
+@@ -385,6 +400,7 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
          model->hparams.vocab_only = params.vocab_only;
          model->hparams.no_alloc   = params.no_alloc;
  
@@ -23,7 +23,7 @@ diff --git a/src/llama.cpp b/src/llama.cpp
          try {
              model->load_hparams(ml);
          } catch(const std::exception & e) {
-@@ -392,9 +414,12 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
+@@ -392,9 +408,12 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
              throw std::runtime_error("error loading model hyperparameters: " + std::string(e.what()));
          }
 +        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_HPARAMS_RETURN\n");
@@ -34,7 +34,7 @@ diff --git a/src/llama.cpp b/src/llama.cpp
          try {
              model->load_vocab(ml);
          } catch(const std::exception & e) {
-@@ -402,10 +427,15 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
+@@ -402,10 +421,15 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
              throw std::runtime_error("error loading model vocabulary: " + std::string(e.what()));
          }
 +        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_VOCAB_RETURN\n");
@@ -90,6 +90,7 @@ diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
              buft = select_weight_buft(hparams, t_meta, op, buft_list);
              if (!buft) {
                  throw std::runtime_error(format("failed to find a compatible buffer type for tensor %s", tn.str().c_str()));
+@@ -1199,6 +1202,10 @@ struct ggml_tensor * llama_model_loader::create_tensor(
              }
          }
 +
@@ -99,19 +100,18 @@ diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
  
          // avoid using a host buffer when using mmap
          auto * buft_dev = ggml_backend_buft_get_device(buft);
-@@ -1248,6 +1251,7 @@ struct ggml_tensor * llama_model_loader::create_tensor(
+@@ -1248,6 +1255,7 @@ struct ggml_tensor * llama_model_loader::create_tensor(
          return ret;
      }
  
 +    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_CHECK_DIMS_BEGIN name=%s\n", tn.str().c_str());
      LLAMA_LOG_DEBUG("%s: loading tensor %s\n", __func__, tn.str().c_str());
--    const struct ggml_tensor * cur = check_tensor_dims(tn.str(), ne, !(flags & TENSOR_NOT_REQUIRED), flags & TENSOR_ALLOW_RESHAPE);
-+    const struct ggml_tensor * cur = check_tensor_dims(tn.str(), ne, !(flags & TENSOR_NOT_REQUIRED), flags & TENSOR_ALLOW_RESHAPE);
+     const struct ggml_tensor * cur = check_tensor_dims(tn.str(), ne, !(flags & TENSOR_NOT_REQUIRED), flags & TENSOR_ALLOW_RESHAPE);
 +    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_CHECK_DIMS_RETURN name=%s cur=%p\n", tn.str().c_str(), (void *) cur);
      if (cur == NULL) {
          return NULL;
      }
-@@ -1255,10 +1259,17 @@ struct ggml_tensor * llama_model_loader::create_tensor(
+@@ -1255,10 +1263,17 @@ struct ggml_tensor * llama_model_loader::create_tensor(
      ggml_tensor t_meta = *cur;
      if (flags & TENSOR_ALLOW_RESHAPE) {
 +        LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_RESHAPE_BEGIN name=%s\n", tn.str().c_str());
@@ -162,7 +162,7 @@ diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
  
      if (duplicated) {
          size_data += ggml_nbytes(&t_meta);
-@@ -1279,6 +1299,7 @@ struct ggml_tensor * llama_model_loader::create_tensor(
+@@ -1279,6 +1301,7 @@ struct ggml_tensor * llama_model_loader::create_tensor(
          n_created++;
      }
  
