@@ -30,8 +30,12 @@ data class RuntimeDiagnosticsSnapshot(
 
 object RuntimeDiagnosticsStore {
     private val markerFile = File(System.getProperty("java.io.tmpdir") ?: ".", "ai-chat-last-native-event.txt")
-    private val state = MutableStateFlow(RuntimeDiagnosticsSnapshot(lastNativeEvent = markerFile.takeIf { it.isFile }?.readText()?.takeIf { it.isNotBlank() }))
+    private val state = MutableStateFlow(RuntimeDiagnosticsSnapshot(lastNativeEvent = readMarker()))
     val snapshot: StateFlow<RuntimeDiagnosticsSnapshot> = state.asStateFlow()
+
+    private fun readMarker(): String? = runCatching {
+        markerFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotBlank() }
+    }.getOrNull()
 
     fun recordTrace(type: RuntimeTraceEvent.Type, message: String? = null) {
         val current = state.value
