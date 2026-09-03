@@ -37,14 +37,28 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         actionTrace = selectedActionTraces,
         runtimeTrace = runtime.trace,
     )
-    val report = diagnostic.report()
-    val errorReport = diagnostic.errorReport()
+    val report = buildString {
+        append(diagnostic.report())
+        append("\n\n===== LAST NATIVE EVENT =====\n")
+        append(runtime.lastNativeEvent ?: "N/A")
+    }
+    val errorReport = buildString {
+        append(diagnostic.errorReport())
+        append("\n\n===== LAST NATIVE EVENT =====\n")
+        append(runtime.lastNativeEvent ?: "N/A")
+    }
 
     SimplePage("عیب‌یابی") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { copyToClipboard(context, "گزارش عیب‌یابی", report) }, modifier = Modifier.weight(1f)) { Text("کپی گزارش کامل") }
-            OutlinedButton(onClick = { copyToClipboard(context, "گزارش خطا", errorReport) }, modifier = Modifier.weight(1f)) { Text("کپی خطا") }
+            Button(onClick = { copyToClipboard(context, "گزارش کامل", report) }, modifier = Modifier.weight(1f)) { Text("کپی گزارش کامل") }
+            OutlinedButton(onClick = { copyToClipboard(context, "نتیجه خطا", errorReport) }, modifier = Modifier.weight(1f)) { Text("کپی نتیجه خطا") }
         }
+
+        Text("آخرین رویداد Native", style = MaterialTheme.typography.titleLarge)
+        Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
+            Text(runtime.lastNativeEvent ?: "هنوز رویداد Native ثبت نشده است.", Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall)
+        }
+        Text("این مقدار قبل از فراخوانی‌های حساس Native ثبت می‌شود و برای تشخیص کرش process-level بعد از باز کردن دوباره اپ باقی می‌ماند.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
 
         Text("عملکرد Runtime", style = MaterialTheme.typography.titleLarge)
         MetricRow("زمان بارگذاری مدل", runtime.loadTimeMs?.let { "$it ms" } ?: "N/A")
