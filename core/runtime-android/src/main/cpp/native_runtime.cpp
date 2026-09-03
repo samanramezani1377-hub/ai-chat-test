@@ -245,16 +245,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
     std::lock_guard<std::mutex> lock(g_backend_init_mutex);
     if (!g_backend_initialized) {
         if (enable_gpu) {
-            // GPU mode intentionally loads the complete backend set, including Vulkan.
             unsetenv("GGML_DISABLE_VULKAN");
             append_native_trace("GPU_BACKEND_LOAD_ALL_STARTED");
             ggml_backend_load_all();
             append_native_trace("GPU_BACKEND_LOAD_ALL_RETURNED");
             g_gpu_backend_loaded = true;
         } else {
-            // CPU mode must not let llama_backend_init() discover/load Vulkan. The
-            // pinned llama.cpp registry honors this process-wide guard while still
-            // registering the statically linked CPU backend.
             setenv("GGML_DISABLE_VULKAN", "1", 1);
             append_native_trace("CPU_ONLY_VULKAN_DISABLE_ENV_SET");
             append_native_trace("CPU_ONLY_BACKEND_LOAD_ALL_SKIPPED");
@@ -273,17 +269,28 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         }
         g_backend_initialized = true;
     } else if (enable_gpu && !g_gpu_backend_loaded) {
-        // If CPU initialized the registry first, the static registry was created
-        // with Vulkan disabled. Try the normal dynamic backend discovery, but keep
-        // the CPU-only path isolated and observable rather than silently changing it.
         unsetenv("GGML_DISABLE_VULKAN");
         append_native_trace("LATE_GPU_BACKEND_LOAD_STARTED");
         ggml_backend_load_all();
-        append_native_trace("LATE_GPU_BACKEND_LOAD_RETURNED");
+        append_native_trace("LATE_GPU_BACKEND_LOAD_ALL_RETURNED");
         g_gpu_backend_loaded = true;
     } else if (!enable_gpu) {
         append_native_trace(g_gpu_backend_loaded ? "CPU_MODE_AFTER_GPU_INIT_VULKAN_ALREADY_LOADED" : "CPU_ONLY_BACKEND_ALREADY_INITIALIZED");
     }
+}
+
+static llama_model *load_model_android(const char *path, llama_model_params mp, bool gpu) {
+    // Android is memory constrained relative to a multi-GB desktop. mmap keeps
+    // the GGUF payload file-backed and avoids the large temporary staging buffers
+    // used by LLAMA_LOAD_MODE_NONE. check_tensors is also disabled: on a mapped
+    // model it adds a full tensor walk during the most memory-sensitive phase and
+    // was the last operation before the CPU SIGSEGV observed on this device.
+    mp.load_mode = LLAMA_LOAD_MODE_MMAP;
+    mp.check_tensors = false;
+    checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_MMAP" : "ANDROID_MODEL_LOAD_POLICY_CPU_MMAP");
+    checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
+        " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
+    return llama_model_load_from_file(path, mp);
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -306,22 +313,24 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         }
         ggml_backend_dev_t cpu_devices[] = { cpu_device, nullptr };
         mp.devices = cpu_devices;
-        // Use mmap for a ~1.55 GiB GGUF on Android. LLAMA_LOAD_MODE_NONE forces
-        // eager tensor allocation and can create a large transient memory peak.
         mp.load_mode = LLAMA_LOAD_MODE_MMAP;
-        mp.check_tensors = true;
+        mp.check_tensors = false;
         checkpoint("CPU_ONLY_CPU_BACKEND_SELECTED");
         checkpoint("CPU_ONLY_LOAD_MODE_MMAP");
-        checkpoint("CPU_ONLY_CHECK_TENSORS_ENABLED");
+        checkpoint("CPU_ONLY_CHECK_TENSORS_DISABLED");
     } else {
         checkpoint("GPU_DEVICE_SELECTION_DEFAULT");
+        mp.load_mode = LLAMA_LOAD_MODE_MMAP;
+        mp.check_tensors = false;
+        checkpoint("GPU_LOAD_MODE_MMAP");
+        checkpoint("GPU_CHECK_TENSORS_DISABLED");
     }
 
     checkpoint((std::string("MODEL_LOAD_PARAMS gpu_layers=") + std::to_string((int)mp.n_gpu_layers) +
         " load_mode=" + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
     checkpoint(gpu_layers == 0 ? "MODEL_LOAD_STARTED gpu_layers=0" : "MODEL_LOAD_STARTED gpu_layers=GPU");
-    g_model = llama_model_load_from_file(path, mp);
+    g_model = load_model_android(path, mp, gpu_layers != 0);
     checkpoint(g_model ? "MODEL_LOAD_RETURNED_SUCCESS" : "MODEL_LOAD_RETURNED_FAILED");
     env->ReleaseStringUTFChars(jpath, path);
     if (!g_model && gpu_layers != 0) {
@@ -331,9 +340,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         ggml_backend_dev_t fallback_cpu_devices[] = { ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU), nullptr };
         mp.devices = fallback_cpu_devices;
         mp.load_mode = LLAMA_LOAD_MODE_MMAP;
-        mp.check_tensors = true;
-        checkpoint("CPU_MODEL_LOAD_STARTED mmap check_tensors=1");
-        g_model = llama_model_load_from_file(path, mp);
+        mp.check_tensors = false;
+        checkpoint("CPU_MODEL_LOAD_STARTED mmap check_tensors=0");
+        g_model = load_model_android(path, mp, false);
         checkpoint(g_model ? "CPU_MODEL_LOAD_RETURNED_SUCCESS" : "CPU_MODEL_LOAD_RETURNED_FAILED");
         env->ReleaseStringUTFChars(jpath, path); g_gpu = false;
     } else g_gpu = g_model != nullptr && gpu_layers != 0;
@@ -360,5 +369,3 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeRuntimeInfo(JNIEnv *
     const std::string value = std::string(g_gpu ? "Hybrid(CPU+Vulkan)" : "CPU/NEON") + "; llama.cpp=c5fc7e34885ba31217e330809437afa993d27745";
     return env->NewStringUTF(value.c_str());
 }
-extern "C" JNIEXPORT jint JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeContextLength(JNIEnv *, jclass) { return g_context ? (jint)llama_n_ctx(g_context) : 0; }
