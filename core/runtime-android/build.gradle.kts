@@ -13,11 +13,11 @@ android {
         consumerProguardFiles("consumer-rules.pro")
         externalNativeBuild {
             cmake {
-                // Keep the native build strictly single-ABI. The app also packages
-                // arm64-v8a only, and CMake must not configure/build extra ABIs.
+                // Validation is intentionally debug-only while native loading is under investigation.
+                // Keep the native build strictly single-ABI; the app also packages arm64-v8a only.
                 abiFilters += "arm64-v8a"
                 arguments += listOf(
-                    "-DCMAKE_BUILD_TYPE=Release",
+                    "-DCMAKE_BUILD_TYPE=Debug",
                     "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
                     "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
                     "-DLLAMA_BUILD_COMMON=OFF",
@@ -37,6 +37,13 @@ android {
                     "-DGGML_VULKAN_VALIDATE=OFF",
                 )
             }
+        }
+    }
+
+    buildTypes {
+        release {
+            // Release packaging is intentionally disabled for this development phase.
+            isMinifyEnabled = false
         }
     }
 
