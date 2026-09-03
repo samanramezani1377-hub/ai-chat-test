@@ -124,9 +124,6 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
         native_write_hex(g_native_fatal_fd, addr_prefix, info ? (uintptr_t)info->si_addr : 0);
         fsync(g_native_fatal_fd);
     }
-
-    // Preserve the native diagnostic file, then hand the fatal signal back to
-    // Android's default handler so debuggerd can emit the full tombstone/backtrace.
     struct sigaction default_action{};
     sigemptyset(&default_action.sa_mask);
     default_action.sa_handler = SIG_DFL;
@@ -157,7 +154,7 @@ static void checkpoint(const char *event) {
     }
 }
 
-static void model_load_progress(float progress, void *) {
+static bool model_load_progress(float progress, void *) {
     const int bucket = std::clamp((int)(progress * 100.0f), 0, 100);
     int previous = g_model_progress_bucket.load(std::memory_order_relaxed);
     while (bucket != previous) {
@@ -166,9 +163,10 @@ static void model_load_progress(float progress, void *) {
             snprintf(line, sizeof(line), "MODEL_LOAD_PROGRESS=%d", bucket);
             append_native_trace(line);
             LOGI("%s", line);
-            return;
+            return true;
         }
     }
+    return true;
 }
 
 static void free_all() {
@@ -331,8 +329,6 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         checkpoint("GPU_DEVICE_SELECTION_DEFAULT");
     }
 
-    // llama.cpp invokes this during tensor loading. This gives us a progress
-    // boundary inside load_tensors(), not just the outer load call boundary.
     g_model_progress_bucket.store(-1, std::memory_order_relaxed);
     mp.progress_callback = model_load_progress;
     mp.progress_callback_user_data = nullptr;
