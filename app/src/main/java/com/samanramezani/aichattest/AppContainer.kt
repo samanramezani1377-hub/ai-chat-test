@@ -36,6 +36,7 @@ import com.woogit.aicore.observability.ExecutionTraceEvent
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
 import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
+import com.woogit.aicore.runtime.android.NativeLlamaCpp
 import java.nio.file.Files
 
 /** Application composition root. Implementations are wired here, never inside UI screens. */
@@ -43,6 +44,11 @@ class AppContainer(context: Context? = null) {
     companion object {
         @Volatile var latest: AppContainer? = null
             private set
+
+        /** Temporary runtime diagnostic switch. Keep MAX as the normal/default behavior. */
+        private const val TEMP_GPU_LAYER_MODE = NativeLlamaCpp.GPU_LAYERS_MAX
+        // For diagnostics only, change TEMP_GPU_LAYER_MODE to one of:
+        // NativeLlamaCpp.GPU_LAYERS_CPU_ONLY (0), NativeLlamaCpp.GPU_LAYERS_70 (70), NativeLlamaCpp.GPU_LAYERS_MAX (99).
     }
 
     init { latest = this }
@@ -56,7 +62,7 @@ class AppContainer(context: Context? = null) {
         traceStore = appContext?.let { AndroidExecutionTraceStore(it) } ?: com.woogit.aicore.observability.InMemoryExecutionTraceStore(),
     )
 
-    val modelRuntime: RuntimeAdapter = LlamaCppAndroidRuntimeAdapter()
+    val modelRuntime: RuntimeAdapter = LlamaCppAndroidRuntimeAdapter(gpuLayers = TEMP_GPU_LAYER_MODE)
     val conversationHistory: ConversationHistoryRepository = appContext?.let { AndroidConversationHistoryRepository(it) } ?: InMemoryConversationHistoryRepository()
     val modelManager: AndroidModelManager? = appContext?.let {
         val directory = it.filesDir.toPath().resolve("models")
@@ -157,7 +163,7 @@ class AppContainer(context: Context? = null) {
         lifecycle.reject(prepared)
         true
     }.getOrElse {
-        reportError("Approval", "REJECT_FAILED", "رد کردن عملیات انجام نشد.", it, executionId = executionId)
+        reportError("Approval", "REJECT_FAILED", "رد کردن عملیات انجام نشد.", it)
         false
     }
 
