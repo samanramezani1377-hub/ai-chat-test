@@ -43,7 +43,21 @@ class FileModelImporter(
 
             val id = UUID.randomUUID().toString()
             val target = storageDirectory.resolve("$id.gguf")
-            Files.copy(source, target, StandardCopyOption.COPY_ATTRIBUTES)
+            val sourceInManagedStorage = source.toAbsolutePath().normalize().parent ==
+                storageDirectory.toAbsolutePath().normalize()
+
+            if (sourceInManagedStorage) {
+                // AndroidModelManager stages the URI in the managed directory. Rename it
+                // instead of copying the whole model a second time. This keeps peak storage
+                // close to one model size and makes large imports much safer.
+                try {
+                    Files.move(source, target, StandardCopyOption.ATOMIC_MOVE)
+                } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                    Files.move(source, target)
+                }
+            } else {
+                Files.copy(source, target, StandardCopyOption.COPY_ATTRIBUTES)
+            }
 
             try {
                 val storedSize = Files.size(target)
