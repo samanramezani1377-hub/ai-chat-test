@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <fstream>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -18,6 +20,8 @@ static llama_model *g_model = nullptr;
 static llama_context *g_context = nullptr;
 static llama_sampler *g_sampler = nullptr;
 static bool g_gpu = false;
+static std::string g_native_marker_file;
+static std::mutex g_native_marker_mutex;
 
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
 static int threads() { return std::clamp((int)std::max(1u, std::thread::hardware_concurrency()) - 2, 2, 4); }
@@ -25,6 +29,14 @@ static int threads() { return std::clamp((int)std::max(1u, std::thread::hardware
 static void checkpoint(const char *event) {
     LOGI("NATIVE_CHECKPOINT %s", event);
     __android_log_write(ANDROID_LOG_INFO, LOG_TAG, event);
+    if (!g_native_marker_file.empty()) {
+        std::lock_guard<std::mutex> lock(g_native_marker_mutex);
+        std::ofstream out(g_native_marker_file, std::ios::trunc);
+        if (out.is_open()) {
+            out << event << '\n';
+            out.flush();
+        }
+    }
 }
 
 static void free_all() {
@@ -35,8 +47,34 @@ static void free_all() {
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *, jclass) {
+Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jclass) {
     LOGI("ACTIVATION_NATIVE_INIT_STARTED");
+
+    jclass system_class = env->FindClass("java/lang/System");
+    if (system_class) {
+        jmethodID get_property = env->GetStaticMethodID(system_class, "getProperty", "(Ljava/lang/String;)Ljava/lang/String;");
+        if (get_property) {
+            jstring key = env->NewStringUTF("java.io.tmpdir");
+            jstring tmp_dir = static_cast<jstring>(env->CallStaticObjectMethod(system_class, get_property, key));
+            env->DeleteLocalRef(key);
+            if (tmp_dir) {
+                const char *dir = env->GetStringUTFChars(tmp_dir, nullptr);
+                if (dir) {
+                    g_native_marker_file = std::string(dir) + "/ai-chat-last-native-event.txt";
+                    env->ReleaseStringUTFChars(tmp_dir, dir);
+                }
+                env->DeleteLocalRef(tmp_dir);
+            }
+        }
+        env->DeleteLocalRef(system_class);
+    }
+
+    if (!g_native_marker_file.empty()) {
+        LOGI("NATIVE_DIAGNOSTICS_MARKER=%s", g_native_marker_file.c_str());
+    } else {
+        LOGW("NATIVE_DIAGNOSTICS_MARKER_UNAVAILABLE");
+    }
+
     llama_log_set([](enum ggml_log_level level, const char *text, void *) {
         const int priority = level >= GGML_LOG_LEVEL_ERROR ? ANDROID_LOG_ERROR :
                              level >= GGML_LOG_LEVEL_WARN ? ANDROID_LOG_WARN : ANDROID_LOG_INFO;
