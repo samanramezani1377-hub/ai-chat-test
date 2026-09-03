@@ -2,6 +2,7 @@
 #include <android/log.h>
 #include <algorithm>
 #include <atomic>
+#include <cinttypes>
 #include <cstring>
 #include <fstream>
 #include <mutex>
@@ -9,6 +10,7 @@
 #include <thread>
 #include <vector>
 #include "llama.h"
+#include "gguf.h"
 
 #define LOG_TAG "AIChatRuntime"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -44,6 +46,80 @@ static void free_all() {
     if (g_context) { llama_free(g_context); g_context = nullptr; }
     if (g_model) { llama_model_free(g_model); g_model = nullptr; }
     g_gpu = false;
+}
+
+static std::string gguf_preflight(const char *path) {
+    gguf_init_params params{};
+    params.no_alloc = true;
+    params.ctx = nullptr;
+
+    gguf_context *ctx = gguf_init_from_file(path, params);
+    if (!ctx) {
+        return std::string("GGUF_PREFLIGHT_FAILED\npath=") + (path ? path : "<null>");
+    }
+
+    const int64_t n_tensors = gguf_get_n_tensors(ctx);
+    const int64_t n_kv = gguf_get_n_kv(ctx);
+    const uint32_t version = gguf_get_version(ctx);
+    const size_t data_offset = gguf_get_data_offset(ctx);
+    const size_t alignment = gguf_get_alignment(ctx);
+
+    std::string architecture = "<missing>";
+    const int64_t arch_key = gguf_find_key(ctx, "general.architecture");
+    if (arch_key >= 0 && gguf_get_kv_type(ctx, arch_key) == GGUF_TYPE_STRING) {
+        const char *value = gguf_get_val_str(ctx, arch_key);
+        if (value) architecture = value;
+    }
+
+    uint64_t total_tensor_bytes = 0;
+    uint64_t largest_tensor_bytes = 0;
+    int64_t largest_tensor_id = -1;
+    uint64_t tensor_data_end = data_offset;
+
+    for (int64_t i = 0; i < n_tensors; ++i) {
+        const size_t size = gguf_get_tensor_size(ctx, i);
+        const size_t offset = gguf_get_tensor_offset(ctx, i);
+        if (UINT64_MAX - total_tensor_bytes < (uint64_t)size) {
+            total_tensor_bytes = UINT64_MAX;
+        } else {
+            total_tensor_bytes += (uint64_t)size;
+        }
+        const uint64_t end = (uint64_t)data_offset + (uint64_t)offset + (uint64_t)size;
+        tensor_data_end = std::max(tensor_data_end, end);
+        if ((uint64_t)size > largest_tensor_bytes) {
+            largest_tensor_bytes = (uint64_t)size;
+            largest_tensor_id = i;
+        }
+    }
+
+    std::string largest_name = "<none>";
+    int largest_type = -1;
+    if (largest_tensor_id >= 0) {
+        const char *name = gguf_get_tensor_name(ctx, largest_tensor_id);
+        if (name) largest_name = name;
+        largest_type = (int)gguf_get_tensor_type(ctx, largest_tensor_id);
+    }
+
+    std::string result;
+    result.reserve(2048);
+    result += "GGUF_PREFLIGHT_OK\n";
+    result += "path=" + std::string(path ? path : "<null>") + "\n";
+    result += "version=" + std::to_string(version) + "\n";
+    result += "architecture=" + architecture + "\n";
+    result += "kv_count=" + std::to_string(n_kv) + "\n";
+    result += "tensor_count=" + std::to_string(n_tensors) + "\n";
+    result += "alignment=" + std::to_string(alignment) + "\n";
+    result += "data_offset=" + std::to_string(data_offset) + "\n";
+    result += "total_tensor_bytes=" + std::to_string(total_tensor_bytes) + "\n";
+    result += "total_tensor_mib=" + std::to_string((double)total_tensor_bytes / (1024.0 * 1024.0)) + "\n";
+    result += "largest_tensor_name=" + largest_name + "\n";
+    result += "largest_tensor_type=" + std::to_string(largest_type) + "\n";
+    result += "largest_tensor_bytes=" + std::to_string(largest_tensor_bytes) + "\n";
+    result += "largest_tensor_mib=" + std::to_string((double)largest_tensor_bytes / (1024.0 * 1024.0)) + "\n";
+    result += "tensor_data_end=" + std::to_string(tensor_data_end) + "\n";
+
+    gguf_free(ctx);
+    return result;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -101,6 +177,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
 
     const char *path = env->GetStringUTFChars(jpath, nullptr);
     if (!path) { LOGE("ACTIVATION_PATH_UTF8_FAILED"); checkpoint("PATH_UTF8_FAILED"); return 3; }
+
+    const std::string preflight = gguf_preflight(path);
+    checkpoint(preflight.c_str());
 
     llama_model_params mp = llama_model_default_params();
     mp.n_gpu_layers = gpu_layers;
