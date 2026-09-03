@@ -99,22 +99,26 @@ internal fun MainScreen(container: AppContainer) {
         diagnostic = null
         scope.launch {
             try {
-                val result = withContext(Dispatchers.Default) { manager.import(uri) }
+                // Import is deliberately separate from activation. Loading a multi-GB model
+                // can fail independently (including native/Vulkan failures) and must never
+                // turn a successful file import into an apparent picker/import crash.
+                val result = withContext(Dispatchers.IO) { manager.import(uri) }
                 when (result) {
                     is ModelResult.Success -> {
-                        runtimeStatus = "مدل وارد شد؛ در حال آماده‌سازی…"
-                        val activation = withContext(Dispatchers.Default) { manager.activate(result.value.id) }
-                        if (activation is ModelResult.Failure) diagnostic = activation.error.message
+                        runtimeStatus = "مدل وارد شد؛ برای فعال‌سازی آماده است."
+                        diagnostic = null
                     }
-                    is ModelResult.Failure -> diagnostic = result.error.message
+                    is ModelResult.Failure -> {
+                        diagnostic = result.error.message
+                    }
                 }
             } catch (t: Throwable) {
                 diagnostic = t.message ?: "وارد کردن مدل ناموفق بود."
             } finally {
                 withContext(Dispatchers.Main) {
                     importBusy = false
-                    if (diagnostic == null) runtimeStatus = "آماده"
-                    else runtimeStatus = "خطا"
+                    if (diagnostic == null && activeModel == null) runtimeStatus = "مدل وارد شد؛ برای فعال‌سازی آماده است."
+                    else if (diagnostic != null) runtimeStatus = "خطا"
                 }
                 refreshModels()
             }
