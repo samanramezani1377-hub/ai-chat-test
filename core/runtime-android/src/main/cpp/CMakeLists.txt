@@ -9,6 +9,13 @@ include(FetchContent)
 set(LLAMA_CPP_TAG "c5fc7e34885ba31217e330809437afa993d27745" CACHE STRING "Pinned llama.cpp revision")
 set(FETCHCONTENT_QUIET OFF)
 
+# Keep FetchContent outside CMake's per-configuration _deps directory.
+# The Android Gradle plugin uses changing .cxx/<build-hash>/... directories;
+# placing the dependency source in this stable module-local directory lets the
+# CI .cxx cache preserve the llama.cpp checkout across native source changes.
+set(FETCHCONTENT_BASE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../.cxx/fetch-content" CACHE PATH "Stable FetchContent base directory")
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "Do not update pinned FetchContent dependencies")
+
 # Direct llama.cpp integration: no llama.kt/llama.rn bootstrap layer.
 if (ANDROID AND DEFINED ENV{VULKAN_SDK})
     set(Vulkan_INCLUDE_DIR "$ENV{VULKAN_SDK}/include" CACHE PATH "Vulkan headers" FORCE)
