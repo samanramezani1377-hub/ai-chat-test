@@ -29,9 +29,7 @@ class LlamaCppAndroidRuntimeAdapter(
     @Volatile private var latestGeneration: GenerationResult? = null
     @Volatile private var latestLoadTimeMs: Long? = null
 
-    init {
-        require(gpuLayers >= 0) { "gpuLayers must be >= 0" }
-    }
+    init { require(gpuLayers >= 0) { "gpuLayers must be >= 0" } }
 
     override fun lastGeneration(): GenerationResult? = latestGeneration
     override fun lastLoadTimeMs(): Long? = latestLoadTimeMs
@@ -52,8 +50,8 @@ class LlamaCppAndroidRuntimeAdapter(
         return try {
             val requested = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
             RuntimeDiagnosticsStore.recordTrace(
-                RuntimeTraceEvent.Type.MODEL_LOAD_STARTED,
-                "file=${file.name} sizeBytes=${file.length()} requestedContext=$requested gpuLayers=$gpuLayers",
+                RuntimeTraceEvent.Type.GENERATION_STARTED,
+                "MODEL_LOAD_DIAGNOSTIC file=${file.name} sizeBytes=${file.length()} requestedContext=$requested gpuLayers=$gpuLayers",
             )
             val result = NativeLlamaCpp.load(file.absolutePath, requested, gpuLayers)
             if (result != 0) return ModelResult.Failure(ModelError.Inference("llama.cpp failed to load the model (code=$result)"))
@@ -64,10 +62,6 @@ class LlamaCppAndroidRuntimeAdapter(
             loadedContextLength = NativeLlamaCpp.contextLength().takeIf { it > 0 } ?: requested
             latestGeneration = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
-            RuntimeDiagnosticsStore.recordTrace(
-                RuntimeTraceEvent.Type.MODEL_LOAD_COMPLETED,
-                "backend=$selectedBackend gpuLayers=$selectedGpuLayers context=${loadedContextLength}",
-            )
             RuntimeDiagnosticsStore.recordLoaded(model, latestLoadTimeMs, runtimeInfo())
             ModelResult.Success(Unit)
         } catch (t: Throwable) {
@@ -76,7 +70,7 @@ class LlamaCppAndroidRuntimeAdapter(
             selectedBackend = "CPU/NEON"
             loadedContextLength = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
-            RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.MODEL_LOAD_FAILED, t.message)
+            RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_FAILED, "MODEL_LOAD_DIAGNOSTIC_FAILED ${t.message}")
             ModelResult.Failure(RuntimeErrorMapper.loadFailure(t, file.absolutePath))
         }
     }
@@ -112,27 +106,16 @@ class LlamaCppAndroidRuntimeAdapter(
         val maxStopLength = settings.stopSequences.maxOfOrNull { it.length } ?: 0
 
         return try {
-            NativeLlamaCpp.generate(
-                prompt = prompt,
-                maxTokens = settings.maxNewTokens.coerceAtLeast(1),
-                temperature = settings.temperature.toFloat().coerceAtLeast(0f),
-                topK = (settings.topK ?: 40).coerceAtLeast(0),
-                topP = (settings.topP ?: 0.9).toFloat().coerceIn(0f, 1f),
-                minP = (settings.minP ?: 0.05).toFloat().coerceIn(0f, 1f),
-            ).collect { chunk ->
+            NativeLlamaCpp.generate(prompt, settings.maxNewTokens.coerceAtLeast(1), settings.temperature.toFloat().coerceAtLeast(0f), (settings.topK ?: 40).coerceAtLeast(0), (settings.topP ?: 0.9).toFloat().coerceIn(0f, 1f), (settings.minP ?: 0.05).toFloat().coerceIn(0f, 1f)).collect { chunk ->
                 currentCoroutineContext().ensureActive()
                 if (chunk.isEmpty() || stopRequested.get()) return@collect
                 if (firstTokenAt == null) firstTokenAt = System.nanoTime()
                 pending.append(chunk)
-
                 val stop = settings.stopSequences.firstOrNull { pending.indexOf(it) >= 0 }
                 if (stop != null) {
                     val index = pending.indexOf(stop)
                     val visible = pending.substring(0, index)
-                    if (visible.isNotEmpty()) {
-                        onToken(visible)
-                        output.append(visible)
-                    }
+                    if (visible.isNotEmpty()) { onToken(visible); output.append(visible) }
                     pending.setLength(0)
                     stopRequested.set(true)
                     NativeLlamaCpp.stop()
@@ -146,41 +129,21 @@ class LlamaCppAndroidRuntimeAdapter(
                     }
                 }
             }
-            if (!stopRequested.get() && pending.isNotEmpty()) {
-                onToken(pending.toString())
-                output.append(pending)
-                pending.setLength(0)
-            }
-
-            val completed = GenerationResult(
-                text = output.toString(),
-                firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
-                generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
-                stopped = stopRequested.get(),
-            )
+            if (!stopRequested.get() && pending.isNotEmpty()) { onToken(pending.toString()); output.append(pending); pending.setLength(0) }
+            val completed = GenerationResult(output.toString(), firstTokenAt?.let { (it - startedAt) / 1_000_000 }, (System.nanoTime() - startedAt) / 1_000_000, stopRequested.get())
             latestGeneration = completed
             RuntimeDiagnosticsStore.recordGeneration(settings, completed, runtimeInfo())
             ModelResult.Success(completed)
         } catch (t: CancellationException) {
             if (stopRequested.get()) {
-                val stopped = GenerationResult(
-                    text = output.toString(),
-                    firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
-                    generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
-                    stopped = true,
-                )
+                val stopped = GenerationResult(output.toString(), firstTokenAt?.let { (it - startedAt) / 1_000_000 }, (System.nanoTime() - startedAt) / 1_000_000, true)
                 latestGeneration = stopped
                 RuntimeDiagnosticsStore.recordGeneration(settings, stopped, runtimeInfo())
                 ModelResult.Success(stopped)
             } else throw t
         } catch (t: Throwable) {
             if (stopRequested.get()) {
-                val stopped = GenerationResult(
-                    text = output.toString(),
-                    firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
-                    generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
-                    stopped = true,
-                )
+                val stopped = GenerationResult(output.toString(), firstTokenAt?.let { (it - startedAt) / 1_000_000 }, (System.nanoTime() - startedAt) / 1_000_000, true)
                 latestGeneration = stopped
                 RuntimeDiagnosticsStore.recordGeneration(settings, stopped, runtimeInfo())
                 ModelResult.Success(stopped)
@@ -188,9 +151,7 @@ class LlamaCppAndroidRuntimeAdapter(
                 RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_FAILED, t.message)
                 ModelResult.Failure(RuntimeErrorMapper.inferenceFailure(t))
             }
-        } finally {
-            stopRequested.set(false)
-        }
+        } finally { stopRequested.set(false) }
     }
 
     override suspend fun stopGeneration() {
@@ -199,14 +160,7 @@ class LlamaCppAndroidRuntimeAdapter(
         NativeLlamaCpp.stop()
     }
 
-    override fun runtimeInfo(): RuntimeInfo = RuntimeInfo(
-        name = "llama.cpp-android-direct",
-        version = "c5fc7e34885ba31217e330809437afa993d27745",
-        backend = selectedBackend,
-        threads = selectedCpuThreads,
-        gpuLayers = selectedGpuLayers,
-        contextLength = loadedContextLength ?: defaultContextLength,
-    )
+    override fun runtimeInfo(): RuntimeInfo = RuntimeInfo("llama.cpp-android-direct", "c5fc7e34885ba31217e330809437afa993d27745", selectedBackend, selectedCpuThreads, selectedGpuLayers, loadedContextLength ?: defaultContextLength)
 
     private class RuntimeFailure(val error: ModelError) : IllegalStateException(error.message)
 }
