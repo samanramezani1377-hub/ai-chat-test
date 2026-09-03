@@ -7,6 +7,7 @@ import com.woogit.aicore.domain.RuntimeInfo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.io.File
 
 data class RuntimeTraceEvent(
     val type: Type,
@@ -28,7 +29,8 @@ data class RuntimeDiagnosticsSnapshot(
 )
 
 object RuntimeDiagnosticsStore {
-    private val state = MutableStateFlow(RuntimeDiagnosticsSnapshot())
+    private val markerFile = File(System.getProperty("java.io.tmpdir") ?: ".", "ai-chat-last-native-event.txt")
+    private val state = MutableStateFlow(RuntimeDiagnosticsSnapshot(lastNativeEvent = markerFile.takeIf { it.isFile }?.readText()?.takeIf { it.isNotBlank() }))
     val snapshot: StateFlow<RuntimeDiagnosticsSnapshot> = state.asStateFlow()
 
     fun recordTrace(type: RuntimeTraceEvent.Type, message: String? = null) {
@@ -38,6 +40,10 @@ object RuntimeDiagnosticsStore {
 
     fun recordNativeEvent(message: String) {
         state.value = state.value.copy(lastNativeEvent = message)
+        runCatching {
+            markerFile.parentFile?.mkdirs()
+            markerFile.writeText(message)
+        }
     }
 
     fun recordLoaded(model: ModelDescriptor, loadTimeMs: Long?, runtime: RuntimeInfo) {
