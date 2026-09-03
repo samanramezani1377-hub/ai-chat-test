@@ -13,6 +13,8 @@ import java.io.File
 internal object NativeLlamaCpp {
     private const val TAG = "AIChatRuntime"
     private const val PREFLIGHT_FILE = "ai-chat-model-preflight.txt"
+    private var nativeInitialized = false
+    private var gpuBackendRequested = false
 
     /** Temporary activation diagnostics: switch between CPU-only, 70 layers, and max-offload. */
     const val GPU_LAYERS_CPU_ONLY = 0
@@ -23,13 +25,24 @@ internal object NativeLlamaCpp {
         Log.i(TAG, "ACTIVATION_NATIVE_LIBRARY_LOAD_STARTED")
         System.loadLibrary("ai_chat_runtime")
         Log.i(TAG, "ACTIVATION_NATIVE_LIBRARY_LOAD_RETURNED")
-        nativeInit()
-        Log.i(TAG, "ACTIVATION_NATIVE_INIT_RETURNED")
+    }
+
+    private fun ensureNativeInitialized(gpuLayers: Int) {
+        val enableGpu = gpuLayers != GPU_LAYERS_CPU_ONLY
+        synchronized(this) {
+            if (nativeInitialized && (!enableGpu || gpuBackendRequested)) return
+            Log.i(TAG, "ACTIVATION_NATIVE_INIT_REQUESTED gpu=$enableGpu gpu_layers=$gpuLayers")
+            nativeInit(enableGpu)
+            nativeInitialized = true
+            gpuBackendRequested = gpuBackendRequested || enableGpu
+            Log.i(TAG, "ACTIVATION_NATIVE_INIT_RETURNED gpu=$enableGpu gpu_layers=$gpuLayers")
+        }
     }
 
     fun load(path: String, contextLength: Int, gpuLayers: Int): Int {
         require(gpuLayers >= 0) { "gpuLayers must be >= 0" }
         persistModelLoadPreflight(path, contextLength, gpuLayers)
+        ensureNativeInitialized(gpuLayers)
         Log.i(TAG, "ACTIVATION_KOTLIN_NATIVE_LOAD_STARTED ctx_len=$contextLength gpu_layers=$gpuLayers file=${path.substringAfterLast('/')}")
         return try {
             val result = nativeLoad(path, contextLength, gpuLayers)
@@ -112,7 +125,7 @@ internal object NativeLlamaCpp {
 
     private interface TokenListener { fun onToken(token: String) }
 
-    @JvmStatic private external fun nativeInit()
+    @JvmStatic private external fun nativeInit(enableGpu: Boolean)
     @JvmStatic private external fun nativeLoad(path: String, contextLength: Int, gpuLayers: Int): Int
     @JvmStatic private external fun nativeGenerate(
         prompt: String,
