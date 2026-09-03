@@ -16,10 +16,10 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collect
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Direct llama.cpp Android runtime. GPU/Vulkan is attempted first and CPU remains the fallback. */
+/** Direct llama.cpp Android runtime. CPU is the safe default; GPU/Vulkan is opt-in. */
 class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 4096,
-    gpuLayers: Int = GPU_LAYERS_MAX,
+    gpuLayers: Int = GPU_LAYERS_CPU_ONLY,
 ) : RuntimeAdapter, RuntimeMetrics {
     companion object {
         const val GPU_LAYERS_CPU_ONLY = 0
