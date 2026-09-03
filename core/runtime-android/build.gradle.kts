@@ -18,6 +18,8 @@ android {
                 abiFilters += "arm64-v8a"
                 arguments += listOf(
                     "-DCMAKE_BUILD_TYPE=Release",
+                    "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+                    "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
                     "-DLLAMA_BUILD_COMMON=OFF",
                     "-DLLAMA_BUILD_TESTS=OFF",
                     "-DLLAMA_BUILD_EXAMPLES=OFF",
