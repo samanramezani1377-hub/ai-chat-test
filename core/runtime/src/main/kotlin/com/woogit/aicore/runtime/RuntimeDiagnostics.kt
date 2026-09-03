@@ -37,6 +37,10 @@ object RuntimeDiagnosticsStore {
         markerFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotBlank() }
     }.getOrNull()
 
+    fun refreshNativeEvent() {
+        state.value = state.value.copy(lastNativeEvent = readMarker())
+    }
+
     fun recordTrace(type: RuntimeTraceEvent.Type, message: String? = null) {
         val current = state.value
         state.value = current.copy(trace = (current.trace + RuntimeTraceEvent(type, message)).takeLast(100))
