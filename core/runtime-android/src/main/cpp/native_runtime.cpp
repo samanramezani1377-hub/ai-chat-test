@@ -4,10 +4,13 @@
 #include <atomic>
 #include <cinttypes>
 #include <cstring>
+#include <fcntl.h>
 #include <fstream>
 #include <mutex>
+#include <signal.h>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 #include "llama.h"
 #include "gguf.h"
@@ -24,6 +27,7 @@ static llama_sampler *g_sampler = nullptr;
 static bool g_gpu = false;
 static std::string g_native_marker_file;
 static std::string g_native_trace_file;
+static int g_native_fatal_fd = -1;
 static std::mutex g_native_marker_mutex;
 
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
@@ -38,6 +42,45 @@ static void append_native_trace(const char *text) {
         if (text[std::strlen(text) - 1] != '\n') out << '\n';
         out.flush();
     }
+}
+
+static void native_fatal_signal_handler(int signal_number) {
+    if (g_native_fatal_fd >= 0) {
+        const char prefix[] = "NATIVE_FATAL_SIGNAL=";
+        char value[16];
+        int n = 0;
+        int value_copy = signal_number;
+        if (value_copy == 0) value[n++] = '0';
+        else {
+            char reverse[16];
+            int r = 0;
+            while (value_copy > 0 && r < (int)sizeof(reverse)) {
+                reverse[r++] = (char)('0' + (value_copy % 10));
+                value_copy /= 10;
+            }
+            while (r > 0) value[n++] = reverse[--r];
+        }
+        const char newline = '\n';
+        (void)write(g_native_fatal_fd, prefix, sizeof(prefix) - 1);
+        (void)write(g_native_fatal_fd, value, (size_t)n);
+        (void)write(g_native_fatal_fd, &newline, 1);
+        (void)fsync(g_native_fatal_fd);
+    }
+    signal(signal_number, SIG_DFL);
+    raise(signal_number);
+}
+
+static void install_native_fatal_handlers() {
+    struct sigaction action{};
+    sigemptyset(&action.sa_mask);
+    action.sa_sigaction = nullptr;
+    action.sa_handler = native_fatal_signal_handler;
+    action.sa_flags = 0;
+    sigaction(SIGSEGV, &action, nullptr);
+    sigaction(SIGBUS, &action, nullptr);
+    sigaction(SIGABRT, &action, nullptr);
+    sigaction(SIGILL, &action, nullptr);
+    sigaction(SIGFPE, &action, nullptr);
 }
 
 static void checkpoint(const char *event) {
@@ -147,6 +190,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
                     const std::string base(dir);
                     g_native_marker_file = base + "/ai-chat-last-native-event.txt";
                     g_native_trace_file = base + "/ai-chat-native-trace.txt";
+                    g_native_fatal_fd = open((base + "/ai-chat-native-trace.txt").c_str(), O_WRONLY | O_CREAT | O_APPEND, 0600);
                     env->ReleaseStringUTFChars(tmp_dir, dir);
                 }
                 env->DeleteLocalRef(tmp_dir);
@@ -159,6 +203,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         LOGI("NATIVE_DIAGNOSTICS_MARKER=%s", g_native_marker_file.c_str());
         LOGI("NATIVE_DIAGNOSTICS_TRACE=%s", g_native_trace_file.c_str());
         append_native_trace("===== NATIVE INIT =====");
+        install_native_fatal_handlers();
     } else LOGW("NATIVE_DIAGNOSTICS_MARKER_UNAVAILABLE");
 
     llama_log_set([](enum ggml_log_level level, const char *text, void *) {
