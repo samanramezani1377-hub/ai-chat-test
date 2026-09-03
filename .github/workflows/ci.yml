@@ -72,6 +72,13 @@ jobs:
           restore-keys: |
             ci-llama-cmake-${{ runner.os }}-ndk27.2-
 
+      - name: Inspect native dependency cache
+        run: |
+          echo "Cached FetchContent directories:"
+          find core/runtime-android/.cxx/fetch-content -maxdepth 3 -type d -name 'llama_cpp-src' -print 2>/dev/null || true
+          echo "Cached llama source markers:"
+          find core/runtime-android/.cxx/fetch-content -maxdepth 5 -type f -name 'CMakeLists.txt' -path '*llama_cpp-src/*' -print 2>/dev/null | head -20 || true
+
       # ccache is content/compiler based; source-file hashes in the cache key only
       # make the cache unnecessarily cold whenever native code changes.
       - name: Restore ccache
