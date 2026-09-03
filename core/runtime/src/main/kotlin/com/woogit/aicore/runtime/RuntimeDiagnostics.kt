@@ -43,7 +43,6 @@ object RuntimeDiagnosticsStore {
             loadTimeMs = loadTimeMs,
             generation = null,
             settings = null,
-            trace = emptyList(),
         )
         recordTrace(RuntimeTraceEvent.Type.MODEL_LOAD_COMPLETED, loadTimeMs?.let { "loadMs=$it" })
     }
