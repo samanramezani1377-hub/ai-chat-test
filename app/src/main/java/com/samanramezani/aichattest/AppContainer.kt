@@ -44,10 +44,8 @@ class AppContainer(context: Context? = null) {
         @Volatile var latest: AppContainer? = null
             private set
 
-        /** Temporary runtime diagnostic switch. Keep MAX as the normal/default behavior. */
-        private const val TEMP_GPU_LAYER_MODE = LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_MAX
-        // For diagnostics only, change TEMP_GPU_LAYER_MODE to one of:
-        // LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_CPU_ONLY (0), LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_70 (70), LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_MAX (99).
+        /** CPU is the safe application default. GPU/Vulkan is opt-in from Settings. */
+        private const val DEFAULT_GPU_LAYER_MODE = LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_CPU_ONLY
     }
 
     init { latest = this }
@@ -61,7 +59,7 @@ class AppContainer(context: Context? = null) {
         traceStore = appContext?.let { AndroidExecutionTraceStore(it) } ?: com.woogit.aicore.observability.InMemoryExecutionTraceStore(),
     )
 
-    val modelRuntime: RuntimeAdapter = LlamaCppAndroidRuntimeAdapter(gpuLayers = TEMP_GPU_LAYER_MODE)
+    val modelRuntime: RuntimeAdapter = LlamaCppAndroidRuntimeAdapter(gpuLayers = DEFAULT_GPU_LAYER_MODE)
     val conversationHistory: ConversationHistoryRepository = appContext?.let { AndroidConversationHistoryRepository(it) } ?: InMemoryConversationHistoryRepository()
     val modelManager: AndroidModelManager? = appContext?.let {
         val directory = it.filesDir.toPath().resolve("models")
