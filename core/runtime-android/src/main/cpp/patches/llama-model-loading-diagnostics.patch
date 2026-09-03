@@ -1,59 +1,41 @@
 diff --git a/src/llama.cpp b/src/llama.cpp
 --- a/src/llama.cpp
 +++ b/src/llama.cpp
-@@ -248,6 +248,7 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
+@@ -320,3 +320,5 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
  
          ml.print_info();
 +        LLAMA_LOG_INFO("ANDROID_DIAG_MODEL_CREATE_BEGIN\n");
          std::unique_ptr<llama_model> model_ptr(llama_model_create(ml, params));
 +        LLAMA_LOG_INFO("ANDROID_DIAG_MODEL_CREATE_RETURN ptr=%p\n", (void *) model_ptr.get());
- 
-+        LLAMA_LOG_INFO("ANDROID_DIAG_PREPARE_DEVICES_BEGIN\n");
+@@ -323,2 +325,4 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
          bool ok = llama_prepare_model_devices(params, model_ptr.get());
 +        LLAMA_LOG_INFO("ANDROID_DIAG_PREPARE_DEVICES_RETURN ok=%d\n", ok ? 1 : 0);
          if (!ok) {
-             return {-1, nullptr};
-         }
-@@ -276,6 +277,7 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
+@@ -340,3 +344,4 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
          model->hparams.vocab_only = params.vocab_only;
          model->hparams.no_alloc   = params.no_alloc;
- 
 +        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_HPARAMS_BEGIN\n");
-         try {
+@@ -344,2 +349,3 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
              model->load_hparams(ml);
          } catch(const std::exception & e) {
-@@ -280,6 +282,7 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
+@@ -347,2 +353,3 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, std::vector<std::string> & splits, FILE * file, llama_model_params & params) {
              throw std::runtime_error("error loading model hyperparameters: " + std::string(e.what()));
          }
 +        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_HPARAMS_RETURN\n");
-         if (model->arch == LLM_ARCH_CLIP) {
-             throw std::runtime_error("CLIP cannot be used as main model, use it with --mmproj instead");
+@@ -350,2 +357,3 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
          }
 +        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_VOCAB_BEGIN\n");
          try {
-             model->load_vocab(ml);
-         } catch(const std::exception & e) {
-@@ -290,10 +293,14 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
+@@ -355,3 +363,4 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
              throw std::runtime_error("error loading model vocabulary: " + std::string(e.what()));
          }
 +        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_VOCAB_RETURN\n");
- 
-+        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_STATS_BEGIN\n");
+@@ -357,2 +366,4 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, std::vector<std::string> & splits, FILE * file, llama_model_params & params) {
          model->load_stats(ml);
 +        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_STATS_RETURN\n");
          model->print_info();
 +        LLAMA_LOG_INFO("ANDROID_DIAG_PRINT_INFO_RETURN\n");
- 
-         if (params.vocab_only) {
-             LLAMA_LOG_INFO("%s: vocab only - skipping tensors\n", __func__);
-@@ -303,8 +310,11 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
-         }
- 
-+        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_TENSORS_BEGIN\n");
+@@ -365,2 +376,3 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, std::vector<std::string> & splits, FILE * file, llama_model_params & params) {
          if (!model->load_tensors(ml)) {
-+            LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_TENSORS_RETURN false\n");
++            LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_TENSORS_BEGIN\n");
              return {-2, nullptr};
-         }
-+        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_TENSORS_RETURN true\n");
- 
-         return {0, model_ptr.release()};
