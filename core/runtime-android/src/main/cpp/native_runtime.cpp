@@ -280,11 +280,6 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
 }
 
 static llama_model *load_model_android(const char *path, llama_model_params mp, bool gpu) {
-    // Android is memory constrained relative to a multi-GB desktop. mmap keeps
-    // the GGUF payload file-backed and avoids the large temporary staging buffers
-    // used by LLAMA_LOAD_MODE_NONE. check_tensors is also disabled: on a mapped
-    // model it adds a full tensor walk during the most memory-sensitive phase and
-    // was the last operation before the CPU SIGSEGV observed on this device.
     mp.load_mode = LLAMA_LOAD_MODE_MMAP;
     mp.check_tensors = false;
     checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_MMAP" : "ANDROID_MODEL_LOAD_POLICY_CPU_MMAP");
@@ -303,19 +298,14 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     const std::string preflight = gguf_preflight(path); checkpoint(preflight.c_str());
     llama_model_params mp = llama_model_default_params(); mp.n_gpu_layers = gpu_layers;
 
-    ggml_backend_dev_t cpu_device = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
     if (gpu_layers == 0) {
         checkpoint("CPU_ONLY_DEVICE_SELECTION_STARTED");
-        if (!cpu_device) {
-            checkpoint("CPU_ONLY_CPU_BACKEND_NOT_AVAILABLE");
-            env->ReleaseStringUTFChars(jpath, path);
-            return 4;
-        }
-        ggml_backend_dev_t cpu_devices[] = { cpu_device, nullptr };
-        mp.devices = cpu_devices;
+        // Do not inject an explicit CPU device array here. llama.cpp's native
+        // device selection is the canonical CPU-only path. With Vulkan disabled,
+        // it cannot select a GPU and load_tensors will use the CPU buffer types.
         mp.load_mode = LLAMA_LOAD_MODE_MMAP;
         mp.check_tensors = false;
-        checkpoint("CPU_ONLY_CPU_BACKEND_SELECTED");
+        checkpoint("CPU_ONLY_CANONICAL_DEVICE_SELECTION");
         checkpoint("CPU_ONLY_LOAD_MODE_MMAP");
         checkpoint("CPU_ONLY_CHECK_TENSORS_DISABLED");
     } else {
@@ -337,8 +327,6 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         checkpoint("GPU_MODEL_LOAD_FAILED_CPU_FALLBACK_STARTED");
         path = env->GetStringUTFChars(jpath, nullptr); if (!path) return 3;
         mp = llama_model_default_params(); mp.n_gpu_layers = 0;
-        ggml_backend_dev_t fallback_cpu_devices[] = { ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU), nullptr };
-        mp.devices = fallback_cpu_devices;
         mp.load_mode = LLAMA_LOAD_MODE_MMAP;
         mp.check_tensors = false;
         checkpoint("CPU_MODEL_LOAD_STARTED mmap check_tensors=0");
