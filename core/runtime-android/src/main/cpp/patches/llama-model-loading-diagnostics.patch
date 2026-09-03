@@ -1,7 +1,8 @@
 diff --git a/src/llama.cpp b/src/llama.cpp
 --- a/src/llama.cpp
 +++ b/src/llama.cpp
-@@ -244,8 +244,13 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metad
+@@ -244,8 +244,13 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
+         llama_model_loader ml(metadata, set_tensor_data, set_tensor_data_ud, fname, splits, file, params.load_mode,
              params.check_tensors, params.no_alloc, params.load_mtp, params.kv_overrides, params.tensor_buft_overrides);
  
          ml.print_info();
@@ -15,7 +16,7 @@ diff --git a/src/llama.cpp b/src/llama.cpp
          if (!ok) {
              return {-1, nullptr};
          }
-@@ -264,6 +269,7 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metad
+@@ -264,6 +269,7 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
          model->hparams.vocab_only = params.vocab_only;
          model->hparams.no_alloc   = params.no_alloc;
  
@@ -56,42 +57,4 @@ diff --git a/src/llama.cpp b/src/llama.cpp
 +        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_TENSORS_RETURN true\n");
  
          return {0, model_ptr.release()};
-*** Update File: src/llama-model.cpp
---- a/src/llama-model.cpp
-+++ b/src/llama-model.cpp
-@@ -1367,6 +1367,7 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
-     const char * load_mode_name = params.load_mode == LLAMA_LOAD_MODE_AUTO
-         ? llama_load_mode_name(ml.use_mmap ? LLAMA_LOAD_MODE_MMAP : LLAMA_LOAD_MODE_NONE)
-         : llama_load_mode_name(params.load_mode);
- 
-+    LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_TENSORS_POLICY mmap=%d params_mode=%s\n", ml.use_mmap ? 1 : 0, load_mode_name);
-     LLAMA_LOG_INFO("%s: loading model tensors, this can take a while... (load_mode = %s)\n",
-         __func__, load_mode_name);
-@@ -1484,6 +1485,7 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
-         // call the per-model loading function
-+        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_ARCH_TENSORS_BEGIN\n");
-         load_arch_tensors(ml);
-+        LLAMA_LOG_INFO("ANDROID_DIAG_LOAD_ARCH_TENSORS_RETURN\n");
- 
-         // generic pass: load optional per-tensor/per-expert ".scale" tensors (e.g. NVFP4 scale2)
-@@ -1576,6 +1578,7 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
-             }
-         }
-         // output scales
-@@ -1587,6 +1590,7 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
-             }
-         }
-     }
-+    LLAMA_LOG_INFO("ANDROID_DIAG_DONE_GETTING_TENSORS_BEGIN\n");
-     ml.done_getting_tensors();
-+    LLAMA_LOG_INFO("ANDROID_DIAG_DONE_GETTING_TENSORS_RETURN\n");
-@@ -1600,6 +1604,7 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
-             tensors_by_name.emplace_back(ggml_get_name(cur), cur);
-         }
-     }
- 
-+    LLAMA_LOG_INFO("ANDROID_DIAG_INIT_MAPPINGS_BEGIN\n");
-     ml.init_mappings(true, use_mlock ? &pimpl->mlock_mmaps : nullptr);
-+    LLAMA_LOG_INFO("ANDROID_DIAG_INIT_MAPPINGS_RETURN count=%zu\n", ml.mappings.size());
-     pimpl->mappings.reserve(ml.mappings.size());
-***
+*** End Patch
