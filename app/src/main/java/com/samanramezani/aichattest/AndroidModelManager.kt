@@ -12,6 +12,8 @@ import com.woogit.aicore.runtime.FileModelImporter
 import com.woogit.aicore.runtime.FileModelRepository
 import com.woogit.aicore.runtime.LocalModelService
 import com.woogit.aicore.runtime.RuntimeAdapter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -28,12 +30,14 @@ class AndroidModelManager(
         runtime = runtime,
     )
 
-    suspend fun import(uri: Uri): ModelResult<ModelDescriptor> {
+    suspend fun import(uri: Uri): ModelResult<ModelDescriptor> = withContext(Dispatchers.IO) {
         Files.createDirectories(modelDirectory)
         val source = Files.createTempFile(modelDirectory, "selected-", ".gguf")
-        return try {
+        return@withContext try {
             val input = contentResolver.openInputStream(uri)
-                ?: return ModelResult.Failure(ModelError.FileAccess("Selected model file could not be opened"))
+                ?: return@withContext ModelResult.Failure(
+                    ModelError.FileAccess("Selected model file could not be opened")
+                )
             input.use { Files.copy(it, source, StandardCopyOption.REPLACE_EXISTING) }
             service.importModel(source)
         } catch (t: Throwable) {
