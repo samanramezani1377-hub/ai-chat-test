@@ -67,9 +67,7 @@ static std::string gguf_preflight(const char *path) {
     params.ctx = nullptr;
 
     gguf_context *ctx = gguf_init_from_file(path, params);
-    if (!ctx) {
-        return std::string("GGUF_PREFLIGHT_FAILED\npath=") + (path ? path : "<null>");
-    }
+    if (!ctx) return std::string("GGUF_PREFLIGHT_FAILED\npath=") + (path ? path : "<null>");
 
     const int64_t n_tensors = gguf_get_n_tensors(ctx);
     const int64_t n_kv = gguf_get_n_kv(ctx);
@@ -92,11 +90,8 @@ static std::string gguf_preflight(const char *path) {
     for (int64_t i = 0; i < n_tensors; ++i) {
         const size_t size = gguf_get_tensor_size(ctx, i);
         const size_t offset = gguf_get_tensor_offset(ctx, i);
-        if (UINT64_MAX - total_tensor_bytes < (uint64_t)size) {
-            total_tensor_bytes = UINT64_MAX;
-        } else {
-            total_tensor_bytes += (uint64_t)size;
-        }
+        if (UINT64_MAX - total_tensor_bytes < (uint64_t)size) total_tensor_bytes = UINT64_MAX;
+        else total_tensor_bytes += (uint64_t)size;
         const uint64_t end = (uint64_t)data_offset + (uint64_t)offset + (uint64_t)size;
         tensor_data_end = std::max(tensor_data_end, end);
         if ((uint64_t)size > largest_tensor_bytes) {
@@ -164,9 +159,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         LOGI("NATIVE_DIAGNOSTICS_MARKER=%s", g_native_marker_file.c_str());
         LOGI("NATIVE_DIAGNOSTICS_TRACE=%s", g_native_trace_file.c_str());
         append_native_trace("===== NATIVE INIT =====");
-    } else {
-        LOGW("NATIVE_DIAGNOSTICS_MARKER_UNAVAILABLE");
-    }
+    } else LOGW("NATIVE_DIAGNOSTICS_MARKER_UNAVAILABLE");
 
     llama_log_set([](enum ggml_log_level level, const char *text, void *) {
         const char *message = text ? text : "<null>";
@@ -192,25 +185,21 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     checkpoint("NATIVE_LOAD_STARTED");
     LOGI("ACTIVATION_NATIVE_LOAD_STARTED ctx_len=%d gpu_layers=%d", (int)ctx_len, (int)gpu_layers);
     append_native_trace((std::string("ACTIVATION_NATIVE_LOAD_STARTED ctx_len=") + std::to_string((int)ctx_len) + " gpu_layers=" + std::to_string((int)gpu_layers)).c_str());
-    LOGI("ACTIVATION_FREE_OLD_RUNTIME_STARTED");
     checkpoint("FREE_OLD_RUNTIME_STARTED");
     free_all();
-    LOGI("ACTIVATION_FREE_OLD_RUNTIME_RETURNED");
     checkpoint("FREE_OLD_RUNTIME_RETURNED");
     g_stop.store(false);
 
     const char *path = env->GetStringUTFChars(jpath, nullptr);
-    if (!path) { LOGE("ACTIVATION_PATH_UTF8_FAILED"); checkpoint("PATH_UTF8_FAILED"); return 3; }
+    if (!path) { checkpoint("PATH_UTF8_FAILED"); return 3; }
 
     const std::string preflight = gguf_preflight(path);
     checkpoint(preflight.c_str());
 
     llama_model_params mp = llama_model_default_params();
     mp.n_gpu_layers = gpu_layers;
-    const std::string params_event = std::string("MODEL_LOAD_PARAMS gpu_layers=") + std::to_string((int)mp.n_gpu_layers) +
-        " use_mmap=" + (mp.use_mmap ? "1" : "0") + " use_mlock=" + (mp.use_mlock ? "1" : "0") +
-        " vocab_only=" + (mp.vocab_only ? "1" : "0");
-    checkpoint(params_event.c_str());
+    checkpoint((std::string("MODEL_LOAD_PARAMS gpu_layers=") + std::to_string((int)mp.n_gpu_layers) +
+        " vocab_only=" + (mp.vocab_only ? "1" : "0")).c_str());
     LOGI("ACTIVATION_MODEL_LOAD_STARTED gpu_layers=%d", (int)mp.n_gpu_layers);
     checkpoint(gpu_layers == 0 ? "MODEL_LOAD_STARTED gpu_layers=0" : "MODEL_LOAD_STARTED gpu_layers=GPU");
     g_model = llama_model_load_from_file(path, mp);
@@ -222,21 +211,17 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         LOGW("ACTIVATION_GPU_MODEL_LOAD_FAILED_STARTING_CPU_FALLBACK");
         checkpoint("GPU_MODEL_LOAD_FAILED_CPU_FALLBACK_STARTED");
         path = env->GetStringUTFChars(jpath, nullptr);
-        if (!path) { LOGE("ACTIVATION_CPU_FALLBACK_PATH_UTF8_FAILED"); checkpoint("CPU_FALLBACK_PATH_UTF8_FAILED"); return 3; }
+        if (!path) { checkpoint("CPU_FALLBACK_PATH_UTF8_FAILED"); return 3; }
         mp = llama_model_default_params();
         mp.n_gpu_layers = 0;
-        LOGI("ACTIVATION_CPU_MODEL_LOAD_STARTED");
         checkpoint("CPU_MODEL_LOAD_STARTED");
         g_model = llama_model_load_from_file(path, mp);
-        LOGI("ACTIVATION_CPU_MODEL_LOAD_RETURNED success=%d", g_model != nullptr ? 1 : 0);
         checkpoint(g_model ? "CPU_MODEL_LOAD_RETURNED_SUCCESS" : "CPU_MODEL_LOAD_RETURNED_FAILED");
         env->ReleaseStringUTFChars(jpath, path);
         g_gpu = false;
-    } else {
-        g_gpu = g_model != nullptr && gpu_layers != 0;
-    }
+    } else g_gpu = g_model != nullptr && gpu_layers != 0;
 
-    if (!g_model) { LOGE("ACTIVATION_MODEL_LOAD_FAILED"); checkpoint("MODEL_LOAD_FAILED"); return 1; }
+    if (!g_model) { checkpoint("MODEL_LOAD_FAILED"); return 1; }
 
     const int trained = llama_model_n_ctx_train(g_model);
     const int requested = ctx_len > 0 ? ctx_len : 4096;
@@ -250,75 +235,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     cp.n_ubatch = cp.n_batch;
     cp.n_threads = threads();
     cp.n_threads_batch = threads();
-    LOGI("ACTIVATION_CONTEXT_INIT_STARTED ctx=%u batch=%u ubatch=%u threads=%d", cp.n_ctx, cp.n_batch, cp.n_ubatch, cp.n_threads);
     checkpoint("CONTEXT_INIT_STARTED");
     g_context = llama_init_from_model(g_model, cp);
-    LOGI("ACTIVATION_CONTEXT_INIT_RETURNED success=%d", g_context != nullptr ? 1 : 0);
     checkpoint(g_context ? "CONTEXT_INIT_RETURNED_SUCCESS" : "CONTEXT_INIT_RETURNED_FAILED");
-    if (!g_context) { LOGE("ACTIVATION_CONTEXT_INIT_FAILED"); checkpoint("CONTEXT_INIT_FAILED"); free_all(); return 2; }
+    if (!g_context) { checkpoint("CONTEXT_INIT_FAILED"); free_all(); return 2; }
     llama_set_abort_callback(g_context, abort_callback, nullptr);
-    LOGI("ACTIVATION_NATIVE_LOAD_COMPLETED backend=%s ctx=%d", g_gpu ? "Vulkan" : "CPU", (int)llama_n_ctx(g_context));
     checkpoint("NATIVE_LOAD_COMPLETED");
     return 0;
-}
-
-extern "C" JNIEXPORT jint JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(JNIEnv *env, jclass, jstring jprompt,
-        jint max_tokens, jfloat temperature, jint top_k, jfloat top_p, jfloat min_p, jobject listener) {
-    if (!g_model || !g_context) return 1;
-    g_stop.store(false);
-    llama_memory_clear(llama_get_memory(g_context), true);
-
-    const char *prompt = env->GetStringUTFChars(jprompt, nullptr);
-    const llama_vocab *vocab = llama_model_get_vocab(g_model);
-    const int n = -llama_tokenize(vocab, prompt, strlen(prompt), nullptr, 0, true, true);
-    if (n <= 0) { env->ReleaseStringUTFChars(jprompt, prompt); return 2; }
-    std::vector<llama_token> tokens(n);
-    if (llama_tokenize(vocab, prompt, strlen(prompt), tokens.data(), tokens.size(), true, true) < 0) {
-        env->ReleaseStringUTFChars(jprompt, prompt); return 3;
-    }
-    env->ReleaseStringUTFChars(jprompt, prompt);
-
-    if (g_sampler) llama_sampler_free(g_sampler);
-    g_sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
-    if (top_k > 0) llama_sampler_chain_add(g_sampler, llama_sampler_init_top_k(top_k));
-    llama_sampler_chain_add(g_sampler, llama_sampler_init_top_p(top_p, 1));
-    llama_sampler_chain_add(g_sampler, llama_sampler_init_min_p(min_p, 1));
-    llama_sampler_chain_add(g_sampler, llama_sampler_init_temp(std::max(0.0f, temperature)));
-    llama_sampler_chain_add(g_sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
-
-    jmethodID on_token = nullptr;
-    if (listener) on_token = env->GetMethodID(env->GetObjectClass(listener), "onToken", "(Ljava/lang/String;)V");
-
-    const int batch_size = (int)llama_n_batch(g_context);
-    for (int offset = 0; offset < n; offset += batch_size) {
-        const int count = std::min(batch_size, n - offset);
-        llama_batch batch = llama_batch_get_one(tokens.data() + offset, count);
-        if (llama_memory_seq_pos_max(llama_get_memory(g_context), 0) + 1 + batch.n_tokens > (int)llama_n_ctx(g_context)) return 4;
-        const int rc = llama_decode(g_context, batch);
-        if (rc != 0) return rc == 2 ? 5 : 6;
-    }
-
-    int generated = 0;
-    while (generated < std::max(1, max_tokens) && !g_stop.load()) {
-        const llama_token id = llama_sampler_sample(g_sampler, g_context, -1);
-        llama_sampler_accept(g_sampler, id);
-        if (llama_vocab_is_eog(vocab, id)) break;
-        char piece[512];
-        const int bytes = llama_token_to_piece(vocab, id, piece, sizeof(piece), 0, true);
-        if (bytes < 0) return 7;
-        if (listener && on_token && bytes > 0) {
-            std::string text(piece, bytes);
-            env->CallVoidMethod(listener, on_token, env->NewStringUTF(text.c_str()));
-            if (env->ExceptionCheck()) { env->ExceptionClear(); return 8; }
-        }
-        ++generated;
-        llama_batch batch = llama_batch_get_one(const_cast<llama_token *>(&id), 1);
-        if (llama_memory_seq_pos_max(llama_get_memory(g_context), 0) + 1 + batch.n_tokens > (int)llama_n_ctx(g_context)) return 4;
-        const int rc = llama_decode(g_context, batch);
-        if (rc != 0) return rc == 2 ? 5 : 6;
-    }
-    return g_stop.load() ? 9 : 0;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -329,7 +252,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeUnload(JNIEnv *, jcl
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeRuntimeInfo(JNIEnv *env, jclass) {
-    const std::string value = std::string(g_gpu ? "Hybrid(CPU+Vulkan)" : "CPU/NEON") + "; llama.cpp=" + AI_CHAT_LLAMA_CPP_SHA;
+    const std::string value = std::string(g_gpu ? "Hybrid(CPU+Vulkan)" : "CPU/NEON") + "; llama.cpp=c5fc7e34885ba31217e330809437afa993d27745";
     return env->NewStringUTF(value.c_str());
 }
 
