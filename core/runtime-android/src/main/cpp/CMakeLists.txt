@@ -37,6 +37,44 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(llama_cpp)
 
+# Downstream fix for Android model loading: this is the upstream llama.cpp
+# change from 5ec4eab69edbfaa4b01bcf1ee1123bb885b8d892. The pinned revision is
+# kept unchanged; we apply the exact loading-memory fix locally and make the
+# operation idempotent so a persistent FetchContent checkout remains valid.
+set(LLAMA_MODEL_LOADING_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/llama-model-loading-memory.patch")
+if (EXISTS "${LLAMA_MODEL_LOADING_PATCH}")
+    execute_process(
+        COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --check "${LLAMA_MODEL_LOADING_PATCH}"
+        RESULT_VARIABLE LLAMA_PATCH_CHECK_RESULT
+        OUTPUT_QUIET
+        ERROR_QUIET
+    )
+    if (LLAMA_PATCH_CHECK_RESULT EQUAL 0)
+        execute_process(
+            COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply "${LLAMA_MODEL_LOADING_PATCH}"
+            RESULT_VARIABLE LLAMA_PATCH_APPLY_RESULT
+        )
+        if (NOT LLAMA_PATCH_APPLY_RESULT EQUAL 0)
+            message(FATAL_ERROR "Failed to apply llama.cpp model-loading memory patch")
+        endif()
+        message(STATUS "Applied llama.cpp Android model-loading memory patch")
+    else()
+        execute_process(
+            COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --reverse --check "${LLAMA_MODEL_LOADING_PATCH}"
+            RESULT_VARIABLE LLAMA_PATCH_REVERSE_CHECK_RESULT
+            OUTPUT_QUIET
+            ERROR_QUIET
+        )
+        if (LLAMA_PATCH_REVERSE_CHECK_RESULT EQUAL 0)
+            message(STATUS "llama.cpp model-loading memory patch already applied")
+        else()
+            message(FATAL_ERROR "llama.cpp source is neither clean nor patched with the expected model-loading fix")
+        endif()
+    endif()
+else()
+    message(FATAL_ERROR "Missing llama.cpp model-loading patch: ${LLAMA_MODEL_LOADING_PATCH}")
+endif()
+
 add_library(ai_chat_runtime SHARED native_runtime.cpp)
 
 target_include_directories(ai_chat_runtime PRIVATE

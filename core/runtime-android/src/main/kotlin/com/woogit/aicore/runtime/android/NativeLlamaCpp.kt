@@ -16,7 +16,6 @@ internal object NativeLlamaCpp {
     private var nativeInitialized = false
     private var gpuBackendRequested = false
 
-    /** Temporary activation diagnostics: switch between CPU-only, 70 layers, and max-offload. */
     const val GPU_LAYERS_CPU_ONLY = 0
     const val GPU_LAYERS_70 = 70
     const val GPU_LAYERS_MAX = 99
@@ -39,19 +38,32 @@ internal object NativeLlamaCpp {
         }
     }
 
+    /** One serialized native activation transaction. Native side owns model/context lifetime. */
+    @Synchronized
     fun load(path: String, contextLength: Int, gpuLayers: Int): Int {
         require(gpuLayers >= 0) { "gpuLayers must be >= 0" }
+        require(path.isNotBlank()) { "Model path must not be blank" }
+        val file = File(path)
+        require(file.isFile && file.canRead()) { "Model file is not readable: $path" }
+
         persistModelLoadPreflight(path, contextLength, gpuLayers)
         ensureNativeInitialized(gpuLayers)
-        Log.i(TAG, "ACTIVATION_KOTLIN_NATIVE_LOAD_STARTED ctx_len=$contextLength gpu_layers=$gpuLayers file=${path.substringAfterLast('/')}")
+        Log.i(TAG, "ACTIVATION_LOAD_BEGIN ctx_len=$contextLength gpu_layers=$gpuLayers file=${file.name}")
         return try {
             val result = nativeLoad(path, contextLength, gpuLayers)
-            Log.i(TAG, "ACTIVATION_KOTLIN_NATIVE_LOAD_RETURNED result=$result gpu_layers=$gpuLayers")
+            Log.i(TAG, "ACTIVATION_LOAD_END result=$result gpu_layers=$gpuLayers")
             result
         } catch (t: Throwable) {
-            Log.e(TAG, "ACTIVATION_KOTLIN_NATIVE_LOAD_THROWN type=${t::class.java.name} message=${t.message}", t)
+            Log.e(TAG, "ACTIVATION_LOAD_EXCEPTION type=${t::class.java.name} message=${t.message}", t)
             throw t
         }
+    }
+
+    @Synchronized
+    fun unload() {
+        Log.i(TAG, "ACTIVATION_UNLOAD_BEGIN")
+        nativeUnload()
+        Log.i(TAG, "ACTIVATION_UNLOAD_END")
     }
 
     private fun persistModelLoadPreflight(path: String, contextLength: Int, gpuLayers: Int) {
@@ -62,14 +74,10 @@ internal object NativeLlamaCpp {
                 Class.forName("android.app.ActivityThread")
                     .getMethod("currentApplication")
                     .invoke(null) as? Context
-            } catch (_: Throwable) {
-                null
-            }
+            } catch (_: Throwable) { null }
             activityManager?.getSystemService(ActivityManager::class.java)?.getMemoryInfo(memoryInfo)
-
             val processMemory = Debug.MemoryInfo()
             Debug.getMemoryInfo(processMemory)
-
             val text = buildString {
                 appendLine("MODEL_LOAD_PREFLIGHT")
                 appendLine("path=${file.absolutePath}")
@@ -90,20 +98,12 @@ internal object NativeLlamaCpp {
                 parentFile?.mkdirs()
                 writeText(text)
             }
-            Log.i(TAG, "MODEL_LOAD_PREFLIGHT_WRITTEN file=${file.absolutePath} size=${file.length()} availMem=${memoryInfo.availMem} pssKiB=${processMemory.totalPss}")
         }.onFailure {
             Log.w(TAG, "MODEL_LOAD_PREFLIGHT_FAILED type=${it::class.java.name} message=${it.message}")
         }
     }
 
-    fun generate(
-        prompt: String,
-        maxTokens: Int,
-        temperature: Float,
-        topK: Int,
-        topP: Float,
-        minP: Float,
-    ): Flow<String> = callbackFlow {
+    fun generate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float): Flow<String> = callbackFlow {
         val listener = object : TokenListener {
             override fun onToken(token: String) { trySend(token) }
         }
@@ -118,24 +118,15 @@ internal object NativeLlamaCpp {
         }
     }
 
+    @Synchronized
     fun stop() = nativeStop()
-    fun unload() = nativeUnload()
     fun runtimeInfo(): String = nativeRuntimeInfo()
     fun contextLength(): Int = nativeContextLength()
 
     private interface TokenListener { fun onToken(token: String) }
-
     @JvmStatic private external fun nativeInit(enableGpu: Boolean)
     @JvmStatic private external fun nativeLoad(path: String, contextLength: Int, gpuLayers: Int): Int
-    @JvmStatic private external fun nativeGenerate(
-        prompt: String,
-        maxTokens: Int,
-        temperature: Float,
-        topK: Int,
-        topP: Float,
-        minP: Float,
-        listener: TokenListener,
-    ): Int
+    @JvmStatic private external fun nativeGenerate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float, listener: TokenListener): Int
     @JvmStatic private external fun nativeStop()
     @JvmStatic private external fun nativeUnload()
     @JvmStatic private external fun nativeRuntimeInfo(): String
