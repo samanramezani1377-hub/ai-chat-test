@@ -38,7 +38,7 @@ jobs:
         run: gradle :core:actions:test :core:agent:test :core:conversation:test :core:domain:test :core:observability:test :core:runtime:test :core:settings:test :core:runtime-android:test :app:testDebugUnitTest --stacktrace --parallel
 
   build:
-    name: Android Build
+    name: Android Debug Build
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -98,18 +98,20 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Build APKs
-        id: build-apks
+      - name: Build Debug APK
+        id: build-debug
         run: |
           export CCACHE_DIR="$HOME/.cache/ccache"
           ccache --zero-stats
+          # CI validation intentionally builds Debug only. Release remains a
+          # release/tag concern and is not needed to validate native loading.
           # No .cxx/FetchContent cache is restored here. CMake gets a clean
           # pinned llama.cpp checkout and applies exactly one deterministic patch.
-          gradle :app:assembleDebug :app:assembleRelease --stacktrace --parallel
+          gradle :app:assembleDebug --stacktrace --parallel
           ccache --show-stats
 
       - name: Save ccache
-        if: steps.build-apks.outcome == 'success'
+        if: steps.build-debug.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/ccache
@@ -121,12 +123,4 @@ jobs:
         with:
           name: ai-chat-test-debug-apk
           path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-
-      - name: Upload release APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-chat-test-release-apk
-          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
