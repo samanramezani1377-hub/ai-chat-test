@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Direct llama.cpp Android runtime. GPU/Vulkan is attempted first and CPU remains the fallback. */
 class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 4096,
-    private val gpuLayers: Int = GPU_LAYERS_MAX,
+    initialGpuLayers: Int = GPU_LAYERS_MAX,
 ) : RuntimeAdapter, RuntimeMetrics {
     companion object {
         const val GPU_LAYERS_CPU_ONLY = 0
@@ -28,6 +28,7 @@ class LlamaCppAndroidRuntimeAdapter(
     }
 
     private val stopRequested = AtomicBoolean(false)
+    @Volatile private var gpuLayers = initialGpuLayers
     @Volatile private var selectedGpuLayers = 0
     @Volatile private var selectedCpuThreads = 2
     @Volatile private var selectedBackend = "CPU/NEON"
@@ -35,7 +36,16 @@ class LlamaCppAndroidRuntimeAdapter(
     @Volatile private var latestGeneration: GenerationResult? = null
     @Volatile private var latestLoadTimeMs: Long? = null
 
-    init { require(gpuLayers >= 0) { "gpuLayers must be >= 0" } }
+    init { require(initialGpuLayers >= 0) { "gpuLayers must be >= 0" } }
+
+    fun setGpuLayers(value: Int) {
+        require(value in setOf(GPU_LAYERS_CPU_ONLY, GPU_LAYERS_70, GPU_LAYERS_MAX)) { "Unsupported diagnostic GPU layer mode: $value" }
+        gpuLayers = value
+        RuntimeDiagnosticsStore.recordNativeEvent("GPU_LAYER_MODE_SELECTED layers=$value")
+        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "GPU_LAYER_MODE_SELECTED layers=$value (applies on next activation)")
+    }
+
+    fun gpuLayers(): Int = gpuLayers
 
     override fun lastGeneration(): GenerationResult? = latestGeneration
     override fun lastLoadTimeMs(): Long? = latestLoadTimeMs
@@ -53,21 +63,26 @@ class LlamaCppAndroidRuntimeAdapter(
         val file = model.path.toFile()
         if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
         val startedAt = System.nanoTime()
+        val requestedGpuLayers = gpuLayers
         return try {
             val requested = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
-            RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "MODEL_LOAD_DIAGNOSTIC file=${file.name} sizeBytes=${file.length()} requestedContext=$requested gpuLayers=$gpuLayers")
-            val result = NativeLlamaCpp.load(file.absolutePath, requested, gpuLayers)
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} context=$requested gpuLayers=$requestedGpuLayers")
+            RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} requestedContext=$requested gpuLayers=$requestedGpuLayers")
+            val result = NativeLlamaCpp.load(file.absolutePath, requested, requestedGpuLayers)
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_RETURNED code=$result gpuLayers=$requestedGpuLayers")
             if (result != 0) return ModelResult.Failure(ModelError.Inference("llama.cpp failed to load the model (code=$result)"))
             val info = NativeLlamaCpp.runtimeInfo()
             selectedBackend = info.substringBefore(';').ifBlank { "CPU/NEON" }
-            selectedGpuLayers = if (selectedBackend.contains("Vulkan", ignoreCase = true)) gpuLayers else 0
+            selectedGpuLayers = if (selectedBackend.contains("Vulkan", ignoreCase = true)) requestedGpuLayers else 0
             selectedCpuThreads = 2
             loadedContextLength = NativeLlamaCpp.contextLength().takeIf { it > 0 } ?: requested
             latestGeneration = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_RUNTIME_READY backend=$selectedBackend gpuLayers=$selectedGpuLayers context=$loadedContextLength")
             RuntimeDiagnosticsStore.recordLoaded(model, latestLoadTimeMs, runtimeInfo())
             ModelResult.Success(Unit)
         } catch (t: Throwable) {
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_EXCEPTION ${t::class.java.name}: ${t.message}")
             NativeLlamaCpp.unload()
             selectedGpuLayers = 0
             selectedBackend = "CPU/NEON"
@@ -101,6 +116,7 @@ class LlamaCppAndroidRuntimeAdapter(
         catch (t: Throwable) { return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation")) }
 
         stopRequested.set(false)
+        RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_STARTED context=$loadedContextLength backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
         RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "context=${loadedContextLength} backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
         val startedAt = System.nanoTime()
         var firstTokenAt: Long? = null
@@ -144,35 +160,22 @@ class LlamaCppAndroidRuntimeAdapter(
                 output.append(pending)
                 pending.setLength(0)
             }
-            val completed = GenerationResult(
-                text = output.toString(),
-                firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
-                generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
-                stopped = stopRequested.get(),
-            )
+            val completed = GenerationResult(text = output.toString(), firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 }, generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000, stopped = stopRequested.get())
             latestGeneration = completed
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_RETURNED tokens=${completed.outputTokens ?: "n/a"}")
             RuntimeDiagnosticsStore.recordGeneration(settings, completed, runtimeInfo())
             ModelResult.Success(completed)
         } catch (t: CancellationException) {
             if (stopRequested.get()) {
-                val stopped = GenerationResult(
-                    text = output.toString(),
-                    firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
-                    generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
-                    stopped = true,
-                )
+                val stopped = GenerationResult(text = output.toString(), firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 }, generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000, stopped = true)
                 latestGeneration = stopped
                 RuntimeDiagnosticsStore.recordGeneration(settings, stopped, runtimeInfo())
                 ModelResult.Success(stopped)
             } else throw t
         } catch (t: Throwable) {
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_EXCEPTION ${t::class.java.name}: ${t.message}")
             if (stopRequested.get()) {
-                val stopped = GenerationResult(
-                    text = output.toString(),
-                    firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 },
-                    generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
-                    stopped = true,
-                )
+                val stopped = GenerationResult(text = output.toString(), firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 }, generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000, stopped = true)
                 latestGeneration = stopped
                 RuntimeDiagnosticsStore.recordGeneration(settings, stopped, runtimeInfo())
                 ModelResult.Success(stopped)
@@ -185,18 +188,12 @@ class LlamaCppAndroidRuntimeAdapter(
 
     override suspend fun stopGeneration() {
         stopRequested.set(true)
+        RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_STOP_REQUESTED")
         RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STOPPED)
         NativeLlamaCpp.stop()
     }
 
-    override fun runtimeInfo(): RuntimeInfo = RuntimeInfo(
-        name = "llama.cpp-android-direct",
-        version = "c5fc7e34885ba31217e330809437afa993d27745",
-        backend = selectedBackend,
-        threads = selectedCpuThreads,
-        gpuLayers = selectedGpuLayers,
-        contextLength = loadedContextLength ?: defaultContextLength,
-    )
+    override fun runtimeInfo(): RuntimeInfo = RuntimeInfo(name = "llama.cpp-android-direct", version = "c5fc7e34885ba31217e330809437afa993d27745", backend = selectedBackend, threads = selectedCpuThreads, gpuLayers = selectedGpuLayers, contextLength = loadedContextLength ?: defaultContextLength)
 
     private class RuntimeFailure(val error: ModelError) : IllegalStateException(error.message)
 }
