@@ -75,23 +75,21 @@ diff --git a/src/llama.cpp b/src/llama.cpp
 +     const struct ggml_tensor * cur = check_tensor_dims(tn.str(), ne, !(flags & TENSOR_NOT_REQUIRED));
 + 
 +     if (cur == NULL) {
-+@@ -1308,6 +1310,8 @@ struct ggml_tensor * llama_model_loader::create_tensor(
++         return NULL;
++@@ -1270,7 +1272,8 @@ struct ggml_tensor * llama_model_loader::create_tensor(
++     if (cur == NULL) {
++         return NULL;
 +     }
 + 
++     bool duplicated = flags & TENSOR_DUPLICATED;
+++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_DIMS_OK name=%s type=%s bytes=%zu\n", tn.str().c_str(), ggml_type_name(cur->type), ggml_nbytes(cur));
++ 
++     struct ggml_tensor * tensor = ggml_dup_tensor(ctx, cur);
++     ggml_set_name(tensor, ggml_get_name(cur));
++@@ -1288,7 +1291,8 @@ struct ggml_tensor * llama_model_loader::create_tensor(
++         n_created++;
++     }
++ 
+++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_CREATE_RETURN name=%s ptr=%p\n", tn.str().c_str(), (void *) tensor);
 +     return tensor;
-+ }
-++
-+diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
-+--- a/src/llama-model-loader.cpp
-++++ b/src/llama-model-loader.cpp
-+@@ -1429,6 +1429,7 @@ void llama_model_loader::load_data_for(struct ggml_tensor * cur) const {
-+     const auto & w = require_weight(ggml_get_name(cur));
-++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_DATA_BEGIN name=%s offs=%zu bytes=%zu mmap=%d\n", ggml_get_name(cur), w.offs, ggml_nbytes(cur), use_mmap ? 1 : 0);
-+ 
-+     if (use_mmap) {
-+@@ -1445,6 +1446,7 @@ void llama_model_loader::load_data_for(struct ggml_tensor * cur) const {
-+             memcpy(cur->data, (uint8_t *)mapping->addr() + w.offs, ggml_nbytes(cur));
-+         }
-+     }
-++    LLAMA_LOG_INFO("ANDROID_DIAG_TENSOR_DATA_RETURN name=%s data=%p\n", ggml_get_name(cur), cur->data);
 + }
