@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cinttypes>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <fstream>
@@ -244,19 +245,38 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
     std::lock_guard<std::mutex> lock(g_backend_init_mutex);
     if (!g_backend_initialized) {
         if (enable_gpu) {
-            append_native_trace("ACTIVATION_BACKEND_LOAD_ALL_STARTED");
+            // GPU mode intentionally loads the complete backend set, including Vulkan.
+            unsetenv("GGML_DISABLE_VULKAN");
+            append_native_trace("GPU_BACKEND_LOAD_ALL_STARTED");
             ggml_backend_load_all();
-            append_native_trace("ACTIVATION_BACKEND_LOAD_ALL_RETURNED");
+            append_native_trace("GPU_BACKEND_LOAD_ALL_RETURNED");
             g_gpu_backend_loaded = true;
         } else {
-            append_native_trace("CPU_ONLY_BACKEND_LOAD_SKIPPED");
-            append_native_trace("CPU_ONLY_VULKAN_BACKEND_INITIALIZATION_SKIPPED");
+            // CPU mode must not let llama_backend_init() discover/load Vulkan. The
+            // pinned llama.cpp registry honors this process-wide guard while still
+            // registering the statically linked CPU backend.
+            setenv("GGML_DISABLE_VULKAN", "1", 1);
+            append_native_trace("CPU_ONLY_VULKAN_DISABLE_ENV_SET");
+            append_native_trace("CPU_ONLY_BACKEND_LOAD_ALL_SKIPPED");
         }
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
         llama_backend_init();
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_RETURNED");
+        if (!enable_gpu) {
+            const size_t backend_count = ggml_backend_reg_count();
+            const bool cpu_available = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU) != nullptr;
+            const bool gpu_available = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) != nullptr ||
+                                       ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU) != nullptr;
+            append_native_trace((std::string("CPU_ONLY_BACKEND_REG_COUNT=") + std::to_string(backend_count)).c_str());
+            append_native_trace(cpu_available ? "CPU_ONLY_CPU_DEVICE_AVAILABLE" : "CPU_ONLY_CPU_DEVICE_MISSING");
+            append_native_trace(gpu_available ? "CPU_ONLY_GPU_DEVICE_UNEXPECTEDLY_AVAILABLE" : "CPU_ONLY_GPU_DEVICE_ABSENT");
+        }
         g_backend_initialized = true;
     } else if (enable_gpu && !g_gpu_backend_loaded) {
+        // If CPU initialized the registry first, the static registry was created
+        // with Vulkan disabled. Try the normal dynamic backend discovery, but keep
+        // the CPU-only path isolated and observable rather than silently changing it.
+        unsetenv("GGML_DISABLE_VULKAN");
         append_native_trace("LATE_GPU_BACKEND_LOAD_STARTED");
         ggml_backend_load_all();
         append_native_trace("LATE_GPU_BACKEND_LOAD_RETURNED");
@@ -286,10 +306,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         }
         ggml_backend_dev_t cpu_devices[] = { cpu_device, nullptr };
         mp.devices = cpu_devices;
-        mp.load_mode = LLAMA_LOAD_MODE_NONE;
+        // Use mmap for a ~1.55 GiB GGUF on Android. LLAMA_LOAD_MODE_NONE forces
+        // eager tensor allocation and can create a large transient memory peak.
+        mp.load_mode = LLAMA_LOAD_MODE_MMAP;
         mp.check_tensors = true;
         checkpoint("CPU_ONLY_CPU_BACKEND_SELECTED");
-        checkpoint("CPU_ONLY_LOAD_MODE_NONE_NO_MMAP");
+        checkpoint("CPU_ONLY_LOAD_MODE_MMAP");
         checkpoint("CPU_ONLY_CHECK_TENSORS_ENABLED");
     } else {
         checkpoint("GPU_DEVICE_SELECTION_DEFAULT");
@@ -308,9 +330,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         mp = llama_model_default_params(); mp.n_gpu_layers = 0;
         ggml_backend_dev_t fallback_cpu_devices[] = { ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU), nullptr };
         mp.devices = fallback_cpu_devices;
-        mp.load_mode = LLAMA_LOAD_MODE_NONE;
+        mp.load_mode = LLAMA_LOAD_MODE_MMAP;
         mp.check_tensors = true;
-        checkpoint("CPU_MODEL_LOAD_STARTED no_mmap check_tensors=1");
+        checkpoint("CPU_MODEL_LOAD_STARTED mmap check_tensors=1");
         g_model = llama_model_load_from_file(path, mp);
         checkpoint(g_model ? "CPU_MODEL_LOAD_RETURNED_SUCCESS" : "CPU_MODEL_LOAD_RETURNED_FAILED");
         env->ReleaseStringUTFChars(jpath, path); g_gpu = false;
