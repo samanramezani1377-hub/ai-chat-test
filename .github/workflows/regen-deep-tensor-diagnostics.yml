@@ -87,3 +87,5 @@ jobs:
           git add core/runtime-android/src/main/cpp/patches/llama-model-loading-memory.patch
           git commit -m "fix: stabilize mmap tensor allocation order" || exit 0
           git push
+
+# trigger canonical regeneration after workflow update
