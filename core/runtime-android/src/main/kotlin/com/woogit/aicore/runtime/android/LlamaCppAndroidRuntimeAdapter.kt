@@ -23,7 +23,9 @@ class LlamaCppAndroidRuntimeAdapter(
 ) : RuntimeAdapter, RuntimeMetrics {
     companion object {
         const val GPU_LAYERS_CPU_ONLY = 0
+        /** Diagnostic value expressed as percent of the model's actual block count. */
         const val GPU_LAYERS_70 = 70
+        /** Keep the existing max diagnostic value; llama.cpp treats this as all layers. */
         const val GPU_LAYERS_MAX = 99
     }
 
@@ -41,8 +43,8 @@ class LlamaCppAndroidRuntimeAdapter(
     fun setGpuLayers(value: Int) {
         require(value in setOf(GPU_LAYERS_CPU_ONLY, GPU_LAYERS_70, GPU_LAYERS_MAX)) { "Unsupported diagnostic GPU layer mode: $value" }
         gpuLayersMode = value
-        RuntimeDiagnosticsStore.recordNativeEvent("GPU_LAYER_MODE_SELECTED layers=$value")
-        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "GPU_LAYER_MODE_SELECTED layers=$value (applies on next activation)")
+        RuntimeDiagnosticsStore.recordNativeEvent("GPU_LAYER_MODE_SELECTED percent=$value")
+        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "GPU_LAYER_MODE_SELECTED percent=$value (applies on next activation)")
     }
 
     fun gpuLayers(): Int = gpuLayersMode
@@ -63,13 +65,25 @@ class LlamaCppAndroidRuntimeAdapter(
         val file = model.path.toFile()
         if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
         val startedAt = System.nanoTime()
-        val requestedGpuLayers = gpuLayersMode
+        val requestedGpuPercent = gpuLayersMode
+        val totalBlocks = model.metadata.blockCount?.toInt()?.takeIf { it > 0 }
+        val requestedGpuLayers = when {
+            requestedGpuPercent <= 0 -> 0
+            requestedGpuPercent >= 99 -> 99
+            totalBlocks != null -> ((totalBlocks * requestedGpuPercent) / 100.0).roundToInt().coerceIn(1, totalBlocks)
+            else -> 99
+        }
         return try {
             val requested = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
-            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} context=$requested gpuLayers=$requestedGpuLayers")
-            RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} requestedContext=$requested gpuLayers=$requestedGpuLayers")
+            RuntimeDiagnosticsStore.recordNativeEvent(
+                "NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} context=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}"
+            )
+            RuntimeDiagnosticsStore.recordTrace(
+                RuntimeTraceEvent.Type.GENERATION_STARTED,
+                "NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} requestedContext=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}"
+            )
             val result = NativeLlamaCpp.load(file.absolutePath, requested, requestedGpuLayers)
-            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_RETURNED code=$result gpuLayers=$requestedGpuLayers")
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_RETURNED code=$result gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers")
             if (result != 0) return ModelResult.Failure(ModelError.Inference("llama.cpp failed to load the model (code=$result)"))
             val info = NativeLlamaCpp.runtimeInfo()
             selectedBackend = info.substringBefore(';').ifBlank { "CPU/NEON" }
@@ -78,7 +92,7 @@ class LlamaCppAndroidRuntimeAdapter(
             loadedContextLength = NativeLlamaCpp.contextLength().takeIf { it > 0 } ?: requested
             latestGeneration = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
-            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_RUNTIME_READY backend=$selectedBackend gpuLayers=$selectedGpuLayers context=$loadedContextLength")
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_RUNTIME_READY backend=$selectedBackend gpuPercent=$requestedGpuPercent gpuLayers=$selectedGpuLayers context=$loadedContextLength")
             RuntimeDiagnosticsStore.recordLoaded(model, latestLoadTimeMs, runtimeInfo())
             ModelResult.Success(Unit)
         } catch (t: Throwable) {
