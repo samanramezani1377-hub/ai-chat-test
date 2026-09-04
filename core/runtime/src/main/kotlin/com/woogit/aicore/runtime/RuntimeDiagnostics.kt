@@ -37,7 +37,7 @@ object RuntimeDiagnosticsStore {
     val snapshot: StateFlow<RuntimeDiagnosticsSnapshot> = state.asStateFlow()
 
     private fun lastNativeDiagnosticLines(text: String): String =
-        text.lineSequence().takeLast(MAX_NATIVE_DIAGNOSTIC_LINES).joinToString("\n")
+        text.lineSequence().toList().takeLast(MAX_NATIVE_DIAGNOSTIC_LINES).joinToString("\n")
 
     private fun readNativeDiagnostics(): String? = runCatching {
         val preflight = preflightFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotBlank() }
