@@ -1,7 +1,8 @@
 diff --git a/ggml/src/ggml-backend.cpp b/ggml/src/ggml-backend.cpp
+index e519bdf50..fff7b22c4 100644
 --- a/ggml/src/ggml-backend.cpp
 +++ b/ggml/src/ggml-backend.cpp
-@@ -250,10 +250,16 @@ void ggml_backend_tensor_set_async(ggml_backend_t backend, struct ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
+@@ -259,12 +259,14 @@ void ggml_backend_tensor_set_async(ggml_backend_t backend, struct ggml_tensor *
      GGML_ASSERT(tensor->data != NULL && "tensor not allocated");
      GGML_ASSERT(offset + size <= ggml_nbytes(tensor) && "tensor write out of bounds");
  
@@ -14,7 +15,9 @@ diff --git a/ggml/src/ggml-backend.cpp b/ggml/src/ggml-backend.cpp
      }
 +    fprintf(stderr, "AI_CHAT_BACKEND_ASYNC_SET_RETURNED backend=%s tensor=%s offset=%zu size=%zu\n", ggml_backend_name(backend), ggml_get_name(tensor), offset, size);
  }
-@@ -337,6 +343,8 @@ void ggml_backend_tensor_set(struct ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
+ 
+ void ggml_backend_tensor_get_async(ggml_backend_t backend, const struct ggml_tensor * tensor, void * data, size_t offset, size_t size) {
+@@ -335,7 +337,9 @@ void ggml_backend_tensor_set(struct ggml_tensor * tensor, const void * data, siz
      GGML_ASSERT(tensor->data != NULL && "tensor not allocated");
      GGML_ASSERT(offset + size <= ggml_nbytes(tensor) && "tensor write out of bounds");
  
@@ -22,8 +25,9 @@ diff --git a/ggml/src/ggml-backend.cpp b/ggml/src/ggml-backend.cpp
      buf->iface.set_tensor(buf, tensor, data, offset, size);
 +    fprintf(stderr, "AI_CHAT_BACKEND_SET_RETURNED tensor=%s offset=%zu size=%zu\n", ggml_get_name(tensor), offset, size);
  }
-@@ -405,6 +413,8 @@ void ggml_backend_synchronize(ggml_backend_t backend) {
-     if (backend->iface.synchronize == NULL) {
+ 
+ void ggml_backend_tensor_get(const struct ggml_tensor * tensor, void * data, size_t offset, size_t size) {
+@@ -419,7 +423,9 @@ void ggml_backend_synchronize(ggml_backend_t backend) {
          return;
      }
  
@@ -31,7 +35,9 @@ diff --git a/ggml/src/ggml-backend.cpp b/ggml/src/ggml-backend.cpp
      backend->iface.synchronize(backend);
 +    fprintf(stderr, "AI_CHAT_BACKEND_SYNC_RETURNED backend=%s\n", ggml_backend_name(backend));
  }
-@@ -538,20 +548,28 @@ void ggml_backend_event_record(ggml_backend_event_t event, ggml_backend_t backend) {
+ 
+ ggml_backend_graph_plan_t ggml_backend_graph_plan_create(ggml_backend_t backend, struct ggml_cgraph * cgraph) {
+@@ -541,21 +547,27 @@ void ggml_backend_event_record(ggml_backend_event_t event, ggml_backend_t backen
      GGML_ASSERT(backend);
      GGML_ASSERT(backend->iface.event_record != NULL);
  
@@ -57,3 +63,5 @@ diff --git a/ggml/src/ggml-backend.cpp b/ggml/src/ggml-backend.cpp
      backend->iface.event_wait(backend, event);
 +    fprintf(stderr, "AI_CHAT_BACKEND_EVENT_WAIT_RETURNED backend=%s\n", ggml_backend_name(backend));
  }
+ 
+ static void ggml_backend_graph_optimize(ggml_backend_t backend, struct ggml_cgraph * cgraph) {

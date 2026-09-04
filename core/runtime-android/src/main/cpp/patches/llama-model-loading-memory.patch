@@ -1,7 +1,8 @@
 diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
+index 9b22cb05f..db1202a9d 100644
 --- a/src/llama-model-loader.cpp
 +++ b/src/llama-model-loader.cpp
-@@ -1598,7 +1597,25 @@ bool llama_model_loader::load_all_data(
+@@ -1538,7 +1538,25 @@ bool llama_model_loader::load_all_data(
              ggml_backend_name(upload_backend));
      }
  
@@ -27,4 +28,3 @@ diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
          const auto * weight = get_weight(ggml_get_name(cur));
          if (weight == nullptr) {
              // this can happen with split experts models
-             continue;
