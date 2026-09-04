@@ -1,7 +1,5 @@
-# Temporary migration workflow; delete after canonical patch generation succeeds.
-# Trigger generation using the exact git diff from the pinned llama.cpp tree.
-# Final execution trigger.
-name: Temporary Deep Tensor Diagnostics Regeneration
+# Temporary migration workflow; delete after the canonical load-order fix is generated and verified.
+name: Temporary Canonical Tensor Load Fix
 
 on:
   push:
@@ -17,7 +15,7 @@ jobs:
     steps:
       - name: Checkout app repository
         uses: actions/checkout@v4
-      - name: Regenerate canonical Vulkan diagnostics patch
+      - name: Generate canonical patch from pinned llama.cpp
         run: |
           set -euo pipefail
           TAG=c5fc7e34885ba31217e330809437afa993d27745
@@ -27,48 +25,65 @@ jobs:
           git -C "$WORK" checkout --quiet --detach "$TAG"
           python3 - <<'PY'
           from pathlib import Path
-          import os, re, subprocess
-          root = Path('.').resolve(); work = Path(os.environ['RUNNER_TEMP']) / 'llama-regenerate'
+          import os
+          import subprocess
+          root = Path('.').resolve()
+          work = Path(os.environ['RUNNER_TEMP']) / 'llama-regenerate'
           pd = root / 'core/runtime-android/src/main/cpp/patches'
-          p1, p2, p3 = [pd / x for x in ('llama-model-loading-memory.patch','llama-backend-vulkan-diagnostics.patch','llama-vulkan-micro-diagnostics.patch')]
-          def run(*a): return subprocess.run(a, cwd=work, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
-          run('git','apply','--recount',str(p1)); run('git','apply','--recount',str(p2))
-          f = work / 'ggml/src/ggml-vulkan/ggml-vulkan.cpp'; t = f.read_text()
-          def replace_once(pattern, repl, label):
-              global t
-              t, n = re.subn(pattern, repl, t, count=1, flags=re.M)
-              if n != 1: raise SystemExit(label)
-          replace_once(r'(static bool ggml_vk_buffer_write_2d_async\([^\{]*\{)', r'''\1
-    std::cerr << "AI_CHAT_VK_TENSOR_BUFFER_WRITE_BEGIN trace=" << ai_chat_vk_trace()
-              << " dst=" << static_cast<const void *>(dst.get())
-              << " dst_bytes=" << (dst ? dst->size : 0)
-              << " dst_offset=" << offset
-              << " bytes=" << (width * height)
-              << " host_visible=" << ((dst->memory_property_flags & vk::MemoryPropertyFlagBits::eHostVisible) != vk::MemoryPropertyFlagBits{})
-              << std::endl;''', 'write async function anchor not found')
-          replace_once(r'(ggml_vk_host_get\([^\n]*\);)', r'''\1
-    std::cerr << "AI_CHAT_VK_SOURCE_CLASSIFIED trace=" << ai_chat_vk_trace() << " pinned=" << (buf != nullptr) << " source_offset=" << buf_offset << std::endl;''', 'host classification anchor not found')
-          replace_once(r'(subctx->s->buffer\.copyBuffer\(buf->buffer, dst->buffer, slices\);)', r'''std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_BEGIN trace=" << ai_chat_vk_trace() << " mode=pinned bytes=" << (width * height) << std::endl;
-        \1
-        std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_RECORDED trace=" << ai_chat_vk_trace() << " mode=pinned bytes=" << (width * height) << std::endl;''', 'pinned copy anchor not found')
-          replace_once(r'(const size_t copy_size = width\*height;)', r'''\1
-    std::cerr << "AI_CHAT_VK_STAGING_PATH_BEGIN trace=" << ai_chat_vk_trace() << " copy_bytes=" << copy_size << std::endl;''', 'staging copy size anchor not found')
-          replace_once(r'(vkCmdCopyBuffer\(subctx->s->buffer, staging->buffer, dst->buffer, 1, &buf_copy\);)', r'''std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_BEGIN trace=" << ai_chat_vk_trace() << " mode=staging bytes=" << copy_size << std::endl;
-    \1
-    std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_RECORDED trace=" << ai_chat_vk_trace() << " mode=staging bytes=" << copy_size << std::endl;''', 'staging copy command anchor not found')
-          replace_once(r'(std::cerr << "AI_CHAT_VK_SET_TENSOR_RETURNED trace=.*?;)', r'''\1
-    std::cerr << "AI_CHAT_VK_TENSOR_LOAD_END trace=" << ai_chat_vk_trace() << " name=" << ggml_get_name(tensor) << " bytes=" << size << std::endl;''', 'tensor completion anchor not found')
-          f.write_text(t)
-          p3.write_text(run('git','diff','--no-ext-diff','--no-color','--','ggml/src/ggml-vulkan/ggml-vulkan.cpp'))
-          run('git','reset','--hard','--quiet',TAG); run('git','clean','-fd','-q')
-          for p in (p1,p2,p3): run('git','apply','--check',str(p)); run('git','apply',str(p))
-          print('VALIDATED: all three patches')
+          p1 = pd / 'llama-model-loading-memory.patch'
+          p2 = pd / 'llama-backend-vulkan-diagnostics.patch'
+          p3 = pd / 'llama-vulkan-micro-diagnostics.patch'
+          tag = 'c5fc7e34885ba31217e330809437afa993d27745'
+          def run(*args):
+              return subprocess.run(args, cwd=work, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
+          run('git', 'apply', '--recount', str(p1))
+          run('git', 'apply', '--recount', str(p2))
+          f = work / 'src/llama-model-loader.cpp'
+          t = f.read_text()
+          old = '''    // without mmap, tensors in non-host buffers are staged through a temporary buffer sized like the tensor
+    // load them biggest-first so the largest staging buffer is allocated while the fewest weights are resident
+    if (!use_mmap) {
+        std::stable_sort(tensors.begin(), tensors.end(), [](const ggml_tensor * a, const ggml_tensor * b) {
+            const bool staged_a = a->buffer && !ggml_backend_buffer_is_host(a->buffer);
+            const bool staged_b = b->buffer && !ggml_backend_buffer_is_host(b->buffer);
+            if (staged_a != staged_b) {
+                return staged_a;
+            }
+            return staged_a && ggml_nbytes(a) > ggml_nbytes(b);
+        });
+    }
+'''
+          new = '''    // Load tensors largest-first for non-host buffers. This also applies to mmap loads,
+    // where Vulkan device allocations are still created progressively and allocation order
+    // can otherwise leave the allocator fragmented before large weights are allocated.
+    std::stable_sort(tensors.begin(), tensors.end(), [](const ggml_tensor * a, const ggml_tensor * b) {
+        const bool staged_a = a->buffer && !ggml_backend_buffer_is_host(a->buffer);
+        const bool staged_b = b->buffer && !ggml_backend_buffer_is_host(b->buffer);
+        if (staged_a != staged_b) {
+            return staged_a;
+        }
+        return staged_a && ggml_nbytes(a) > ggml_nbytes(b);
+    });
+'''
+          if old not in t:
+              raise SystemExit('expected tensor ordering block not found')
+          f.write_text(t.replace(old, new, 1))
+          generated = run('git', 'diff', '--no-ext-diff', '--no-color', '--', 'src/llama-model-loader.cpp')
+          if not generated.startswith('diff --git '):
+              raise SystemExit('generated patch is empty')
+          p1.write_text(generated)
+          run('git', 'reset', '--hard', '--quiet', tag)
+          run('git', 'clean', '-fd', '-q')
+          for p in (p1, p2, p3):
+              run('git', 'apply', '--recount', '--check', str(p))
+              run('git', 'apply', '--recount', str(p))
+          print('VALIDATED: canonical tensor load-order fix and all three patches apply to pinned revision')
           PY
       - name: Commit canonical patch
         run: |
           set -euo pipefail
           git config user.name patch-generator
           git config user.email patch-generator@localhost
-          git add core/runtime-android/src/main/cpp/patches/llama-vulkan-micro-diagnostics.patch
-          git commit -m "diag: instrument per-tensor Vulkan upload lifecycle" || exit 0
+          git add core/runtime-android/src/main/cpp/patches/llama-model-loading-memory.patch
+          git commit -m "fix: stabilize mmap tensor allocation order" || exit 0
           git push
