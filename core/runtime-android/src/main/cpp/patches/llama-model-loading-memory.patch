@@ -46,19 +46,20 @@ diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
                      file->read_raw(read_buf.data(), n_size);
                      ggml_backend_tensor_set(cur, read_buf.data(), 0, n_size);
 +
-+diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
-+--- a/src/llama-model-loader.cpp
-++++ b/src/llama-model-loader.cpp
-+@@ -1680,7 +1680,13 @@ bool llama_model_loader::load_all_data(
-+             GGML_ASSERT(buf_mmap || cur->data); // either we have a buffer to allocate the tensor in, or it is already allocated
-+             if (buf_mmap && cur->data == nullptr) {
-++                LLAMA_LOG_INFO("AI_CHAT_TENSOR_ALLOC_BEGIN name=%s type=%d bytes=%zu ne=[%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 "] buffer=%s\n",
-++                    ggml_get_name(cur), (int) cur->type, n_size,
-++                    cur->ne[0], cur->ne[1], cur->ne[2], cur->ne[3],
-++                    ggml_backend_buft_name(ggml_backend_buffer_get_type(buf_mmap)));
-+                 ggml_backend_tensor_alloc(buf_mmap, cur, data);
-++                LLAMA_LOG_INFO("AI_CHAT_TENSOR_ALLOC_RETURNED name=%s data=%p bytes=%zu\n",
-++                    ggml_get_name(cur), cur->data, n_size);
-+                 if (lmlocks) {
-+                     const auto & lmlock = lmlocks->at(weight->idx);
-+                     lmlock->grow_to(weight->offs + n_size);
+diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
+--- a/src/llama-model-loader.cpp
++++ b/src/llama-model-loader.cpp
+@@ -1680,7 +1680,13 @@ bool llama_model_loader::load_all_data(
+ 
+             GGML_ASSERT(buf_mmap || cur->data); // either we have a buffer to allocate the tensor in, or it is already allocated
+             if (buf_mmap && cur->data == nullptr) {
++                LLAMA_LOG_INFO("AI_CHAT_TENSOR_ALLOC_BEGIN name=%s type=%d bytes=%zu ne=[%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 "] buffer=%s\n",
++                    ggml_get_name(cur), (int) cur->type, n_size,
++                    cur->ne[0], cur->ne[1], cur->ne[2], cur->ne[3],
++                    ggml_backend_buft_name(ggml_backend_buffer_get_type(buf_mmap)));
+                 ggml_backend_tensor_alloc(buf_mmap, cur, data);
++                LLAMA_LOG_INFO("AI_CHAT_TENSOR_ALLOC_RETURNED name=%s data=%p bytes=%zu\n",
++                    ggml_get_name(cur), cur->data, n_size);
+                 if (lmlocks) {
+                     const auto & lmlock = lmlocks->at(weight->idx);
+                     lmlock->grow_to(weight->offs + n_size);
