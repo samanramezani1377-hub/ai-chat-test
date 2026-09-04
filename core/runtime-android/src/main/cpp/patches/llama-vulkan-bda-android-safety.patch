@@ -22,7 +22,7 @@ diff --git a/ggml/src/ggml-vulkan/ggml-vulkan.cpp b/ggml/src/ggml-vulkan/ggml-vu
 +        }
 +
          device->device_fault = device->device_fault && fault_features.deviceFault;
-@@ -3587,4 +3587,9 @@
+@@ -3586,4 +3586,9 @@
      if (device->buffer_device_address) {
          const vk::BufferDeviceAddressInfo addressInfo(buf->buffer);
 -        buf->bda_addr = device->device.getBufferAddress(addressInfo);
