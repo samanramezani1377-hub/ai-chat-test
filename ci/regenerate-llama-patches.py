@@ -5,12 +5,11 @@ Patch files are treated as semantic change specifications. Unified-diff hunk
 line counts are never trusted or edited manually: Git generates the final
 headers from the resulting file state.
 
-The generator is deliberately self-healing for safe, deterministic cases:
-- malformed/stale hunk line counts are ignored;
-- LF/CRLF differences are normalized for matching;
-- if exact context moved but a whitespace-normalized preimage is unique, that
-  unique location is used.
-Anything ambiguous still fails rather than guessing.
+Application is delegated to Git itself with --recount. This is important:
+--recount makes Git infer hunk sizes from the actual patch body instead of
+trusting stale @@ counts, while normal Git patch matching still provides the
+safety boundary. Ambiguous or genuinely stale preimages fail instead of being
+guessed.
 """
 
 from pathlib import Path
@@ -60,58 +59,11 @@ def parse_patch(text):
     return files
 
 
-def normalized(line):
-    # Matching-only normalization. The actual replacement text is never
-    # normalized, so intentional formatting changes remain intact.
-    return " ".join(line.replace("\r\n", "\n").replace("\r", "\n").strip().split())
-
-
-def find_match(lines, old, path):
-    exact = [
-        i for i in range(0, len(lines) - len(old) + 1)
-        if lines[i : i + len(old)] == old
-    ]
-    if len(exact) == 1:
-        return exact[0]
-    if len(exact) > 1:
-        raise RuntimeError(f"{path}: preimage is ambiguous ({len(exact)} exact matches)")
-
-    old_norm = [normalized(line) for line in old]
-    fuzzy = [
-        i for i in range(0, len(lines) - len(old) + 1)
-        if [normalized(line) for line in lines[i : i + len(old)]] == old_norm
-    ]
-    if len(fuzzy) == 1:
-        print(f"SELF-HEAL: {path}: recovered unique whitespace-normalized preimage")
-        return fuzzy[0]
-    if len(fuzzy) > 1:
-        raise RuntimeError(f"{path}: normalized preimage is ambiguous ({len(fuzzy)} matches)")
-    raise RuntimeError(f"{path}: preimage not found; no safe deterministic recovery")
-
-
-def apply_hunks(repo, spec):
-    for file_spec in spec:
-        path = repo / file_spec["path"]
-        if not path.exists():
-            raise RuntimeError(f"{path}: target file does not exist")
-        # Use open(..., newline="") instead of Path.read_text(newline=...),
-        # because some GitHub-hosted runner Python versions do not expose the
-        # newline keyword on Path.read_text/write_text.
-        with path.open("r", newline="") as handle:
-            lines = handle.read().splitlines(keepends=True)
-        for hunk in file_spec["hunks"]:
-            # Unified diff prefixes are metadata. Strip exactly one prefix
-            # character from both sides before matching/replacing. The old
-            # implementation accidentally retained '-'/' ' in the preimage,
-            # making every normal hunk impossible to match.
-            old = [line[1:] for line in hunk["lines"] if not line.startswith("+")]
-            new = [line[1:] for line in hunk["lines"] if not line.startswith("-")]
-            if not old:
-                raise RuntimeError(f"{path}: unsupported empty preimage hunk")
-            index = find_match(lines, old, path)
-            lines[index : index + len(old)] = new
-        with path.open("w", newline="") as handle:
-            handle.write("".join(lines))
+def apply_patch(repo, patch_file):
+    """Apply a patch without trusting manually edited hunk line counts."""
+    patch_file = Path(patch_file).resolve()
+    run("git", "-C", str(repo), "apply", "--recount", "--check", str(patch_file))
+    run("git", "-C", str(repo), "apply", "--recount", str(patch_file))
 
 
 def git_diff(repo, paths):
@@ -130,8 +82,8 @@ def validate_generated(upstream, generated):
         patch_file = upstream / f".generated-{name}"
         patch_file.write_text(diff)
         try:
-            run("git", "-C", str(upstream), "apply", "--check", str(patch_file))
-            run("git", "-C", str(upstream), "apply", str(patch_file))
+            run("git", "-C", str(upstream), "apply", "--recount", "--check", str(patch_file))
+            run("git", "-C", str(upstream), "apply", "--recount", str(patch_file))
         finally:
             patch_file.unlink(missing_ok=True)
         print(f"VALIDATED: {name}")
@@ -154,11 +106,11 @@ with tempfile.TemporaryDirectory(prefix="ai-chat-llama-regen-") as temp_dir:
         run("git", "-C", str(upstream), "reset", "--hard", "--quiet", TAG)
         run("git", "-C", str(upstream), "clean", "-fd", "-q")
 
-        for previous in specs[:index]:
-            apply_hunks(upstream, previous)
+        for previous in PATCHES[:index]:
+            apply_patch(upstream, PATCH_DIR / previous)
             git_snapshot(upstream)
 
-        apply_hunks(upstream, spec)
+        apply_patch(upstream, PATCH_DIR / name)
         diff = git_diff(upstream, [file_spec["path"] for file_spec in spec])
         if not diff.strip():
             raise RuntimeError(f"{name}: generated empty diff")
