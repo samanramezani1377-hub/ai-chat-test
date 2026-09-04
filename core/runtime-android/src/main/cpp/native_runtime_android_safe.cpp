@@ -4,9 +4,9 @@
 #include <vector>
 #include <string>
 
-// Keep the JNI implementation in native_runtime.cpp. Rename only its fatal
-// handler installer while including it so the Android-specific installer below
-// can coexist without a duplicate symbol.
+// Keep the JNI implementation in native_runtime.cpp. Its own fatal handler is
+// retained under a private name; the Android-specific handler below is installed
+// explicitly after nativeInit() returns, so it cannot be accidentally shadowed.
 #define install_native_fatal_handlers install_native_fatal_handlers_legacy
 #include "native_runtime.cpp"
 #undef install_native_fatal_handlers
@@ -63,6 +63,12 @@ static void install_native_fatal_handlers() {
     sigaction(SIGABRT, &action, nullptr);
     sigaction(SIGILL, &action, nullptr);
     sigaction(SIGFPE, &action, nullptr);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInstallFatalHandlers(
+        JNIEnv *, jclass) {
+    install_native_fatal_handlers();
 }
 
 extern "C" JNIEXPORT jint JNICALL
