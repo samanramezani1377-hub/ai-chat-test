@@ -47,17 +47,8 @@ jobs:
           vulkan = work / 'ggml/src/ggml-vulkan/ggml-vulkan.cpp'
           text = vulkan.read_text()
 
-          anchor = 'static void ggml_vk_ensure_sync_staging_buffer(ggml_backend_vk_context * ctx, size_t size) {'
-          if anchor not in text:
-              raise SystemExit('staging function anchor not found')
-          replacement = '''static void ggml_vk_ensure_sync_staging_buffer(ggml_backend_vk_context * ctx, size_t size) {\n    std::cerr << "AI_CHAT_VK_STAGING_ALLOC_BEGIN trace=" << ai_chat_vk_trace()\n              << " ctx=" << static_cast<const void *>(ctx)\n              << " requested_bytes=" << size\n              << " existing=" << static_cast<const void *>(ctx->sync_staging.get())\n              << " existing_bytes=" << (ctx->sync_staging ? ctx->sync_staging->size : 0)\n              << std::endl;'''
-          text = text.replace(anchor, replacement, 1)
-
-          anchor = 'ctx->sync_staging = ggml_vk_create_buffer_check(ctx, size,'
-          if anchor not in text:
-              raise SystemExit('staging create anchor not found')
-          text = text.replace(anchor, anchor + '\n        std::cerr << "AI_CHAT_VK_STAGING_CREATE_CALL trace=" << ai_chat_vk_trace() << " bytes=" << size << std::endl;', 1)
-
+          # Instrument the real per-tensor write path. The existing patch already assigns a
+          # unique trace id to each tensor, so every deeper event can be correlated back to it.
           anchor = 'static void ggml_vk_buffer_write_2d_async(ggml_backend_vk_context * ctx, vk_context * subctx, vk_buffer& dst, size_t offset, const void * src, size_t spitch, size_t width, size_t height, bool sync_staging = false) {'
           if anchor not in text:
               raise SystemExit('write async function anchor not found')
@@ -71,17 +62,22 @@ jobs:
           anchor = 'subctx->s->buffer.copyBuffer(buf->buffer, dst->buffer, slices);'
           if anchor not in text:
               raise SystemExit('pinned copy anchor not found')
-          text = text.replace(anchor, 'std::cerr << "AI_CHAT_VK_UPLOAD_SUBMIT_BEGIN trace=" << ai_chat_vk_trace() << " mode=pinned bytes=" << (width * height) << std::endl;\n        ' + anchor + '\n        std::cerr << "AI_CHAT_VK_UPLOAD_SUBMIT_RECORDED trace=" << ai_chat_vk_trace() << " mode=pinned bytes=" << (width * height) << std::endl;', 1)
+          text = text.replace(anchor, 'std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_BEGIN trace=" << ai_chat_vk_trace() << " mode=pinned bytes=" << (width * height) << std::endl;\n        ' + anchor + '\n        std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_RECORDED trace=" << ai_chat_vk_trace() << " mode=pinned bytes=" << (width * height) << std::endl;', 1)
 
           anchor = 'const size_t copy_size = width*height;'
           if anchor not in text:
               raise SystemExit('staging copy size anchor not found')
-          text = text.replace(anchor, anchor + '\n    std::cerr << "AI_CHAT_VK_STAGING_PATH trace=" << ai_chat_vk_trace() << " copy_bytes=" << copy_size << std::endl;', 1)
+          text = text.replace(anchor, anchor + '\n    std::cerr << "AI_CHAT_VK_STAGING_PATH_BEGIN trace=" << ai_chat_vk_trace() << " copy_bytes=" << copy_size << std::endl;', 1)
+
+          anchor = 'ggml_vk_ensure_sync_staging_buffer(ctx, copy_size);'
+          if anchor not in text:
+              raise SystemExit('staging ensure anchor not found')
+          text = text.replace(anchor, 'std::cerr << "AI_CHAT_VK_STAGING_ALLOC_CALL trace=" << ai_chat_vk_trace() << " requested_bytes=" << copy_size << std::endl;\n                ' + anchor + '\n                std::cerr << "AI_CHAT_VK_STAGING_ALLOC_RETURNED trace=" << ai_chat_vk_trace() << " buffer=" << static_cast<const void *>(ctx->sync_staging.get()) << " bytes=" << (ctx->sync_staging ? ctx->sync_staging->size : 0) << std::endl;', 1)
 
           anchor = 'vkCmdCopyBuffer(subctx->s->buffer, staging->buffer, dst->buffer, 1, &buf_copy);'
           if anchor not in text:
               raise SystemExit('staging copy command anchor not found')
-          text = text.replace(anchor, 'std::cerr << "AI_CHAT_VK_UPLOAD_SUBMIT_BEGIN trace=" << ai_chat_vk_trace() << " mode=staging bytes=" << copy_size << " staging=" << static_cast<const void *>(staging.get()) << std::endl;\n    ' + anchor + '\n    std::cerr << "AI_CHAT_VK_UPLOAD_SUBMIT_RECORDED trace=" << ai_chat_vk_trace() << " mode=staging bytes=" << copy_size << std::endl;', 1)
+          text = text.replace(anchor, 'std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_BEGIN trace=" << ai_chat_vk_trace() << " mode=staging bytes=" << copy_size << " staging=" << static_cast<const void *>(staging.get()) << std::endl;\n    ' + anchor + '\n    std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_RECORDED trace=" << ai_chat_vk_trace() << " mode=staging bytes=" << copy_size << std::endl;', 1)
 
           anchor = 'ggml_vk_buffer_write_2d(ctx, dst, offset, src, 0, size, 1);'
           if anchor not in text:
