@@ -98,6 +98,17 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
+      # CMake/AGP native configuration must always start from a completely
+      # fresh state. In particular, never reuse .cxx configuration, generated
+      # CMake files, FetchContent state, or native build directories between CI
+      # runs. This deliberately does NOT clear ccache: ccache only reuses
+      # compiler objects and cannot provide stale CMake configuration.
+      - name: Purge native CMake state
+        run: |
+          find . -type d \( -name .cxx -o -name cmake-build-debug \) -prune -exec rm -rf {} +
+          find . -type d \( -path '*/build/cmake' -o -path '*/build/intermediates/cxx' \) -prune -exec rm -rf {} +
+          rm -rf core/runtime-android/build app/.cxx app/build/.cxx
+
       - name: Build Debug APK
         id: build-debug
         run: |
@@ -105,9 +116,8 @@ jobs:
           ccache --zero-stats
           # CI validation intentionally builds Debug only. Release remains a
           # release/tag concern and is not needed to validate native loading.
-          # No .cxx/FetchContent cache is restored here. CMake gets a clean
-          # pinned llama.cpp checkout and applies exactly one deterministic patch.
-          gradle :app:assembleDebug --stacktrace --parallel
+          # Native CMake state was explicitly purged immediately before this build.
+          gradle :app:assembleDebug --stacktrace --parallel --rerun-tasks
           ccache --show-stats
 
       - name: Save ccache
