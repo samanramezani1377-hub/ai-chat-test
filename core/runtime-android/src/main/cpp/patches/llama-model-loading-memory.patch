@@ -59,6 +59,6 @@ diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
 +                 ggml_backend_tensor_alloc(buf_mmap, cur, data);
 ++                LLAMA_LOG_INFO("AI_CHAT_TENSOR_ALLOC_RETURNED name=%s data=%p bytes=%zu\n",
 ++                    ggml_get_name(cur), cur->data, n_size);
-                 if (lmlocks) {
-                     const auto & lmlock = lmlocks->at(weight->idx);
-                     lmlock->grow_to(weight->offs + n_size);
++                 if (lmlocks) {
++                     const auto & lmlock = lmlocks->at(weight->idx);
++                     lmlock->grow_to(weight->offs + n_size);
