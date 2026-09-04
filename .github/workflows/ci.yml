@@ -2,9 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -14,48 +16,131 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  GRADLE_VERSION: '8.11.1'
+  JAVA_VERSION: '17'
+
 jobs:
   unit-tests:
-    name: Unit Tests
-    runs-on: ubuntu-22.04
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup Java 21
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
-      - name: Setup Gradle 8.11.1
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.11.1'
-      - name: Run unit tests
-        run: gradle :core:actions:test :core:agent:test :core:conversation:test :core:domain:test :core:observability:test :core:runtime:test :core:settings:test :app:testDebugUnitTest --stacktrace --parallel
-
-  build:
-    name: Android Debug Build
+    name: Unit tests
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Setup Java 21
+
+      - name: Set up JDK
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '21'
-      - name: Setup Gradle 8.11.1
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.11.1'
-      - name: Build Debug APK
-        run: gradle :app:assembleDebug --stacktrace --parallel --rerun-tasks
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Show toolchain
+        run: |
+          java -version
+          gradle --version
+
+      - name: Run JVM and Android unit tests
+        run: >-
+          gradle
+          :core:actions:test
+          :core:agent:test
+          :core:conversation:test
+          :core:domain:test
+          :core:observability:test
+          :core:runtime:test
+          :core:settings:test
+          :app:testDebugUnitTest
+          --stacktrace
+          --console=plain
+          --no-daemon
+          --parallel
+
+  android-build:
+    name: Android debug build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Show toolchain
+        run: |
+          java -version
+          gradle --version
+
+      - name: Verify Android SDK
+        run: |
+          test -n "$ANDROID_HOME"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list >/dev/null
+
+      - name: Assemble debug APK
+        run: >-
+          gradle
+          :app:assembleDebug
+          --stacktrace
+          --console=plain
+          --no-daemon
+          --parallel
+
       - name: Upload debug APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ai-chat-test-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 7
+
+  android-lint:
+    name: Android lint
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Run Android lint
+        run: >-
+          gradle
+          :app:lintDebug
+          --stacktrace
+          --console=plain
+          --no-daemon
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-lint-report
+          path: |
+            app/build/reports/lint-results-debug.html
+            app/build/reports/lint-results-debug.xml
+          if-no-files-found: ignore
+          retention-days: 7
