@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -22,38 +22,43 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Java 21
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-
       - name: Setup Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-
       - name: Run unit tests
         run: gradle :core:actions:test :core:agent:test :core:conversation:test :core:domain:test :core:observability:test :core:runtime:test :core:settings:test :core:runtime-android:test :app:testDebugUnitTest --stacktrace --parallel
 
+  llama-patch-verification:
+    name: Verify llama.cpp Patch Stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Verify pinned llama.cpp revision and patches
+        run: python3 ci/verify-llama-patches.py .
+
   build:
     name: Android Debug Build
+    needs: [unit-tests, llama-patch-verification]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Java 21
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-
       - name: Install NDK and ccache
         run: |
           sdkmanager "ndk;27.2.12479018"
@@ -61,9 +66,9 @@ jobs:
           sudo apt-get install -y ccache
           ccache --version
 
-      # Vulkan is needed only by the native Android build. Cache the SDK itself,
-      # not CMake's dependency/source tree; the latter was restoring large,
-      # partially patched state and made llama.cpp configuration non-deterministic.
+      # Cache immutable SDK/tooling only. Never cache llama.cpp source or CMake
+      # configuration state; CMake must fetch the exact pinned revision and
+      # apply the checked-in patches from a clean source tree.
       - name: Restore Vulkan SDK
         uses: actions/cache/restore@v4
         with:
@@ -71,10 +76,8 @@ jobs:
             /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
             $HOME/vulkan-sdk
           key: ci-vulkan-${{ runner.os }}-1.4.321.1
-
       - name: Prepare Vulkan SDK
         run: bash ci/prepare-vulkan.sh
-
       - name: Save Vulkan SDK cache
         if: success()
         uses: actions/cache/save@v4
@@ -84,7 +87,6 @@ jobs:
             $HOME/vulkan-sdk
           key: ci-vulkan-${{ runner.os }}-1.4.321.1
 
-      # ccache is an optimization only. Correctness never depends on it.
       - name: Restore ccache
         uses: actions/cache/restore@v4
         with:
@@ -92,34 +94,15 @@ jobs:
           key: ci-ccache-${{ runner.os }}-ndk27.2
           restore-keys: |
             ci-ccache-${{ runner.os }}-ndk27.2-
-
       - name: Setup Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
 
-      # Every CI build validates the patch specifications against the exact
-      # pinned llama.cpp revision. The generator ignores hunk line counts and
-      # lets Git produce canonical unified diffs, so no manual line-count
-      # editing or --recount workaround can enter the build path.
-      # On push/dispatch, changed canonical patches are committed back to main.
-      # On pull requests, the generator validates them in-place but never pushes.
-      - name: Regenerate llama.cpp patches from pinned revision
-        run: |
-          python3 ci/regenerate-llama-patches.py .
-          if [[ "${{ github.event_name }}" != "pull_request" ]] && ! git diff --quiet -- core/runtime-android/src/main/cpp/patches; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add core/runtime-android/src/main/cpp/patches
-            git commit -m "chore: regenerate llama.cpp patches [skip ci]"
-            git push
-          fi
-
-      # CMake/AGP native configuration must always start from a completely
-      # fresh state. In particular, never reuse .cxx configuration, generated
-      # CMake files, FetchContent state, or native build directories between CI
-      # runs. This deliberately does NOT clear ccache: ccache only reuses
-      # compiler objects and cannot provide stale CMake configuration.
+      # Native configuration must start from a completely fresh state. Do not
+      # reuse .cxx, generated CMake files, FetchContent state, or native build
+      # directories between CI runs. ccache remains enabled because it only
+      # reuses compiler outputs and does not own configuration correctness.
       - name: Purge native CMake state
         run: |
           find . -type d \( -name .cxx -o -name cmake-build-debug \) -prune -exec rm -rf {} +
@@ -131,19 +114,17 @@ jobs:
         run: |
           export CCACHE_DIR="$HOME/.cache/ccache"
           ccache --zero-stats
-          # CI validation intentionally builds Debug only. Release remains a
-          # release/tag concern and is not needed to validate native loading.
-          # Native CMake state was explicitly purged immediately before this build.
+          # The patch stack was independently verified against the same pinned
+          # llama.cpp revision. CMake applies those immutable patches again in
+          # its own clean FetchContent source tree.
           gradle :app:assembleDebug --stacktrace --parallel --rerun-tasks
           ccache --show-stats
-
       - name: Save ccache
         if: steps.build-debug.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/ccache
           key: ci-ccache-${{ runner.os }}-ndk27.2
-
       - name: Upload debug APK
         if: success()
         uses: actions/upload-artifact@v4
