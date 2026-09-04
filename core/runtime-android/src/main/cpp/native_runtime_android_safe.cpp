@@ -4,11 +4,14 @@
 #include <vector>
 #include <string>
 
-// Keep the JNI implementation in native_runtime.cpp. Rename only its fatal
-// handler installer while including it so Android gets the debuggerd-friendly
-// handler below. Do NOT rename llama_model_load_from_file: the legacy wrapper
-// previously did that and recursively called itself after macro expansion.
-#define install_native_fatal_handlers install_native_fatal_handlers_legacy
+// Keep the JNI implementation in native_runtime.cpp, but make its
+// nativeInit() call the Android-specific fatal handler below. The previous
+// wrapper renamed the installer to a legacy symbol, which also renamed the
+// call site inside native_runtime.cpp and therefore left the Android handler
+// unused. Do NOT rename llama_model_load_from_file: that previously caused a
+// recursive wrapper after macro expansion.
+static void install_native_fatal_handlers_android();
+#define install_native_fatal_handlers install_native_fatal_handlers_android
 #include "native_runtime.cpp"
 #undef install_native_fatal_handlers
 
@@ -58,7 +61,7 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
     _exit(128 + signal_number);
 }
 
-static void install_native_fatal_handlers() {
+static void install_native_fatal_handlers_android() {
     struct sigaction action{};
     sigemptyset(&action.sa_mask);
     action.sa_sigaction = android_fatal_signal_handler;
