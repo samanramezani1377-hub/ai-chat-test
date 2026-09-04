@@ -1,5 +1,6 @@
 # Temporary migration workflow; delete after canonical patch generation succeeds.
 # Trigger generation using the exact git diff from the pinned llama.cpp tree.
+# Final execution trigger.
 name: Temporary Deep Tensor Diagnostics Regeneration
 
 on:
