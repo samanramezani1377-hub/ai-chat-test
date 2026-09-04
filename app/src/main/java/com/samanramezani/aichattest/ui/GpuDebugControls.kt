@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -30,9 +29,9 @@ internal fun GpuDebugControls() {
         Text("فقط برای تست کرش. انتخاب بعدیِ فعال‌سازی مدل اعمال می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf(
-                LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_CPU_ONLY to "۰ · CPU",
-                LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_70 to "۷۰ · GPU",
-                LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_MAX to "۹۹ · GPU Max",
+                LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_CPU_ONLY to "۰٪ · CPU",
+                LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_70 to "۷۰٪ · GPU",
+                LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_MAX to "۹۹٪ · GPU Max",
             ).forEach { (value, label) ->
                 val selectedNow = selected == value
                 if (selectedNow) {
