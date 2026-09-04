@@ -15,6 +15,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collect
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.roundToInt
 
 /** Direct llama.cpp Android runtime. CPU is the safe default; GPU/Vulkan is opt-in. */
 class LlamaCppAndroidRuntimeAdapter(
@@ -23,9 +24,7 @@ class LlamaCppAndroidRuntimeAdapter(
 ) : RuntimeAdapter, RuntimeMetrics {
     companion object {
         const val GPU_LAYERS_CPU_ONLY = 0
-        /** Diagnostic value expressed as percent of the model's actual block count. */
         const val GPU_LAYERS_70 = 70
-        /** Keep the existing max diagnostic value; llama.cpp treats this as all layers. */
         const val GPU_LAYERS_MAX = 99
     }
 
@@ -48,7 +47,6 @@ class LlamaCppAndroidRuntimeAdapter(
     }
 
     fun gpuLayers(): Int = gpuLayersMode
-
     override fun lastGeneration(): GenerationResult? = latestGeneration
     override fun lastLoadTimeMs(): Long? = latestLoadTimeMs
 
@@ -75,13 +73,8 @@ class LlamaCppAndroidRuntimeAdapter(
         }
         return try {
             val requested = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
-            RuntimeDiagnosticsStore.recordNativeEvent(
-                "NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} context=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}"
-            )
-            RuntimeDiagnosticsStore.recordTrace(
-                RuntimeTraceEvent.Type.GENERATION_STARTED,
-                "NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} requestedContext=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}"
-            )
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} context=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}")
+            RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} requestedContext=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}")
             val result = NativeLlamaCpp.load(file.absolutePath, requested, requestedGpuLayers)
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_RETURNED code=$result gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers")
             if (result != 0) return ModelResult.Failure(ModelError.Inference("llama.cpp failed to load the model (code=$result)"))
