@@ -1,0 +1,161 @@
+name: Temporary Deep Tensor Diagnostics Regeneration
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout app repository
+        uses: actions/checkout@v4
+
+      - name: Setup exact llama.cpp source and regenerate canonical patches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=c5fc7e34885ba31217e330809437afa993d27745
+          WORK="$RUNNER_TEMP/llama-regenerate"
+          rm -rf "$WORK"
+          git clone --quiet --filter=blob:none https://github.com/ggml-org/llama.cpp.git "$WORK"
+          git -C "$WORK" checkout --quiet --detach "$TAG"
+          git -C "$WORK" config user.name patch-generator
+          git -C "$WORK" config user.email patch-generator@localhost
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import tempfile
+
+          root = Path('.').resolve()
+          work = Path(__import__('os').environ['RUNNER_TEMP']) / 'llama-regenerate'
+          patch_dir = root / 'core/runtime-android/src/main/cpp/patches'
+          p1 = patch_dir / 'llama-model-loading-memory.patch'
+          p2 = patch_dir / 'llama-backend-vulkan-diagnostics.patch'
+          p3 = patch_dir / 'llama-vulkan-micro-diagnostics.patch'
+
+          def run(*args):
+              return subprocess.run(args, cwd=work, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
+
+          def reset():
+              run('git', 'reset', '--hard', '--quiet', 'c5fc7e34885ba31217e330809437afa993d27745')
+              run('git', 'clean', '-fd', '-q')
+
+          def apply(p):
+              run('git', 'apply', '--recount', str(p))
+
+          def diff(path):
+              return run('git', 'diff', '--no-ext-diff', '--no-color', '--', str(path))
+
+          # Patch 1: add one unambiguous load interval per tensor around the existing loader body.
+          reset()
+          apply(p1)
+          loader = work / 'src/llama-model-loader.cpp'
+          text = loader.read_text()
+          anchor = '        size_t n_size = ggml_nbytes(cur);\n\n'
+          insertion = '''        size_t n_size = ggml_nbytes(cur);\n\n        LLAMA_LOG_INFO("AI_CHAT_TENSOR_LOAD_BEGIN name=%s type=%d bytes=%zu file_index=%d file_offset=%zu mmap=%d check_tensors=%d buffer=%p data=%p\\n",\n            ggml_get_name(cur), (int) cur->type, n_size, weight->idx, weight->offs, (int) use_mmap, (int) check_tensors,\n            (void *) cur->buffer, cur->data);\n\n'''
+          if anchor not in text:
+              raise SystemExit('loader anchor not found')
+          text = text.replace(anchor, insertion, 1)
+          end_anchor = '        size_done += n_size;\n'
+          end_insert = '        LLAMA_LOG_INFO("AI_CHAT_TENSOR_LOAD_END name=%s bytes=%zu\\n", ggml_get_name(cur), n_size);\n\n        size_done += n_size;\n'
+          if end_anchor not in text:
+              raise SystemExit('loader end anchor not found')
+          text = text.replace(end_anchor, end_insert, 1)
+          loader.write_text(text)
+          new_p1 = diff('src/llama-model-loader.cpp')
+          if not new_p1.strip():
+              raise SystemExit('empty regenerated patch1')
+          p1.write_text(new_p1)
+
+          # Patch 2 is intentionally unchanged; verify it still applies after regenerated patch1.
+          reset()
+          apply(p1)
+          apply(p2)
+
+          # Patch 3: instrument the actual Vulkan allocation/upload boundary and the synchronous
+          # staging-buffer path. These are behavior-neutral stderr diagnostics only.
+          vulkan = work / 'ggml/src/ggml-vulkan/ggml-vulkan.cpp'
+          text = vulkan.read_text()
+
+          anchor = 'static void ggml_vk_ensure_sync_staging_buffer(ggml_backend_vk_context * ctx, size_t size) {\n'
+          if anchor not in text:
+              raise SystemExit('staging function anchor not found')
+          replacement = '''static void ggml_vk_ensure_sync_staging_buffer(ggml_backend_vk_context * ctx, size_t size) {\n    std::cerr << "AI_CHAT_VK_STAGING_ALLOC_BEGIN trace=" << ai_chat_vk_trace()\n              << " ctx=" << static_cast<const void *>(ctx)\n              << " requested_bytes=" << size\n              << " existing=" << static_cast<const void *>(ctx->sync_staging.get())\n              << " existing_bytes=" << (ctx->sync_staging ? ctx->sync_staging->size : 0)\n              << std::endl;\n'''
+          text = text.replace(anchor, replacement, 1)
+
+          anchor = '        ctx->sync_staging = ggml_vk_create_buffer_check(ctx, size,\n'
+          if anchor not in text:
+              raise SystemExit('staging create anchor not found')
+          text = text.replace(anchor, anchor + '        std::cerr << "AI_CHAT_VK_STAGING_CREATE_CALL trace=" << ai_chat_vk_trace() << " bytes=" << size << std::endl;\n', 1)
+
+          anchor = '                    vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);\n'
+          if anchor not in text:
+              raise SystemExit('staging create return anchor not found')
+          text = text.replace(anchor, anchor + '        std::cerr << "AI_CHAT_VK_STAGING_ALLOC_RETURNED trace=" << ai_chat_vk_trace() << " buffer=" << static_cast<const void *>(ctx->sync_staging.get()) << " bytes=" << (ctx->sync_staging ? ctx->sync_staging->size : 0) << std::endl;\n', 1)
+
+          anchor = '    std::cerr << "AI_CHAT_VK_WRITE_ASYNC_BEGIN trace=" << ai_chat_vk_trace() << " ctx=" << static_cast<const void *>(&subctx) << " src=" << src << " offset=" << offset << " width=" << width << " height=" << height << " sync_staging=" << sync_staging << std::endl;\n'
+          if anchor not in text:
+              raise SystemExit('write async anchor not found')
+          extra = '''    std::cerr << "AI_CHAT_VK_TENSOR_BUFFER_WRITE_BEGIN trace=" << ai_chat_vk_trace()\n              << " dst=" << static_cast<const void *>(dst.get())\n              << " dst_bytes=" << (dst ? dst->size : 0)\n              << " dst_offset=" << offset\n              << " bytes=" << (width * height)\n              << " host_visible=" << ((dst->memory_property_flags & vk::MemoryPropertyFlagBits::eHostVisible) != vk::MemoryPropertyFlagBits{})\n              << std::endl;\n'''
+          text = text.replace(anchor, anchor + extra, 1)
+
+          anchor = '    ggml_vk_host_get(dst->device, src, buf, buf_offset);\n'
+          if anchor not in text:
+              raise SystemExit('host get anchor not found')
+          text = text.replace(anchor, anchor + '    std::cerr << "AI_CHAT_VK_SOURCE_CLASSIFIED trace=" << ai_chat_vk_trace() << " pinned=" << (buf != nullptr) << " source_offset=" << buf_offset << std::endl;\n', 1)
+
+          anchor = '        subctx->s->buffer.copyBuffer(buf->buffer, dst->buffer, slices);\n'
+          if anchor not in text:
+              raise SystemExit('pinned copy anchor not found')
+          text = text.replace(anchor, '        std::cerr << "AI_CHAT_VK_UPLOAD_SUBMIT_BEGIN trace=" << ai_chat_vk_trace() << " mode=pinned bytes=" << (width * height) << std::endl;\n' + anchor + '        std::cerr << "AI_CHAT_VK_UPLOAD_SUBMIT_RECORDED trace=" << ai_chat_vk_trace() << " mode=pinned bytes=" << (width * height) << std::endl;\n', 1)
+
+          anchor = '    const size_t copy_size = width*height;\n'
+          if anchor not in text:
+              raise SystemExit('staging copy size anchor not found')
+          text = text.replace(anchor, anchor + '    std::cerr << "AI_CHAT_VK_STAGING_PATH trace=" << ai_chat_vk_trace() << " copy_bytes=" << copy_size << std::endl;\n', 1)
+
+          anchor = '    vkCmdCopyBuffer(subctx->s->buffer, staging->buffer, dst->buffer, 1, &buf_copy);\n'
+          if anchor not in text:
+              raise SystemExit('staging copy command anchor not found')
+          text = text.replace(anchor, '    std::cerr << "AI_CHAT_VK_UPLOAD_SUBMIT_BEGIN trace=" << ai_chat_vk_trace() << " mode=staging bytes=" << copy_size << " staging=" << static_cast<const void *>(staging.get()) << std::endl;\n' + anchor + '    std::cerr << "AI_CHAT_VK_UPLOAD_SUBMIT_RECORDED trace=" << ai_chat_vk_trace() << " mode=staging bytes=" << copy_size << std::endl;\n', 1)
+
+          anchor = '    ggml_vk_buffer_write_2d(ctx, dst, offset, src, 0, size, 1);\n'
+          if anchor not in text:
+              raise SystemExit('sync write anchor not found')
+          text = text.replace(anchor, '    std::cerr << "AI_CHAT_VK_UPLOAD_WAIT_BEGIN trace=" << ai_chat_vk_trace() << " bytes=" << size << std::endl;\n' + anchor + '    std::cerr << "AI_CHAT_VK_UPLOAD_WAIT_RETURNED trace=" << ai_chat_vk_trace() << " bytes=" << size << std::endl;\n', 1)
+
+          # Add explicit tensor completion immediately after the synchronous Vulkan write returns.
+          anchor = '    std::cerr << "AI_CHAT_VK_SET_TENSOR_RETURNED trace=" << ai_chat_vk_trace() << " tensor=" << static_cast<const void *>(tensor) << " name=" << ggml_get_name(tensor) << " data=" << data << " offset=" << offset << " size=" << size << std::endl;\n'
+          if anchor not in text:
+              raise SystemExit('tensor returned anchor not found')
+          text = text.replace(anchor, anchor + '    std::cerr << "AI_CHAT_VK_TENSOR_LOAD_END trace=" << ai_chat_vk_trace() << " name=" << ggml_get_name(tensor) << " bytes=" << size << std::endl;\n', 1)
+
+          vulkan.write_text(text)
+          new_p3 = diff('ggml/src/ggml-vulkan/ggml-vulkan.cpp')
+          if not new_p3.strip():
+              raise SystemExit('empty regenerated patch3')
+          p3.write_text(new_p3)
+
+          # Canonical validation of the complete stack against the exact pinned revision.
+          reset()
+          for p in (p1, p2, p3):
+              run('git', 'apply', '--check', str(p))
+              run('git', 'apply', str(p))
+          print('VALIDATED: all three patches')
+          PY
+
+      - name: Commit canonical patches
+        run: |
+          set -euo pipefail
+          git config user.name patch-generator
+          git config user.email patch-generator@localhost
+          git add core/runtime-android/src/main/cpp/patches/llama-model-loading-memory.patch core/runtime-android/src/main/cpp/patches/llama-vulkan-micro-diagnostics.patch
+          git commit -m "diag: instrument per-tensor Vulkan load lifecycle" || exit 0
+          git push
