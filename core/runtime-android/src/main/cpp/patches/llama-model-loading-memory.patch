@@ -64,141 +64,54 @@ diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
                      const auto & lmlock = lmlocks->at(weight->idx);
                      lmlock->grow_to(weight->offs + n_size);
 +
-+diff --git a/ggml/src/ggml-vulkan/ggml-vulkan.cpp b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
-+--- a/ggml/src/ggml-vulkan/ggml-vulkan.cpp
-++++ b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
-+@@ -1600,6 +1600,65 @@ static vk_buffer ggml_vk_create_buffer(ggml_backend_vk_context * ctx, size_t size, vk::MemoryPropertyFlags req_flags, vk::MemoryPropertyFlags fallback_flags = vk::MemoryPropertyFlags(0)) {
-+ #ifdef GGML_VULKAN_DEBUG
-+     std::cerr << "ggml_vk_create_buffer(" << size << ", " << to_string(req_flags) << ", " << to_string(fallback_flags) << ")" << std::endl;
-+ #endif
-+    LLAMA_LOG_INFO("AI_CHAT_VK_ALLOC_BEGIN size=%zu req=%s fallback=%s\n",
-+        size, to_string(req_flags).c_str(), to_string(fallback_flags).c_str());
-+
-+    const auto log_vk_error = [&](const char * stage, const vk::SystemError & e) {
-+        LLAMA_LOG_ERROR("AI_CHAT_VK_ALLOC_ERROR stage=%s size=%zu result=%d message=%s\n",
-+            stage, size, (int)e.code().value(), e.what());
-+    };
-+
-+    try {
-+        vk::PhysicalDeviceProperties device_props = ctx->device->physical_device.getProperties();
-+        LLAMA_LOG_INFO("AI_CHAT_VK_DEVICE name=%s vendor=0x%x device=0x%x max_alloc=%zu\n",
-+            device_props.deviceName, device_props.vendorID, device_props.deviceID,
-+            ctx->device->max_memory_allocation_size);
-+    } catch (...) {
-+        LLAMA_LOG_WARN("AI_CHAT_VK_DEVICE_QUERY_FAILED size=%zu\n", size);
-+    }
-+
-+    try {
-+        vk_buffer buf = std::make_shared<vk_buffer_struct>();
-+
-+        if (size == 0) {
-+            buf->size = 0;
-+            LLAMA_LOG_INFO("AI_CHAT_VK_ALLOC_ZERO_RETURNED\n");
-+            return buf;
-+        }
-+
-+        buf->size = size;
-+
-+        vk::BufferCreateInfo buffer_create_info{
-+            vk::BufferCreateFlags(),
-+            size,
-+            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst,
-+            vk::SharingMode::eExclusive,
-+            0,
-+            nullptr,
-+        };
-+
-+        LLAMA_LOG_INFO("AI_CHAT_VK_CREATE_BUFFER_BEGIN size=%zu\n", size);
-+        buf->buffer = ctx->device->device.createBuffer(buffer_create_info);
-+        LLAMA_LOG_INFO("AI_CHAT_VK_CREATE_BUFFER_RETURNED handle=%p size=%zu\n",
-+            (void *)(VkBuffer)buf->buffer, size);
-+
-+        LLAMA_LOG_INFO("AI_CHAT_VK_MEM_REQ_BEGIN size=%zu\n", size);
-+        vk::MemoryRequirements mem_req = ctx->device->device.getBufferMemoryRequirements(buf->buffer);
-+        LLAMA_LOG_INFO("AI_CHAT_VK_MEM_REQ_RETURNED requested=%zu required=%zu alignment=%zu type_bits=0x%x\n",
-+            size, (size_t)mem_req.size, (size_t)mem_req.alignment, (unsigned)mem_req.memoryTypeBits);
-+
-+        vk::PhysicalDeviceMemoryProperties mem_props = ctx->device->physical_device.getMemoryProperties();
-+        uint32_t memory_type_index = UINT32_MAX;
-+        memory_type_index = find_properties(&mem_props, &mem_req, req_flags);
-+        buf->memory_property_flags = req_flags;
-+
-+        LLAMA_LOG_INFO("AI_CHAT_VK_MEM_TYPE_REQUESTED index=%u flags=%s\n",
-+            memory_type_index, to_string(req_flags).c_str());
-+
-+        if (memory_type_index == UINT32_MAX && fallback_flags) {
-+            memory_type_index = find_properties(&mem_props, &mem_req, fallback_flags);
-+            buf->memory_property_flags = fallback_flags;
-+            LLAMA_LOG_INFO("AI_CHAT_VK_MEM_TYPE_FALLBACK index=%u flags=%s\n",
-+                memory_type_index, to_string(fallback_flags).c_str());
-+        }
-+
-+        if (memory_type_index == UINT32_MAX) {
-+            LLAMA_LOG_ERROR("AI_CHAT_VK_MEM_TYPE_NONE size=%zu required=%zu type_bits=0x%x\n",
-+                size, (size_t)mem_req.size, (unsigned)mem_req.memoryTypeBits);
-+            ctx->device->device.destroyBuffer(buf->buffer);
-+            buf->size = 0;
-+            throw vk::OutOfDeviceMemoryError("No suitable memory type found");
-+        }
-+
-+        const uint32_t heap_index = mem_props.memoryTypes[memory_type_index].heapIndex;
-+        LLAMA_LOG_INFO("AI_CHAT_VK_MEM_TYPE_SELECTED index=%u heap=%u heap_size=%zu\n",
-+            memory_type_index, heap_index, (size_t)mem_props.memoryHeaps[heap_index].size);
-+
-+        LLAMA_LOG_INFO("AI_CHAT_VK_ALLOCATE_MEMORY_BEGIN size=%zu required=%zu type=%u\n",
-+            size, (size_t)mem_req.size, memory_type_index);
-+        try {
-+            buf->device_memory = ctx->device->device.allocateMemory({ mem_req.size, memory_type_index });
-+        } catch (const vk::SystemError & e) {
-+            log_vk_error("allocateMemory", e);
-+            ctx->device->device.destroyBuffer(buf->buffer);
-+            buf->size = 0;
-+            throw;
-+        }
-+        LLAMA_LOG_INFO("AI_CHAT_VK_ALLOCATE_MEMORY_RETURNED size=%zu type=%u\n",
-+            (size_t)mem_req.size, memory_type_index);
-+
-+        buf->ptr = nullptr;
-+        if (buf->memory_property_flags & vk::MemoryPropertyFlagBits::eHostVisible) {
-+            LLAMA_LOG_INFO("AI_CHAT_VK_MAP_MEMORY_BEGIN size=%zu\n", (size_t)mem_req.size);
-+            try {
-+                buf->ptr = ctx->device->device.mapMemory(buf->device_memory, 0, VK_WHOLE_SIZE);
-+            } catch (const vk::SystemError & e) {
-+                log_vk_error("mapMemory", e);
-+                ctx->device->device.freeMemory(buf->device_memory);
-+                ctx->device->device.destroyBuffer(buf->buffer);
-+                buf->size = 0;
-+                throw;
-+            }
-+            LLAMA_LOG_INFO("AI_CHAT_VK_MAP_MEMORY_RETURNED ptr=%p\n", buf->ptr);
-+        }
-+
-+        LLAMA_LOG_INFO("AI_CHAT_VK_BIND_BUFFER_BEGIN size=%zu\n", size);
-+        try {
-+            ctx->device->device.bindBufferMemory(buf->buffer, buf->device_memory, 0);
-+        } catch (const vk::SystemError & e) {
-+            log_vk_error("bindBufferMemory", e);
-+            if (buf->ptr) {
-+                ctx->device->device.unmapMemory(buf->device_memory);
-+            }
-+            ctx->device->device.freeMemory(buf->device_memory);
-+            ctx->device->device.destroyBuffer(buf->buffer);
-+            buf->size = 0;
-+            throw;
-+        }
-+        LLAMA_LOG_INFO("AI_CHAT_VK_BIND_BUFFER_RETURNED size=%zu\n", size);
-+
-+        buf->ctx = ctx;
-+        buf->device = ctx->device;
-+        LLAMA_LOG_INFO("AI_CHAT_VK_ALLOC_SUCCESS size=%zu ptr=%p\n", size, buf->ptr);
-+        return buf;
-+    } catch (const vk::SystemError & e) {
-+        log_vk_error("create_buffer", e);
-+        throw;
-+    }
-+}
-+
-+/* original implementation replaced above */
-+/*
-+static vk_buffer ggml_vk_create_buffer(ggml_backend_vk_context * ctx, size_t size, vk::MemoryPropertyFlags req_flags, vk::MemoryPropertyFlags fallback_flags = vk::MemoryPropertyFlags(0)) {
-+*/
+diff --git a/ggml/src/ggml-vulkan/ggml-vulkan.cpp b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
+--- a/ggml/src/ggml-vulkan/ggml-vulkan.cpp
++++ b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
+@@ -1610,6 +1610,8 @@ static vk_buffer ggml_vk_create_buffer(ggml_backend_vk_context * ctx, size_t size, vk::MemoryPropertyFlags req_flags, vk::MemoryPropertyFlags fallback_flags = vk::MemoryPropertyFlags(0)) {
+ #endif
++    std::cerr << "AI_CHAT_VK_ALLOC_BEGIN size=" << size << " req=" << to_string(req_flags) << " fallback=" << to_string(fallback_flags) << std::endl;
+     vk_buffer buf = std::make_shared<vk_buffer_struct>();
+@@ -1630,6 +1632,8 @@ static vk_buffer ggml_vk_create_buffer(ggml_backend_vk_context * ctx, size_t size, vk::MemoryPropertyFlags req_flags, vk::MemoryPropertyFlags fallback_flags = vk::MemoryPropertyFlags(0)) {
+     };
+ 
++    std::cerr << "AI_CHAT_VK_CREATE_BUFFER_BEGIN size=" << size << std::endl;
+     buf->buffer = ctx->device->device.createBuffer(buffer_create_info);
++    std::cerr << "AI_CHAT_VK_CREATE_BUFFER_RETURNED size=" << size << std::endl;
+ 
+     vk::MemoryRequirements mem_req = ctx->device->device.getBufferMemoryRequirements(buf->buffer);
++    std::cerr << "AI_CHAT_VK_MEM_REQ required=" << mem_req.size << " alignment=" << mem_req.alignment << " type_bits=0x" << std::hex << mem_req.memoryTypeBits << std::dec << std::endl;
+     vk::PhysicalDeviceMemoryProperties mem_props = ctx->device->physical_device.getMemoryProperties();
+@@ -1648,6 +1652,8 @@ static vk_buffer ggml_vk_create_buffer(ggml_backend_vk_context * ctx, size_t size, vk::MemoryPropertyFlags req_flags, vk::MemoryPropertyFlags fallback_flags = vk::MemoryPropertyFlags(0)) {
+         buf->size = 0;
+         throw vk::OutOfDeviceMemoryError("No suitable memory type found");
+     }
++    std::cerr << "AI_CHAT_VK_MEM_TYPE_SELECTED index=" << memory_type_index
++              << " heap=" << mem_props.memoryTypes[memory_type_index].heapIndex << std::endl;
+ 
+     try {
++        std::cerr << "AI_CHAT_VK_ALLOCATE_MEMORY_BEGIN required=" << mem_req.size << " type=" << memory_type_index << std::endl;
+         buf->device_memory = ctx->device->device.allocateMemory({ mem_req.size, memory_type_index });
++        std::cerr << "AI_CHAT_VK_ALLOCATE_MEMORY_RETURNED required=" << mem_req.size << " type=" << memory_type_index << std::endl;
+     } catch (const vk::SystemError& e) {
++        std::cerr << "AI_CHAT_VK_ALLOCATE_MEMORY_ERROR code=" << e.code().value() << " message=" << e.what() << std::endl;
+         // Out of Host/Device memory, clean up buffer
+@@ -1659,10 +1665,16 @@ static vk_buffer ggml_vk_create_buffer(ggml_backend_vk_context * ctx, size_t size, vk::MemoryPropertyFlags req_flags, vk::MemoryPropertyFlags fallback_flags = vk::MemoryPropertyFlags(0)) {
+ 
+     buf->ptr = nullptr;
+ 
+     if (buf->memory_property_flags & vk::MemoryPropertyFlagBits::eHostVisible) {
++        std::cerr << "AI_CHAT_VK_MAP_MEMORY_BEGIN size=" << mem_req.size << std::endl;
+         buf->ptr = ctx->device->device.mapMemory(buf->device_memory, 0, VK_WHOLE_SIZE);
++        std::cerr << "AI_CHAT_VK_MAP_MEMORY_RETURNED ptr=" << buf->ptr << std::endl;
+     }
+ 
++    std::cerr << "AI_CHAT_VK_BIND_BUFFER_BEGIN size=" << size << std::endl;
+     ctx->device->device.bindBufferMemory(buf->buffer, buf->device_memory, 0);
++    std::cerr << "AI_CHAT_VK_BIND_BUFFER_RETURNED size=" << size << std::endl;
+@@ -1674,6 +1686,7 @@ static vk_buffer ggml_vk_create_buffer(ggml_backend_vk_context * ctx, size_t size, vk::MemoryPropertyFlags req_flags, vk::MemoryPropertyFlags fallback_flags = vk::MemoryPropertyFlags(0)) {
+ #ifdef GGML_VULKAN_DEBUG
+     std::cerr << "Created buffer " << buf->buffer << std::endl;
+ #endif
++    std::cerr << "AI_CHAT_VK_ALLOC_SUCCESS size=" << size << " required=" << mem_req.size << std::endl;
+     return buf;
+ }
