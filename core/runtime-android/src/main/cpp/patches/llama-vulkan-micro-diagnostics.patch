@@ -1,55 +1,66 @@
 diff --git a/ggml/src/ggml-vulkan/ggml-vulkan.cpp b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
 --- a/ggml/src/ggml-vulkan/ggml-vulkan.cpp
 +++ b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
-@@ -1,2 +1,10 @@
+@@ -1,3 +1,11 @@
  #include "ggml-vulkan.h"
+ #include <vulkan/vulkan_core.h>
 +#include <atomic>
++
 +// AI Chat Test: behavior-neutral diagnostic correlation for tensor uploads.
 +// The trace id is scoped to the synchronous call chain on the current thread.
 +static std::atomic<uint64_t> g_ai_chat_vk_trace_id{0};
 +static thread_local uint64_t g_ai_chat_vk_current_trace_id = 0;
 +static uint64_t ai_chat_vk_begin_trace() { return ++g_ai_chat_vk_trace_id; }
 +static uint64_t ai_chat_vk_trace() { return g_ai_chat_vk_current_trace_id; }
-+
- #include <vulkan/vulkan_core.h>
-@@ -1490,2 +1498,3 @@ static void ggml_vk_ctx_begin(vk_device& device, vk_context& subctx) {
+ #if defined(GGML_VULKAN_RUN_TESTS) || defined(GGML_VULKAN_CHECK_RESULTS)
+ #include <chrono>
+ #include "ggml-cpu.h"
+@@ -1,4 +1,5 @@ static void ggml_vk_ctx_begin(vk_device& device, vk_context& subctx) {
+ static void ggml_vk_ctx_begin(vk_device& device, vk_context& subctx) {
      VK_LOG_DEBUG("ggml_vk_ctx_begin(" << device->name << ")");
 +    std::cerr << "AI_CHAT_VK_CTX_BEGIN trace=" << ai_chat_vk_trace() << " device=" << device->name << " ctx=" << static_cast<const void *>(&subctx) << std::endl;
      if (subctx->s != nullptr) {
-@@ -1500,2 +1509,3 @@ static void ggml_vk_ctx_end(vk_context& ctx) {
+         ggml_vk_ctx_end(subctx);
+@@ -1,4 +1,5 @@ static void ggml_vk_ctx_end(vk_context& ctx) {
+ static void ggml_vk_ctx_end(vk_context& ctx) {
      VK_LOG_DEBUG("ggml_vk_ctx_end(" << ctx << ", " << ctx->seqs.size() << ")");
 +    std::cerr << "AI_CHAT_VK_CTX_END_BEGIN trace=" << ai_chat_vk_trace() << " ctx=" << static_cast<const void *>(&ctx) << std::endl;
      if (ctx->s == nullptr) {
-@@ -1520,3 +1530,4 @@ static void ggml_vk_submit(vk_context& ctx, vk::Fence fence) {
+         return;
+@@ -1,4 +1,5 @@ static void ggml_vk_submit(vk_context& ctx, vk::Fence fence) {
+ static void ggml_vk_submit(vk_context& ctx, vk::Fence fence) {
++    std::cerr << "AI_CHAT_VK_SUBMIT_BEGIN trace=" << ai_chat_vk_trace() << " ctx=" << static_cast<const void *>(&ctx) << " seqs=" << ctx->seqs.size() << std::endl;
      if (ctx->seqs.empty()) {
          if (fence) {
-+            std::cerr << "AI_CHAT_VK_SUBMIT_EMPTY_FENCE_BEGIN trace=" << ai_chat_vk_trace() << " fence=" << static_cast<VkFence>(fence) << std::endl;
              ctx->p->q->handle->submit({}, fence);
-@@ -1520,2 +1531,3 @@ static void ggml_vk_submit(vk_context& ctx, vk::Fence fence) {
- static void ggml_vk_submit(vk_context& ctx, vk::Fence fence) {
-+    std::cerr << "AI_CHAT_VK_SUBMIT_BEGIN trace=" << ai_chat_vk_trace() << " ctx=" << static_cast<const void *>(&ctx) << " seqs=" << ctx->seqs.size() << " fence=" << static_cast<VkFence>(fence) << std::endl;
-     if (ctx->seqs.empty()) {
-@@ -16220,2 +16232,3 @@ static bool ggml_vk_buffer_write_2d_async(vk_context subctx, vk_buffer& dst, size_t offset, const void * src, size_t spitch, size_t dpitch, size_t width, size_t height, bool sync_staging = false) {
+@@ -1,4 +1,5 @@ static bool ggml_vk_buffer_write_2d_async(vk_context subctx, vk_buffer& dst, size_t offset, const void * src, size_t spitch, size_t dpitch, size_t width, size_t height, bool sync_staging = false) {
+ static bool ggml_vk_buffer_write_2d_async(vk_context subctx, vk_buffer& dst, size_t offset, const void * src, size_t spitch, size_t dpitch, size_t width, size_t height, bool sync_staging = false) {
      VK_LOG_DEBUG("ggml_vk_buffer_write_2d_async(" << width << ", " << height << ")");
-+    std::cerr << "AI_CHAT_VK_WRITE_ASYNC_BEGIN trace=" << ai_chat_vk_trace() << " ctx=" << static_cast<const void *>(&subctx) << " dst=" << static_cast<const void *>(dst->buffer) << " src=" << src << " offset=" << offset << " width=" << width << " height=" << height << " sync_staging=" << sync_staging << std::endl;
++    std::cerr << "AI_CHAT_VK_WRITE_ASYNC_BEGIN trace=" << ai_chat_vk_trace() << " ctx=" << static_cast<const void *>(&subctx) << " src=" << src << " offset=" << offset << " width=" << width << " height=" << height << " sync_staging=" << sync_staging << std::endl;
      // Check if src is pinned memory
-@@ -17140,2 +17153,5 @@ static void ggml_backend_vk_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
+     vk_buffer buf = nullptr;
+@@ -1,5 +1,9 @@ static void ggml_backend_vk_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
+ static void ggml_backend_vk_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
      VK_LOG_DEBUG("ggml_backend_vk_buffer_set_tensor(" << buffer << ", " << tensor << ", " << data << ", " << offset << ", " << size << ")");
+     ggml_backend_vk_buffer_context * buf_ctx = (ggml_backend_vk_buffer_context *)buffer->context;
+     vk_buffer buf = buf_ctx->dev_buffer;
+ 
+     if (size == 0) {
+         return;
+     }
+ 
 +    const uint64_t ai_chat_vk_prev_trace_id = g_ai_chat_vk_current_trace_id;
 +    g_ai_chat_vk_current_trace_id = ai_chat_vk_begin_trace();
-+    std::cerr << "AI_CHAT_VK_TRACE_BEGIN trace=" << ai_chat_vk_trace() << " tensor=" << static_cast<const void *>(tensor) << " name=" << ggml_get_name(tensor) << " type=" << (int) tensor->type << " data=" << data << " offset=" << offset << " size=" << size << std::endl;
 +    std::cerr << "AI_CHAT_VK_SET_TENSOR_BEGIN trace=" << ai_chat_vk_trace() << " tensor=" << static_cast<const void *>(tensor) << " name=" << ggml_get_name(tensor) << " type=" << (int) tensor->type << " data=" << data << " offset=" << offset << " size=" << size << std::endl;
-     ggml_backend_vk_buffer_context * buf_ctx = (ggml_backend_vk_buffer_context *)buffer->context;
-@@ -17152,2 +17168,3 @@ static void ggml_backend_vk_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
      ggml_vk_buffer_write(buf, vk_tensor_offset(tensor) + tensor->view_offs + offset, data, size);
 +    std::cerr << "AI_CHAT_VK_SET_TENSOR_RETURNED trace=" << ai_chat_vk_trace() << " tensor=" << static_cast<const void *>(tensor) << " name=" << ggml_get_name(tensor) << " data=" << data << " offset=" << offset << " size=" << size << std::endl;
 +    g_ai_chat_vk_current_trace_id = ai_chat_vk_prev_trace_id;
  }
-@@ -17500,2 +17519,5 @@ static void ggml_backend_vk_set_tensor_async(ggml_backend_t backend, ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
+@@ -1,4 +1,8 @@ static void ggml_backend_vk_set_tensor_async(ggml_backend_t backend, ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
+ static void ggml_backend_vk_set_tensor_async(ggml_backend_t backend, ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
      VK_LOG_DEBUG("ggml_backend_vk_set_tensor_async(" << size << ")");
 +    const uint64_t ai_chat_vk_prev_trace_id = g_ai_chat_vk_current_trace_id;
 +    g_ai_chat_vk_current_trace_id = ai_chat_vk_begin_trace();
-+    std::cerr << "AI_CHAT_VK_TRACE_BEGIN trace=" << ai_chat_vk_trace() << " tensor=" << static_cast<const void *>(tensor) << " name=" << ggml_get_name(tensor) << " type=" << (int) tensor->type << " data=" << data << " offset=" << offset << " size=" << size << std::endl;
 +    std::cerr << "AI_CHAT_VK_SET_TENSOR_ASYNC_BEGIN trace=" << ai_chat_vk_trace() << " tensor=" << static_cast<const void *>(tensor) << " name=" << ggml_get_name(tensor) << " type=" << (int) tensor->type << " data=" << data << " offset=" << offset << " size=" << size << std::endl;
      ggml_backend_vk_set_tensor_2d_async(backend, tensor, data, offset, size, 1, size, size);
 +    std::cerr << "AI_CHAT_VK_SET_TENSOR_ASYNC_RETURNED trace=" << ai_chat_vk_trace() << " tensor=" << static_cast<const void *>(tensor) << " name=" << ggml_get_name(tensor) << " data=" << data << " offset=" << offset << " size=" << size << std::endl;
