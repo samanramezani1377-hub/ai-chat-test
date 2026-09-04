@@ -67,7 +67,6 @@ def normalized(line):
 
 
 def find_match(lines, old, path):
-    # First preference: exact byte-for-byte preimage.
     exact = [
         i for i in range(0, len(lines) - len(old) + 1)
         if lines[i : i + len(old)] == old
@@ -77,8 +76,6 @@ def find_match(lines, old, path):
     if len(exact) > 1:
         raise RuntimeError(f"{path}: preimage is ambiguous ({len(exact)} exact matches)")
 
-    # Safe recovery: tolerate only line-ending/whitespace differences, and
-    # only when the normalized preimage has exactly one match.
     old_norm = [normalized(line) for line in old]
     fuzzy = [
         i for i in range(0, len(lines) - len(old) + 1)
@@ -99,7 +96,11 @@ def apply_hunks(repo, spec):
             raise RuntimeError(f"{path}: target file does not exist")
         lines = path.read_text(newline="").splitlines(keepends=True)
         for hunk in file_spec["hunks"]:
-            old = [line for line in hunk["lines"] if not line.startswith("+")]
+            # Unified diff prefixes are metadata. Strip exactly one prefix
+            # character from both sides before matching/replacing. The old
+            # implementation accidentally retained '-'/' ' in the preimage,
+            # making every normal hunk impossible to match.
+            old = [line[1:] for line in hunk["lines"] if not line.startswith("+")]
             new = [line[1:] for line in hunk["lines"] if not line.startswith("-")]
             if not old:
                 raise RuntimeError(f"{path}: unsupported empty preimage hunk")
@@ -113,8 +114,6 @@ def git_diff(repo, paths):
 
 
 def git_snapshot(repo):
-    # Commit the current generated state so the next patch's diff is strictly
-    # incremental instead of accidentally containing all previous patches.
     run("git", "-C", str(repo), "add", "-A")
     run("git", "-C", str(repo), "commit", "--quiet", "--no-verify", "-m", "generator snapshot")
 
@@ -143,8 +142,6 @@ with tempfile.TemporaryDirectory(prefix="ai-chat-llama-regen-") as temp_dir:
     run("git", "-C", str(upstream), "config", "user.name", "patch-generator")
     run("git", "-C", str(upstream), "config", "user.email", "patch-generator@localhost")
 
-    # Parse all semantic specs before modifying anything. This also means a
-    # malformed patch cannot leave the generator halfway through regeneration.
     specs = [parse_patch((PATCH_DIR / name).read_text()) for name in PATCHES]
     generated = []
 
@@ -152,8 +149,6 @@ with tempfile.TemporaryDirectory(prefix="ai-chat-llama-regen-") as temp_dir:
         run("git", "-C", str(upstream), "reset", "--hard", "--quiet", TAG)
         run("git", "-C", str(upstream), "clean", "-fd", "-q")
 
-        # Recreate the exact state on which this patch is based. Snapshot each
-        # previous state so git diff contains only the current incremental patch.
         for previous in specs[:index]:
             apply_hunks(upstream, previous)
             git_snapshot(upstream)
@@ -164,8 +159,6 @@ with tempfile.TemporaryDirectory(prefix="ai-chat-llama-regen-") as temp_dir:
             raise RuntimeError(f"{name}: generated empty diff")
         generated.append(diff)
 
-    # Final clean-room verification: exact pinned revision + generated patches
-    # in order must all pass git apply --check without --recount.
     validate_generated(upstream, generated)
 
     for name, diff in zip(PATCHES, generated):
