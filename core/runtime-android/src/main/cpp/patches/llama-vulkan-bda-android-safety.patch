@@ -1,28 +1,8 @@
 diff --git a/ggml/src/ggml-vulkan/ggml-vulkan.cpp b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
+index 8108e94c1..000000000 100644
 --- a/ggml/src/ggml-vulkan/ggml-vulkan.cpp
 +++ b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
-@@ -26501,9 +26501,9 @@
-         VkPhysicalDeviceVulkan11Features vk11_features;
-         vk11_features.pNext = nullptr;
-         vk11_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-         device_features2.pNext = &vk11_features;
- 
--        VkPhysicalDeviceVulkan12Features vk12_features;
-+        VkPhysicalDeviceVulkan12Features vk12_features {};
-         vk12_features.pNext = nullptr;
-         vk12_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-         vk11_features.pNext = &vk12_features;
-@@ -26664,3 +26664,9 @@
-         vkGetPhysicalDeviceFeatures2(device->physical_device, &device_features2);
- 
-+        // vkGetBufferDeviceAddress is core Vulkan 1.2. Do not enable the core
-+        // BDA path on a physical device that only exposes Vulkan 1.1.
-+        if (device->properties.apiVersion < VK_API_VERSION_1_2) {
-+            vk12_features.bufferDeviceAddress = VK_FALSE;
-+        }
-+
-         device->device_fault = device->device_fault && fault_features.deviceFault;
-@@ -3586,4 +3586,9 @@
+@@ -3568,4 +3568,9 @@
      if (device->buffer_device_address) {
          const vk::BufferDeviceAddressInfo addressInfo(buf->buffer);
 -        buf->bda_addr = device->device.getBufferAddress(addressInfo);
