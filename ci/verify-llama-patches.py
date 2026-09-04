@@ -15,7 +15,7 @@ import tempfile
 ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 LLAMA_SHA = "c5fc7e34885ba31217e330809437afa993d27745"
 PATCH_DIR = ROOT / "core/runtime-android/src/main/cpp/patches"
-PATCHES = ["llama-model-loading-memory.patch", "llama-backend-vulkan-diagnostics.patch", "llama-vulkan-micro-diagnostics.patch"]
+PATCHES = ["llama-model-loading-memory.patch", "llama-backend-vulkan-diagnostics.patch", "llama-vulkan-micro-diagnostics.patch", "llama-vulkan-bda-android-safety.patch"]
 
 
 def run(*args):
