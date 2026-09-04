@@ -2,7 +2,7 @@ diff --git a/ggml/src/ggml-vulkan/ggml-vulkan.cpp b/ggml/src/ggml-vulkan/ggml-vu
 index 8108e94c1..000000000 100644
 --- a/ggml/src/ggml-vulkan/ggml-vulkan.cpp
 +++ b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
-@@ -26501,5 +26501,5 @@
+@@ -26501,9 +26501,9 @@
          VkPhysicalDeviceVulkan11Features vk11_features;
          vk11_features.pNext = nullptr;
          vk11_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
@@ -13,7 +13,7 @@ index 8108e94c1..000000000 100644
          vk12_features.pNext = nullptr;
          vk12_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
          vk11_features.pNext = &vk12_features;
-@@ -26664,3 +26664,8 @@
+@@ -26664,3 +26664,9 @@
          vkGetPhysicalDeviceFeatures2(device->physical_device, &device_features2);
  
 +        // vkGetBufferDeviceAddress is core Vulkan 1.2. Do not enable the core
