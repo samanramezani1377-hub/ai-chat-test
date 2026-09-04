@@ -7,7 +7,6 @@ plugins {
 android {
     namespace = "com.samanramezani.aichattest"
     compileSdk = 36
-    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         applicationId = "com.samanramezani.aichattest"
@@ -15,7 +14,6 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
-        ndk { abiFilters += "arm64-v8a" }
     }
 
     buildFeatures {
@@ -39,7 +37,6 @@ dependencies {
     implementation(project(":core:observability"))
     implementation(project(":core:settings"))
     implementation(project(":core:runtime"))
-    implementation(project(":core:runtime-android"))
     implementation(project(":core:conversation"))
     implementation(project(":core:agent"))
 

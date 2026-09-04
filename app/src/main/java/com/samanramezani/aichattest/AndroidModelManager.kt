@@ -2,64 +2,80 @@ package com.samanramezani.aichattest
 
 import android.content.ContentResolver
 import android.net.Uri
+import com.woogit.aicore.domain.ApiProviderConfigStore
 import com.woogit.aicore.domain.ChatMessage
+import com.woogit.aicore.domain.GenerationRequest
 import com.woogit.aicore.domain.GenerationResult
-import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.domain.ModelError
+import com.woogit.aicore.domain.ModelFormat
+import com.woogit.aicore.domain.ModelMetadata
 import com.woogit.aicore.domain.ModelResult
-import com.woogit.aicore.runtime.FileModelImporter
-import com.woogit.aicore.runtime.FileModelRepository
-import com.woogit.aicore.runtime.LocalModelService
+import com.woogit.aicore.domain.ModelState
+import com.woogit.aicore.domain.Quantization
+import com.woogit.aicore.domain.RuntimeCompatibility
+import com.woogit.aicore.domain.ValidationStatus
+import com.woogit.aicore.runtime.RemoteApiRuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeAdapter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
+import java.nio.file.Paths
 
-/** Android bridge for the user-selected GGUF file. The model is copied into app-private storage. */
+/** Compatibility façade kept for the existing UI while inference is now 100% remote/API based. */
 class AndroidModelManager(
-    private val contentResolver: ContentResolver,
-    private val modelDirectory: Path,
+    @Suppress("UNUSED_PARAMETER") private val contentResolver: ContentResolver,
+    @Suppress("UNUSED_PARAMETER") private val modelDirectory: Path,
     runtime: RuntimeAdapter,
 ) {
-    private val service = LocalModelService(
-        importer = FileModelImporter(modelDirectory),
-        repository = FileModelRepository(modelDirectory.resolve("registry.properties")),
-        runtime = runtime,
-    )
+    private val remoteRuntime = runtime
+    @Volatile private var active = true
 
-    suspend fun import(uri: Uri): ModelResult<ModelDescriptor> = withContext(Dispatchers.IO) {
-        Files.createDirectories(modelDirectory)
-        val source = Files.createTempFile(modelDirectory, "selected-", ".gguf")
-        return@withContext try {
-            val input = contentResolver.openInputStream(uri)
-                ?: return@withContext ModelResult.Failure(
-                    ModelError.FileAccess("Selected model file could not be opened")
-                )
-            input.use { Files.copy(it, source, StandardCopyOption.REPLACE_EXISTING) }
-            service.importModel(source)
+    private fun descriptor(): ModelDescriptor {
+        val config = ApiProviderConfigStore.current
+        return ModelDescriptor(
+            id = "remote:${config.providerId}:${config.model}",
+            displayName = "${config.providerId} · ${config.model}",
+            path = Paths.get(System.getProperty("java.io.tmpdir") ?: ".").resolve("remote-api-model"),
+            format = ModelFormat.UNKNOWN,
+            quantization = Quantization.UNKNOWN,
+            sizeBytes = 0L,
+            metadata = ModelMetadata(name = config.model, contextLength = null),
+            validation = ValidationStatus.VALID,
+            runtimeCompatibility = RuntimeCompatibility(true, "Remote API runtime"),
+            state = if (active) ModelState.ACTIVE else ModelState.READY,
+        )
+    }
+
+    suspend fun import(@Suppress("UNUSED_PARAMETER") uri: Uri): ModelResult<ModelDescriptor> =
+        ModelResult.Failure(ModelError.UnsupportedFormat("Local GGUF models are disabled; configure a remote API provider instead."))
+
+    suspend fun models(): ModelResult<List<ModelDescriptor>> = ModelResult.Success(if (active) listOf(descriptor()) else emptyList())
+    suspend fun activeModel(): ModelResult<ModelDescriptor?> = ModelResult.Success(if (active) descriptor() else null)
+    suspend fun restoreActive(): ModelResult<ModelDescriptor?> = ModelResult.Success(if (active) descriptor() else null)
+
+    suspend fun activate(@Suppress("UNUSED_PARAMETER") id: String): ModelResult<ModelDescriptor> = withContext(Dispatchers.IO) {
+        try {
+            remoteRuntime.load(descriptor())
+            active = true
+            ModelResult.Success(descriptor())
         } catch (t: Throwable) {
-            ModelResult.Failure(ModelError.Storage("Unable to read selected model file", t))
-        } finally {
-            Files.deleteIfExists(source)
+            ModelResult.Failure(ModelError.LoadFailed("Remote API is not ready: ${t.message}", t))
         }
     }
 
-    suspend fun models(): ModelResult<List<ModelDescriptor>> = service.listModels()
-    suspend fun activeModel(): ModelResult<ModelDescriptor?> = service.activeModel()
-    suspend fun restoreActive(): ModelResult<ModelDescriptor?> = service.restoreActive()
-    suspend fun activate(id: String): ModelResult<ModelDescriptor> = service.activate(id)
-    suspend fun deactivate(): ModelResult<Unit> = service.deactivate()
-    suspend fun unload(): ModelResult<Unit> = service.unload()
+    suspend fun deactivate(): ModelResult<Unit> {
+        remoteRuntime.unload()
+        active = false
+        return ModelResult.Success(Unit)
+    }
 
-    suspend fun generate(
-        messages: List<ChatMessage>,
-        settings: InferenceSettings,
-        onToken: suspend (String) -> Unit = {},
-    ): ModelResult<GenerationResult> = service.generate(messages, settings, onToken)
+    suspend fun unload(): ModelResult<Unit> = deactivate()
 
-    suspend fun stopGeneration() = service.stopGeneration()
-    suspend fun delete(id: String): ModelResult<Unit> = service.deleteModel(id)
+    suspend fun generate(messages: List<ChatMessage>, settings: com.woogit.aicore.domain.InferenceSettings, onToken: suspend (String) -> Unit = {}): ModelResult<GenerationResult> =
+        try { ModelResult.Success(remoteRuntime.generate(GenerationRequest(messages, settings), onToken)) }
+        catch (t: Throwable) { ModelResult.Failure(ModelError.Inference("Remote API generation failed: ${t.message}", t)) }
+
+    suspend fun stopGeneration() = remoteRuntime.stopGeneration()
+    suspend fun delete(@Suppress("UNUSED_PARAMETER") id: String): ModelResult<Unit> = ModelResult.Success(Unit)
 }

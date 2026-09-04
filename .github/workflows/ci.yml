@@ -15,23 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  llama-patch-verification:
-    name: Verify llama.cpp Patch Stack
-    # Pin the verification runner instead of ubuntu-latest. The previous two
-    # attempts failed before checkout and exposed zero workflow steps, so this
-    # job never reached the verifier. Keep the actual verification unchanged.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Verify pinned llama.cpp revision and patches
-        run: python3 ci/verify-llama-patches.py .
-
   unit-tests:
     name: Unit Tests
-    needs: [llama-patch-verification]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -46,13 +32,12 @@ jobs:
         with:
           gradle-version: '8.11.1'
       - name: Run unit tests
-        run: gradle :core:actions:test :core:agent:test :core:conversation:test :core:domain:test :core:observability:test :core:runtime:test :core:settings:test :core:runtime-android:test :app:testDebugUnitTest --stacktrace --parallel
+        run: gradle :core:actions:test :core:agent:test :core:conversation:test :core:domain:test :core:observability:test :core:runtime:test :core:settings:test :app:testDebugUnitTest --stacktrace --parallel
 
   build:
     name: Android Debug Build
-    needs: [llama-patch-verification]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,74 +46,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-      - name: Install NDK and ccache
-        run: |
-          sdkmanager "ndk;27.2.12479018"
-          sudo apt-get update
-          sudo apt-get install -y ccache
-          ccache --version
-
-      # Cache immutable SDK/tooling only. Never cache llama.cpp source or CMake
-      # configuration state; CMake must fetch the exact pinned revision and
-      # apply the checked-in patches from a clean source tree.
-      - name: Restore Vulkan SDK
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
-            $HOME/vulkan-sdk
-          key: ci-vulkan-${{ runner.os }}-1.4.321.1
-      - name: Prepare Vulkan SDK
-        run: bash ci/prepare-vulkan.sh
-      - name: Save Vulkan SDK cache
-        if: success()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
-            $HOME/vulkan-sdk
-          key: ci-vulkan-${{ runner.os }}-1.4.321.1
-
-      - name: Restore ccache
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/ccache
-          key: ci-ccache-${{ runner.os }}-ndk27.2
-          restore-keys: |
-            ci-ccache-${{ runner.os }}-ndk27.2-
       - name: Setup Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-
-      # Native configuration must start from a completely fresh state. Do not
-      # reuse .cxx, generated CMake files, FetchContent state, or native build
-      # directories between CI runs. ccache remains enabled because it only
-      # reuses compiler outputs and does not own configuration correctness.
-      - name: Purge native CMake state
-        run: |
-          find . -type d \( -name .cxx -o -name cmake-build-debug \) -prune -exec rm -rf {} +
-          find . -type d \( -path '*/build/cmake' -o -path '*/build/intermediates/cxx' \) -prune -exec rm -rf {} +
-          rm -rf core/runtime-android/build app/.cxx app/build/.cxx
-
       - name: Build Debug APK
-        id: build-debug
-        run: |
-          export CCACHE_DIR="$HOME/.cache/ccache"
-          ccache --zero-stats
-          # The patch stack was independently verified against the same pinned
-          # llama.cpp revision. CMake applies those immutable patches again in
-          # its own clean FetchContent source tree.
-          gradle :app:assembleDebug --stacktrace --parallel --rerun-tasks
-          ccache --show-stats
-      - name: Save ccache
-        if: steps.build-debug.outcome == 'success'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/ccache
-          key: ci-ccache-${{ runner.os }}-ndk27.2
+        run: gradle :app:assembleDebug --stacktrace --parallel --rerun-tasks
       - name: Upload debug APK
         if: success()
         uses: actions/upload-artifact@v4

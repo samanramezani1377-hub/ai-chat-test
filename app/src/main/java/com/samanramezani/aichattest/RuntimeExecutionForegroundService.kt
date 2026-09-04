@@ -9,7 +9,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 
-/** Keeps the app process in the foreground while an on-device inference is running. */
+/** Keeps the app process in the foreground while a remote API inference is active. */
 class RuntimeExecutionForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
@@ -20,7 +20,7 @@ class RuntimeExecutionForegroundService : Service() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle("AI Chat Test")
-            .setContentText("مدل محلی در حال اجراست…")
+            .setContentText("در حال دریافت پاسخ از API…")
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -33,11 +33,7 @@ class RuntimeExecutionForegroundService : Service() {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "اجرای مدل محلی",
-                NotificationManager.IMPORTANCE_LOW,
-            )
+            val channel = NotificationChannel(CHANNEL_ID, "اجرای API", NotificationManager.IMPORTANCE_LOW)
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
@@ -48,11 +44,7 @@ class RuntimeExecutionForegroundService : Service() {
 
         fun start(context: android.content.Context) {
             val intent = Intent(context, RuntimeExecutionForegroundService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
         }
 
         fun stop(context: android.content.Context) {
