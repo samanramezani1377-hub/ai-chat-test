@@ -10,7 +10,11 @@ set(LLAMA_CPP_TAG "c5fc7e34885ba31217e330809437afa993d27745" CACHE STRING "Pinne
 set(FETCHCONTENT_QUIET OFF)
 
 # Keep the dependency in a stable location, but never rely on a cached patched
-# tree. CMake always resets the checkout to the exact pinned revision first.
+# tree. The checkout itself is build state and is intentionally not CI-cached.
+# Within one Gradle/CMake invocation, however, multiple configure passes are
+# common. Prepare the exact pinned source + patch once and verify it cheaply on
+# subsequent configure passes instead of resetting/cleaning/reapplying every
+# time.
 set(FETCHCONTENT_BASE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../.cxx/fetch-content" CACHE PATH "Stable FetchContent base directory")
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "Do not update pinned FetchContent dependencies")
 
@@ -32,32 +36,65 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(llama_cpp)
 
-execute_process(
-    COMMAND git -C "${llama_cpp_SOURCE_DIR}" reset --hard ${LLAMA_CPP_TAG}
-    RESULT_VARIABLE LLAMA_RESET_RESULT
-    OUTPUT_VARIABLE LLAMA_RESET_OUTPUT
-    ERROR_VARIABLE LLAMA_RESET_ERROR
-)
-if (NOT LLAMA_RESET_RESULT EQUAL 0)
-    message(FATAL_ERROR "Failed to reset cached llama.cpp source to ${LLAMA_CPP_TAG}: ${LLAMA_RESET_ERROR}")
-endif()
-
-execute_process(
-    COMMAND git -C "${llama_cpp_SOURCE_DIR}" clean -fd
-    RESULT_VARIABLE LLAMA_CLEAN_RESULT
-    OUTPUT_VARIABLE LLAMA_CLEAN_OUTPUT
-    ERROR_VARIABLE LLAMA_CLEAN_ERROR
-)
-if (NOT LLAMA_CLEAN_RESULT EQUAL 0)
-    message(FATAL_ERROR "Failed to clean cached llama.cpp source: ${LLAMA_CLEAN_ERROR}")
-endif()
-
-message(STATUS "llama.cpp source reset to pinned revision ${LLAMA_CPP_TAG}")
-
 # Android memory/staging fix. This patch is known to apply to the pinned
 # revision. Keep exactly one downstream llama.cpp patch in the build path.
 set(LLAMA_MODEL_LOADING_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/llama-model-loading-memory.patch")
-if (EXISTS "${LLAMA_MODEL_LOADING_PATCH}")
+if (NOT EXISTS "${LLAMA_MODEL_LOADING_PATCH}")
+    message(FATAL_ERROR "Missing llama.cpp model-loading patch: ${LLAMA_MODEL_LOADING_PATCH}")
+endif()
+
+file(SHA256 "${LLAMA_MODEL_LOADING_PATCH}" LLAMA_MODEL_LOADING_PATCH_SHA256)
+set(LLAMA_PREPARED_MARKER "${FETCHCONTENT_BASE_DIR}/.ai-chat-test-llama-prepared-${LLAMA_CPP_TAG}")
+set(LLAMA_PREPARED_EXPECTED "${LLAMA_CPP_TAG}\n${LLAMA_MODEL_LOADING_PATCH_SHA256}\n")
+set(LLAMA_SOURCE_PREPARED FALSE)
+
+# Fast path for repeated CMake configure passes. The marker is outside the
+# source checkout so git clean -fd cannot remove it. Reverse apply --check is a
+# cheap integrity check that proves the downstream patch is already present.
+if (EXISTS "${LLAMA_PREPARED_MARKER}")
+    file(READ "${LLAMA_PREPARED_MARKER}" LLAMA_PREPARED_CONTENT)
+    execute_process(
+        COMMAND git -C "${llama_cpp_SOURCE_DIR}" rev-parse HEAD
+        RESULT_VARIABLE LLAMA_HEAD_RESULT
+        OUTPUT_VARIABLE LLAMA_HEAD
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if (LLAMA_HEAD_RESULT EQUAL 0 AND LLAMA_HEAD STREQUAL LLAMA_CPP_TAG AND LLAMA_PREPARED_CONTENT STREQUAL LLAMA_PREPARED_EXPECTED)
+        execute_process(
+            COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --reverse --check "${LLAMA_MODEL_LOADING_PATCH}"
+            RESULT_VARIABLE LLAMA_REVERSE_CHECK_RESULT
+            OUTPUT_QUIET
+            ERROR_QUIET
+        )
+        if (LLAMA_REVERSE_CHECK_RESULT EQUAL 0)
+            set(LLAMA_SOURCE_PREPARED TRUE)
+            message(STATUS "llama.cpp source preparation already complete; skipping reset/clean/reapply")
+        endif()
+    endif()
+endif()
+
+if (NOT LLAMA_SOURCE_PREPARED)
+    execute_process(
+        COMMAND git -C "${llama_cpp_SOURCE_DIR}" reset --hard ${LLAMA_CPP_TAG}
+        RESULT_VARIABLE LLAMA_RESET_RESULT
+        OUTPUT_VARIABLE LLAMA_RESET_OUTPUT
+        ERROR_VARIABLE LLAMA_RESET_ERROR
+    )
+    if (NOT LLAMA_RESET_RESULT EQUAL 0)
+        message(FATAL_ERROR "Failed to reset llama.cpp source to ${LLAMA_CPP_TAG}: ${LLAMA_RESET_ERROR}")
+    endif()
+
+    execute_process(
+        COMMAND git -C "${llama_cpp_SOURCE_DIR}" clean -fd
+        RESULT_VARIABLE LLAMA_CLEAN_RESULT
+        OUTPUT_VARIABLE LLAMA_CLEAN_OUTPUT
+        ERROR_VARIABLE LLAMA_CLEAN_ERROR
+    )
+    if (NOT LLAMA_CLEAN_RESULT EQUAL 0)
+        message(FATAL_ERROR "Failed to clean llama.cpp source: ${LLAMA_CLEAN_ERROR}")
+    endif()
+
     execute_process(
         COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --check "${LLAMA_MODEL_LOADING_PATCH}"
         RESULT_VARIABLE LLAMA_PATCH_CHECK_RESULT
@@ -76,9 +113,10 @@ if (EXISTS "${LLAMA_MODEL_LOADING_PATCH}")
     if (NOT LLAMA_PATCH_APPLY_RESULT EQUAL 0)
         message(FATAL_ERROR "Failed to apply llama.cpp model-loading memory patch: ${LLAMA_PATCH_APPLY_ERROR}")
     endif()
-    message(STATUS "Applied llama.cpp Android model-loading memory patch")
-else()
-    message(FATAL_ERROR "Missing llama.cpp model-loading patch: ${LLAMA_MODEL_LOADING_PATCH}")
+
+    file(MAKE_DIRECTORY "${FETCHCONTENT_BASE_DIR}")
+    file(WRITE "${LLAMA_PREPARED_MARKER}" "${LLAMA_PREPARED_EXPECTED}")
+    message(STATUS "Prepared llama.cpp ${LLAMA_CPP_TAG} and applied Android model-loading memory patch")
 endif()
 
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp)
