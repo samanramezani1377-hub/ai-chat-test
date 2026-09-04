@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """Regenerate downstream llama.cpp patches from the pinned revision.
 
-Patch files are treated as semantic change specifications. Unified-diff hunk
-line counts are never trusted or edited manually: Git generates the final
-headers from the resulting file state.
-
-Application is delegated to Git itself with --recount. This is important:
---recount makes Git infer hunk sizes from the actual patch body instead of
-trusting stale @@ counts, while normal Git patch matching still provides the
-safety boundary. Ambiguous or genuinely stale preimages fail instead of being
-guessed.
+Patch files are semantic change specifications. Neither hunk line counts nor
+hunk start offsets are trusted: the generator resolves each hunk's preimage
+against the actual pinned source, then Git produces the canonical final diff.
 """
 
 from pathlib import Path
@@ -50,7 +44,16 @@ def parse_patch(text):
             current = {"path": match.group(2), "hunks": []}
             hunk = None
         elif current is not None and line.startswith("@@ "):
-            hunk = {"lines": []}
+            match = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)\n?$", line)
+            if not match:
+                raise RuntimeError(f"Malformed hunk header: {line.rstrip()}")
+            hunk = {
+                "header": line,
+                "old_start": int(match.group(1)),
+                "new_start": int(match.group(3)),
+                "lines": [],
+                "suffix": match.group(5),
+            }
             current["hunks"].append(hunk)
         elif current is not None and hunk is not None and line[:1] in " +-":
             hunk["lines"].append(line)
@@ -59,11 +62,90 @@ def parse_patch(text):
     return files
 
 
-def apply_patch(repo, patch_file):
-    """Apply a patch without trusting manually edited hunk line counts."""
-    patch_file = Path(patch_file).resolve()
-    run("git", "-C", str(repo), "apply", "--recount", "--check", str(patch_file))
-    run("git", "-C", str(repo), "apply", "--recount", str(patch_file))
+def _preimage_and_postimage(hunk):
+    old_lines = []
+    new_lines = []
+    for line in hunk["lines"]:
+        prefix = line[:1]
+        body = line[1:]
+        if prefix in " -":
+            old_lines.append(body)
+        if prefix in " +":
+            new_lines.append(body)
+    return old_lines, new_lines
+
+
+def _find_preimage(lines, preimage, hint):
+    if not preimage:
+        return max(0, min(hint - 1, len(lines)))
+    matches = []
+    width = len(preimage)
+    for start in range(0, len(lines) - width + 1):
+        if lines[start:start + width] == preimage:
+            matches.append(start)
+    if not matches:
+        raise RuntimeError(
+            f"cannot resolve patch hunk near old line {hint}: exact preimage not found"
+        )
+    return min(matches, key=lambda pos: abs((pos + 1) - hint))
+
+
+def canonicalize_patch(repo, patch_file, work_dir):
+    """Resolve stale hunk locations against the real pinned source.
+
+    This is deliberately not a fuzzy application. Every context/deletion line
+    must match exactly. Only the temporary hunk locations are rewritten; the
+    repository patch is later replaced by a fresh `git diff`, which generates
+    both hunk counts and offsets itself.
+    """
+    text = Path(patch_file).read_text()
+    specs = parse_patch(text)
+    lines_by_path = {}
+    out = []
+    cursor = 0
+    all_lines = text.splitlines(keepends=True)
+
+    for spec in specs:
+        path = spec["path"]
+        target = repo / path
+        if not target.is_file():
+            raise RuntimeError(f"patch target does not exist in pinned source: {path}")
+        lines_by_path[path] = target.read_text().splitlines(keepends=True)
+
+    # Rebuild the patch while resolving each hunk against the current
+    # preimage. This also accounts for earlier hunks in the same file.
+    for line in all_lines:
+        if not line.startswith("@@ "):
+            out.append(line)
+            continue
+
+        # Find the corresponding parsed hunk in source order.
+        spec = next(s for s in specs if any(h["header"] == line for h in s["hunks"]))
+        hunk = next(h for h in spec["hunks"] if h["header"] == line)
+        path = spec["path"]
+        current_lines = lines_by_path[path]
+        preimage, postimage = _preimage_and_postimage(hunk)
+        pos = _find_preimage(current_lines, preimage, hunk["old_start"])
+
+        old_start = pos + 1 if preimage else pos + 1
+        new_start = old_start
+        suffix = hunk["suffix"]
+        out.append(f"@@ -{old_start} +{new_start}{suffix}\n")
+
+        if preimage:
+            current_lines[pos:pos + len(preimage)] = postimage
+        else:
+            current_lines[pos:pos] = postimage
+
+    canonical = work_dir / f"canonical-{Path(patch_file).name}"
+    canonical.write_text("".join(out))
+    return canonical, specs
+
+
+def apply_patch(repo, patch_file, work_dir):
+    canonical, _ = canonicalize_patch(repo, patch_file, work_dir)
+    run("git", "-C", str(repo), "apply", "--recount", "--check", str(canonical))
+    run("git", "-C", str(repo), "apply", "--recount", str(canonical))
 
 
 def git_diff(repo, paths):
@@ -75,22 +157,20 @@ def git_snapshot(repo):
     run("git", "-C", str(repo), "commit", "--quiet", "--no-verify", "-m", "generator snapshot")
 
 
-def validate_generated(upstream, generated):
+def validate_generated(upstream, generated, work_dir):
     run("git", "-C", str(upstream), "reset", "--hard", "--quiet", TAG)
     run("git", "-C", str(upstream), "clean", "-fd", "-q")
     for name, diff in zip(PATCHES, generated):
-        patch_file = upstream / f".generated-{name}"
+        patch_file = work_dir / f"generated-{name}"
         patch_file.write_text(diff)
-        try:
-            run("git", "-C", str(upstream), "apply", "--recount", "--check", str(patch_file))
-            run("git", "-C", str(upstream), "apply", "--recount", str(patch_file))
-        finally:
-            patch_file.unlink(missing_ok=True)
+        run("git", "-C", str(upstream), "apply", "--recount", "--check", str(patch_file))
+        run("git", "-C", str(upstream), "apply", "--recount", str(patch_file))
         print(f"VALIDATED: {name}")
 
 
 with tempfile.TemporaryDirectory(prefix="ai-chat-llama-regen-") as temp_dir:
-    upstream = Path(temp_dir) / "llama.cpp"
+    temp = Path(temp_dir)
+    upstream = temp / "llama.cpp"
     run(
         "git", "clone", "--quiet", "--filter=blob:none",
         "https://github.com/ggml-org/llama.cpp.git", str(upstream)
@@ -107,16 +187,16 @@ with tempfile.TemporaryDirectory(prefix="ai-chat-llama-regen-") as temp_dir:
         run("git", "-C", str(upstream), "clean", "-fd", "-q")
 
         for previous in PATCHES[:index]:
-            apply_patch(upstream, PATCH_DIR / previous)
+            apply_patch(upstream, PATCH_DIR / previous, temp)
             git_snapshot(upstream)
 
-        apply_patch(upstream, PATCH_DIR / name)
+        apply_patch(upstream, PATCH_DIR / name, temp)
         diff = git_diff(upstream, [file_spec["path"] for file_spec in spec])
         if not diff.strip():
             raise RuntimeError(f"{name}: generated empty diff")
         generated.append(diff)
 
-    validate_generated(upstream, generated)
+    validate_generated(upstream, generated, temp)
 
     for name, diff in zip(PATCHES, generated):
         (PATCH_DIR / name).write_text(diff)
