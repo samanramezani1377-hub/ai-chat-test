@@ -35,21 +35,34 @@ diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
          const auto * weight = get_weight(ggml_get_name(cur));
          if (weight == nullptr) {
              // this can happen with split experts models
-@@ -1711,7 +1728,8 @@ bool llama_model_loader::load_all_data(
+@@ -1645,6 +1662,10 @@ bool llama_model_loader::load_all_data(
+                     // Async upload actual data to GPU
++                        LLAMA_LOG_INFO("AI_CHAT_TENSOR_ASYNC_SET_BEGIN name=%s type=%d chunk_offset=%zu chunk_bytes=%zu buffer_index=%zu\n",
++                            ggml_get_name(cur), (int) cur->type, data_read, data_to_copy, buffer_idx);
+                         ggml_backend_tensor_set_async(upload_backend, cur,
+                                                       reinterpret_cast<void *>(ptr_data), data_read, data_to_copy);
++                        LLAMA_LOG_INFO("AI_CHAT_TENSOR_ASYNC_SET_RETURNED name=%s chunk_offset=%zu chunk_bytes=%zu\n",
++                            ggml_get_name(cur), data_read, data_to_copy);
++                        LLAMA_LOG_INFO("AI_CHAT_TENSOR_ASYNC_EVENT_RECORD_BEGIN name=%s buffer_index=%zu\n",
++                            ggml_get_name(cur), buffer_idx);
+                         ggml_backend_event_record(events[buffer_idx], upload_backend);
++                        LLAMA_LOG_INFO("AI_CHAT_TENSOR_ASYNC_EVENT_RECORD_RETURNED name=%s buffer_index=%zu\n",
++                            ggml_get_name(cur), buffer_idx);
+@@ -1711,7 +1732,8 @@ bool llama_model_loader::load_all_data(
                          buffer_idx %= n_buffers;
                      }
                  } else {
--                    read_buf.resize(n_size);
-+                    // scoped to one tensor so only one staging buffer is alive at a time
-+                    std::vector<no_init<uint8_t>> read_buf(n_size);
+                     // scoped to one tensor so only one staging buffer is alive at a time
+                     std::vector<no_init<uint8_t>> read_buf(n_size);
                      file->seek(weight->offs, SEEK_SET);
                      file->read_raw(read_buf.data(), n_size);
++                    LLAMA_LOG_INFO("AI_CHAT_TENSOR_SET_BEGIN name=%s type=%d bytes=%zu\n", ggml_get_name(cur), (int) cur->type, n_size);
                      ggml_backend_tensor_set(cur, read_buf.data(), 0, n_size);
-+
-diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
---- a/src/llama-model-loader.cpp
-+++ b/src/llama-model-loader.cpp
-@@ -1680,7 +1680,13 @@ bool llama_model_loader::load_all_data(
++                    LLAMA_LOG_INFO("AI_CHAT_TENSOR_SET_RETURNED name=%s bytes=%zu\n", ggml_get_name(cur), n_size);
+                     if (check_tensors && !ggml_validate_row_data(cur->type, read_buf.data(), n_size)) {
+                         throw std::runtime_error(format("tensor '%s' has invalid data", ggml_get_name(cur)));
+                     }
+@@ -1680,7 +1704,13 @@ bool llama_model_loader::load_all_data(
  
              GGML_ASSERT(buf_mmap || cur->data); // either we have a buffer to allocate the tensor in, or it is already allocated
              if (buf_mmap && cur->data == nullptr) {
