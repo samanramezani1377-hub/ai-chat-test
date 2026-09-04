@@ -1,70 +1,73 @@
 diff --git a/ggml/src/ggml-vulkan/ggml-vulkan.cpp b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
 --- a/ggml/src/ggml-vulkan/ggml-vulkan.cpp
 +++ b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
-@@ -1520,6 +1520,9 @@ static void ggml_vk_submit(vk_context& ctx, vk::Fence fence) {
-+    std::cerr << "AI_CHAT_VK_SUBMIT_BEGIN seqs=" << ctx->seqs.size() << " fence=" << static_cast<VkFence>(fence) << std::endl;
+@@ -1490,6 +1490,7 @@ static void ggml_vk_ctx_begin(vk_device& device, vk_context& subctx) {
+     VK_LOG_DEBUG("ggml_vk_ctx_begin(" << device->name << ")");
++    std::cerr << "AI_CHAT_VK_CTX_BEGIN device=" << device->name << " ctx=" << static_cast<const void *>(&subctx) << std::endl;
+     if (subctx->s != nullptr) {
+         ggml_vk_ctx_end(subctx);
+     }
+@@ -1500,6 +1501,7 @@ static void ggml_vk_ctx_end(vk_context& ctx) {
+ static void ggml_vk_ctx_end(vk_context& ctx) {
++    std::cerr << "AI_CHAT_VK_CTX_END_BEGIN ctx=" << static_cast<const void *>(&ctx) << std::endl;
+     if (ctx->s == nullptr) {
+         return;
+@@ -1510,6 +1512,7 @@ static void ggml_vk_ctx_end(vk_context& ctx) {
+     ctx->s->buffer->buf.end();
+     ctx->s = nullptr;
++    std::cerr << "AI_CHAT_VK_CTX_END_RETURNED ctx=" << static_cast<const void *>(&ctx) << std::endl;
+ }
+@@ -1520,6 +1523,9 @@ static void ggml_vk_submit(vk_context& ctx, vk::Fence fence) {
+ static void ggml_vk_submit(vk_context& ctx, vk::Fence fence) {
++    std::cerr << "AI_CHAT_VK_SUBMIT_BEGIN ctx=" << static_cast<const void *>(&ctx) << " seqs=" << ctx->seqs.size() << " fence=" << static_cast<VkFence>(fence) << std::endl;
      if (ctx->seqs.empty()) {
          if (fence) {
-+            std::cerr << "AI_CHAT_VK_SUBMIT_EMPTY_FENCE_BEGIN" << std::endl;
++            std::cerr << "AI_CHAT_VK_SUBMIT_EMPTY_FENCE_BEGIN fence=" << static_cast<VkFence>(fence) << std::endl;
              ctx->p->q->handle->submit({}, fence);
-+            std::cerr << "AI_CHAT_VK_SUBMIT_EMPTY_FENCE_RETURNED" << std::endl;
++            std::cerr << "AI_CHAT_VK_SUBMIT_EMPTY_FENCE_RETURNED fence=" << static_cast<VkFence>(fence) << std::endl;
          }
          return;
-@@ -1555,6 +1558,8 @@ static void ggml_vk_submit(vk_context& ctx, vk::Fence fence) {
+@@ -1555,6 +1561,8 @@ static void ggml_vk_submit(vk_context& ctx, vk::Fence fence) {
 -    ctx->p->q->handle->submit(submit_infos, fence);
-+    std::cerr << "AI_CHAT_VK_QUEUE_SUBMIT_BEGIN submits=" << submit_infos.size() << " fence=" << static_cast<VkFence>(fence) << std::endl;
++    std::cerr << "AI_CHAT_VK_QUEUE_SUBMIT_BEGIN ctx=" << static_cast<const void *>(&ctx) << " submits=" << submit_infos.size() << " fence=" << static_cast<VkFence>(fence) << std::endl;
 +    ctx->p->q->handle->submit(submit_infos, fence);
-+    std::cerr << "AI_CHAT_VK_QUEUE_SUBMIT_RETURNED submits=" << submit_infos.size() << std::endl;
++    std::cerr << "AI_CHAT_VK_QUEUE_SUBMIT_RETURNED ctx=" << static_cast<const void *>(&ctx) << " submits=" << submit_infos.size() << std::endl;
  }
-@@ -1490,6 +1495,7 @@ static void ggml_vk_ctx_begin(vk_device& device, vk_context& subctx) {
-     VK_LOG_DEBUG("ggml_vk_ctx_begin(" << device->name << ")");
-+    std::cerr << "AI_CHAT_VK_CTX_BEGIN device=" << device->name << std::endl;
-     if (subctx->s != nullptr) {
-@@ -1500,6 +1506,7 @@ static void ggml_vk_ctx_end(vk_context& ctx) {
- static void ggml_vk_ctx_end(vk_context& ctx) {
-+    std::cerr << "AI_CHAT_VK_CTX_END_BEGIN" << std::endl;
-     if (ctx->s == nullptr) {
-@@ -1510,6 +1517,7 @@ static void ggml_vk_ctx_end(vk_context& ctx) {
-     ctx->s = nullptr;
-+    std::cerr << "AI_CHAT_VK_CTX_END_RETURNED" << std::endl;
- }
-@@ -16220,6 +16228,7 @@ static bool ggml_vk_buffer_write_2d_async(vk_context subctx, vk_buffer& dst, size_t offset, const void * src, size_t spitch, size_t dpitch, size_t width, size_t height, bool sync_staging = false) {
+@@ -16220,6 +16228,8 @@ static bool ggml_vk_buffer_write_2d_async(vk_context subctx, vk_buffer& dst, size_t offset, const void * src, size_t spitch, size_t dpitch, size_t width, size_t height, bool sync_staging = false) {
      VK_LOG_DEBUG("ggml_vk_buffer_write_2d_async(" << width << ", " << height << ")");
-+    std::cerr << "AI_CHAT_VK_WRITE_ASYNC_BEGIN offset=" << offset << " width=" << width << " height=" << height << " sync_staging=" << sync_staging << std::endl;
++    std::cerr << "AI_CHAT_VK_WRITE_ASYNC_BEGIN ctx=" << static_cast<const void *>(&subctx) << " dst=" << static_cast<const void *>(dst->buffer) << " src=" << src << " offset=" << offset << " width=" << width << " height=" << height << " sync_staging=" << sync_staging << std::endl;
      // Check if src is pinned memory
-@@ -16226,6 +16235,7 @@ static bool ggml_vk_buffer_write_2d_async(vk_context subctx, vk_buffer& dst, size_t offset, const void * src, size_t spitch, size_t dpitch, size_t width, size_t height, bool sync_staging = false) {
+     vk_buffer buf = nullptr;
      size_t buf_offset = 0;
      ggml_vk_host_get(dst->device, src, buf, buf_offset);
-+    std::cerr << "AI_CHAT_VK_HOST_GET_RETURNED pinned=" << (buf ? 1 : 0) << " host_offset=" << buf_offset << std::endl;
++    std::cerr << "AI_CHAT_VK_HOST_GET_RETURNED dst=" << static_cast<const void *>(dst->buffer) << " src=" << src << " pinned=" << (buf ? 1 : 0) << " host_offset=" << buf_offset << std::endl;
 @@ -16270,6 +16280,7 @@ static bool ggml_vk_buffer_write_2d_async(vk_context subctx, vk_buffer& dst, size_t offset, const void * src, size_t spitch, size_t dpitch, size_t width, size_t height, bool sync_staging = false) {
--    return true;
-+    std::cerr << "AI_CHAT_VK_WRITE_ASYNC_RETURNED offset=" << offset << " width=" << width << " height=" << height << std::endl;
-+    return true;
+     }
++    std::cerr << "AI_CHAT_VK_WRITE_ASYNC_RETURNED ctx=" << static_cast<const void *>(&subctx) << " dst=" << static_cast<const void *>(dst->buffer) << " src=" << src << " offset=" << offset << " width=" << width << " height=" << height << std::endl;
+     return true;
  }
 @@ -16276,6 +16287,7 @@ static bool ggml_vk_buffer_write_async(vk_context subctx, vk_buffer& dst, size_t offset, const void * src, size_t size, bool sync_staging = false) {
      VK_LOG_DEBUG("ggml_vk_buffer_write_async(" << size << ")");
-+    std::cerr << "AI_CHAT_VK_WRITE_ASYNC_WRAPPER_BEGIN size=" << size << std::endl;
++    std::cerr << "AI_CHAT_VK_WRITE_ASYNC_WRAPPER_BEGIN dst=" << static_cast<const void *>(dst->buffer) << " src=" << src << " offset=" << offset << " size=" << size << std::endl;
      return ggml_vk_buffer_write_2d_async(subctx, dst, offset, src, size, size, size, 1, sync_staging);
  }
 @@ -16305,6 +16317,7 @@ static void ggml_vk_buffer_write_2d(vk_buffer& dst, size_t offset, const void * src, size_t spitch, size_t dpitch, size_t width, size_t height) {
      VK_LOG_DEBUG("ggml_vk_buffer_write_2d(" << width << ", " << height << ")");
-+    std::cerr << "AI_CHAT_VK_WRITE_SYNC_BEGIN offset=" << offset << " width=" << width << " height=" << height << std::endl;
++    std::cerr << "AI_CHAT_VK_WRITE_SYNC_BEGIN dst=" << static_cast<const void *>(dst->buffer) << " src=" << src << " offset=" << offset << " width=" << width << " height=" << height << std::endl;
 @@ -16345,6 +16358,7 @@ static void ggml_vk_buffer_write_2d(vk_buffer& dst, size_t offset, const void * src, size_t spitch, size_t dpitch, size_t width, size_t height) {
--    }
-+    }
-+    std::cerr << "AI_CHAT_VK_WRITE_SYNC_RETURNED offset=" << offset << " width=" << width << " height=" << height << std::endl;
+     }
++    std::cerr << "AI_CHAT_VK_WRITE_SYNC_RETURNED dst=" << static_cast<const void *>(dst->buffer) << " src=" << src << " offset=" << offset << " width=" << width << " height=" << height << std::endl;
  }
 @@ -17140,6 +17154,7 @@ static void ggml_backend_vk_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
      VK_LOG_DEBUG("ggml_backend_vk_buffer_set_tensor(" << buffer << ", " << tensor << ", " << data << ", " << offset << ", " << size << ")");
-+    std::cerr << "AI_CHAT_VK_SET_TENSOR_BEGIN name=" << ggml_get_name(tensor) << " offset=" << offset << " size=" << size << std::endl;
++    std::cerr << "AI_CHAT_VK_SET_TENSOR_BEGIN tensor=" << static_cast<const void *>(tensor) << " name=" << ggml_get_name(tensor) << " type=" << (int) tensor->type << " data=" << data << " offset=" << offset << " size=" << size << std::endl;
 @@ -17152,6 +17167,7 @@ static void ggml_backend_vk_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
      ggml_vk_buffer_write(buf, vk_tensor_offset(tensor) + tensor->view_offs + offset, data, size);
-+    std::cerr << "AI_CHAT_VK_SET_TENSOR_RETURNED name=" << ggml_get_name(tensor) << " offset=" << offset << " size=" << size << std::endl;
++    std::cerr << "AI_CHAT_VK_SET_TENSOR_RETURNED tensor=" << static_cast<const void *>(tensor) << " name=" << ggml_get_name(tensor) << " data=" << data << " offset=" << offset << " size=" << size << std::endl;
  }
 @@ -17500,6 +17516,8 @@ static void ggml_backend_vk_set_tensor_async(ggml_backend_t backend, ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
      VK_LOG_DEBUG("ggml_backend_vk_set_tensor_async(" << size << ")");
-+    std::cerr << "AI_CHAT_VK_SET_TENSOR_ASYNC_BEGIN name=" << ggml_get_name(tensor) << " offset=" << offset << " size=" << size << std::endl;
++    std::cerr << "AI_CHAT_VK_SET_TENSOR_ASYNC_BEGIN tensor=" << static_cast<const void *>(tensor) << " name=" << ggml_get_name(tensor) << " type=" << (int) tensor->type << " data=" << data << " offset=" << offset << " size=" << size << std::endl;
      ggml_backend_vk_set_tensor_2d_async(backend, tensor, data, offset, size, 1, size, size);
-+    std::cerr << "AI_CHAT_VK_SET_TENSOR_ASYNC_RETURNED name=" << ggml_get_name(tensor) << " offset=" << offset << " size=" << size << std::endl;
++    std::cerr << "AI_CHAT_VK_SET_TENSOR_ASYNC_RETURNED tensor=" << static_cast<const void *>(tensor) << " name=" << ggml_get_name(tensor) << " data=" << data << " offset=" << offset << " size=" << size << std::endl;
  }
-*** End Patch
