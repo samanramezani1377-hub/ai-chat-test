@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Checkout app repository
         uses: actions/checkout@v4
-      - name: Generate canonical patch from pinned llama.cpp
+      - name: Generate canonical llama.cpp patch from pinned revision
         run: |
           set -euo pipefail
           TAG=c5fc7e34885ba31217e330809437afa993d27745
@@ -68,24 +68,50 @@ jobs:
           if old not in t:
               raise SystemExit('expected tensor ordering block not found')
           f.write_text(t.replace(old, new, 1))
-          generated = run('git', 'diff', '--no-ext-diff', '--no-color', '--', 'src/llama-model-loader.cpp')
-          if not generated.startswith('diff --git '):
-              raise SystemExit('generated patch is empty')
-          p1.write_text(generated)
+
+          model = work / 'src/llama-model.cpp'
+          t = model.read_text()
+          old = '    const bool use_mmap_buffer = true;\n'
+          new = '''#if defined(__ANDROID__)
+    // Android Vulkan drivers, especially UMA/mobile drivers, may not safely support
+    // importing the mmap address directly as a backend buffer. Use normal backend
+    // allocations and let the loader upload the mapped tensor data instead.
+    const bool use_mmap_buffer = false;
+#else
+    const bool use_mmap_buffer = true;
+#endif
+'''
+          if old not in t:
+              raise SystemExit('expected use_mmap_buffer declaration not found')
+          model.write_text(t.replace(old, new, 1))
+
+          generated_p1 = run('git', 'diff', '--no-ext-diff', '--no-color', '--', 'src/llama-model-loader.cpp')
+          generated_model = run('git', 'diff', '--no-ext-diff', '--no-color', '--', 'src/llama-model.cpp')
+          if not generated_p1.startswith('diff --git '):
+              raise SystemExit('generated model-loader patch is empty')
+          if not generated_model.startswith('diff --git '):
+              raise SystemExit('generated model patch is empty')
+          p1.write_text(generated_p1)
+          p2.write_text(generated_model)
+
           run('git', 'reset', '--hard', '--quiet', tag)
           run('git', 'clean', '-fd', '-q')
+          # p1 remains the model-loader patch; the Android mmap-buffer fix is folded
+          # into the backend/model patch file below so the checked-in stack stays canonical.
+          p1.write_text(generated_p1)
+          p2.write_text(generated_model)
           for p in (p1, p2, p3):
               run('git', 'apply', '--recount', '--check', str(p))
               run('git', 'apply', '--recount', str(p))
-          print('VALIDATED: canonical tensor load-order fix and all three patches apply to pinned revision')
+          print('VALIDATED: canonical tensor ordering + Android mmap-buffer fix and all three checked-in patches apply to pinned revision')
           PY
-      - name: Commit canonical patch
+      - name: Commit canonical patches
         run: |
           set -euo pipefail
           git config user.name patch-generator
           git config user.email patch-generator@localhost
-          git add core/runtime-android/src/main/cpp/patches/llama-model-loading-memory.patch
-          git commit -m "fix: stabilize mmap tensor allocation order" || exit 0
+          git add core/runtime-android/src/main/cpp/patches/llama-model-loading-memory.patch core/runtime-android/src/main/cpp/patches/llama-backend-vulkan-diagnostics.patch
+          git commit -m "fix: avoid Android Vulkan mmap buffer import" || exit 0
           git push
 
 # trigger canonical regeneration after workflow update
