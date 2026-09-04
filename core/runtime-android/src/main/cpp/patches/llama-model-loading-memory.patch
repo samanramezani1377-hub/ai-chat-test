@@ -35,7 +35,33 @@ diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
          const auto * weight = get_weight(ggml_get_name(cur));
          if (weight == nullptr) {
              // this can happen with split experts models
-@@ -1711,7 +1728,8 @@ bool llama_model_loader::load_all_data(
+@@ -1680,6 +1697,10 @@ bool llama_model_loader::load_all_data(
+ 
+             GGML_ASSERT(buf_mmap || cur->data); // either we have a buffer to allocate the tensor in, or it is already allocated
+             if (buf_mmap && cur->data == nullptr) {
++                LLAMA_LOG_INFO("AI_CHAT_TENSOR_ALLOC_BEGIN name=%s type=%d bytes=%zu ne=[%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 "] buffer=%s\n",
++                    ggml_get_name(cur), (int) cur->type, n_size,
++                    cur->ne[0], cur->ne[1], cur->ne[2], cur->ne[3],
++                    ggml_backend_buft_name(ggml_backend_buffer_get_type(buf_mmap)));
+                 ggml_backend_tensor_alloc(buf_mmap, cur, data);
++                LLAMA_LOG_INFO("AI_CHAT_TENSOR_ALLOC_RETURNED name=%s data=%p bytes=%zu\n",
++                    ggml_get_name(cur), cur->data, n_size);
+                 if (lmlocks) {
+                     const auto & lmlock = lmlocks->at(weight->idx);
+                     lmlock->grow_to(weight->offs + n_size);
+@@ -1687,6 +1708,10 @@ bool llama_model_loader::load_all_data(
+                 mmap_used.first  = std::min(mmap_used.first,  weight->offs);
+                 mmap_used.second = std::max(mmap_used.second, weight->offs + n_size);
+             } else {
++                LLAMA_LOG_INFO("AI_CHAT_TENSOR_SET_BEGIN name=%s type=%d bytes=%zu data=%p\n",
++                    ggml_get_name(cur), (int) cur->type, n_size, (void *) data);
+                 ggml_backend_tensor_set(cur, data, 0, n_size);
++                LLAMA_LOG_INFO("AI_CHAT_TENSOR_SET_RETURNED name=%s bytes=%zu\n",
++                    ggml_get_name(cur), n_size);
+             }
+         } else {
+             const auto & file = files.at(weight->idx);
+@@ -1711,7 +1736,8 @@ bool llama_model_loader::load_all_data(
                          buffer_idx %= n_buffers;
                      }
                  } else {
@@ -45,22 +71,23 @@ diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
                      file->seek(weight->offs, SEEK_SET);
                      file->read_raw(read_buf.data(), n_size);
                      ggml_backend_tensor_set(cur, read_buf.data(), 0, n_size);
-
-diff --git a/src/llama-model.cpp b/src/llama-model.cpp
---- a/src/llama-model.cpp
-+++ b/src/llama-model.cpp
-@@ -1816,6 +1816,14 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
-         return true;
+@@ -1728,3 +1754,4 @@ bool llama_model_loader::load_all_data(
+         return progress_callback(1.0f, progress_callback_user_data);
      }
  
-+    // without mmap, load non-host buffers first: their tensors go through a staging buffer, which is cheapest while the fewest weights are resident
-+    if (!ml.use_mmap) {
-+        std::stable_partition(ctx_buf_maps.begin(), ctx_buf_maps.end(), [](const auto & ctx_buf_map) {
-+            const auto & buf_map = ctx_buf_map.second;
-+            return !buf_map.empty() && !ggml_backend_buffer_is_host(buf_map.begin()->second);
-+        });
-+    }
-+
-     // load tensor data
-     for (auto & [ctx, buf_map] : ctx_buf_maps) {
-         if (!ml.load_all_data(ctx, buf_map, use_mlock ? &pimpl->mlock_mmaps : NULL, params.progress_callback, params.progress_callback_user_data)) {
+     return true;
+ }
+ 
+ std::string llama_model_loader::ftype_name() const {
+     return llama_ftype_name(ftype);
+ }
+ 
+ void llama_model_loader::print_info() const {
+     LLAMA_LOG_INFO("%s: file format = %s\n", __func__, llama_file_version_name(fver));
+     LLAMA_LOG_INFO("%s: file type   = %s\n", __func__, llama_ftype_name(ftype));
+     if (n_bytes < GiB) {
+         LLAMA_LOG_INFO("%s: file size   = %.2f MiB (%.2f BPW) \n", __func__, n_bytes/1024.0/1024.0,        n_bytes*8.0/n_elements);
+     } else {
+         LLAMA_LOG_INFO("%s: file size   = %.2f GiB (%.2f BPW) \n", __func__, n_bytes/1024.0/1024.0/1024.0, n_bytes*8.0/n_elements);
+     }
+ }
