@@ -280,9 +280,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
 }
 
 static llama_model *load_model_android(const char *path, llama_model_params mp, bool gpu) {
-    mp.load_mode = LLAMA_LOAD_MODE_MMAP;
+    // Avoid the mmap -> Vulkan host-pointer import path on Android. Mobile UMA Vulkan
+    // drivers can fail inside buffer_from_host_ptr while the model is being initialized.
+    // LLAMA_LOAD_MODE_NONE keeps bounded file reads and normal backend allocations, so
+    // GPU layers remain enabled without relying on the fragile mmap buffer import.
+    mp.load_mode = LLAMA_LOAD_MODE_NONE;
     mp.check_tensors = false;
-    checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_MMAP" : "ANDROID_MODEL_LOAD_POLICY_CPU_MMAP");
+    checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_STAGED" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
     return llama_model_load_from_file(path, mp);
