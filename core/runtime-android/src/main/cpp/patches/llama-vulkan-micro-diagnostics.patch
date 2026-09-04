@@ -11,7 +11,7 @@ diff --git a/ggml/src/ggml-vulkan/ggml-vulkan.cpp b/ggml/src/ggml-vulkan/ggml-vu
 +static uint64_t ai_chat_vk_begin_trace() { return ++g_ai_chat_vk_trace_id; }
 +static uint64_t ai_chat_vk_trace() { return g_ai_chat_vk_current_trace_id; }
 +
-+#include <vulkan/vulkan_core.h>
+ #include <vulkan/vulkan_core.h>
 @@ -1490,2 +1498,3 @@ static void ggml_vk_ctx_begin(vk_device& device, vk_context& subctx) {
      VK_LOG_DEBUG("ggml_vk_ctx_begin(" << device->name << ")");
 +    std::cerr << "AI_CHAT_VK_CTX_BEGIN trace=" << ai_chat_vk_trace() << " device=" << device->name << " ctx=" << static_cast<const void *>(&subctx) << std::endl;
