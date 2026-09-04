@@ -33,7 +33,7 @@ diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
          const auto * weight = get_weight(ggml_get_name(cur));
          if (weight == nullptr) {
              // this can happen with split experts models
-@@ -1645,6 +1662,10 @@ bool llama_model_loader::load_all_data(
+@@ -1645,4 +1662,12 @@ bool llama_model_loader::load_all_data(
                      // Async upload actual data to GPU
 +                        LLAMA_LOG_INFO("AI_CHAT_TENSOR_ASYNC_SET_BEGIN name=%s type=%d chunk_offset=%zu chunk_bytes=%zu buffer_index=%zu\n",
 +                            ggml_get_name(cur), (int) cur->type, data_read, data_to_copy, buffer_idx);
