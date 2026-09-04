@@ -40,6 +40,10 @@ internal object NativeLlamaCpp {
                     "previously_initialized=$nativeInitialized"
             )
             nativeInit(enableGpu)
+            // native_runtime.cpp has its legacy installer for standalone use. The Android
+            // safe translation unit exposes a second JNI entry point that installs the
+            // Android handler after nativeInit, avoiding preprocessor call-site collisions.
+            nativeInstallFatalHandlers()
             nativeInitialized = true
             Log.i(
                 TAG,
@@ -136,6 +140,7 @@ internal object NativeLlamaCpp {
 
     private interface TokenListener { fun onToken(token: String) }
     @JvmStatic private external fun nativeInit(enableGpu: Boolean)
+    @JvmStatic private external fun nativeInstallFatalHandlers()
     @JvmStatic private external fun nativeLoad(path: String, contextLength: Int, gpuLayers: Int): Int
     @JvmStatic private external fun nativeGenerate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float, listener: TokenListener): Int
     @JvmStatic private external fun nativeStop()
