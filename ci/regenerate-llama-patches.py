@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
-"""Regenerate downstream llama.cpp patches from the pinned revision.
+"""Developer-only llama.cpp patch migration tool.
 
-The checked-in patches are semantic change specifications. Hunk counts and
-line offsets are never edited or trusted. Each hunk is applied by exact
-preimage matching; for legacy diagnostic hunks whose replaced diagnostic line
-is no longer present upstream, an exact unchanged-context anchor is required
-and only the intended additions are applied. Git alone generates canonical
-unified diffs.
+IMPORTANT: this tool is intentionally NOT part of CI. Checked-in patch files
+are immutable CI inputs. This migration helper may regenerate them only when a
+developer explicitly opts in with ALLOW_LLAMA_PATCH_REGEN=1.
+
+Hunk counts and offsets are never manually derived from SHA values. Git alone
+creates canonical unified diffs after semantic migration against the pinned
+source revision.
 """
+
+import os
+
+if os.environ.get("CI", "").lower() == "true" and os.environ.get("ALLOW_LLAMA_PATCH_REGEN") != "1":
+    raise SystemExit(
+        "Refusing to regenerate llama.cpp patches in CI. "
+        "Patch files are immutable CI inputs; run this migration tool locally "
+        "with ALLOW_LLAMA_PATCH_REGEN=1 only when intentionally porting patches."
+    )
 
 from pathlib import Path
 import re
@@ -46,17 +56,10 @@ def parse_patch(text):
             match = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)\n?$", line)
             if not match:
                 raise RuntimeError(f"Malformed hunk header: {line.rstrip()}")
-            hunk = {
-                "old_start": int(match.group(1)),
-                "new_start": int(match.group(3)),
-                "suffix": match.group(5),
-                "lines": [],
-            }
+            hunk = {"old_start": int(match.group(1)), "new_start": int(match.group(3)), "suffix": match.group(5), "lines": []}
             current["hunks"].append(hunk)
         elif current is not None and hunk is not None:
-            if line.startswith((" ", "+", "-")):
-                hunk["lines"].append(line)
-            elif line.startswith("\\ No newline at end of file"):
+            if line.startswith((" ", "+", "-")) or line.startswith("\\ No newline"):
                 hunk["lines"].append(line)
     if current is not None:
         files.append(current)
@@ -66,13 +69,11 @@ def parse_patch(text):
 
 
 def preimage_postimage(hunk):
-    old_lines = []
-    new_lines = []
+    old_lines, new_lines = [], []
     for line in hunk["lines"]:
-        if line.startswith("\\ No newline at end of file"):
+        if line.startswith("\\ No newline"):
             continue
-        prefix = line[0]
-        body = line[1:]
+        prefix, body = line[0], line[1:]
         if prefix in " -":
             old_lines.append(body)
         if prefix in " +":
@@ -83,60 +84,32 @@ def preimage_postimage(hunk):
 def find_exact(lines, preimage, hint, path):
     if not preimage:
         return max(0, min(hint - 1, len(lines)))
-    width = len(preimage)
-    matches = [i for i in range(len(lines) - width + 1) if lines[i:i + width] == preimage]
+    matches = [i for i in range(len(lines) - len(preimage) + 1) if lines[i:i + len(preimage)] == preimage]
     if not matches:
-        raise RuntimeError(
-            f"{path}: cannot resolve hunk near old line {hint}: exact preimage not found"
-        )
+        raise RuntimeError(f"{path}: exact preimage not found near old line {hint}")
     if len(matches) > 1:
         return min(matches, key=lambda i: abs((i + 1) - hint))
     return matches[0]
 
 
 def apply_context_fallback(lines, hunk, path):
-    """Apply a legacy diagnostic hunk using only exact unchanged context.
-
-    This is deliberately narrow: all context lines must occur contiguously and
-    the hunk must contain one contiguous changed block. No hunk header/count is
-    rewritten and no fuzzy character matching is performed.
-    """
     entries = [line for line in hunk["lines"] if not line.startswith("\\ No newline")]
     context = [line[1:] for line in entries if line.startswith(" ")]
     if not context:
-        raise RuntimeError(
-            f"{path}: exact preimage missing and hunk has no context anchor near old line {hunk['old_start']}"
-        )
-
+        raise RuntimeError(f"{path}: no exact context anchor near old line {hunk['old_start']}")
     matches = [i for i in range(len(lines) - len(context) + 1) if lines[i:i + len(context)] == context]
     if not matches:
-        raise RuntimeError(
-            f"{path}: exact preimage missing and exact context anchor not found near old line {hunk['old_start']}"
-        )
-    if len(matches) > 1:
-        pos = min(matches, key=lambda i: abs((i + 1) - hunk["old_start"]))
-    else:
-        pos = matches[0]
-
+        raise RuntimeError(f"{path}: exact context anchor not found near old line {hunk['old_start']}")
+    pos = min(matches, key=lambda i: abs((i + 1) - hunk["old_start"]))
     first_context = next(i for i, line in enumerate(entries) if line.startswith(" "))
     last_context = len(entries) - 1 - next(i for i, line in enumerate(reversed(entries)) if line.startswith(" "))
     changed = entries[first_context + 1:last_context] if first_context < last_context else entries[first_context + 1:]
-
     if any(line.startswith(" ") for line in changed):
-        raise RuntimeError(
-            f"{path}: unsupported non-contiguous diagnostic hunk near old line {hunk['old_start']}"
-        )
-
-    # If the context is the whole hunk except for additions, insert additions
-    # at the position where the missing legacy diagnostic line belonged.
+        raise RuntimeError(f"{path}: non-contiguous fallback hunk near old line {hunk['old_start']}")
     additions = [line[1:] for line in changed if line.startswith("+")]
     if not additions:
-        raise RuntimeError(
-            f"{path}: legacy hunk near old line {hunk['old_start']} has no additions to apply"
-        )
-
-    insert_at = pos + first_context + 1
-    lines[insert_at:insert_at] = additions
+        raise RuntimeError(f"{path}: fallback hunk has no additions near old line {hunk['old_start']}")
+    lines[pos + first_context + 1:pos + first_context + 1] = additions
     return lines
 
 
@@ -145,31 +118,19 @@ def apply_semantic_hunk(lines, hunk, path):
     try:
         pos = find_exact(lines, preimage, hunk["old_start"], path)
     except RuntimeError:
-        # Some old diagnostic patches replaced diagnostics that were later
-        # removed from the pinned upstream revision. Preserve those diagnostics
-        # by anchoring the new line to the exact upstream context instead of
-        # inventing or editing offsets/counts.
         return apply_context_fallback(lines, hunk, path)
-
-    if preimage:
-        lines[pos:pos + len(preimage)] = postimage
-    else:
-        lines[pos:pos] = postimage
+    lines[pos:pos + len(preimage)] = postimage
     return lines
 
 
 def apply_semantic_patch(repo, patch_file):
-    """Apply a patch specification without constructing/applying a unified diff."""
-    specs = parse_patch(Path(patch_file).read_text())
-    for spec in specs:
-        path = spec["path"]
-        target = repo / path
+    for spec in parse_patch(Path(patch_file).read_text()):
+        target = repo / spec["path"]
         if not target.is_file():
-            raise RuntimeError(f"{path}: target does not exist in pinned revision")
-
+            raise RuntimeError(f"{spec['path']}: target does not exist")
         lines = target.read_text().splitlines(keepends=True)
         for hunk in spec["hunks"]:
-            lines = apply_semantic_hunk(lines, hunk, path)
+            lines = apply_semantic_hunk(lines, hunk, spec["path"])
         target.write_text("".join(lines))
 
 
@@ -211,17 +172,14 @@ with tempfile.TemporaryDirectory(prefix="ai-chat-llama-regen-") as temp_dir:
         for previous in PATCHES[:index]:
             apply_semantic_patch(upstream, PATCH_DIR / previous)
             snapshot(upstream)
-
         spec = parse_patch((PATCH_DIR / name).read_text())
         apply_semantic_patch(upstream, PATCH_DIR / name)
-        paths = [file_spec["path"] for file_spec in spec]
-        diff = diff_for(upstream, paths)
+        diff = diff_for(upstream, [file_spec["path"] for file_spec in spec])
         if not diff.strip():
             raise RuntimeError(f"{name}: generated empty diff")
         generated.append(diff)
 
     validate(upstream, generated, temp)
-
     for name, diff in zip(PATCHES, generated):
         (PATCH_DIR / name).write_text(diff)
 
