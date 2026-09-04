@@ -2,9 +2,11 @@
 """Regenerate downstream llama.cpp patches from the pinned revision.
 
 The checked-in patches are semantic change specifications. Hunk counts and
-line offsets are never edited or trusted. Each hunk's exact preimage is found
-in the pinned source, the semantic change is applied directly to that source,
-and Git alone generates the canonical unified diff.
+line offsets are never edited or trusted. Each hunk is applied by exact
+preimage matching; for legacy diagnostic hunks whose replaced diagnostic line
+is no longer present upstream, an exact unchanged-context anchor is required
+and only the intended additions are applied. Git alone generates canonical
+unified diffs.
 """
 
 from pathlib import Path
@@ -87,7 +89,73 @@ def find_exact(lines, preimage, hint, path):
         raise RuntimeError(
             f"{path}: cannot resolve hunk near old line {hint}: exact preimage not found"
         )
-    return min(matches, key=lambda i: abs((i + 1) - hint))
+    if len(matches) > 1:
+        return min(matches, key=lambda i: abs((i + 1) - hint))
+    return matches[0]
+
+
+def apply_context_fallback(lines, hunk, path):
+    """Apply a legacy diagnostic hunk using only exact unchanged context.
+
+    This is deliberately narrow: all context lines must occur contiguously and
+    the hunk must contain one contiguous changed block. No hunk header/count is
+    rewritten and no fuzzy character matching is performed.
+    """
+    entries = [line for line in hunk["lines"] if not line.startswith("\\ No newline")]
+    context = [line[1:] for line in entries if line.startswith(" ")]
+    if not context:
+        raise RuntimeError(
+            f"{path}: exact preimage missing and hunk has no context anchor near old line {hunk['old_start']}"
+        )
+
+    matches = [i for i in range(len(lines) - len(context) + 1) if lines[i:i + len(context)] == context]
+    if not matches:
+        raise RuntimeError(
+            f"{path}: exact preimage missing and exact context anchor not found near old line {hunk['old_start']}"
+        )
+    if len(matches) > 1:
+        pos = min(matches, key=lambda i: abs((i + 1) - hunk["old_start"]))
+    else:
+        pos = matches[0]
+
+    first_context = next(i for i, line in enumerate(entries) if line.startswith(" "))
+    last_context = len(entries) - 1 - next(i for i, line in enumerate(reversed(entries)) if line.startswith(" "))
+    changed = entries[first_context + 1:last_context] if first_context < last_context else entries[first_context + 1:]
+
+    if any(line.startswith(" ") for line in changed):
+        raise RuntimeError(
+            f"{path}: unsupported non-contiguous diagnostic hunk near old line {hunk['old_start']}"
+        )
+
+    # If the context is the whole hunk except for additions, insert additions
+    # at the position where the missing legacy diagnostic line belonged.
+    additions = [line[1:] for line in changed if line.startswith("+")]
+    if not additions:
+        raise RuntimeError(
+            f"{path}: legacy hunk near old line {hunk['old_start']} has no additions to apply"
+        )
+
+    insert_at = pos + first_context + 1
+    lines[insert_at:insert_at] = additions
+    return lines
+
+
+def apply_semantic_hunk(lines, hunk, path):
+    preimage, postimage = preimage_postimage(hunk)
+    try:
+        pos = find_exact(lines, preimage, hunk["old_start"], path)
+    except RuntimeError:
+        # Some old diagnostic patches replaced diagnostics that were later
+        # removed from the pinned upstream revision. Preserve those diagnostics
+        # by anchoring the new line to the exact upstream context instead of
+        # inventing or editing offsets/counts.
+        return apply_context_fallback(lines, hunk, path)
+
+    if preimage:
+        lines[pos:pos + len(preimage)] = postimage
+    else:
+        lines[pos:pos] = postimage
+    return lines
 
 
 def apply_semantic_patch(repo, patch_file):
@@ -100,15 +168,8 @@ def apply_semantic_patch(repo, patch_file):
             raise RuntimeError(f"{path}: target does not exist in pinned revision")
 
         lines = target.read_text().splitlines(keepends=True)
-        # Resolve each hunk against the source state produced by earlier hunks.
-        # The old_start is only a search hint; exact preimage equality is required.
         for hunk in spec["hunks"]:
-            preimage, postimage = preimage_postimage(hunk)
-            pos = find_exact(lines, preimage, hunk["old_start"], path)
-            if preimage:
-                lines[pos:pos + len(preimage)] = postimage
-            else:
-                lines[pos:pos] = postimage
+            lines = apply_semantic_hunk(lines, hunk, path)
         target.write_text("".join(lines))
 
 
@@ -147,9 +208,6 @@ with tempfile.TemporaryDirectory(prefix="ai-chat-llama-regen-") as temp_dir:
     generated = []
     for index, name in enumerate(PATCHES):
         reset(upstream)
-
-        # Rebuild the same cumulative state that the downstream patch stack
-        # represents. Every transformation is exact; Git generates the output.
         for previous in PATCHES[:index]:
             apply_semantic_patch(upstream, PATCH_DIR / previous)
             snapshot(upstream)
