@@ -99,12 +99,13 @@ jobs:
           gradle-version: '8.11.1'
 
       # One-time bootstrap for the three downstream patches. The patch files
-      # currently in the repository are semantic change specifications only;
-      # this step rebuilds them from the exact pinned llama.cpp revision and
-      # lets Git generate the final unified diffs. No hunk line counts are
-      # edited manually and no --recount workaround is used.
+      # are semantic change specifications; this step rebuilds them from the
+      # exact pinned llama.cpp revision and lets Git generate final unified
+      # diffs. The generator self-heals only deterministic whitespace/context
+      # drift and then validates every generated patch on a clean checkout.
+      # No hunk line counts are edited manually and no --recount workaround is used.
       - name: Regenerate llama.cpp patches from pinned revision
-        if: contains(github.event.head_commit.message, '[regen-llama-patches]')
+        if: contains(github.event.head_commit.message, '[regen-llama-patches]') || github.event_name == 'workflow_dispatch'
         run: |
           python3 ci/regenerate-llama-patches.py .
           if ! git diff --quiet -- core/runtime-android/src/main/cpp/patches; then
