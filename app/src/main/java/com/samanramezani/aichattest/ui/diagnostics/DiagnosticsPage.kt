@@ -19,6 +19,9 @@ import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
 import java.text.DateFormat
 import java.util.Date
 
+private const val DISPLAY_RUNTIME_EVENTS = 20
+private const val DISPLAY_ACTION_EVENTS = 10
+
 @Composable
 internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
     val context = LocalContext.current
@@ -49,6 +52,8 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         append("\n\n===== LAST NATIVE EVENT =====\n")
         append(runtime.lastNativeEvent ?: "N/A")
     }
+    val recentRuntimeEvents = runtime.trace.takeLast(DISPLAY_RUNTIME_EVENTS)
+    val recentActionEvents = selectedActionTraces.takeLast(DISPLAY_ACTION_EVENTS)
 
     SimplePage("عیب‌یابی") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -56,11 +61,51 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             OutlinedButton(onClick = { copyToClipboard(context, "نتیجه خطا", errorReport) }, modifier = Modifier.weight(1f)) { Text("کپی نتیجه خطا") }
         }
 
+        Text("خلاصه خطا", style = MaterialTheme.typography.titleLarge)
+        Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
+            Column(Modifier.padding(12.dp)) {
+                MetricRow("وضعیت", diagnostic.status)
+                MetricRow("Execution", diagnostic.executionId ?: "N/A")
+                MetricRow("مدل", diagnostic.model?.displayName ?: "N/A")
+                MetricRow("Runtime", "${diagnostic.runtime.name} ${diagnostic.runtime.version}")
+                MetricRow("Backend", diagnostic.runtime.backend ?: "N/A")
+                MetricRow("GPU Layers", diagnostic.runtime.gpuLayers?.toString() ?: "N/A")
+                if (!diagnostic.error.isNullOrBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("Error: ${diagnostic.error}", color = MaterialTheme.colorScheme.onErrorContainer)
+                }
+            }
+        }
+
         Text("آخرین رویداد Native", style = MaterialTheme.typography.titleLarge)
         Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
             Text(runtime.lastNativeEvent ?: "هنوز رویداد Native ثبت نشده است.", Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall)
         }
-        Text("این مقدار قبل از فراخوانی‌های حساس Native ثبت می‌شود و برای تشخیص کرش process-level بعد از باز کردن دوباره اپ باقی می‌ماند.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        Text("فقط رویدادهای اخیر برای خوانایی نمایش داده می‌شوند؛ trace کامل همچنان در گزارش کامل قابل کپی است.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+
+        Text("رویدادهای اخیر Runtime", style = MaterialTheme.typography.titleLarge)
+        if (recentRuntimeEvents.isEmpty()) Text("Trace Runtime ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        else recentRuntimeEvents.forEach { event ->
+            Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
+                Column(Modifier.padding(10.dp)) {
+                    Text(event.type.toString(), style = MaterialTheme.typography.labelLarge)
+                    Text(DateFormat.getDateTimeInstance().format(Date(event.timestampMs)), style = MaterialTheme.typography.bodySmall)
+                    event.message?.let { Text(it) }
+                }
+            }
+        }
+
+        Text("رویدادهای اخیر Action", style = MaterialTheme.typography.titleLarge)
+        if (recentActionEvents.isEmpty()) Text("Trace عملیات برای این Execution ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        else recentActionEvents.forEach { event ->
+            Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
+                Column(Modifier.padding(10.dp)) {
+                    Text(event.type.toString(), style = MaterialTheme.typography.labelLarge)
+                    Text(DateFormat.getDateTimeInstance().format(Date(event.timestampMs)), style = MaterialTheme.typography.bodySmall)
+                    event.message?.let { Text(it) }
+                }
+            }
+        }
 
         Text("عملکرد Runtime", style = MaterialTheme.typography.titleLarge)
         MetricRow("زمان بارگذاری مدل", runtime.loadTimeMs?.let { "$it ms" } ?: "N/A")
@@ -108,35 +153,6 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             MetricRow("پایان", execution.finishedAt?.let { DateFormat.getDateTimeInstance().format(Date(it)) } ?: "N/A")
             MetricRow("Approval", if (execution.approvalRequired) "لازم است" else "لازم نیست")
             execution.error?.let { Text("Error: $it", color = MaterialTheme.colorScheme.error) }
-        }
-
-        Text("Runtime Trace", style = MaterialTheme.typography.titleLarge)
-        if (runtime.trace.isEmpty()) Text("Trace Runtime ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        else runtime.trace.forEach { event ->
-            Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
-                Column(Modifier.padding(10.dp)) {
-                    Text(event.type.toString(), style = MaterialTheme.typography.labelLarge)
-                    Text(DateFormat.getDateTimeInstance().format(Date(event.timestampMs)), style = MaterialTheme.typography.bodySmall)
-                    event.message?.let { Text(it) }
-                }
-            }
-        }
-
-        Text("Action Trace", style = MaterialTheme.typography.titleLarge)
-        if (selectedActionTraces.isEmpty()) Text("Trace عملیات برای این Execution ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        else selectedActionTraces.forEach { event ->
-            Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
-                Column(Modifier.padding(10.dp)) {
-                    Text(event.type.toString(), style = MaterialTheme.typography.labelLarge)
-                    Text(DateFormat.getDateTimeInstance().format(Date(event.timestampMs)), style = MaterialTheme.typography.bodySmall)
-                    event.message?.let { Text(it) }
-                }
-            }
-        }
-
-        Text("گزارش خام قابل کپی", style = MaterialTheme.typography.titleLarge)
-        Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium) {
-            Text(report, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
         }
     }
 }
