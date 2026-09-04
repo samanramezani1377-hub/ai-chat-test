@@ -94,7 +94,11 @@ def apply_hunks(repo, spec):
         path = repo / file_spec["path"]
         if not path.exists():
             raise RuntimeError(f"{path}: target file does not exist")
-        lines = path.read_text(newline="").splitlines(keepends=True)
+        # Use open(..., newline="") instead of Path.read_text(newline=...),
+        # because some GitHub-hosted runner Python versions do not expose the
+        # newline keyword on Path.read_text/write_text.
+        with path.open("r", newline="") as handle:
+            lines = handle.read().splitlines(keepends=True)
         for hunk in file_spec["hunks"]:
             # Unified diff prefixes are metadata. Strip exactly one prefix
             # character from both sides before matching/replacing. The old
@@ -106,7 +110,8 @@ def apply_hunks(repo, spec):
                 raise RuntimeError(f"{path}: unsupported empty preimage hunk")
             index = find_match(lines, old, path)
             lines[index : index + len(old)] = new
-        path.write_text("".join(lines), newline="")
+        with path.open("w", newline="") as handle:
+            handle.write("".join(lines))
 
 
 def git_diff(repo, paths):
