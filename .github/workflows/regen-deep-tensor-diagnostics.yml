@@ -25,37 +25,37 @@ jobs:
           git -C "$WORK" checkout --quiet --detach "$TAG"
           python3 - <<'PY'
           from pathlib import Path
-          import os, subprocess
+          import os, re, subprocess
           root = Path('.').resolve(); work = Path(os.environ['RUNNER_TEMP']) / 'llama-regenerate'
           pd = root / 'core/runtime-android/src/main/cpp/patches'
           p1, p2, p3 = [pd / x for x in ('llama-model-loading-memory.patch','llama-backend-vulkan-diagnostics.patch','llama-vulkan-micro-diagnostics.patch')]
           def run(*a): return subprocess.run(a, cwd=work, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
           run('git','apply','--recount',str(p1)); run('git','apply','--recount',str(p2))
           f = work / 'ggml/src/ggml-vulkan/ggml-vulkan.cpp'; t = f.read_text()
-          anchor = 'static bool ggml_vk_buffer_write_2d_async(vk_context subctx, vk_buffer& dst, size_t offset, const void * src, size_t spitch, size_t width, size_t height, bool sync_staging = false) {'
-          if anchor not in t: raise SystemExit('write async function anchor not found')
-          t = t.replace(anchor, anchor + '''\n    std::cerr << "AI_CHAT_VK_TENSOR_BUFFER_WRITE_BEGIN trace=" << ai_chat_vk_trace()\n              << " dst=" << static_cast<const void *>(dst.get())\n              << " dst_bytes=" << (dst ? dst->size : 0)\n              << " dst_offset=" << offset\n              << " bytes=" << (width * height)\n              << " host_visible=" << ((dst->memory_property_flags & vk::MemoryPropertyFlagBits::eHostVisible) != vk::MemoryPropertyFlagBits{})\n              << std::endl;''', 1)
-          anchor = 'ggml_vk_host_get(dst->device, src, buf, buf_offset);'
-          if anchor not in t: raise SystemExit('host classification anchor not found')
-          t = t.replace(anchor, anchor + '\n    std::cerr << "AI_CHAT_VK_SOURCE_CLASSIFIED trace=" << ai_chat_vk_trace() << " pinned=" << (buf != nullptr) << " source_offset=" << buf_offset << std::endl;', 1)
-          anchor = 'subctx->s->buffer.copyBuffer(buf->buffer, dst->buffer, slices);'
-          if anchor not in t: raise SystemExit('pinned copy anchor not found')
-          t = t.replace(anchor, 'std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_BEGIN trace=" << ai_chat_vk_trace() << " mode=pinned bytes=" << (width * height) << std::endl;\n        ' + anchor + '\n        std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_RECORDED trace=" << ai_chat_vk_trace() << " mode=pinned bytes=" << (width * height) << std::endl;', 1)
-          anchor = 'const size_t copy_size = width*height;'
-          if anchor not in t: raise SystemExit('staging copy size anchor not found')
-          t = t.replace(anchor, anchor + '\n    std::cerr << "AI_CHAT_VK_STAGING_PATH_BEGIN trace=" << ai_chat_vk_trace() << " copy_bytes=" << copy_size << std::endl;', 1)
-          anchor = 'ggml_vk_ensure_sync_staging_buffer(dst->device, copy_size);'
-          if anchor in t:
-              t = t.replace(anchor, 'std::cerr << "AI_CHAT_VK_STAGING_ALLOC_CALL trace=" << ai_chat_vk_trace() << " requested_bytes=" << copy_size << std::endl;\n        ' + anchor + '\n        std::cerr << "AI_CHAT_VK_STAGING_ALLOC_RETURNED trace=" << ai_chat_vk_trace() << " bytes=" << copy_size << std::endl;', 1)
-          anchor = 'vkCmdCopyBuffer(subctx->s->buffer, staging->buffer, dst->buffer, 1, &buf_copy);'
-          if anchor not in t: raise SystemExit('staging copy command anchor not found')
-          t = t.replace(anchor, 'std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_BEGIN trace=" << ai_chat_vk_trace() << " mode=staging bytes=" << copy_size << std::endl;\n    ' + anchor + '\n    std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_RECORDED trace=" << ai_chat_vk_trace() << " mode=staging bytes=" << copy_size << std::endl;', 1)
-          anchor = 'ggml_vk_buffer_write_2d(dst, offset, src, 0, size, 1);'
-          if anchor in t:
-              t = t.replace(anchor, 'std::cerr << "AI_CHAT_VK_UPLOAD_WAIT_BEGIN trace=" << ai_chat_vk_trace() << " bytes=" << size << std::endl;\n    ' + anchor + '\n    std::cerr << "AI_CHAT_VK_UPLOAD_WAIT_RETURNED trace=" << ai_chat_vk_trace() << " bytes=" << size << std::endl;', 1)
-          anchor = 'std::cerr << "AI_CHAT_VK_SET_TENSOR_RETURNED trace=" << ai_chat_vk_trace() << " tensor=" << static_cast<const void *>(tensor) << " name=" << ggml_get_name(tensor) << " data=" << data << " offset=" << offset << " size=" << size << std::endl;'
-          if anchor not in t: raise SystemExit('tensor completion anchor not found')
-          t = t.replace(anchor, anchor + '\n    std::cerr << "AI_CHAT_VK_TENSOR_LOAD_END trace=" << ai_chat_vk_trace() << " name=" << ggml_get_name(tensor) << " bytes=" << size << std::endl;', 1)
+          def replace_once(pattern, repl, label):
+              global t
+              t, n = re.subn(pattern, repl, t, count=1, flags=re.M)
+              if n != 1: raise SystemExit(label)
+          replace_once(r'(static bool ggml_vk_buffer_write_2d_async\([^\{]*\{)', r'''\1
+    std::cerr << "AI_CHAT_VK_TENSOR_BUFFER_WRITE_BEGIN trace=" << ai_chat_vk_trace()
+              << " dst=" << static_cast<const void *>(dst.get())
+              << " dst_bytes=" << (dst ? dst->size : 0)
+              << " dst_offset=" << offset
+              << " bytes=" << (width * height)
+              << " host_visible=" << ((dst->memory_property_flags & vk::MemoryPropertyFlagBits::eHostVisible) != vk::MemoryPropertyFlagBits{})
+              << std::endl;''', 'write async function anchor not found')
+          replace_once(r'(ggml_vk_host_get\([^\n]*\);)', r'''\1
+    std::cerr << "AI_CHAT_VK_SOURCE_CLASSIFIED trace=" << ai_chat_vk_trace() << " pinned=" << (buf != nullptr) << " source_offset=" << buf_offset << std::endl;''', 'host classification anchor not found')
+          replace_once(r'(subctx->s->buffer\.copyBuffer\(buf->buffer, dst->buffer, slices\);)', r'''std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_BEGIN trace=" << ai_chat_vk_trace() << " mode=pinned bytes=" << (width * height) << std::endl;
+        \1
+        std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_RECORDED trace=" << ai_chat_vk_trace() << " mode=pinned bytes=" << (width * height) << std::endl;''', 'pinned copy anchor not found')
+          replace_once(r'(const size_t copy_size = width\*height;)', r'''\1
+    std::cerr << "AI_CHAT_VK_STAGING_PATH_BEGIN trace=" << ai_chat_vk_trace() << " copy_bytes=" << copy_size << std::endl;''', 'staging copy size anchor not found')
+          replace_once(r'(vkCmdCopyBuffer\(subctx->s->buffer, staging->buffer, dst->buffer, 1, &buf_copy\);)', r'''std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_BEGIN trace=" << ai_chat_vk_trace() << " mode=staging bytes=" << copy_size << std::endl;
+    \1
+    std::cerr << "AI_CHAT_VK_UPLOAD_COMMAND_RECORDED trace=" << ai_chat_vk_trace() << " mode=staging bytes=" << copy_size << std::endl;''', 'staging copy command anchor not found')
+          replace_once(r'(std::cerr << "AI_CHAT_VK_SET_TENSOR_RETURNED trace=.*?;)', r'''\1
+    std::cerr << "AI_CHAT_VK_TENSOR_LOAD_END trace=" << ai_chat_vk_trace() << " name=" << ggml_get_name(tensor) << " bytes=" << size << std::endl;''', 'tensor completion anchor not found')
           f.write_text(t)
           p3.write_text(run('git','diff','--no-ext-diff','--no-color','--','ggml/src/ggml-vulkan/ggml-vulkan.cpp'))
           run('git','reset','--hard','--quiet',TAG); run('git','clean','-fd','-q')
