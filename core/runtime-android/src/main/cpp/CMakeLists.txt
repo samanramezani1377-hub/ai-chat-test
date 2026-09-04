@@ -30,7 +30,8 @@ FetchContent_MakeAvailable(llama_cpp)
 
 set(LLAMA_MODEL_LOADING_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/llama-model-loading-memory.patch")
 set(LLAMA_BACKEND_DIAGNOSTICS_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/llama-backend-vulkan-diagnostics.patch")
-foreach(LLAMA_PATCH IN ITEMS "${LLAMA_MODEL_LOADING_PATCH}" "${LLAMA_BACKEND_DIAGNOSTICS_PATCH}")
+set(LLAMA_VULKAN_MICRO_DIAGNOSTICS_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/llama-vulkan-micro-diagnostics.patch")
+foreach(LLAMA_PATCH IN ITEMS "${LLAMA_MODEL_LOADING_PATCH}" "${LLAMA_BACKEND_DIAGNOSTICS_PATCH}" "${LLAMA_VULKAN_MICRO_DIAGNOSTICS_PATCH}")
     if (NOT EXISTS "${LLAMA_PATCH}")
         message(FATAL_ERROR "Missing llama.cpp downstream patch: ${LLAMA_PATCH}")
     endif()
@@ -38,8 +39,9 @@ endforeach()
 
 file(SHA256 "${LLAMA_MODEL_LOADING_PATCH}" LLAMA_MODEL_LOADING_PATCH_SHA256)
 file(SHA256 "${LLAMA_BACKEND_DIAGNOSTICS_PATCH}" LLAMA_BACKEND_DIAGNOSTICS_PATCH_SHA256)
+file(SHA256 "${LLAMA_VULKAN_MICRO_DIAGNOSTICS_PATCH}" LLAMA_VULKAN_MICRO_DIAGNOSTICS_PATCH_SHA256)
 set(LLAMA_PREPARED_MARKER "${FETCHCONTENT_BASE_DIR}/.ai-chat-test-llama-prepared-${LLAMA_CPP_TAG}")
-set(LLAMA_PREPARED_EXPECTED "${LLAMA_CPP_TAG}\n${LLAMA_MODEL_LOADING_PATCH_SHA256}\n${LLAMA_BACKEND_DIAGNOSTICS_PATCH_SHA256}\n")
+set(LLAMA_PREPARED_EXPECTED "${LLAMA_CPP_TAG}\n${LLAMA_MODEL_LOADING_PATCH_SHA256}\n${LLAMA_BACKEND_DIAGNOSTICS_PATCH_SHA256}\n${LLAMA_VULKAN_MICRO_DIAGNOSTICS_PATCH_SHA256}\n")
 set(LLAMA_SOURCE_PREPARED FALSE)
 
 if (EXISTS "${LLAMA_PREPARED_MARKER}")
@@ -52,17 +54,10 @@ if (EXISTS "${LLAMA_PREPARED_MARKER}")
         ERROR_QUIET
     )
     if (LLAMA_HEAD_RESULT EQUAL 0 AND LLAMA_HEAD STREQUAL LLAMA_CPP_TAG AND LLAMA_PREPARED_CONTENT STREQUAL LLAMA_PREPARED_EXPECTED)
-        execute_process(
-            COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --reverse --check "${LLAMA_MODEL_LOADING_PATCH}"
-            RESULT_VARIABLE LLAMA_MODEL_REVERSE_RESULT
-            OUTPUT_QUIET ERROR_QUIET
-        )
-        execute_process(
-            COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --reverse --check "${LLAMA_BACKEND_DIAGNOSTICS_PATCH}"
-            RESULT_VARIABLE LLAMA_BACKEND_REVERSE_RESULT
-            OUTPUT_QUIET ERROR_QUIET
-        )
-        if (LLAMA_MODEL_REVERSE_RESULT EQUAL 0 AND LLAMA_BACKEND_REVERSE_RESULT EQUAL 0)
+        execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --reverse --check "${LLAMA_MODEL_LOADING_PATCH}" RESULT_VARIABLE LLAMA_MODEL_REVERSE_RESULT OUTPUT_QUIET ERROR_QUIET)
+        execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --reverse --check "${LLAMA_BACKEND_DIAGNOSTICS_PATCH}" RESULT_VARIABLE LLAMA_BACKEND_REVERSE_RESULT OUTPUT_QUIET ERROR_QUIET)
+        execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --reverse --check "${LLAMA_VULKAN_MICRO_DIAGNOSTICS_PATCH}" RESULT_VARIABLE LLAMA_MICRO_REVERSE_RESULT OUTPUT_QUIET ERROR_QUIET)
+        if (LLAMA_MODEL_REVERSE_RESULT EQUAL 0 AND LLAMA_BACKEND_REVERSE_RESULT EQUAL 0 AND LLAMA_MICRO_REVERSE_RESULT EQUAL 0)
             set(LLAMA_SOURCE_PREPARED TRUE)
             message(STATUS "llama.cpp source preparation already complete; skipping reset/clean/reapply")
         endif()
@@ -70,50 +65,27 @@ if (EXISTS "${LLAMA_PREPARED_MARKER}")
 endif()
 
 if (NOT LLAMA_SOURCE_PREPARED)
-    execute_process(
-        COMMAND git -C "${llama_cpp_SOURCE_DIR}" reset --hard ${LLAMA_CPP_TAG}
-        RESULT_VARIABLE LLAMA_RESET_RESULT
-        OUTPUT_VARIABLE LLAMA_RESET_OUTPUT
-        ERROR_VARIABLE LLAMA_RESET_ERROR
-    )
+    execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" reset --hard ${LLAMA_CPP_TAG} RESULT_VARIABLE LLAMA_RESET_RESULT ERROR_VARIABLE LLAMA_RESET_ERROR)
     if (NOT LLAMA_RESET_RESULT EQUAL 0)
         message(FATAL_ERROR "Failed to reset llama.cpp source to ${LLAMA_CPP_TAG}: ${LLAMA_RESET_ERROR}")
     endif()
-
-    execute_process(
-        COMMAND git -C "${llama_cpp_SOURCE_DIR}" clean -fd
-        RESULT_VARIABLE LLAMA_CLEAN_RESULT
-        OUTPUT_VARIABLE LLAMA_CLEAN_OUTPUT
-        ERROR_VARIABLE LLAMA_CLEAN_ERROR
-    )
+    execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" clean -fd RESULT_VARIABLE LLAMA_CLEAN_RESULT ERROR_VARIABLE LLAMA_CLEAN_ERROR)
     if (NOT LLAMA_CLEAN_RESULT EQUAL 0)
         message(FATAL_ERROR "Failed to clean llama.cpp source: ${LLAMA_CLEAN_ERROR}")
     endif()
-
-    foreach(LLAMA_PATCH IN ITEMS "${LLAMA_MODEL_LOADING_PATCH}" "${LLAMA_BACKEND_DIAGNOSTICS_PATCH}")
-        execute_process(
-            COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --check "${LLAMA_PATCH}"
-            RESULT_VARIABLE LLAMA_PATCH_CHECK_RESULT
-            OUTPUT_QUIET
-            ERROR_VARIABLE LLAMA_PATCH_CHECK_ERROR
-        )
+    foreach(LLAMA_PATCH IN ITEMS "${LLAMA_MODEL_LOADING_PATCH}" "${LLAMA_BACKEND_DIAGNOSTICS_PATCH}" "${LLAMA_VULKAN_MICRO_DIAGNOSTICS_PATCH}")
+        execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --check "${LLAMA_PATCH}" RESULT_VARIABLE LLAMA_PATCH_CHECK_RESULT OUTPUT_QUIET ERROR_VARIABLE LLAMA_PATCH_CHECK_ERROR)
         if (NOT LLAMA_PATCH_CHECK_RESULT EQUAL 0)
             message(FATAL_ERROR "Pinned llama.cpp source does not accept downstream patch ${LLAMA_PATCH}: ${LLAMA_PATCH_CHECK_ERROR}")
         endif()
-
-        execute_process(
-            COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply "${LLAMA_PATCH}"
-            RESULT_VARIABLE LLAMA_PATCH_APPLY_RESULT
-            ERROR_VARIABLE LLAMA_PATCH_APPLY_ERROR
-        )
+        execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply "${LLAMA_PATCH}" RESULT_VARIABLE LLAMA_PATCH_APPLY_RESULT ERROR_VARIABLE LLAMA_PATCH_APPLY_ERROR)
         if (NOT LLAMA_PATCH_APPLY_RESULT EQUAL 0)
             message(FATAL_ERROR "Failed to apply llama.cpp downstream patch ${LLAMA_PATCH}: ${LLAMA_PATCH_APPLY_ERROR}")
         endif()
     endforeach()
-
     file(MAKE_DIRECTORY "${FETCHCONTENT_BASE_DIR}")
     file(WRITE "${LLAMA_PREPARED_MARKER}" "${LLAMA_PREPARED_EXPECTED}")
-    message(STATUS "Prepared llama.cpp ${LLAMA_CPP_TAG} and applied Android model-loading/backend diagnostics patches")
+    message(STATUS "Prepared llama.cpp ${LLAMA_CPP_TAG} and applied Android model-loading/backend/micro diagnostics patches")
 endif()
 
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp)
