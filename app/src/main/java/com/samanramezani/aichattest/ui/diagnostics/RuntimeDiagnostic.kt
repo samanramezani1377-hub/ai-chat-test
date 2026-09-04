@@ -7,6 +7,9 @@ import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeTraceEvent
 
+private const val RECENT_RUNTIME_EVENTS = 20
+private const val RECENT_ACTION_EVENTS = 10
+
 internal data class RuntimeDiagnostic(
     val model: ModelDescriptor?,
     val runtime: RuntimeInfo,
@@ -72,8 +75,22 @@ internal fun RuntimeDiagnostic.errorReport(): String = buildString {
     appendLine("Execution: ${executionId ?: "N/A"}")
     appendLine("Model: ${model?.displayName ?: "N/A"}")
     appendLine("Runtime: ${runtime.name} ${runtime.version}")
+    appendLine("Backend: ${runtime.backend ?: "N/A"}")
+    appendLine("GPU Layers: ${runtime.gpuLayers ?: "N/A"}")
     appendLine("Error: ${error ?: "N/A"}")
-    appendLine("Raw Error: ${rawError ?: "N/A"}")
+    if (!rawError.isNullOrBlank() && rawError != error) appendLine("Raw Error: $rawError")
+    appendLine()
+    appendLine("Recent Runtime Events (last $RECENT_RUNTIME_EVENTS)")
+    if (runtimeTrace.isEmpty()) appendLine("N/A")
+    else runtimeTrace.takeLast(RECENT_RUNTIME_EVENTS).forEach { event ->
+        appendLine("${event.timestampMs} | ${event.type} | ${event.message ?: ""}".trimEnd())
+    }
+    appendLine()
+    appendLine("Recent Action Events (last $RECENT_ACTION_EVENTS)")
+    if (actionTrace.isEmpty()) appendLine("N/A")
+    else actionTrace.takeLast(RECENT_ACTION_EVENTS).forEach { event ->
+        appendLine("${event.timestampMs} | ${event.type} | ${event.message ?: ""}".trimEnd())
+    }
 }
 
 private fun tokensPerSecond(result: GenerationResult?): Double? {
