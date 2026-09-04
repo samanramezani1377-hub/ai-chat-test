@@ -30,17 +30,17 @@ jobs:
           root = Path('.').resolve()
           work = Path(os.environ['RUNNER_TEMP']) / 'llama-regenerate'
           pd = root / 'core/runtime-android/src/main/cpp/patches'
-          old_p1 = pd / 'llama-model-loading-memory.patch'
+          p1 = pd / 'llama-model-loading-memory.patch'
           p2 = pd / 'llama-backend-vulkan-diagnostics.patch'
           p3 = pd / 'llama-vulkan-micro-diagnostics.patch'
           tag = 'c5fc7e34885ba31217e330809437afa993d27745'
           def run(*args):
               return subprocess.run(args, cwd=work, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
 
-          # Start from the exact pinned revision and apply only the existing model-loader
-          # patch. The new Android model.cpp change is then added to that same canonical
-          # patch so the checked-in patch stack remains exactly three patches.
-          run('git', 'apply', '--recount', str(old_p1))
+          # Build the new canonical model patch from the exact pinned revision.
+          # Existing p1 contains only the previous model-loader change; add the Android
+          # mmap-buffer workaround before generating the combined git diff.
+          run('git', 'apply', '--recount', str(p1))
 
           loader = work / 'src/llama-model-loader.cpp'
           t = loader.read_text()
@@ -92,12 +92,12 @@ jobs:
           generated = run('git', 'diff', '--no-ext-diff', '--no-color', '--', 'src/llama-model-loader.cpp', 'src/llama-model.cpp')
           if not generated.startswith('diff --git '):
               raise SystemExit('generated combined model patch is empty')
-          old_p1.write_text(generated)
+          p1.write_text(generated)
 
-          # Validate the complete checked-in stack against the exact pinned revision.
+          # Validate every patch against the exact pinned revision. Never edit hunk counts.
           run('git', 'reset', '--hard', '--quiet', tag)
           run('git', 'clean', '-fd', '-q')
-          for p in (old_p1, p2, p3):
+          for p in (p1, p2, p3):
               run('git', 'apply', '--recount', '--check', str(p))
               run('git', 'apply', '--recount', str(p))
           print('VALIDATED: canonical model-loader + Android mmap-buffer fix and all three checked-in patches apply to pinned revision')
@@ -111,4 +111,4 @@ jobs:
           git commit -m "fix: avoid Android Vulkan mmap buffer import" || exit 0
           git push
 
-# trigger canonical regeneration after workflow update
+# trigger canonical regeneration after workflow update: 2026-09-04T20:00Z
