@@ -17,8 +17,6 @@ android {
                 // Keep the native build strictly single-ABI; the app also packages arm64-v8a only.
                 abiFilters += "arm64-v8a"
                 arguments += listOf(
-                    "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
-                    "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
                     "-DLLAMA_BUILD_COMMON=OFF",
                     "-DLLAMA_BUILD_TESTS=OFF",
                     "-DLLAMA_BUILD_EXAMPLES=OFF",
