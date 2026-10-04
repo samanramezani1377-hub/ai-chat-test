@@ -19,6 +19,7 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    // Keep only resources/code actually reachable in the release APK.
     }
 
     compileOptions {
@@ -28,6 +29,22 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            packagingOptions.jniLibs.useLegacyPackaging = false
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            // Keep native .so files in the APK so Android does not extract a second copy on install.
+            useLegacyPackaging = false
+        }
     }
 }
 
