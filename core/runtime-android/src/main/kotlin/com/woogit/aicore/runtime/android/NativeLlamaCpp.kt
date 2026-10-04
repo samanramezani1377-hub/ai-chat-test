@@ -37,7 +37,7 @@ internal object NativeLlamaCpp {
     /** One serialized native activation transaction. Native side owns model/context lifetime. */
     @Synchronized
     fun load(path: String, contextLength: Int, gpuLayers: Int): Int {
-        require(gpuLayers == GPU_LAYERS_MAX) { "OpenCL GPU-only runtime requires gpuLayers=99" }
+        require(gpuLayers > 0) { "OpenCL GPU-only runtime requires at least one GPU layer" }
         require(path.isNotBlank()) { "Model path must not be blank" }
         val file = File(path)
         require(file.isFile && file.canRead()) { "Model file is not readable: $path" }
