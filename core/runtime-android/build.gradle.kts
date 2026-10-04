@@ -31,9 +31,8 @@ android {
                     "-DGGML_CPU_ARM_ARCH=armv8-a",
                     "-DGGML_OPENMP=OFF",
                     "-DGGML_LLAMAFILE=OFF",
-                    "-DGGML_VULKAN=ON",
-                    "-DGGML_VULKAN_RUN_TESTS=OFF",
-                    "-DGGML_VULKAN_VALIDATE=OFF",
+                    "-DGGML_OPENCL=ON",
+                    "-DGGML_VULKAN=OFF",
                 )
             }
         }
