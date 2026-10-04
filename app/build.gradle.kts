@@ -36,7 +36,6 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-            packagingOptions.jniLibs.useLegacyPackaging = false
         }
     }
 
