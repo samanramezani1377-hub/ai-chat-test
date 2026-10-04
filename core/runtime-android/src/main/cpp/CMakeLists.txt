@@ -37,7 +37,14 @@ set(ENABLE_OPENCL_LAYER OFF CACHE BOOL "" FORCE)
 set(ENABLE_OPENCL_ICD_LOADER ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(opencl_icd_loader)
 
+# Android's CMake toolchain does not expose a linkable system OpenCL library.
+# The ICD loader target above is our portable link-time OpenCL implementation;
+# the real vendor OpenCL implementation is discovered dynamically at runtime.
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+
 set(GGML_OPENCL ON CACHE BOOL "Use OpenCL GPU backend" FORCE)
+set(GGML_OPENCL_USE_ADRENO_KERNELS OFF CACHE BOOL "Use portable OpenCL kernels, not Adreno-specific kernels" FORCE)
+set(GGML_OPENCL_USE_ADRENO_BIN_KERNELS OFF CACHE BOOL "Do not use vendor-specific Adreno binary kernels" FORCE)
 set(GGML_VULKAN OFF CACHE BOOL "Vulkan is intentionally disabled" FORCE)
 set(GGML_OPENCL_USE_SVM ON CACHE BOOL "Allow OpenCL shared virtual memory when supported" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
