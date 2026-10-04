@@ -35,12 +35,12 @@ import com.woogit.aicore.domain.Verifier
 import com.woogit.aicore.observability.CentralObservability
 import com.woogit.aicore.observability.ErrorReport
 import com.woogit.aicore.observability.ExecutionTraceEvent
-import com.woogit.aicore.runtime.RemoteApiRuntimeAdapter
+import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
 import java.nio.file.Files
 
-/** Application composition root. Inference is remote/API based; no local model runtime is wired. */
+/** Application composition root. Local GGUF inference is the primary runtime; remote API remains separately configurable. */
 class AppContainer(context: Context? = null) {
     companion object {
         @Volatile var latest: AppContainer? = null
@@ -58,9 +58,9 @@ class AppContainer(context: Context? = null) {
         traceStore = appContext?.let { AndroidExecutionTraceStore(it) } ?: com.woogit.aicore.observability.InMemoryExecutionTraceStore(),
     )
 
-    val modelRuntime: RuntimeAdapter = RemoteApiRuntimeAdapter { ApiProviderConfigStore.current }
+    val modelRuntime: RuntimeAdapter = LlamaCppAndroidRuntimeAdapter()
     val conversationHistory: ConversationHistoryRepository = appContext?.let { AndroidConversationHistoryRepository(it) } ?: InMemoryConversationHistoryRepository()
-    val modelManager: AndroidModelManager? = appContext?.let { AndroidModelManager(it.contentResolver, it.filesDir.toPath().resolve("models"), modelRuntime) }
+    val modelManager: AndroidModelManager? = appContext?.let {\n        AndroidModelManager(it.contentResolver, it.filesDir.toPath().resolve("models"), modelRuntime as LlamaCppAndroidRuntimeAdapter)\n    }
 
     fun apiConfig(): ApiProviderConfig = ApiProviderConfigStore.current
     fun updateApiConfig(config: ApiProviderConfig) { ApiProviderConfigStore.current = config }
