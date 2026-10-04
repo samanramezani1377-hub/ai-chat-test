@@ -68,7 +68,12 @@ class LlamaCppAndroidRuntimeAdapter(
             else -> 99
         }
         return try {
-            val requested = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
+            // Do not blindly allocate the model's advertised maximum context on mobile.
+            // Qwen3-1.7B uses about 112 KiB of FP16 KV cache per token, so 32K
+            // context alone is ~3.7 GiB before model weights and graph buffers.
+            // Keep the Android runtime at a conservative 4K working context.
+            val modelContext = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
+            val requested = minOf(modelContext, defaultContextLength)
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} context=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}")
             RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} requestedContext=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}")
             val result = NativeLlamaCpp.load(file.absolutePath, requested, requestedGpuLayers)
