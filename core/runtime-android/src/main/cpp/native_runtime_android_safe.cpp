@@ -71,6 +71,97 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInstallFatalHandlers
     install_native_fatal_handlers();
 }
 
+
+static bool emit_complete_utf8(JNIEnv * env, jobject listener, jmethodID on_token, std::string & pending) {
+    std::u16string utf16;
+    size_t i = 0;
+
+    while (i < pending.size()) {
+        const unsigned char c0 = static_cast<unsigned char>(pending[i]);
+        uint32_t codepoint = 0;
+        size_t width = 0;
+
+        if (c0 <= 0x7F) {
+            codepoint = c0;
+            width = 1;
+        } else if (c0 >= 0xC2 && c0 <= 0xDF) {
+            if (i + 1 >= pending.size()) break;
+            const unsigned char c1 = static_cast<unsigned char>(pending[i + 1]);
+            if ((c1 & 0xC0) != 0x80) {
+                codepoint = 0xFFFD;
+                width = 1;
+            } else {
+                codepoint = ((c0 & 0x1F) << 6) | (c1 & 0x3F);
+                width = 2;
+            }
+        } else if (c0 >= 0xE0 && c0 <= 0xEF) {
+            if (i + 2 >= pending.size()) break;
+            const unsigned char c1 = static_cast<unsigned char>(pending[i + 1]);
+            const unsigned char c2 = static_cast<unsigned char>(pending[i + 2]);
+            const bool valid =
+                    (c1 & 0xC0) == 0x80 &&
+                    (c2 & 0xC0) == 0x80 &&
+                    !(c0 == 0xE0 && c1 < 0xA0) &&
+                    !(c0 == 0xED && c1 >= 0xA0);
+            if (!valid) {
+                codepoint = 0xFFFD;
+                width = 1;
+            } else {
+                codepoint = ((c0 & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (c2 & 0x3F);
+                width = 3;
+            }
+        } else if (c0 >= 0xF0 && c0 <= 0xF4) {
+            if (i + 3 >= pending.size()) break;
+            const unsigned char c1 = static_cast<unsigned char>(pending[i + 1]);
+            const unsigned char c2 = static_cast<unsigned char>(pending[i + 2]);
+            const unsigned char c3 = static_cast<unsigned char>(pending[i + 3]);
+            const bool valid =
+                    (c1 & 0xC0) == 0x80 &&
+                    (c2 & 0xC0) == 0x80 &&
+                    (c3 & 0xC0) == 0x80 &&
+                    !(c0 == 0xF0 && c1 < 0x90) &&
+                    !(c0 == 0xF4 && c1 >= 0x90);
+            if (!valid) {
+                codepoint = 0xFFFD;
+                width = 1;
+            } else {
+                codepoint = ((c0 & 0x07) << 18) | ((c1 & 0x3F) << 12) |
+                            ((c2 & 0x3F) << 6) | (c3 & 0x3F);
+                width = 4;
+            }
+        } else {
+            codepoint = 0xFFFD;
+            width = 1;
+        }
+
+        if (codepoint <= 0xFFFF) {
+            utf16.push_back(static_cast<char16_t>(codepoint));
+        } else {
+            codepoint -= 0x10000;
+            utf16.push_back(static_cast<char16_t>(0xD800 + (codepoint >> 10)));
+            utf16.push_back(static_cast<char16_t>(0xDC00 + (codepoint & 0x3FF)));
+        }
+        i += width;
+    }
+
+    if (i == 0) return true;
+
+    jstring chunk = env->NewString(reinterpret_cast<const jchar *>(utf16.data()),
+                                   static_cast<jsize>(utf16.size()));
+    if (!chunk) return false;
+
+    env->CallVoidMethod(listener, on_token, chunk);
+    env->DeleteLocalRef(chunk);
+    if (env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+        return false;
+    }
+
+    pending.erase(0, i);
+    return true;
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         JNIEnv * env,
@@ -141,6 +232,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     append_native_trace((std::string("NATIVE_GENERATE_PARAMS promptTokens=") + std::to_string(n_prompt) + " maxTokens=" + std::to_string(max_predict) + " temperature=" + std::to_string(temp) + " topK=" + std::to_string(k) + " topP=" + std::to_string(p) + " minP=" + std::to_string(mp)).c_str());
     int generated = 0;
     int position = 0;
+    std::string pending_utf8;
     int result = 0;
     while (position + batch.n_tokens < n_prompt + max_predict) {
         if (g_stop.load(std::memory_order_relaxed)) { result = 9; checkpoint("NATIVE_GENERATE_STOPPED"); break; }
@@ -153,14 +245,30 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         int piece_size = llama_token_to_piece(vocab, token, piece, (int) sizeof(piece), 0, true);
         if (piece_size < 0) { append_native_trace((std::string("NATIVE_GENERATE_TOKEN_TO_PIECE_FAILED size=") + std::to_string(piece_size)).c_str()); checkpoint("NATIVE_GENERATE_TOKEN_TO_PIECE_FAILED"); result = 11; break; }
         if (piece_size > 0) {
-            jstring chunk = env->NewStringUTF(piece);
-            if (!chunk) { checkpoint("NATIVE_GENERATE_JSTRING_FAILED"); result = 12; break; }
-            env->CallVoidMethod(listener, on_token, chunk);
-            env->DeleteLocalRef(chunk);
-            if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); checkpoint("NATIVE_GENERATE_LISTENER_EXCEPTION"); result = 13; break; }
+            // llama_token_to_piece() deliberately does not null-terminate its output.
+            // Consume exactly piece_size bytes and keep incomplete UTF-8 sequences
+            // until the following token supplies the remaining bytes.
+            pending_utf8.append(piece, static_cast<size_t>(piece_size));
+            if (!emit_complete_utf8(env, listener, on_token, pending_utf8)) {
+                checkpoint("NATIVE_GENERATE_JSTRING_FAILED");
+                result = 12;
+                break;
+            }
         }
         ++generated;
         batch = llama_batch_get_one(const_cast<llama_token *>(&token), 1);
+    }
+    if (!pending_utf8.empty() && result == 0) {
+        // A valid model output should not leave a partial UTF-8 sequence behind.
+        // Emit it as U+FFFD rather than passing unterminated bytes to JNI.
+        pending_utf8.clear();
+        const jchar replacement = 0xFFFD;
+        jstring chunk = env->NewString(&replacement, 1);
+        if (chunk) {
+            env->CallVoidMethod(listener, on_token, chunk);
+            env->DeleteLocalRef(chunk);
+            if (env->ExceptionCheck()) env->ExceptionClear();
+        }
     }
     env->DeleteLocalRef(listener_class);
     llama_sampler_free(sampler);
