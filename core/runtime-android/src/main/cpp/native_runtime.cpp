@@ -245,14 +245,14 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
     std::lock_guard<std::mutex> lock(g_backend_init_mutex);
     if (!g_backend_initialized) {
         if (enable_gpu) {
-            unsetenv("GGML_DISABLE_VULKAN");
+            unsetenv("GGML_DISABLE_OPENCL");
             append_native_trace("GPU_BACKEND_LOAD_ALL_STARTED");
             ggml_backend_load_all();
             append_native_trace("GPU_BACKEND_LOAD_ALL_RETURNED");
             g_gpu_backend_loaded = true;
         } else {
-            setenv("GGML_DISABLE_VULKAN", "1", 1);
-            append_native_trace("CPU_ONLY_VULKAN_DISABLE_ENV_SET");
+            setenv("GGML_DISABLE_OPENCL", "1", 1);
+            append_native_trace("CPU_ONLY_OPENCL_DISABLE_ENV_SET");
             append_native_trace("CPU_ONLY_BACKEND_LOAD_ALL_SKIPPED");
         }
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
@@ -269,18 +269,18 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         }
         g_backend_initialized = true;
     } else if (enable_gpu && !g_gpu_backend_loaded) {
-        unsetenv("GGML_DISABLE_VULKAN");
+        unsetenv("GGML_DISABLE_OPENCL");
         append_native_trace("LATE_GPU_BACKEND_LOAD_STARTED");
         ggml_backend_load_all();
         append_native_trace("LATE_GPU_BACKEND_LOAD_ALL_RETURNED");
         g_gpu_backend_loaded = true;
     } else if (!enable_gpu) {
-        append_native_trace(g_gpu_backend_loaded ? "CPU_MODE_AFTER_GPU_INIT_VULKAN_ALREADY_LOADED" : "CPU_ONLY_BACKEND_ALREADY_INITIALIZED");
+        append_native_trace(g_gpu_backend_loaded ? "CPU_MODE_AFTER_GPU_INIT_OPENCL_ALREADY_LOADED" : "CPU_ONLY_BACKEND_ALREADY_INITIALIZED");
     }
 }
 
 static llama_model *load_model_android(const char *path, llama_model_params mp, bool gpu) {
-    // Avoid the mmap -> Vulkan host-pointer import path on Android. Mobile UMA Vulkan
+    // Avoid the mmap -> OpenCL host-pointer import path on Android. Mobile UMA OpenCL
     // drivers can fail inside buffer_from_host_ptr while the model is being initialized.
     // LLAMA_LOAD_MODE_NONE keeps bounded file reads and normal backend allocations, so
     // GPU layers remain enabled without relying on the fragile mmap buffer import.
@@ -355,7 +355,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeUnload(JNIEnv *, jclass) { g_stop.store(true); free_all(); }
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeRuntimeInfo(JNIEnv *env, jclass) {
-    const std::string value = std::string(g_gpu ? "Hybrid(CPU+Vulkan)" : "CPU/NEON") + "; llama.cpp=c5fc7e34885ba31217e330809437afa993d27745";
+    const std::string value = std::string(g_gpu ? "Hybrid(CPU+OpenCL)" : "CPU/NEON") + "; llama.cpp=c5fc7e34885ba31217e330809437afa993d27745";
     return env->NewStringUTF(value.c_str());
 }
 
