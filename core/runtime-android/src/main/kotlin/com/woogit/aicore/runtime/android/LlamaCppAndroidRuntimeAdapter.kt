@@ -23,8 +23,6 @@ class LlamaCppAndroidRuntimeAdapter(
     gpuLayers: Int = GPU_LAYERS_CPU_ONLY,
 ) : RuntimeAdapter, RuntimeMetrics {
     companion object {
-        const val GPU_LAYERS_CPU_ONLY = 0
-        const val GPU_LAYERS_70 = 70
         const val GPU_LAYERS_MAX = 99
     }
 
@@ -37,13 +35,13 @@ class LlamaCppAndroidRuntimeAdapter(
     @Volatile private var latestGeneration: GenerationResult? = null
     @Volatile private var latestLoadTimeMs: Long? = null
 
-    init { require(gpuLayers in setOf(GPU_LAYERS_CPU_ONLY, GPU_LAYERS_70, GPU_LAYERS_MAX)) { "Unsupported diagnostic GPU layer mode: $gpuLayers" } }
+    init { require(gpuLayers == GPU_LAYERS_MAX) { "Unsupported diagnostic GPU layer mode: $gpuLayers" } }
 
     fun setGpuLayers(value: Int) {
-        require(value in setOf(GPU_LAYERS_CPU_ONLY, GPU_LAYERS_70, GPU_LAYERS_MAX)) { "Unsupported diagnostic GPU layer mode: $value" }
+        require(value == GPU_LAYERS_MAX) { "Unsupported diagnostic GPU layer mode: $value" }
         gpuLayersMode = value
-        RuntimeDiagnosticsStore.recordNativeEvent("GPU_LAYER_MODE_SELECTED percent=$value")
-        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "GPU_LAYER_MODE_SELECTED percent=$value (applies on next activation)")
+        RuntimeDiagnosticsStore.recordNativeEvent("OPENCL_GPU_ONLY_SELECTED")
+        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "OPENCL_GPU_ONLY_SELECTED (applies on next activation)")
     }
 
     fun gpuLayers(): Int = gpuLayersMode
@@ -63,12 +61,10 @@ class LlamaCppAndroidRuntimeAdapter(
         val file = model.path.toFile()
         if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
         val startedAt = System.nanoTime()
-        val requestedGpuPercent = gpuLayersMode
+        val requestedGpuPercent = 100
         val totalBlocks = model.metadata.blockCount?.toInt()?.takeIf { it > 0 }
         val requestedGpuLayers = when {
-            requestedGpuPercent <= 0 -> 0
-            requestedGpuPercent >= 99 -> 99
-            totalBlocks != null -> ((totalBlocks * requestedGpuPercent) / 100.0).roundToInt().coerceIn(1, totalBlocks)
+            totalBlocks != null -> totalBlocks
             else -> 99
         }
         return try {
