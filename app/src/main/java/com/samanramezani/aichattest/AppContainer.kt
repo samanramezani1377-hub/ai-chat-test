@@ -38,7 +38,7 @@ import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
 import java.nio.file.Files
 
-/** Application composition root. Local GGUF inference is the primary runtime; remote API remains separately configurable. */
+/** Application composition root. Local GGUF inference is the only runtime. */
 class AppContainer(context: Context? = null) {
     companion object {
         @Volatile var latest: AppContainer? = null
@@ -191,7 +191,7 @@ class AppContainer(context: Context? = null) {
 
     private suspend fun reportError(component: String, code: String, userMessageFa: String, throwable: Throwable, actionId: String? = null, taskId: String? = null, executionId: String? = null) {
         val trace = executionId?.let { observability.traces(it) }?.joinToString("\n") { "${it.timestamp} ${it.phase}: ${it.message ?: ""}" }
-        observability.error(appVersion = appVersion, component = component, errorCode = code, userMessageFa = userMessageFa, rawMachineError = throwable.stackTraceToString(), actionId = actionId, taskId = taskId, trace = trace, runtimeInfo = modelRuntime.runtimeInfo().toString(), modelInfo = ApiProviderConfigStore.current.toString())
+        observability.error(appVersion = appVersion, component = component, errorCode = code, userMessageFa = userMessageFa, rawMachineError = throwable.stackTraceToString(), actionId = actionId, taskId = taskId, trace = trace, runtimeInfo = modelRuntime.runtimeInfo().toString(), modelInfo = modelRuntime.runtimeInfo().toString())
     }
 }
 
