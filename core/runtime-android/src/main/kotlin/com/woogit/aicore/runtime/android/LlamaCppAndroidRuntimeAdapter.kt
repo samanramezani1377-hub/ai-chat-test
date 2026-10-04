@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.collect
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
-/** Direct llama.cpp Android runtime. CPU is the safe default; GPU/Vulkan is opt-in. */
+/** Direct llama.cpp Android runtime. OpenCL GPU is preferred; CPU is the automatic fallback. */
 class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 4096,
     gpuLayers: Int = GPU_LAYERS_CPU_ONLY,
@@ -73,14 +73,14 @@ class LlamaCppAndroidRuntimeAdapter(
         }
         return try {
             val requested = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
-            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} context=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}")
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} context=$requested gpuPercent=$requestedGpuPercent gpuLayers=$actualGpuLayers totalBlocks=${totalBlocks ?: "unknown"}")
             RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} requestedContext=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}")
             val result = NativeLlamaCpp.load(file.absolutePath, requested, requestedGpuLayers)
-            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_RETURNED code=$result gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers")
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_RETURNED code=$result gpuPercent=$requestedGpuPercent gpuLayers=$actualGpuLayers")
             if (result != 0) return ModelResult.Failure(ModelError.Inference("llama.cpp failed to load the model (code=$result)"))
             val info = NativeLlamaCpp.runtimeInfo()
             selectedBackend = info.substringBefore(';').ifBlank { "CPU/NEON" }
-            selectedGpuLayers = if (selectedBackend.contains("Vulkan", ignoreCase = true)) requestedGpuLayers else 0
+            selectedGpuLayers = if (selectedBackend.contains("OpenCL", ignoreCase = true)) actualGpuLayers else 0
             selectedCpuThreads = 2
             loadedContextLength = NativeLlamaCpp.contextLength().takeIf { it > 0 } ?: requested
             latestGeneration = null
