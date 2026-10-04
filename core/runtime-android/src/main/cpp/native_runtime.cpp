@@ -310,7 +310,11 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     const int effective = std::max(1, std::min(requested, trained));
     checkpoint((std::string("MODEL_READY trained_ctx=") + std::to_string(trained) + " effective_ctx=" + std::to_string(effective)).c_str());
     llama_context_params cp = llama_context_default_params();
-    cp.n_ctx = (uint32_t)effective; cp.n_batch = std::min<uint32_t>(cp.n_ctx, 512); cp.n_ubatch = cp.n_batch;
+    cp.n_ctx = (uint32_t)effective;
+    // Keep graph/batch working sets small on mobile GPUs. The previous 512-token
+    // batch is unnecessarily large for interactive single-message generation.
+    cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
+    cp.n_ubatch = cp.n_batch;
     cp.n_threads = threads(); cp.n_threads_batch = threads();
     checkpoint("CONTEXT_INIT_STARTED"); g_context = llama_init_from_model(g_model, cp);
     checkpoint(g_context ? "CONTEXT_INIT_RETURNED_SUCCESS" : "CONTEXT_INIT_RETURNED_FAILED");
