@@ -96,11 +96,22 @@ fun SettingsScreen(
     onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)? = null, onDelete: (String) -> Unit,
 ) {
     var section by remember { mutableStateOf("مدل") }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = UiTokens.pagePadding), contentPadding = PaddingValues(top = UiTokens.sectionGap, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(UiTokens.sectionGap)) {
-        item { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("تنظیمات", style = MaterialTheme.typography.headlineMedium); Text("کنترل‌های واقعی برنامه و Runtime محلی", color = MaterialTheme.colorScheme.onSurfaceVariant) } }        item { SettingsGroup("هوش مصنوعی", aiSections, section) { section = it } }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = UiTokens.pagePadding),
+        contentPadding = PaddingValues(top = UiTokens.sectionGap, bottom = 36.dp),
+        verticalArrangement = Arrangement.spacedBy(UiTokens.sectionGap),
+    ) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("تنظیمات", style = MaterialTheme.typography.headlineMedium)
+                Text("کنترل‌های واقعی برنامه و Runtime محلی", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        item { SettingsGroup("هوش مصنوعی", aiSections, section) { section = it } }
         item { SettingsGroup("برنامه", appSections, section) { section = it } }
         item { HorizontalDivider() }
-        item { when (section) {
+        item {
+            when (section) {
             "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
             "استنتاج" -> InferenceControls()
             "زمینه" -> ContextControls()
