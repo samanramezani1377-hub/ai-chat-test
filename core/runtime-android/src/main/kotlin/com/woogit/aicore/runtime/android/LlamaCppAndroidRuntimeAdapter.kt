@@ -180,7 +180,7 @@ class LlamaCppAndroidRuntimeAdapter(
         NativeLlamaCpp.stop()
     }
 
-    override fun runtimeInfo(): RuntimeInfo = RuntimeInfo(name = "llama.cpp-android-direct", version = "c5fc7e34885ba31217e330809437afa993d27745", backend = selectedBackend, threads = selectedCpuThreads, gpuLayers = selectedGpuLayers, contextLength = loadedContextLength ?: defaultContextLength)
+    override fun runtimeInfo(): RuntimeInfo = RuntimeInfo(name = "llama.cpp-android-direct", version = "2e7c58c", backend = selectedBackend, threads = selectedCpuThreads, gpuLayers = selectedGpuLayers, contextLength = loadedContextLength ?: defaultContextLength)
 
     private class RuntimeFailure(val error: ModelError) : IllegalStateException(error.message)
 }
