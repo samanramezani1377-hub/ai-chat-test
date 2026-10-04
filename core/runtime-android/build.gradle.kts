@@ -56,17 +56,6 @@ android {
     }
 }
 
-// There is no release APK/package in the current development phase.
-// Disable the library release variant so Gradle cannot configure/build
-// buildCMakeRelease for this native runtime module.
-androidComponents {
-    beforeVariants { variantBuilder ->
-        if (variantBuilder.buildType == "release") {
-            variantBuilder.enable = false
-        }
-    }
-}
-
 dependencies {
     implementation(project(":core:domain"))
     implementation(project(":core:runtime"))
