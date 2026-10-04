@@ -20,7 +20,7 @@ import kotlin.math.roundToInt
 /** Direct llama.cpp Android runtime. OpenCL GPU is preferred; CPU is the automatic fallback. */
 class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 4096,
-    gpuLayers: Int = GPU_LAYERS_CPU_ONLY,
+    gpuLayers: Int = GPU_LAYERS_MAX,
 ) : RuntimeAdapter, RuntimeMetrics {
     companion object {
         const val GPU_LAYERS_MAX = 99
