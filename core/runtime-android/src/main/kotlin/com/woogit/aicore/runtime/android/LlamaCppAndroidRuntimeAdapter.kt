@@ -32,6 +32,7 @@ class LlamaCppAndroidRuntimeAdapter(
     @Volatile private var selectedCpuThreads = 2
     @Volatile private var selectedBackend = "OpenCL"
     @Volatile private var loadedContextLength: Int? = null
+    @Volatile private var loadedArchitecture: String = "unknown"
     @Volatile private var latestGeneration: GenerationResult? = null
     @Volatile private var latestLoadTimeMs: Long? = null
 
@@ -84,6 +85,7 @@ class LlamaCppAndroidRuntimeAdapter(
             selectedGpuLayers = if (selectedBackend.contains("OpenCL", ignoreCase = true)) requestedGpuLayers else 0
             selectedCpuThreads = 2
             loadedContextLength = NativeLlamaCpp.contextLength().takeIf { it > 0 } ?: requested
+            loadedArchitecture = model.metadata.architecture?.lowercase() ?: "unknown"
             latestGeneration = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_RUNTIME_READY backend=$selectedBackend gpuPercent=$requestedGpuPercent gpuLayers=$selectedGpuLayers context=$loadedContextLength")
@@ -95,6 +97,7 @@ class LlamaCppAndroidRuntimeAdapter(
             selectedGpuLayers = 0
             selectedBackend = "OpenCL"
             loadedContextLength = null
+            loadedArchitecture = "unknown"
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
             RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_FAILED, "MODEL_LOAD_DIAGNOSTIC_FAILED ${t.message}")
             ModelResult.Failure(RuntimeErrorMapper.loadFailure(t, file.absolutePath))
@@ -119,7 +122,14 @@ class LlamaCppAndroidRuntimeAdapter(
         currentCoroutineContext().ensureActive()
         if (loadedContextLength == null) return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
         val settings = request.settings
-        val prompt = try { Qwen3PromptFormatter.format(request.messages) } catch (t: Throwable) { return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation")) }
+        val prompt = try {
+            when (loadedArchitecture) {
+                "lfm2" -> Lfm2PromptFormatter.format(request.messages)
+                else -> Qwen3PromptFormatter.format(request.messages)
+            }
+        } catch (t: Throwable) {
+            return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation"))
+        }
         stopRequested.set(false)
         RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_STARTED context=$loadedContextLength backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
         RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "context=${loadedContextLength} backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
@@ -129,7 +139,14 @@ class LlamaCppAndroidRuntimeAdapter(
         val pending = StringBuilder()
         val maxStopLength = settings.stopSequences.maxOfOrNull { it.length } ?: 0
         return try {
-            NativeLlamaCpp.generate(prompt = prompt, maxTokens = settings.maxNewTokens.coerceAtLeast(1), temperature = settings.temperature.toFloat().coerceAtLeast(0f), topK = (settings.topK ?: 40).coerceAtLeast(0), topP = (settings.topP ?: 0.9).toFloat().coerceIn(0f, 1f), minP = (settings.minP ?: 0.05).toFloat().coerceIn(0f, 1f)).collect { chunk ->
+            NativeLlamaCpp.generate(
+                prompt = prompt,
+                maxTokens = settings.maxNewTokens.coerceAtLeast(1),
+                temperature = if (loadedArchitecture == "lfm2") 0.3f else settings.temperature.toFloat().coerceAtLeast(0f),
+                topK = (settings.topK ?: 40).coerceAtLeast(0),
+                topP = (settings.topP ?: 0.9).toFloat().coerceIn(0f, 1f),
+                minP = if (loadedArchitecture == "lfm2") 0.15f else (settings.minP ?: 0.05).toFloat().coerceIn(0f, 1f)
+            ).collect { chunk ->
                 currentCoroutineContext().ensureActive()
                 if (chunk.isEmpty() || stopRequested.get()) return@collect
                 if (firstTokenAt == null) firstTokenAt = System.nanoTime()
@@ -181,7 +198,7 @@ class LlamaCppAndroidRuntimeAdapter(
         NativeLlamaCpp.stop()
     }
 
-    override fun runtimeInfo(): RuntimeInfo = RuntimeInfo(name = "llama.cpp-android-direct", version = "2e7c58c", backend = selectedBackend, threads = selectedCpuThreads, gpuLayers = selectedGpuLayers, contextLength = loadedContextLength ?: defaultContextLength)
+    override fun runtimeInfo(): RuntimeInfo = RuntimeInfo(name = "llama.cpp-android-direct", version = "2ca15f5", backend = selectedBackend, threads = selectedCpuThreads, gpuLayers = selectedGpuLayers, contextLength = loadedContextLength ?: defaultContextLength)
 
     private class RuntimeFailure(val error: ModelError) : IllegalStateException(error.message)
 }
