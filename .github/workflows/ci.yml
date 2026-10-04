@@ -54,6 +54,7 @@ jobs:
           :core:domain:test
           :core:observability:test
           :core:runtime:test
+          :core:runtime-android:test
           :core:settings:test
           :app:testDebugUnitTest
           --stacktrace
@@ -93,6 +94,7 @@ jobs:
       - name: Assemble debug APK
         run: >-
           gradle
+          :core:runtime-android:assembleDebug
           :app:assembleDebug
           --stacktrace
           --console=plain
