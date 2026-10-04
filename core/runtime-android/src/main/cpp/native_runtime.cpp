@@ -251,9 +251,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
             append_native_trace("GPU_BACKEND_LOAD_ALL_RETURNED");
             g_gpu_backend_loaded = true;
         } else {
-            setenv("GGML_DISABLE_OPENCL", "1", 1);
-            append_native_trace("CPU_ONLY_OPENCL_DISABLE_ENV_SET");
-            append_native_trace("CPU_ONLY_BACKEND_LOAD_ALL_SKIPPED");
+            unsetenv("GGML_DISABLE_OPENCL");
+            append_native_trace("OPENCL_BACKEND_REQUIRED");
         }
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
         llama_backend_init();
