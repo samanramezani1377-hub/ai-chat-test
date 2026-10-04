@@ -75,7 +75,7 @@ class LlamaCppAndroidRuntimeAdapter(
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_RETURNED code=$result gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers")
             if (result != 0) return ModelResult.Failure(ModelError.Inference("llama.cpp failed to load the model (code=$result)"))
             val info = NativeLlamaCpp.runtimeInfo()
-            selectedBackend = info.substringBefore(';').ifBlank { "CPU/NEON" }
+            selectedBackend = info.substringBefore(';').ifBlank { "OpenCL" }
             selectedGpuLayers = if (selectedBackend.contains("OpenCL", ignoreCase = true)) requestedGpuLayers else 0
             selectedCpuThreads = 2
             loadedContextLength = NativeLlamaCpp.contextLength().takeIf { it > 0 } ?: requested
@@ -88,7 +88,7 @@ class LlamaCppAndroidRuntimeAdapter(
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_EXCEPTION ${t::class.java.name}: ${t.message}")
             NativeLlamaCpp.unload()
             selectedGpuLayers = 0
-            selectedBackend = "CPU/NEON"
+            selectedBackend = "OpenCL"
             loadedContextLength = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
             RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_FAILED, "MODEL_LOAD_DIAGNOSTIC_FAILED ${t.message}")
@@ -101,7 +101,7 @@ class LlamaCppAndroidRuntimeAdapter(
         NativeLlamaCpp.unload()
         stopRequested.set(false)
         selectedGpuLayers = 0
-        selectedBackend = "CPU/NEON"
+        selectedBackend = "OpenCL"
         loadedContextLength = null
     }
 
