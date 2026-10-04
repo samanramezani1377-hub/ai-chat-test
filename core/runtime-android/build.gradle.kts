@@ -11,6 +11,9 @@ android {
     defaultConfig {
         minSdk = 29
         consumerProguardFiles("consumer-rules.pro")
+        ndk {
+            debugSymbolLevel = "none"
+        }
         externalNativeBuild {
             cmake {
                 // Validation is intentionally debug-only while native loading is under investigation.
@@ -31,6 +34,7 @@ android {
                     "-DGGML_LLAMAFILE=OFF",
                     "-DGGML_OPENCL=ON",
                     "-DGGML_VULKAN=OFF",
+                    "-DCMAKE_BUILD_TYPE=Release",
                 )
             }
         }
