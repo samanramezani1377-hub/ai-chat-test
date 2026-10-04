@@ -111,6 +111,7 @@ class LlamaCppAndroidRuntimeAdapter(
         selectedGpuLayers = 0
         selectedBackend = "OpenCL"
         loadedContextLength = null
+        loadedArchitecture = "unknown"
     }
 
     override suspend fun generate(request: GenerationRequest, onToken: suspend (String) -> Unit): GenerationResult = when (val result = generateResult(request, onToken)) {
