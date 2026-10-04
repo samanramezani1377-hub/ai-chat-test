@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
-set(LLAMA_CPP_TAG "2e7c58c" CACHE STRING "Pinned llama.cpp revision with Android OpenCL support")
+set(LLAMA_CPP_TAG "2ca15f5404760548c39e7b92bd43116a09414a1a" CACHE STRING "Pinned llama.cpp revision with LFM2 and Android OpenCL support")
 set(FETCHCONTENT_QUIET OFF)
 set(FETCHCONTENT_BASE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../.cxx/fetch-content" CACHE PATH "Stable FetchContent base directory")
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "Do not update pinned FetchContent dependencies")
