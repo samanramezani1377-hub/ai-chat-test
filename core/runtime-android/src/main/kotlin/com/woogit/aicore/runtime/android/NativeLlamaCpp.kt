@@ -15,8 +15,6 @@ internal object NativeLlamaCpp {
     private const val PREFLIGHT_FILE = "ai-chat-model-preflight.txt"
     private var nativeInitialized = false
 
-    const val GPU_LAYERS_CPU_ONLY = 0
-    const val GPU_LAYERS_70 = 70
     const val GPU_LAYERS_MAX = 99
 
     init {
@@ -25,43 +23,27 @@ internal object NativeLlamaCpp {
         Log.i(TAG, "ACTIVATION_NATIVE_LIBRARY_LOAD_RETURNED")
     }
 
-    /**
-     * Backend selection is a per-load request. The native side owns the process-wide
-     * backend registry and safely handles first initialization plus late Vulkan loading.
-     * Do not reject CPU -> GPU (or GPU -> CPU model) transitions here: nativeLoad always
-     * releases the previous model/context before loading the newly requested model.
-     */
-    private fun ensureNativeInitialized(gpuLayers: Int) {
-        val enableGpu = gpuLayers != GPU_LAYERS_CPU_ONLY
+    /** OpenCL is the only native backend; every model load requests full GPU offload. */
+    private fun ensureNativeInitialized() {
         synchronized(this) {
-            Log.i(
-                TAG,
-                "ACTIVATION_NATIVE_INIT_REQUESTED gpu=$enableGpu gpu_layers=$gpuLayers " +
-                    "previously_initialized=$nativeInitialized"
-            )
-            nativeInit(enableGpu)
-            // native_runtime.cpp has its legacy installer for standalone use. The Android
-            // safe translation unit exposes a second JNI entry point that installs the
-            // Android handler after nativeInit, avoiding preprocessor call-site collisions.
+            Log.i(TAG, "ACTIVATION_NATIVE_INIT_REQUESTED backend=OpenCL previously_initialized=$nativeInitialized")
+            nativeInit(true)
             nativeInstallFatalHandlers()
             nativeInitialized = true
-            Log.i(
-                TAG,
-                "ACTIVATION_NATIVE_INIT_RETURNED gpu=$enableGpu gpu_layers=$gpuLayers"
-            )
+            Log.i(TAG, "ACTIVATION_NATIVE_INIT_RETURNED backend=OpenCL")
         }
     }
 
     /** One serialized native activation transaction. Native side owns model/context lifetime. */
     @Synchronized
     fun load(path: String, contextLength: Int, gpuLayers: Int): Int {
-        require(gpuLayers >= 0) { "gpuLayers must be >= 0" }
+        require(gpuLayers == GPU_LAYERS_MAX) { "OpenCL GPU-only runtime requires gpuLayers=99" }
         require(path.isNotBlank()) { "Model path must not be blank" }
         val file = File(path)
         require(file.isFile && file.canRead()) { "Model file is not readable: $path" }
 
         persistModelLoadPreflight(path, contextLength, gpuLayers)
-        ensureNativeInitialized(gpuLayers)
+        ensureNativeInitialized()
         Log.i(TAG, "ACTIVATION_LOAD_BEGIN ctx_len=$contextLength gpu_layers=$gpuLayers file=${file.name}")
         return try {
             val result = nativeLoad(path, contextLength, gpuLayers)
@@ -100,7 +82,7 @@ internal object NativeLlamaCpp {
                 appendLine("file_size_mib=${if (file.isFile) file.length() / 1048576.0 else -1.0}")
                 appendLine("requested_context=$contextLength")
                 appendLine("gpu_layers=$gpuLayers")
-                appendLine("backend_mode=${if (gpuLayers == 0) "CPU" else "GPU"}")
+                appendLine("backend_mode=OpenCL_GPU_ONLY")
                 appendLine("device_mem_total_bytes=${memoryInfo.totalMem}")
                 appendLine("device_mem_available_bytes=${memoryInfo.availMem}")
                 appendLine("device_mem_available_mib=${memoryInfo.availMem / 1048576.0}")
