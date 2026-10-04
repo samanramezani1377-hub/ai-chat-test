@@ -26,19 +26,15 @@ internal fun GpuDebugControls() {
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("حالت GPU برای دیباگ موقت", style = MaterialTheme.typography.titleMedium)
-        Text("فقط برای تست کرش. انتخاب بعدیِ فعال‌سازی مدل اعمال می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        Text("Runtime فقط با OpenCL GPU اجرا می‌شود؛ انتخاب CPU یا GPU جزئی غیرفعال است.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(
-                LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_CPU_ONLY to "۰٪ · CPU",
-                LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_70 to "۷۰٪ · GPU",
-                LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_MAX to "۹۹٪ · GPU Max",
-            ).forEach { (value, label) ->
-                val selectedNow = selected == value
-                if (selectedNow) {
-                    Button(onClick = { runtime.setGpuLayers(value); selected = value }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(label) }
-                } else {
-                    OutlinedButton(onClick = { runtime.setGpuLayers(value); selected = value }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(label) }
-                }
+            val value = LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_MAX
+            val label = "۱۰۰٪ · OpenCL GPU"
+            val selectedNow = selected == value
+            if (selectedNow) {
+                Button(onClick = { runtime.setGpuLayers(value); selected = value }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(label) }
+            } else {
+                OutlinedButton(onClick = { runtime.setGpuLayers(value); selected = value }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(label) }
             }
         }
     }
