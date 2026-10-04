@@ -244,37 +244,17 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
 
     std::lock_guard<std::mutex> lock(g_backend_init_mutex);
     if (!g_backend_initialized) {
-        if (enable_gpu) {
-            unsetenv("GGML_DISABLE_OPENCL");
-            append_native_trace("GPU_BACKEND_LOAD_ALL_STARTED");
-            ggml_backend_load_all();
-            append_native_trace("GPU_BACKEND_LOAD_ALL_RETURNED");
-            g_gpu_backend_loaded = true;
-        } else {
-            unsetenv("GGML_DISABLE_OPENCL");
-            append_native_trace("OPENCL_BACKEND_REQUIRED");
-        }
+        unsetenv("GGML_DISABLE_OPENCL");
+        append_native_trace("OPENCL_BACKEND_LOAD_ALL_STARTED");
+        ggml_backend_load_all();
+        append_native_trace("OPENCL_BACKEND_LOAD_ALL_RETURNED");
+        g_gpu_backend_loaded = true;
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
         llama_backend_init();
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_RETURNED");
-        if (!enable_gpu) {
-            const size_t backend_count = ggml_backend_reg_count();
-            const bool cpu_available = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU) != nullptr;
-            const bool gpu_available = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) != nullptr ||
-                                       ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU) != nullptr;
-            append_native_trace((std::string("CPU_ONLY_BACKEND_REG_COUNT=") + std::to_string(backend_count)).c_str());
-            append_native_trace(cpu_available ? "CPU_ONLY_CPU_DEVICE_AVAILABLE" : "CPU_ONLY_CPU_DEVICE_MISSING");
-            append_native_trace(gpu_available ? "CPU_ONLY_GPU_DEVICE_UNEXPECTEDLY_AVAILABLE" : "CPU_ONLY_GPU_DEVICE_ABSENT");
-        }
         g_backend_initialized = true;
-    } else if (enable_gpu && !g_gpu_backend_loaded) {
-        unsetenv("GGML_DISABLE_OPENCL");
-        append_native_trace("LATE_GPU_BACKEND_LOAD_STARTED");
-        ggml_backend_load_all();
-        append_native_trace("LATE_GPU_BACKEND_LOAD_ALL_RETURNED");
-        g_gpu_backend_loaded = true;
-    } else if (!enable_gpu) {
-        append_native_trace(g_gpu_backend_loaded ? "CPU_MODE_AFTER_GPU_INIT_OPENCL_ALREADY_LOADED" : "CPU_ONLY_BACKEND_ALREADY_INITIALIZED");
+    } else {
+        append_native_trace("OPENCL_BACKEND_ALREADY_INITIALIZED");
     }
 }
 
@@ -299,41 +279,31 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     const char *path = env->GetStringUTFChars(jpath, nullptr);
     if (!path) { checkpoint("PATH_UTF8_FAILED"); return 3; }
     const std::string preflight = gguf_preflight(path); checkpoint(preflight.c_str());
-    llama_model_params mp = llama_model_default_params(); mp.n_gpu_layers = gpu_layers;
-
-    if (gpu_layers == 0) {
-        checkpoint("CPU_ONLY_DEVICE_SELECTION_STARTED");
-        mp.load_mode = LLAMA_LOAD_MODE_MMAP;
-        mp.check_tensors = false;
-        checkpoint("CPU_ONLY_CANONICAL_DEVICE_SELECTION");
-        checkpoint("CPU_ONLY_LOAD_MODE_MMAP");
-        checkpoint("CPU_ONLY_CHECK_TENSORS_DISABLED");
-    } else {
-        checkpoint("GPU_DEVICE_SELECTION_DEFAULT");
-        mp.load_mode = LLAMA_LOAD_MODE_MMAP;
-        mp.check_tensors = false;
-        checkpoint("GPU_LOAD_MODE_MMAP");
-        checkpoint("GPU_CHECK_TENSORS_DISABLED");
+    if (gpu_layers <= 0) {
+        checkpoint("OPENCL_GPU_ONLY_REJECTED_INVALID_GPU_LAYERS");
+        env->ReleaseStringUTFChars(jpath, path);
+        return 4;
     }
-
+    llama_model_params mp = llama_model_default_params();
+    mp.n_gpu_layers = gpu_layers;
+    mp.load_mode = LLAMA_LOAD_MODE_NONE;
+    mp.check_tensors = false;
+    checkpoint("OPENCL_GPU_DEVICE_SELECTION");
+    checkpoint("OPENCL_GPU_ONLY_LOAD_MODE_STAGED");
+    checkpoint("OPENCL_GPU_ONLY_CHECK_TENSORS_DISABLED");
     checkpoint((std::string("MODEL_LOAD_PARAMS gpu_layers=") + std::to_string((int)mp.n_gpu_layers) +
         " load_mode=" + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
-    checkpoint(gpu_layers == 0 ? "MODEL_LOAD_STARTED gpu_layers=0" : "MODEL_LOAD_STARTED gpu_layers=GPU");
-    g_model = load_model_android(path, mp, gpu_layers != 0);
+    checkpoint("MODEL_LOAD_STARTED gpu_layers=OPENCL");
+    g_model = load_model_android(path, mp, true);
     checkpoint(g_model ? "MODEL_LOAD_RETURNED_SUCCESS" : "MODEL_LOAD_RETURNED_FAILED");
     env->ReleaseStringUTFChars(jpath, path);
-    if (!g_model && gpu_layers != 0) {
-        checkpoint("GPU_MODEL_LOAD_FAILED_CPU_FALLBACK_STARTED");
-        path = env->GetStringUTFChars(jpath, nullptr); if (!path) return 3;
-        mp = llama_model_default_params(); mp.n_gpu_layers = 0;
-        mp.load_mode = LLAMA_LOAD_MODE_MMAP;
-        mp.check_tensors = false;
-        checkpoint("CPU_MODEL_LOAD_STARTED mmap check_tensors=0");
-        g_model = load_model_android(path, mp, false);
-        checkpoint(g_model ? "CPU_MODEL_LOAD_RETURNED_SUCCESS" : "CPU_MODEL_LOAD_RETURNED_FAILED");
-        env->ReleaseStringUTFChars(jpath, path); g_gpu = false;
-    } else g_gpu = g_model != nullptr && gpu_layers != 0;
+    if (!g_model) {
+        checkpoint("OPENCL_GPU_ONLY_MODEL_LOAD_FAILED_NO_CPU_FALLBACK");
+        g_gpu = false;
+        return 1;
+    }
+    g_gpu = true;
     if (!g_model) { checkpoint("MODEL_LOAD_FAILED"); return 1; }
     const int trained = llama_model_n_ctx_train(g_model);
     const int requested = ctx_len > 0 ? ctx_len : 4096;
@@ -354,7 +324,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeUnload(JNIEnv *, jclass) { g_stop.store(true); free_all(); }
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeRuntimeInfo(JNIEnv *env, jclass) {
-    const std::string value = std::string(g_gpu ? "Hybrid(CPU+OpenCL)" : "CPU/NEON") + "; llama.cpp=c5fc7e34885ba31217e330809437afa993d27745";
+    const std::string value = std::string(g_gpu ? "OpenCL-GPU-ONLY" : "OpenCL-UNAVAILABLE") + "; llama.cpp=" + AI_CHAT_LLAMA_CPP_SHA;
     return env->NewStringUTF(value.c_str());
 }
 
