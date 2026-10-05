@@ -93,7 +93,18 @@ class LlamaCppAndroidRuntimeAdapter(
             val requested = minOf(modelContext, defaultContextLength)
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} context=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}")
             RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} requestedContext=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}")
-            val result = NativeLlamaCpp.load(file.absolutePath, requested, requestedGpuLayers)
+            val draftCandidates = listOf(
+    File(file.parentFile, "Qwen3-0.6B-Q4_K_M.gguf"),
+    File(file.parentFile, "Qwen3-0.6B-Q5_K_M.gguf"),
+    File(file.parentFile, "Qwen3-0.6B-Q6_K.gguf")
+)
+val draftFile = draftCandidates.firstOrNull { it.isFile && it.canRead() }
+if (draftFile != null) {
+    RuntimeDiagnosticsStore.recordNativeEvent("SPECULATIVE_DRAFT_SELECTED file=" + draftFile.name + " sizeBytes=" + draftFile.length())
+} else {
+    RuntimeDiagnosticsStore.recordNativeEvent("SPECULATIVE_DRAFT_NOT_FOUND target=" + file.name)
+}
+val result = NativeLlamaCpp.load(file.absolutePath, requested, requestedGpuLayers, draftFile?.absolutePath)
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_RETURNED code=$result gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers")
             if (result != 0) return ModelResult.Failure(ModelError.Inference("llama.cpp failed to load the model (code=$result)"))
             val info = NativeLlamaCpp.runtimeInfo()
