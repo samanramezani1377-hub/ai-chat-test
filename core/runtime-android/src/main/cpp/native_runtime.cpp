@@ -43,7 +43,7 @@ static int generation_threads() {
     const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
     // Decode is memory-bandwidth bound; keep a bounded number of workers and
     // derive it from the host topology rather than hard-coding a device.
-    return std::clamp((int)(cores / 2), 2, 4);
+    return std::clamp((int)cores, 2, 4);
 }
 
 static int batch_threads() {
@@ -270,7 +270,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
                         g_native_marker_file = base + "/ai-chat-last-native-event.txt";
                         g_native_trace_file = base + "/ai-chat-native-trace.txt";
                         g_native_fatal_fd = open((base + "/ai-chat-native-trace.txt").c_str(), O_WRONLY | O_CREAT | O_APPEND, 0600);
-                        setenv("GGML_OPENCL_KERNEL_CACHE_DIR", base.c_str(), 0);
+                        // Keep the OpenCL program cache in an app-private subdirectory.
+                        // llama.cpp already invalidates entries by kernel source, build
+                        // options, device, driver and platform, so this is a persistence
+                        // location only; it does not alter kernel selection.
+                        const std::string cl_cache_dir = base + "/ai-chat-opencl-cache";
+                        setenv("GGML_OPENCL_KERNEL_CACHE_DIR", cl_cache_dir.c_str(), 0);
                         env->ReleaseStringUTFChars(tmp_dir, dir);
                     }
                     env->DeleteLocalRef(tmp_dir);
@@ -292,11 +297,11 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
 
     std::lock_guard<std::mutex> lock(g_backend_init_mutex);
     if (!g_backend_initialized) {
-        // Upstream llama.cpp uses this as an opt-in Adreno XMEM GEMM path. It is
-        // capability/backend based (not tied to a specific phone), and has a
-        // measured benefit on supported Adreno devices. Non-Adreno OpenCL paths
-        // simply do not select the Adreno kernel.
-        setenv("GGML_OPENCL_ADRENO_XMEM_GEMM", "1", 1);
+        // Do not force vendor-specific XMEM selection here. Upstream llama.cpp
+        // selects the Adreno XMEM path from backend capabilities, while keeping
+        // generic OpenCL devices on their generic kernels. This keeps the runtime
+        // device-agnostic and avoids turning a performance experiment into a
+        // global backend policy.
         unsetenv("GGML_DISABLE_OPENCL");
         append_native_trace("OPENCL_BACKEND_LOAD_ALL_STARTED");
         ggml_backend_load_all();
