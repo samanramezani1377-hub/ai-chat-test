@@ -31,7 +31,8 @@ static std::mutex g_native_runtime_mutex;
 static bool g_spec_requested=false;
 static std::string g_spec_draft_path;
 static common_speculative_init_result_ptr g_spec_init;
-static common_speculative_ptr g_spec;
+static common_speculative * g_spec = nullptr;
+static void append_native_trace(const char *text);
 
 static void append_speculative_stats_trace(int draft_tokens, int accepted_tokens, int steps) {
     const double rate = draft_tokens > 0 ? (100.0 * static_cast<double>(accepted_tokens) / static_cast<double>(draft_tokens)) : 0.0;
@@ -66,7 +67,7 @@ static bool init_speculative_runtime() {
         if(!g_spec){g_spec_init.reset();return false;}
         append_native_trace((std::string("SPECULATIVE_READY draft=")+g_spec_draft_path+" nMax=4").c_str());
         return true;
-    } catch(const std::exception &e){append_native_trace((std::string("SPECULATIVE_EXCEPTION ")+e.what()).c_str());g_spec.reset();g_spec_init.reset();return false;}
+    } catch(const std::exception &e){append_native_trace((std::string("SPECULATIVE_EXCEPTION ")+e.what()).c_str());if (g_spec) { common_speculative_free(g_spec); g_spec = nullptr; }g_spec_init.reset();return false;}
 }
 
 static common_params_sampling spec_sampling(float temperature,int top_k,float top_p,float min_p){
@@ -113,30 +114,30 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
     };
 
     llama_tokens hist(inp.begin(), inp.end()-1);
-    common_speculative_begin(g_spec.get(), 0, hist);
+    common_speculative_begin(g_spec, 0, hist);
 
     for (int off=0; off<n_prompt-1; off+=cap) {
         int n=std::min(cap,n_prompt-1-off);
         common_batch cb(g_context);
         for(int i=0;i<n;++i) cb.add(inp[(size_t)off+i],(llama_pos)(off+i),0,false);
         fill(inp.data()+off,n,off,false);
-        if(llama_decode(g_context,batch)!=0 || !common_speculative_process(g_spec.get(),cb)){llama_batch_free(batch);finish();return 10;}
+        if(llama_decode(g_context,batch)!=0 || !common_speculative_process(g_spec,cb)){llama_batch_free(batch);finish();return 10;}
     }
 
     llama_token last=inp.back();
     int pos=(int)hist.size(), generated=0;
     while(generated<max_tokens && !g_stop.load(std::memory_order_relaxed)){
-        auto &dp=common_speculative_get_draft_params(g_spec.get(),0);
+        auto &dp=common_speculative_get_draft_params(g_spec,0);
         dp={}; dp.drafting=true; dp.n_max=std::min(4,max_tokens-generated-1); dp.pos0=pos; dp.id_last=last; dp.prompt=&hist;
-        llama_tokens draft; dp.result=&draft; common_speculative_draft(g_spec.get());
+        llama_tokens draft; dp.result=&draft; common_speculative_draft(g_spec);
         draft_tokens+=(int)draft.size();
 
         if(draft.empty()){
             fill(&last,1,pos,true);
             common_batch one(g_context); one.add(last,pos,0,true);
-            if(llama_decode(g_context,batch)!=0 || !common_speculative_process(g_spec.get(),one)){llama_batch_free(batch);finish();return 10;}
+            if(llama_decode(g_context,batch)!=0 || !common_speculative_process(g_spec,one)){llama_batch_free(batch);finish();return 10;}
             llama_token tok=common_sampler_sample(smp.get(),g_context,0);
-            common_sampler_accept(smp.get(),tok,true); common_speculative_accept(g_spec.get(),0,0);
+            common_sampler_accept(smp.get(),tok,true); common_speculative_accept(g_spec,0,0);
             if(!emit_spec_token(env,listener,on_token,vocab,tok)){llama_batch_free(batch);finish();return 12;}
             ++generated; hist.push_back(last); last=tok; ++pos; continue;
         }
@@ -146,13 +147,13 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
         fill(verify.data(),(int)verify.size(),pos,true);
         common_batch cb(g_context);
         for(size_t i=0;i<verify.size();++i) cb.add(verify[i],(llama_pos)(pos+i),0,i+1==verify.size());
-        if(llama_decode(g_context,batch)!=0 || !common_speculative_process(g_spec.get(),cb)){llama_batch_free(batch);finish();return 10;}
+        if(llama_decode(g_context,batch)!=0 || !common_speculative_process(g_spec,cb)){llama_batch_free(batch);finish();return 10;}
 
         std::vector<int> idx; for(size_t i=0;i<=draft.size();++i) idx.push_back((int)i);
         auto ids=common_sampler_sample_and_accept_n(smp.get(),g_context,idx,draft);
         if(ids.empty()){llama_batch_free(batch);finish();return 10;}
         const int acc=std::max(0,(int)ids.size()-1); accepted_tokens+=acc; ++steps;
-        common_speculative_accept(g_spec.get(),0,(uint16_t)acc);
+        common_speculative_accept(g_spec,0,(uint16_t)acc);
 
         const llama_pos rollback_from=pos+(llama_pos)ids.size();
         const llama_pos decoded_end=pos+(llama_pos)verify.size();
