@@ -286,6 +286,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         }
     }
 
+    // Do not publish the new prompt as cacheable until its prefill has actually
+    // completed. A failed decode must never advertise a partially-built state
+    // as a valid prefix for the next turn.
+
     llama_batch batch;
     if (reuse_prefix < prompt_tokens.size()) {
         batch = llama_batch_get_one(prompt_tokens.data() + reuse_prefix,
@@ -321,7 +325,14 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             append_native_trace((std::string("NATIVE_PREFILL_COMPLETED promptTokens=") + std::to_string(n_prompt) + " reusedTokens=" + std::to_string(reuse_prefix) + " prefillMs=" + std::to_string(prefill_ms)).c_str());
             prefill_recorded = true;
         }
-        if (decode_result != 0) { append_native_trace((std::string("NATIVE_GENERATE_DECODE_FAILED code=") + std::to_string(decode_result)).c_str()); checkpoint("NATIVE_GENERATE_DECODE_FAILED"); result = 10; break; }
+        if (decode_result != 0) {
+            append_native_trace((std::string("NATIVE_GENERATE_DECODE_FAILED code=") + std::to_string(decode_result)).c_str());
+            g_cached_prompt_tokens.clear();
+            llama_memory_clear(memory, true);
+            checkpoint("NATIVE_GENERATE_DECODE_FAILED_CACHE_RESET");
+            result = 10;
+            break;
+        }
         position += batch.n_tokens;
         const llama_token token = llama_sampler_sample(sampler, g_context, -1);
         llama_sampler_accept(sampler, token);
