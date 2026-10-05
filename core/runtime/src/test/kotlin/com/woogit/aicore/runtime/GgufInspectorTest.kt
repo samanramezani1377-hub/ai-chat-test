@@ -31,6 +31,20 @@ class GgufInspectorTest {
     }
 
     @Test
+    fun `inspects Qwen3.5 GGUF with Q6_K quantization`() {
+        val file = Files.createTempFile("qwen35-test-", ".gguf")
+        try {
+            Files.write(file, buildMinimalQwen35Q6K())
+            val result = kotlinx.coroutines.runBlocking { GgufInspector().inspect(file) }
+            val inspection = assertIs<ModelResult.Success<*>>(result).value as com.woogit.aicore.domain.ModelInspection
+            assertEquals("qwen35", inspection.metadata.architecture)
+            assertEquals(Quantization.Q6_K, inspection.quantization)
+        } finally {
+            Files.deleteIfExists(file)
+        }
+    }
+
+    @Test
     fun `inspects GGUF metadata containing tokenizer sized arrays without retaining every element`() {
         val file = Files.createTempFile("qwen3-large-metadata-", ".gguf")
         try {
@@ -80,6 +94,21 @@ class GgufInspectorTest {
         out.writeIntLE(4)
         out.writeIntLE(18)
 
+        return out.toByteArray()
+    }
+
+    private fun buildMinimalQwen35Q6K(): ByteArray {
+        val out = mutableListOf<Byte>()
+        out.addAll("GGUF".encodeToByteArray().toList())
+        out.writeIntLE(3)
+        out.writeLongLE(1)
+        out.writeLongLE(2)
+        out.writeString("general.architecture")
+        out.writeIntLE(8)
+        out.writeString("qwen35")
+        out.writeString("general.file_type")
+        out.writeIntLE(4)
+        out.writeIntLE(18)
         return out.toByteArray()
     }
 
