@@ -57,8 +57,8 @@ static bool init_generation_context() {
     if (!g_model || g_context_length == 0) return false;
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx = g_context_length;
-    cp.n_batch = std::min<uint32_t>(cp.n_ctx, 512);
-    cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 512);
+    cp.n_batch = std::min<uint32_t>(cp.n_ctx, 256);
+    cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 256);
     // Let llama.cpp select the backend-safe attention implementation. The previous
     // forced-disabled path expanded attention work and was a major mobile decode
     // cost at 8K context. AUTO preserves the normal attention math while allowing
@@ -270,6 +270,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
                         g_native_marker_file = base + "/ai-chat-last-native-event.txt";
                         g_native_trace_file = base + "/ai-chat-native-trace.txt";
                         g_native_fatal_fd = open((base + "/ai-chat-native-trace.txt").c_str(), O_WRONLY | O_CREAT | O_APPEND, 0600);
+                        setenv("GGML_OPENCL_KERNEL_CACHE_DIR", base.c_str(), 0);
                         env->ReleaseStringUTFChars(tmp_dir, dir);
                     }
                     env->DeleteLocalRef(tmp_dir);
@@ -291,6 +292,11 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
 
     std::lock_guard<std::mutex> lock(g_backend_init_mutex);
     if (!g_backend_initialized) {
+        // Upstream llama.cpp uses this as an opt-in Adreno XMEM GEMM path. It is
+        // capability/backend based (not tied to a specific phone), and has a
+        // measured benefit on supported Adreno devices. Non-Adreno OpenCL paths
+        // simply do not select the Adreno kernel.
+        setenv("GGML_OPENCL_ADRENO_XMEM_GEMM", "1", 1);
         unsetenv("GGML_DISABLE_OPENCL");
         append_native_trace("OPENCL_BACKEND_LOAD_ALL_STARTED");
         ggml_backend_load_all();
