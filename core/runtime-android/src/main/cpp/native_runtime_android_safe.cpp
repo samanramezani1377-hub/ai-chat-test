@@ -517,7 +517,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
 
     if (result == 0) {
         while (generated < max_predict) {
-            if (g_stop.load(std::memory_order_relaxed)) { result = 9; checkpoint("NATIVE_GENERATE_STOPPED"); break; }
+            if (g_stop.load(std::memory_order_relaxed)) { result = 9; stop_reason = "USER_STOP"; checkpoint("NATIVE_GENERATE_STOPPED"); break; }
 
             const llama_token token = llama_sampler_sample(sampler, g_context, -1);
             llama_sampler_accept(sampler, token);
