@@ -60,7 +60,7 @@ static bool init_generation_context() {
     cp.n_ctx = g_context_length;
     cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
     cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 128);
-    cp.n_rs_seq = g_spec_requested ? 4 : 0;
+    cp.n_rs_seq = 0;
     // Let llama.cpp select the backend-safe attention implementation. The previous
     // forced-disabled path expanded attention work and was a major mobile decode
     // cost at 8K context. AUTO preserves the normal attention math while allowing
@@ -196,6 +196,10 @@ static void checkpoint(const char *event) {
 }
 
 static void free_all() {
+    if (g_spec) { common_speculative_free(g_spec); g_spec = nullptr; }
+    g_spec_init.reset();
+    g_spec_requested = false;
+    g_spec_draft_path.clear();
     clear_android_generation_cache();
     if (g_sampler) { llama_sampler_free(g_sampler); g_sampler = nullptr; }
     if (g_context) { llama_synchronize(g_context); llama_free(g_context); g_context = nullptr; }
@@ -385,6 +389,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     const bool context_ready = init_generation_context();
     checkpoint(context_ready ? "CONTEXT_INIT_RETURNED_SUCCESS" : "CONTEXT_INIT_RETURNED_FAILED");
     if (!context_ready) { checkpoint("CONTEXT_INIT_FAILED"); free_all(); return 2; }
+    if (g_spec_requested) {
+        const bool spec_ready = init_speculative_runtime();
+        checkpoint(spec_ready ? "SPECULATIVE_INIT_RETURNED_SUCCESS" : "SPECULATIVE_INIT_RETURNED_FAILED");
+    }
     checkpoint("NATIVE_LOAD_COMPLETED"); return 0;
 }
 
