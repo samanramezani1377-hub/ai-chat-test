@@ -33,6 +33,7 @@ class LlamaCppAndroidRuntimeAdapter(
     @Volatile private var selectedBackend = "OpenCL"
     @Volatile private var loadedContextLength: Int? = null
     @Volatile private var loadedArchitecture: String = "unknown"
+    @Volatile private var loadedModelPath: String? = null
     @Volatile private var latestGeneration: GenerationResult? = null
     @Volatile private var latestLoadTimeMs: Long? = null
 
@@ -58,6 +59,11 @@ class LlamaCppAndroidRuntimeAdapter(
 
     suspend fun loadResult(model: ModelDescriptor): ModelResult<Unit> {
         currentCoroutineContext().ensureActive()
+        val requestedPath = model.path.toFile().absolutePath
+        if (loadedContextLength != null && loadedModelPath == requestedPath) {
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_SKIPPED_ALREADY_LOADED file=${model.path.toFile().name} context=$loadedContextLength gpuLayers=$selectedGpuLayers")
+            return ModelResult.Success(Unit)
+        }
         unload()
         val file = model.path.toFile()
         if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
@@ -86,6 +92,7 @@ class LlamaCppAndroidRuntimeAdapter(
             selectedCpuThreads = 2
             loadedContextLength = NativeLlamaCpp.contextLength().takeIf { it > 0 } ?: requested
             loadedArchitecture = model.metadata.architecture?.lowercase() ?: "unknown"
+            loadedModelPath = file.absolutePath
             latestGeneration = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_RUNTIME_READY backend=$selectedBackend gpuPercent=$requestedGpuPercent gpuLayers=$selectedGpuLayers context=$loadedContextLength")
@@ -98,6 +105,7 @@ class LlamaCppAndroidRuntimeAdapter(
             selectedBackend = "OpenCL"
             loadedContextLength = null
             loadedArchitecture = "unknown"
+            loadedModelPath = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
             RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_FAILED, "MODEL_LOAD_DIAGNOSTIC_FAILED ${t.message}")
             ModelResult.Failure(RuntimeErrorMapper.loadFailure(t, file.absolutePath))
@@ -112,6 +120,7 @@ class LlamaCppAndroidRuntimeAdapter(
         selectedBackend = "OpenCL"
         loadedContextLength = null
         loadedArchitecture = "unknown"
+        loadedModelPath = null
     }
 
     override suspend fun generate(request: GenerationRequest, onToken: suspend (String) -> Unit): GenerationResult = when (val result = generateResult(request, onToken)) {
