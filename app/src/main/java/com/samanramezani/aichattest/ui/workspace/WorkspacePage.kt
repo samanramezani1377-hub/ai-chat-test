@@ -9,7 +9,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.samanramezani.aichattest.AppContainer
-import com.samanramezani.aichattest.ui.components.SimplePage
+import com.samanramezani1377.aichattest.ui.components.SimplePage
 import com.samanramezani.aichattest.ui.state.ExecutionState
 import com.woogit.aicore.actions.ActionErrorLog
 import com.woogit.aicore.actions.ActionExecutionState
