@@ -147,10 +147,11 @@ class LlamaCppAndroidRuntimeAdapter(
         currentCoroutineContext().ensureActive()
         if (loadedContextLength == null) return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
         val settings = request.settings
+        val safeMessages = trimMessagesToContext(request.messages, settings.maxNewTokens.coerceAtLeast(1))
         val prompt = try {
             when (loadedArchitecture) {
-                "lfm2" -> Lfm2PromptFormatter.format(request.messages)
-                else -> Qwen3PromptFormatter.format(request.messages)
+                "lfm2" -> Lfm2PromptFormatter.format(safeMessages)
+                else -> Qwen3PromptFormatter.format(safeMessages)
             }
         } catch (t: Throwable) {
             return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation"))
@@ -216,6 +217,44 @@ class LlamaCppAndroidRuntimeAdapter(
             }
             } finally { stopRequested.set(false) }
         }
+    }
+
+    /**
+     * Keep as much recent conversation as possible while reserving the full generation
+     * budget. The actual GGUF vocabulary counts tokens, so mixed Persian/English text
+     * is handled without a character-based guess.
+     */
+    private fun trimMessagesToContext(
+        messages: List<com.woogit.aicore.domain.ChatMessage>,
+        maxNewTokens: Int,
+    ): List<com.woogit.aicore.domain.ChatMessage> {
+        val context = loadedContextLength ?: return messages
+        val reserve = maxNewTokens + 32
+        val budget = context - reserve
+        if (messages.isEmpty() || budget <= 0) return messages.takeLast(1)
+
+        val selected = ArrayDeque<com.woogit.aicore.domain.ChatMessage>()
+        for (index in messages.lastIndex downTo 0) {
+            selected.addFirst(messages[index])
+            val candidate = selected.toList()
+            val formatted = when (loadedArchitecture) {
+                "lfm2" -> Lfm2PromptFormatter.format(candidate)
+                else -> Qwen3PromptFormatter.format(candidate)
+            }
+            val tokenCount = NativeLlamaCpp.countTokens(formatted)
+            if (tokenCount < 0 || tokenCount > budget) {
+                selected.removeFirst()
+                break
+            }
+        }
+        val result = selected.toList()
+        RuntimeDiagnosticsStore.recordNativeEvent(
+            "NATIVE_PROMPT_BUDGET context=" + context +
+                " reserve=" + reserve +
+                " selectedMessages=" + result.size +
+                " originalMessages=" + messages.size
+        )
+        return if (result.isNotEmpty()) result else messages.takeLast(1)
     }
 
     override suspend fun stopGeneration() {
