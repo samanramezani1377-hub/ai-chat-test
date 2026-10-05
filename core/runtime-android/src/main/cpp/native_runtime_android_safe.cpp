@@ -29,7 +29,10 @@ static void clear_android_generation_cache() {
 
 static std::mutex g_native_runtime_mutex;
 static bool g_spec_requested=false;
+static bool g_spec_mtp=false;
 static std::string g_spec_draft_path;
+static std::string g_target_model_path;
+static double g_spec_accept_ema=1.0;
 static common_speculative_init_result_ptr g_spec_init;
 static common_speculative * g_spec = nullptr;
 static void append_native_trace(const char *text);
@@ -52,29 +55,46 @@ static void append_speculative_stats_trace(int draft_tokens, int accepted_tokens
 #undef install_native_fatal_handlers
 
 static bool init_speculative_runtime() {
-    if (!g_spec_requested || g_spec_draft_path.empty() || !g_model || !g_context) return false;
+    if (!g_spec_requested || !g_model || !g_context) return false;
     try {
         common_params p;
-        p.model.path = g_spec_draft_path;
+        p.model.path = g_target_model_path;
         p.n_ctx = (int) llama_n_ctx(g_context);
         p.n_batch = 128; p.n_ubatch = 128;
         p.n_parallel = 1; p.n_sequences = 1; p.n_gpu_layers = 99;
-        p.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE };
-        p.speculative.draft.mparams.path = g_spec_draft_path;
-        p.speculative.draft.n_max = 4;
+        p.speculative.draft.n_max = 3;
         p.speculative.draft.n_gpu_layers = 99;
-        g_spec_init = common_speculative_init_from_params(p, g_model, g_context);
-        if (!g_spec_init || !g_spec_init->context() || !g_spec_init->model()) { g_spec_init.reset(); return false; }
-        if (!common_speculative_are_compatible(g_model, g_spec_init->model())) {
-            append_native_trace("SPECULATIVE_INCOMPATIBLE_VOCAB");
-            g_spec_init.reset();
-            return false;
-        }
         p.speculative.draft.ctx_tgt = g_context;
-        p.speculative.draft.ctx_dft = g_spec_init->context();
+
+        if (g_spec_mtp) {
+            p.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_MTP };
+            g_spec_init = common_speculative_init_from_params(p, g_model, g_context);
+            if (!g_spec_init || !g_spec_init->context()) {
+                g_spec_init.reset();
+                append_native_trace("MTP_INIT_CONTEXT_FAILED");
+                return false;
+            }
+            p.speculative.draft.ctx_dft = g_spec_init->context();
+        } else {
+            p.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE };
+            p.speculative.draft.mparams.path = g_spec_draft_path;
+            g_spec_init = common_speculative_init_from_params(p, g_model, g_context);
+            if (!g_spec_init || !g_spec_init->context() || !g_spec_init->model()) {
+                g_spec_init.reset();
+                return false;
+            }
+            if (!common_speculative_are_compatible(g_model, g_spec_init->model())) {
+                append_native_trace("SPECULATIVE_INCOMPATIBLE_VOCAB");
+                g_spec_init.reset();
+                return false;
+            }
+            p.speculative.draft.ctx_dft = g_spec_init->context();
+        }
+
         g_spec = common_speculative_init(p.speculative, 1);
         if (!g_spec) { g_spec_init.reset(); return false; }
-        append_native_trace((std::string("SPECULATIVE_READY draft=") + g_spec_draft_path + " nMax=4").c_str());
+        append_native_trace((std::string("SPECULATIVE_READY mode=") +
+            (g_spec_mtp ? "MTP" : "DRAFT") + " nMax=3").c_str());
         return true;
     } catch (const std::exception &e) {
         append_native_trace((std::string("SPECULATIVE_EXCEPTION ") + e.what()).c_str());
@@ -83,7 +103,6 @@ static bool init_speculative_runtime() {
         return false;
     }
 }
-
 static common_params_sampling spec_sampling(float temperature,int top_k,float top_p,float min_p){
     common_params_sampling p; p.top_k=std::max(0,top_k); p.top_p=std::clamp(top_p,0.f,1.f); p.min_p=std::clamp(min_p,0.f,1.f);
     p.temp=std::max(0.f,temperature); p.penalty_last_n=64; p.penalty_repeat=1.1f;
@@ -142,7 +161,9 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
     int pos=(int)hist.size(), generated=0;
     while(generated<max_tokens && !g_stop.load(std::memory_order_relaxed)){
         auto &dp=common_speculative_get_draft_params(g_spec,0);
-        dp={}; dp.drafting=true; dp.n_max=std::min(4,max_tokens-generated-1); dp.pos0=pos; dp.id_last=last; dp.prompt=&hist;
+        dp={}; dp.drafting=true;
+        const int adaptiveMax = g_spec_accept_ema > 0.82 ? 5 : (g_spec_accept_ema > 0.62 ? 3 : 2);
+        dp.n_max=std::min(adaptiveMax,max_tokens-generated-1); dp.pos0=pos; dp.id_last=last; dp.prompt=&hist;
         llama_tokens draft; dp.result=&draft; common_speculative_draft(g_spec);
         draft_tokens+=(int)draft.size();
 
@@ -167,6 +188,13 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
         auto ids=common_sampler_sample_and_accept_n(smp.get(),g_context,idx,draft);
         if(ids.empty()){llama_batch_free(batch);finish();return 10;}
         const int acc=std::max(0,(int)ids.size()-1); accepted_tokens+=acc; ++steps;
+        if (!draft.empty()) {
+            const double roundRate = static_cast<double>(acc) / static_cast<double>(draft.size());
+            g_spec_accept_ema = 0.75 * g_spec_accept_ema + 0.25 * roundRate;
+            append_native_trace((std::string("SPECULATIVE_ADAPT acceptance=") +
+                std::to_string(roundRate) + " ema=" + std::to_string(g_spec_accept_ema) +
+                " nextMax=" + std::to_string(g_spec_accept_ema > 0.82 ? 5 : (g_spec_accept_ema > 0.62 ? 3 : 2))).c_str());
+        }
         common_speculative_accept(g_spec,0,(uint16_t)acc);
 
         const llama_pos rollback_from=pos+(llama_pos)ids.size();
