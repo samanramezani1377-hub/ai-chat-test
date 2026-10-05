@@ -302,7 +302,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     }
     append_native_trace((std::string("NATIVE_GENERATE_PARAMS promptTokens=") + std::to_string(n_prompt) + " maxTokens=" + std::to_string(max_predict) + " temperature=" + std::to_string(temp) + " topK=" + std::to_string(k) + " topP=" + std::to_string(p) + " minP=" + std::to_string(mp)).c_str());
     int generated = 0;
-    int position = 0;
+    int position = (int) reuse_prefix;
     std::string pending_utf8;
     int result = 0;
     const auto generation_started_at = std::chrono::steady_clock::now();
@@ -319,6 +319,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         if (decode_result != 0) { append_native_trace((std::string("NATIVE_GENERATE_DECODE_FAILED code=") + std::to_string(decode_result)).c_str()); checkpoint("NATIVE_GENERATE_DECODE_FAILED"); result = 10; break; }
         position += batch.n_tokens;
         const llama_token token = llama_sampler_sample(sampler, g_context, -1);
+        llama_sampler_accept(sampler, token);
         if (llama_vocab_is_eog(vocab, token)) { checkpoint("NATIVE_GENERATE_EOG"); break; }
         char piece[1024];
         int piece_size = llama_token_to_piece(vocab, token, piece, (int) sizeof(piece), 0, true);
