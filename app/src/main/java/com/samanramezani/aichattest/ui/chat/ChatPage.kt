@@ -144,8 +144,8 @@ private fun ActionSummary(
             if (execution.approvalRequired) {
                 Text("این عملیات حساس است و قبل از اجرا به تأیید شما نیاز دارد.", style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onApprove, enabled = !approvalBusy, Modifier.weight(1f).heightIn(min = 48.dp)) { Text(if (approvalBusy) "در حال اجرا…" else "تأیید و اجرا") }
-                    OutlinedButton(onClick = onReject, enabled = !approvalBusy, Modifier.weight(1f).heightIn(min = 48.dp)) { Text("رد") }
+                    Button(onClick = onApprove, enabled = !approvalBusy, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(if (approvalBusy) "در حال اجرا…" else "تأیید و اجرا") }
+                    OutlinedButton(onClick = onReject, enabled = !approvalBusy, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("رد") }
                 }
             }
         }
