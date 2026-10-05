@@ -374,7 +374,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     // completed. A failed decode must never advertise a partially-built state
     // as a valid prefix for the next turn.
 
-    // The context is intentionally configured with a physical batch/ubatch of 128 on Android.
+    // The context is intentionally configured with a physical batch/ubatch of 256 on Android.
     // Never pass the entire 4K context as one llama_decode() batch: llama_decode() requires
     // callers to split larger prompt batches according to llama_n_batch(). Passing a 3K-4K
     // token prompt directly here was the long-prompt crash path and could also corrupt the
