@@ -29,8 +29,8 @@ private const val KEY_SEED = "seed"
 private const val KEY_STOPS = "stop_sequences"
 private const val KEY_MAX_ACTION_STEPS = "max_action_steps"
 
-private val aiSections = listOf("مدل", "استنتاج", "زمینه", "عامل")
-private val appSections = listOf("فضای کار", "لاگ و عیب‌یابی", "عملکرد", "امنیت و تأیید")
+private val aiSections = listOf("مدل", "پاسخ", "زمینه", "عامل")
+private val appSections = listOf("برنامه", "لاگ و عیب‌یابی", "عملکرد", "امنیت و تأیید")
 
 private enum class InferencePreset(
     val title: String,
@@ -104,7 +104,7 @@ fun SettingsScreen(
         item {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("تنظیمات", style = MaterialTheme.typography.headlineMedium)
-                Text("کنترل‌های واقعی برنامه و Runtime محلی", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("تنظیمات ساده برای استفاده روزمره؛ گزینه‌های تخصصی فقط وقتی لازم باشند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item { SettingsGroup("هوش مصنوعی", aiSections, section) { section = it } }
@@ -113,10 +113,10 @@ fun SettingsScreen(
         item {
             when (section) {
             "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
-            "استنتاج" -> InferenceControls()
+            "پاسخ" -> InferenceControls()
             "زمینه" -> ContextControls()
             "عامل" -> AgentControls()
-            "فضای کار" -> SettingsInfo("فضای کار", "Workspace محیط اجرای واقعی Actionهاست. تنظیمات مسیر یا دسترسی عمومی قابل تغییر نیست تا مرز امنیتی Workspace شکسته نشود.")
+            "برنامه" -> SettingsInfo("برنامه", "مدل و پاسخ‌ها روی دستگاه اجرا می‌شوند و inference به API ابری متکی نیست.")
             "لاگ و عیب‌یابی" -> SettingsInfo("لاگ و عیب‌یابی", "گزارش Runtime، TTFT، زمان تولید، تنظیمات، Runtime Trace و Action Trace از داده واقعی جمع می‌شوند. گزارش کامل و گزارش خطا از صفحه عیب‌یابی قابل کپی هستند.")
             "عملکرد" -> SettingsInfo("عملکرد", "Performance بدون مقدار ساختگی از Runtime اندازه‌گیری می‌شود. برای تشخیص TTFT و سرعت تولید، صفحه عیب‌یابی آخرین metrics واقعی را نمایش می‌دهد.")
             "امنیت و تأیید" -> SettingsInfo("امنیت و تأیید", "Actionهای حساس قبل از اجرا نیازمند تأیید هستند. این سیاست بخشی از مسیر واقعی Agent است و برای جلوگیری از دور زدن کنترل امنیتی، خاموش‌کردن عمومی آن ارائه نشده است.")
