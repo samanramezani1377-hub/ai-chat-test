@@ -1,8 +1,9 @@
 #include "llama.h"
 
-// Hook used by the Android wrapper to invalidate the token/cache bookkeeping whenever
-// the native model/context is replaced or unloaded.
-static void clear_android_generation_cache();
+// Hook used by the Android wrapper to invalidate token/cache bookkeeping whenever
+// the native model/context is replaced or unloaded. KV reuse is intentionally disabled
+// for this mobile runtime, so there is no separate Android-side cache to invalidate.
+static void clear_android_generation_cache() {}
 #include <signal.h>
 #include <unistd.h>
 #include <vector>
