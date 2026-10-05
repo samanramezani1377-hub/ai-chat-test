@@ -60,7 +60,7 @@ dependencies {
 
     // Keep all Compose artifacts on Google's stable BOM so Gradle cannot resolve
     // unversioned Compose modules to an incompatible alpha release.
-    val composeBom = platform("androidx.compose:compose-bom:2026.07.00")
+    val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
