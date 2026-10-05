@@ -159,6 +159,8 @@ class LlamaCppAndroidRuntimeAdapter(
         stopRequested.set(false)
         RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_STARTED context=$loadedContextLength backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
         RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "context=${loadedContextLength} backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
+        val promptTokens = NativeLlamaCpp.countTokens(prompt).takeIf { it >= 0 }
+        RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_PROMPT_READY context=$loadedContextLength promptTokens=${promptTokens ?: "n/a"} maxNewTokens=${settings.maxNewTokens}")
         val startedAt = System.nanoTime()
         var firstTokenAt: Long? = null
         val output = StringBuilder()
@@ -191,14 +193,14 @@ class LlamaCppAndroidRuntimeAdapter(
                 }
             }
             if (!stopRequested.get() && pending.isNotEmpty()) { onToken(pending.toString()); output.append(pending); pending.setLength(0) }
-            val completed = GenerationResult(text = output.toString(), firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 }, generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000, stopped = stopRequested.get())
+            val completed = GenerationResult(text = output.toString(), inputTokens = promptTokens?.toLong(), outputTokens = NativeLlamaCpp.countTokens(output.toString()).takeIf { it >= 0 }?.toLong(), firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 }, generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000, stopped = stopRequested.get())
             latestGeneration = completed
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_RETURNED tokens=${completed.outputTokens ?: "n/a"}")
             RuntimeDiagnosticsStore.recordGeneration(settings, completed, runtimeInfo())
             ModelResult.Success(completed)
         } catch (t: CancellationException) {
             if (stopRequested.get()) {
-                val stopped = GenerationResult(text = output.toString(), firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 }, generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000, stopped = true)
+                val stopped = GenerationResult(text = output.toString(), inputTokens = promptTokens?.toLong(), outputTokens = NativeLlamaCpp.countTokens(output.toString()).takeIf { it >= 0 }?.toLong(), firstTokenTimeMs = firstTokenAt?.let { (it - startedAt) / 1_000_000 }, generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000, stopped = true)
                 latestGeneration = stopped
                 RuntimeDiagnosticsStore.recordGeneration(settings, stopped, runtimeInfo())
                 ModelResult.Success(stopped)
