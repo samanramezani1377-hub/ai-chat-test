@@ -35,7 +35,7 @@ private val sections = listOf("مدل", "پاسخ", "زمینه", "عامل")
 private enum class InferencePreset(val title: String, val description: String, val settings: InferenceSettings) {
     FAST("سریع", "برای گفت‌وگوی روزمره", InferenceSettings(temperature=.7, maxNewTokens=256, topK=32, topP=.9, minP=0.0, repeatPenalty=1.1, contextLength=2048, recentMessages=6, maxActionSteps=2)),
     BALANCED("استاندارد", "پیشنهاد من برای استفاده معمول", InferenceSettings(temperature=.7, maxNewTokens=512, topK=40, topP=.9, minP=0.0, repeatPenalty=1.1, contextLength=4096, recentMessages=10, maxActionSteps=4)),
-    DEEP("عمیق", "پاسخ طولانی‌تر، مصرف بیشتر", InferenceSettings(temperature=.65, maxNewTokens=1024, topK=50, topP=.92, minP=0.0, repeatPenalty=1.1, contextLength=8192, recentMessages=20, maxActionSteps=6)),
+    DEEP("عمیق", "پاسخ طولانی‌تر، مصرف بیشتر", InferenceSettings(temperature=.65, maxNewTokens=1024, topK=50, topP=.92, minP=0.0, repeatPenalty=1.1, contextLength=4096, recentMessages=12, maxActionSteps=6)),
 }
 
 @Composable
