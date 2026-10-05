@@ -58,8 +58,7 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
-    // Current stable Compose BOM: keeps the complete UI stack on a compatible modern release.
-    
+    // Compose versions are pinned through the concrete UI/Material dependencies below.
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.foundation:foundation-layout")
@@ -73,7 +72,5 @@ dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("androidx.compose.material3:material3-adaptive-navigation-suite:1.5.0-alpha29")
-
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
 }
