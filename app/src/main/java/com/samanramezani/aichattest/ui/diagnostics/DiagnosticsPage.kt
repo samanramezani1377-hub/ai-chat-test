@@ -135,7 +135,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             }
         }
 
-        Text("برای بررسی فنی، «گزارش کامل» را کپی کن. اطلاعات خام عملکرد نگه داشته می‌شود و تشخیص گلوگاه به بررسی گزارش سپرده می‌شود.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("اول وضعیت، بعد اعداد مهم، و در انتها جزئیات خام را می‌بینی. این صفحه فقط داده را نمایش می‌دهد و علت را حدس نمی‌زند.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -162,7 +162,7 @@ private fun StatusCard(
                 )
                 Column(Modifier.weight(1f)) {
                     Text(if (hasError) "این اجرا خطا داشته" else "Runtime آماده است", style = MaterialTheme.typography.titleLarge)
-                    Text("وضعیت: $status", style = MaterialTheme.typography.labelLarge)
+                    Text("وضعیت اجرای اخیر: $status", style = MaterialTheme.typography.labelLarge)
                     Text("مدل: $model", style = MaterialTheme.typography.bodySmall)
                 }
             }
