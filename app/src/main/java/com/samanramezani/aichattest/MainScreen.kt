@@ -101,6 +101,30 @@ internal fun MainScreen(container: AppContainer) {
             }
         }
     }
+    fun assignDraft(draftId: String?) {
+        val m = manager ?: return
+        val target = activeModel ?: return
+        scope.launch(Dispatchers.Default) {
+            val result = m.assignDraft(target.id, draftId)
+            withContext(Dispatchers.Main) {
+                when (result) {
+                    is ModelResult.Success -> {
+                        val activated = m.activate(target.id)
+                        if (activated is ModelResult.Success) {
+                            activeDraft = draftModels.firstOrNull { it.id == draftId }
+                            runtimeStatus = "آماده"
+                            diagnostic = null
+                        } else {
+                            runtimeStatus = "خطا"
+                            diagnostic = (activated as ModelResult.Failure).error.message
+                        }
+                    }
+                    is ModelResult.Failure -> { runtimeStatus = "خطا"; diagnostic = result.error.message }
+                }
+                refreshModels()
+            }
+        }
+    }
     fun activateModel(id: String) { val m = manager ?: return; if (generating || approvalBusy || importBusy || activationBusy) return; activationBusy = true; runtimeStatus = "در حال فعال‌سازی…"; diagnostic = null; scope.launch(Dispatchers.Default) { val result = m.activate(id); withContext(Dispatchers.Main) { activationBusy = false; when (result) { is ModelResult.Success -> { activeModel = result.value; runtimeStatus = "آماده"; diagnostic = null }; is ModelResult.Failure -> { runtimeStatus = "خطا"; diagnostic = result.error.message } }; refreshModels() } } }
     fun updateStreamMessage(streamId: String, append: String? = null, replace: String? = null) { if (activeStreamId != streamId) return; messages = messages.map { message -> if (message.id != streamId) message else message.copy(text = replace ?: (message.text + append.orEmpty())) } }
     fun send() { val record = current ?: return; if (manager == null || generating || approvalBusy || importBusy || activationBusy) return; if (activeModel == null) { runtimeStatus = "خارج از دسترس"; diagnostic = "برای ارسال پیام ابتدا یک مدل محلی را فعال کنید."; return }; val text = composer.trim(); if (text.isEmpty()) return; composer = ""; messages = messages + UiMessage(ChatMessage.Role.USER, text, UUID.randomUUID().toString()); val streamId = UUID.randomUUID().toString(); activeStreamId = streamId; messages = messages + UiMessage(ChatMessage.Role.ASSISTANT, "", streamId); generating = true; runtimeStatus = "در حال اجرای Agent"; diagnostic = null; execution = ExecutionState(UUID.randomUUID().toString(), "در حال تولید پاسخ", "در حال تولید پاسخ مدل", System.currentTimeMillis(), requestPreview = text); scope.launch(Dispatchers.Default) { val session = container.createAgentSession(record.id) { event -> withContext(Dispatchers.Main.immediate) { when (event) { AgentEvent.Started -> runtimeStatus = "در حال اجرای Agent"; is AgentEvent.Token -> updateStreamMessage(streamId, append = event.value); is AgentEvent.ActionPrepared -> execution = execution?.copy(id = event.executionId, action = event.actionId, status = "در حال اجرای عملیات"); is AgentEvent.ApprovalRequired -> { execution = execution?.copy(id = event.executionId, status = "نیازمند تأیید", approvalRequired = true); runtimeStatus = "نیازمند تأیید"; generating = false; activeStreamId = null; }; is AgentEvent.ActionExecuted -> execution = execution?.copy(status = "عملیات انجام شد"); is AgentEvent.Failed -> { diagnostic = event.message; execution = execution?.copy(status = "ناموفق", error = event.message, finishedAt = System.currentTimeMillis()) }; AgentEvent.Completed -> if (!(execution?.approvalRequired ?: false)) runtimeStatus = "آماده" } } } ?: run { withContext(Dispatchers.Main) { generating = false; activeStreamId = null; runtimeStatus = "خطا"; diagnostic = "Agent Session در دسترس نیست."; execution = execution?.copy(status = "ناموفق", finishedAt = System.currentTimeMillis(), error = diagnostic) }; return@launch }; try { val result = session.send(text, InferenceSettings(maxNewTokens = 512), requestedRecentMessages = 10); withContext(Dispatchers.Main) { updateStreamMessage(streamId, replace = result.generation.text); generating = false; activeStreamId = null; val finalStatus = when { execution?.approvalRequired == true -> "نیازمند تأیید"; result.actionPlan != null -> "عملیات تکمیل شد"; else -> "پاسخ آماده است" }; execution = execution?.copy(status = finalStatus, finishedAt = System.currentTimeMillis(), resultPreview = result.generation.text.take(240)); if (!(execution?.approvalRequired ?: false)) runtimeStatus = "آماده" } } catch (t: Throwable) { withContext(Dispatchers.Main) { generating = false; activeStreamId = null; runtimeStatus = "خطا"; diagnostic = t.message ?: "Local agent execution failed"; execution = execution?.copy(status = "ناموفق", finishedAt = System.currentTimeMillis(), error = diagnostic) } }; val updated = history.recent(recentLimit).firstOrNull { it.id == record.id }; withContext(Dispatchers.Main) { if (updated != null) current = updated; conversations = history.recent(recentLimit) } } }
