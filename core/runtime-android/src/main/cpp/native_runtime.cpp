@@ -39,14 +39,26 @@ static uint32_t g_context_length = 0;
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
 static void append_native_trace(const char *text);
 static bool init_generation_context();
-static int threads() { return std::clamp((int)std::max(1u, std::thread::hardware_concurrency()) - 2, 2, 4); }
+static int generation_threads() {
+    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+    // Decode is memory-bandwidth bound; keep a bounded number of workers and
+    // derive it from the host topology rather than hard-coding a device.
+    return std::clamp((int)(cores / 2), 2, 4);
+}
+
+static int batch_threads() {
+    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+    // Prompt evaluation benefits from more host workers for scheduling/token
+    // preparation while model inference remains GPU-only.
+    return std::clamp((int)cores - 2, 4, 6);
+}
 
 static bool init_generation_context() {
     if (!g_model || g_context_length == 0) return false;
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx = g_context_length;
-    cp.n_batch = std::min<uint32_t>(cp.n_ctx, 256);
-    cp.n_ubatch = cp.n_batch;
+    cp.n_batch = std::min<uint32_t>(cp.n_ctx, 512);
+    cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 512);
     // Let llama.cpp select the backend-safe attention implementation. The previous
     // forced-disabled path expanded attention work and was a major mobile decode
     // cost at 8K context. AUTO preserves the normal attention math while allowing
@@ -56,12 +68,15 @@ static bool init_generation_context() {
     cp.type_v = GGML_TYPE_F16;
     cp.offload_kqv = true;
     cp.n_seq_max = 1;
-    const int runtime_threads = threads();
+    const int runtime_threads = generation_threads();
+    const int runtime_batch_threads = batch_threads();
     cp.n_threads = runtime_threads;
-    cp.n_threads_batch = runtime_threads;
+    cp.n_threads_batch = runtime_batch_threads;
     append_native_trace((std::string("NATIVE_CONTEXT_THREADS generation=") +
         std::to_string(cp.n_threads) + " batch=" +
-        std::to_string(cp.n_threads_batch) + " flashAttn=auto").c_str());
+        std::to_string(cp.n_threads_batch) + " nBatch=" +
+        std::to_string(cp.n_batch) + " nUbatch=" +
+        std::to_string(cp.n_ubatch) + " flashAttn=auto").c_str());
     g_context = llama_init_from_model(g_model, cp);
     if (!g_context) return false;
     llama_set_abort_callback(g_context, abort_callback, nullptr);
