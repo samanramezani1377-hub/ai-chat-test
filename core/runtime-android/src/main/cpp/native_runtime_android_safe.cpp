@@ -1,4 +1,8 @@
 #include "llama.h"
+
+// Hook used by the Android wrapper to invalidate the token/cache bookkeeping whenever
+// the native model/context is replaced or unloaded.
+static void clear_android_generation_cache();
 #include <signal.h>
 #include <unistd.h>
 #include <vector>
