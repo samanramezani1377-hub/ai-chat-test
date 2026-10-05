@@ -77,18 +77,18 @@ static common_params_sampling spec_sampling(float temperature,int top_k,float to
 }
 
 static int generate_spec(JNIEnv *env,jobject listener,jmethodID on_token,const std::vector<llama_token>& inp,int max_tokens,float temperature,int top_k,float top_p,float min_p){
-    llama_context *dctx=g_spec_init?g_spec_init->context():nullptr; if(!g_spec||!dctx||inp.empty()) return -1;
+    int speculative_draft_tokens=0;
+    int speculative_accepted_tokens=0;
+    int speculative_steps=0;
+    auto finish_spec_stats = [&]() { append_speculative_stats_trace(speculative_draft_tokens, speculative_accepted_tokens, speculative_steps); };
+    llama_context *dctx=g_spec_init?g_spec_init->context():nullptr; if(!g_spec||!dctx||inp.empty()){ finish_spec_stats(); return -1; }
     llama_memory_clear(llama_get_memory(g_context),true); llama_memory_clear(llama_get_memory(dctx),true);
-    common_params_sampling sp=spec_sampling(temperature,top_k,top_p,min_p); common_sampler_ptr smp(common_sampler_init(g_model,sp)); if(!smp) return -1;
+    common_params_sampling sp=spec_sampling(temperature,top_k,top_p,min_p); common_sampler_ptr smp(common_sampler_init(g_model,sp)); if(!smp){ finish_spec_stats(); return -1; }
     const llama_vocab *v=llama_model_get_vocab(g_model);
     common_batch bp(g_context); for(size_t i=0;i+1<inp.size();++i) bp.add(inp[i],(llama_pos)i,0,false);
     if(bp.size()){if(llama_decode(g_context,bp.get())!=0){ finish_spec_stats(); return 10; }if(!common_speculative_process(g_spec.get(),bp)){ finish_spec_stats(); return 10; }}
     llama_token last=inp.back(); llama_tokens hist(inp.begin(),inp.end()-1); common_speculative_begin(g_spec.get(),0,hist);
     int pos=(int)hist.size(),gen=0; llama_tokens draft; common_batch bt(g_context);
-    int speculative_draft_tokens=0;
-    int speculative_accepted_tokens=0;
-    int speculative_steps=0;
-    auto finish_spec_stats = [&]() { append_speculative_stats_trace(speculative_draft_tokens, speculative_accepted_tokens, speculative_steps); };
     while(gen<max_tokens&&!g_stop.load()){
         auto &dp=common_speculative_get_draft_params(g_spec.get(),0); dp={}; dp.drafting=true; dp.n_max=std::min(4,max_tokens-gen-1); dp.pos0=pos; dp.id_last=last; dp.prompt=&hist; dp.result=&draft; draft.clear(); common_speculative_draft(g_spec.get());
         speculative_draft_tokens += static_cast<int>(draft.size());
