@@ -45,6 +45,8 @@ internal fun MainScreen(container: AppContainer) {
     var diagnostic by remember { mutableStateOf<String?>(null) }
     var activeModel by remember { mutableStateOf<ModelDescriptor?>(null) }
     var models by remember { mutableStateOf(emptyList<ModelDescriptor>()) }
+    var draftModels by remember { mutableStateOf(emptyList<ModelDescriptor>()) }
+    var activeDraft by remember { mutableStateOf<ModelDescriptor?>(null) }
     var execution by remember { mutableStateOf<ExecutionState?>(null) }
     var sidebarOpen by remember { mutableStateOf(false) }
     var quickMenuOpen by remember { mutableStateOf(false) }
@@ -61,7 +63,7 @@ internal fun MainScreen(container: AppContainer) {
     )
 
     fun loadConversation(record: ConversationRecord) { current = record; messages = history.messages(record.id).map { UiMessage(it.role, it.content, it.id) } }
-    fun refreshModels() { scope.launch(Dispatchers.Default) { val listed = manager?.models(); val active = manager?.activeModel(); withContext(Dispatchers.Main) { models = (listed as? ModelResult.Success)?.value ?: emptyList(); activeModel = (active as? ModelResult.Success)?.value; if (!generating && !approvalBusy && !importBusy && !activationBusy) runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس" } } }
+    fun refreshModels() { scope.launch(Dispatchers.Default) { val listed = manager?.models(); val drafts = manager?.draftModels(); val active = manager?.activeModel(); val draft = (active as? ModelResult.Success)?.value?.let { manager?.draftForModel(it.id) }; withContext(Dispatchers.Main) { models = (listed as? ModelResult.Success)?.value ?: emptyList(); draftModels = (drafts as? ModelResult.Success)?.value ?: emptyList(); activeModel = (active as? ModelResult.Success)?.value; activeDraft = (draft as? ModelResult.Success)?.value; if (!generating && !approvalBusy && !importBusy && !activationBusy) runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس" } } }
     fun refreshHistory() { scope.launch(Dispatchers.Default) { val records = history.recent(recentLimit); withContext(Dispatchers.Main) { conversations = records } } }
     LaunchedEffect(Unit) {
         val startup = withContext(Dispatchers.Default) {
