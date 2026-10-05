@@ -21,7 +21,7 @@ import kotlin.math.roundToInt
 
 /** Direct llama.cpp Android runtime. OpenCL is the only supported inference backend. */
 class LlamaCppAndroidRuntimeAdapter(
-    private val defaultContextLength: Int = 4096,
+    private val defaultContextLength: Int = 8192,
     gpuLayers: Int = GPU_LAYERS_MAX,
 ) : RuntimeAdapter, RuntimeMetrics {
     companion object {
@@ -86,10 +86,9 @@ class LlamaCppAndroidRuntimeAdapter(
             else -> 99
         }
         return try {
-            // Do not blindly allocate the model's advertised maximum context on mobile.
-            // Qwen3-1.7B uses about 112 KiB of FP16 KV cache per token, so 32K
-            // context alone is ~3.7 GiB before model weights and graph buffers.
-            // Keep the Android runtime at a conservative 4K working context.
+            // Use a larger working context so a long user prompt does not immediately
+            // consume the entire generation window. We still never exceed the model's
+            // trained context; prompt trimming below reserves output capacity.
             val modelContext = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
             val requested = minOf(modelContext, defaultContextLength)
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} context=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}")
@@ -232,27 +231,92 @@ class LlamaCppAndroidRuntimeAdapter(
         if (messages.isEmpty() || budget <= 0) return messages.takeLast(1)
 
         val selected = ArrayDeque<com.woogit.aicore.domain.ChatMessage>()
+        var truncatedLatest = false
+
         for (index in messages.lastIndex downTo 0) {
-            selected.addFirst(messages[index])
-            val candidate = selected.toList()
-            val formatted = when (loadedArchitecture) {
-                "lfm2" -> Lfm2PromptFormatter.format(candidate)
-                else -> Qwen3PromptFormatter.format(candidate)
+            val message = messages[index]
+            val candidate = buildList {
+                add(message)
+                addAll(selected)
             }
-            val tokenCount = NativeLlamaCpp.countTokens(formatted)
-            if (tokenCount < 0 || tokenCount > budget) {
-                selected.removeFirst()
-                break
+            val tokenCount = NativeLlamaCpp.countTokens(formatMessages(candidate))
+            if (tokenCount in 0..budget) {
+                selected.addFirst(message)
+                continue
             }
+
+            // If the newest message itself is larger than the whole prompt budget,
+            // never fall back to the unbounded message (the previous implementation
+            // did exactly that and nativeGenerate correctly rejected it as overflow).
+            if (selected.isEmpty() && index == messages.lastIndex) {
+                val fitted = fitMessageToBudget(message, budget)
+                selected.addFirst(fitted)
+                truncatedLatest = fitted.content != message.content
+            }
+            break
         }
+
         val result = selected.toList()
+        val finalTokenCount = if (result.isEmpty()) 0 else NativeLlamaCpp.countTokens(formatMessages(result))
         RuntimeDiagnosticsStore.recordNativeEvent(
             "NATIVE_PROMPT_BUDGET context=" + context +
                 " reserve=" + reserve +
+                " budget=" + budget +
                 " selectedMessages=" + result.size +
-                " originalMessages=" + messages.size
+                " originalMessages=" + messages.size +
+                " promptTokens=" + finalTokenCount +
+                " truncatedLatest=" + truncatedLatest
         )
-        return if (result.isNotEmpty()) result else messages.takeLast(1)
+        return result
+    }
+
+    private fun formatMessages(messages: List<com.woogit.aicore.domain.ChatMessage>): String =
+        when (loadedArchitecture) {
+            "lfm2" -> Lfm2PromptFormatter.format(messages)
+            else -> Qwen3PromptFormatter.format(messages)
+        }
+
+    /**
+     * Fit one oversized message to the token budget without character-count guesses.
+     * The search keeps both the beginning and end of the message so instructions at
+     * the start and the actual payload/result at the end are retained.
+     */
+    private fun fitMessageToBudget(
+        message: com.woogit.aicore.domain.ChatMessage,
+        budget: Int,
+    ): com.woogit.aicore.domain.ChatMessage {
+        if (budget <= 0) return message.copy(content = "")
+
+        fun candidate(length: Int): com.woogit.aicore.domain.ChatMessage {
+            if (length >= message.content.length) return message
+            if (length <= 0) return message.copy(content = "")
+            val marker = "\n[… محتوای میانی برای جا شدن در پنجرهٔ متن حذف شد …]\n"
+            val payloadLength = (length - marker.length).coerceAtLeast(0)
+            val head = (payloadLength * 0.6f).toInt().coerceAtMost(message.content.length)
+            val tail = payloadLength - head
+            val content = if (tail <= 0) {
+                message.content.take(head) + marker
+            } else {
+                message.content.take(head) + marker + message.content.takeLast(tail)
+            }
+            return message.copy(content = content)
+        }
+
+        var low = 0
+        var high = message.content.length
+        var best = message.copy(content = "")
+        while (low <= high) {
+            val mid = low + (high - low) / 2
+            val candidateMessage = candidate(mid)
+            val tokens = NativeLlamaCpp.countTokens(formatMessages(listOf(candidateMessage)))
+            if (tokens in 0..budget) {
+                best = candidateMessage
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return best
     }
 
     override suspend fun stopGeneration() {
