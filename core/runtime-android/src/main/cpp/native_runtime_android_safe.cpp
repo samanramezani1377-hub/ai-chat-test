@@ -305,7 +305,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     // Explicitly position every batch. This is required when resuming after a
     // cached prefix; a long prior response must never make the next decode start
     // from an implicit position.
-    const int batch_capacity = std::max(1, std::min(128, n_ctx));
+    const int batch_capacity = std::max(1, n_ctx);
     llama_batch batch = llama_batch_init(batch_capacity, 0, 1);
     if (!batch.token || !batch.pos || !batch.n_seq_id || !batch.seq_id || !batch.logits) {
         llama_batch_free(batch);
