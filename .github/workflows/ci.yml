@@ -79,7 +79,6 @@ jobs:
         run: |
           test -n "${ANDROID_HOME:-}"
           test -d "$ANDROID_HOME/platforms/android-36"
-          test -d "$ANDROID_HOME/ndk/27.2.12479018"
 
       - name: Cache exact native build state
         uses: actions/cache@v4
