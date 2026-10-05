@@ -2,6 +2,7 @@ package com.samanramezani.aichattest.ui
 
 import android.content.Context
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -158,10 +159,9 @@ private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescript
                 InferencePreset.values().forEach { preset ->
                     val selected = settings == preset.settings
                     Surface(
-                        Modifier.fillMaxWidth(),
+                        Modifier.fillMaxWidth().clickable { update(preset.settings) },
                         shape = RoundedCornerShape(14.dp),
                         color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                        onClick = { update(preset.settings) },
                     ) {
                         Column(Modifier.padding(13.dp)) {
                             Text((if (selected) "✓ " else "") + preset.title, style = MaterialTheme.typography.titleSmall)
