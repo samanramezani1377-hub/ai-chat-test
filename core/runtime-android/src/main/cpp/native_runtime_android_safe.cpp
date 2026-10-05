@@ -4,6 +4,10 @@
 // Tokens represented by the resident prompt prefix in the native KV cache.
 static std::vector<llama_token> g_cached_prompt_tokens;
 static void clear_android_generation_cache() { g_cached_prompt_tokens.clear(); }
+
+static bool model_uses_recurrent_memory() {
+    return g_model && (llama_model_is_recurrent(g_model) || llama_model_is_hybrid(g_model));
+}
 #include <signal.h>
 #include <unistd.h>
 #include <vector>
@@ -258,12 +262,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         ++common_prefix;
     }
 
-    bool cache_reused = !g_cached_prompt_tokens.empty() && !llama_model_has_encoder(g_model);
+    const bool cache_supported = !llama_model_has_encoder(g_model) && !model_uses_recurrent_memory();
+    bool cache_reused = cache_supported && !g_cached_prompt_tokens.empty();
     size_t reuse_prefix = 0;
     if (!cache_reused) {
         llama_memory_clear(memory, true);
         g_cached_prompt_tokens.clear();
-        checkpoint("NATIVE_KV_CACHE_MISS_CLEARED");
+        checkpoint(cache_supported ? "NATIVE_KV_CACHE_MISS_CLEARED" : "NATIVE_KV_CACHE_REBUILD_HYBRID");
     } else {
         const bool exact_prompt = common_prefix == prompt_tokens.size() &&
                                   common_prefix == g_cached_prompt_tokens.size();
