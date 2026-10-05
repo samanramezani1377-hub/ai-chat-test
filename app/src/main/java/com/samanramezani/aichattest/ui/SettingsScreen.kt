@@ -41,6 +41,8 @@ private enum class InferencePreset(val title: String, val description: String, v
 @Composable
 fun SettingsScreen(
     models: List<ModelDescriptor>, active: ModelDescriptor?, error: String?, onImport: () -> Unit,
+    draftModels: List<ModelDescriptor>, activeDraft: ModelDescriptor?, onImportDraft: () -> Unit,
+    onAssignDraft: (String?) -> Unit, onDeleteDraft: (String) -> Unit,
     onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)? = null, onDelete: (String) -> Unit,
 ) {
     var section by remember { mutableStateOf("مدل") }
@@ -68,7 +70,7 @@ fun SettingsScreen(
         }
         item {
             when (section) {
-                "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
+                "مدل" -> ModelManagement(active, models, error, onImport, draftModels, activeDraft, onImportDraft, onAssignDraft, onDeleteDraft, onRefresh, onActivate, onDeactivate, onDelete)
                 "پاسخ" -> InferenceControls()
                 "زمینه" -> ContextControls()
                 "عامل" -> AgentControls()
