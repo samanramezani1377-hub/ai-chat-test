@@ -8,7 +8,7 @@ import com.woogit.aicore.domain.ModelDescriptor
  * user-facing screen. GPU-only is a runtime policy, not a user setting.
  */
 @Composable
-internal fun SettingsScreen(
+internal fun SettingsScreenLegacyCompatibility(
     models: List<ModelDescriptor>,
     active: ModelDescriptor?,
     runtimeStatus: String,
@@ -19,7 +19,7 @@ internal fun SettingsScreen(
     onDeactivate: () -> Unit,
     onDelete: (String) -> Unit,
 ) {
-    SettingsScreen(
+    SettingsScreenBase(
         models = models,
         active = active,
         error = error,
