@@ -316,6 +316,15 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     // batch is unnecessarily large for interactive single-message generation.
     cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
     cp.n_ubatch = cp.n_batch;
+    // OpenCL/Adreno has a known class of long-prompt Flash Attention crashes
+    // around tiled Android execution. This app prioritizes stable multi-turn
+    // local inference, so keep Flash Attention explicitly disabled.
+    cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    // Keep the KV cache in the portable F16 format. OpenCL SET_ROWS support for
+    // quantized KV formats is device-dependent and can abort inside graph setup.
+    cp.type_k = GGML_TYPE_F16;
+    cp.type_v = GGML_TYPE_F16;
+    cp.offload_kqv = true;
     // This runtime serves exactly one interactive generation sequence. Keep the
     // recurrent/hybrid state single-sequence as well; LFM2/LFM2.5 uses that state.
     cp.n_seq_max = 1;
