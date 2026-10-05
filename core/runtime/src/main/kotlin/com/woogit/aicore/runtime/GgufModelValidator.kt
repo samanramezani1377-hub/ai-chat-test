@@ -8,7 +8,7 @@ import com.woogit.aicore.domain.ModelValidator
 import com.woogit.aicore.domain.Quantization
 import com.woogit.aicore.domain.ValidationStatus
 
-/** Validates the exact Qwen3 GGUF profile used by this prototype. */
+/** Validates GGUF profiles supported by the local llama.cpp Android runtime. */
 class GgufModelValidator(
     private val supportedArchitectures: Set<String> = DEFAULT_ARCHITECTURES,
     private val supportedQuantizations: Set<Quantization> = DEFAULT_QUANTIZATIONS
@@ -57,7 +57,12 @@ class GgufModelValidator(
 
     companion object {
         private val SUPPORTED_GGUF_VERSIONS = setOf(1, 2, 3)
-        private val DEFAULT_ARCHITECTURES = setOf("qwen3")
-        private val DEFAULT_QUANTIZATIONS = setOf(Quantization.Q6_K)
+
+        // Both architectures are implemented by the pinned llama.cpp runtime.
+        // LFM2.5 GGUFs declare general.architecture = "lfm2".
+        private val DEFAULT_ARCHITECTURES = setOf("qwen3", "lfm2")
+
+        // Keep the existing Q6_K baseline and allow the LFM2.5 Q8_0 checkpoint.
+        private val DEFAULT_QUANTIZATIONS = setOf(Quantization.Q6_K, Quantization.Q8_0)
     }
 }
