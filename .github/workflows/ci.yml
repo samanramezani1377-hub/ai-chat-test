@@ -40,11 +40,6 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
-      - name: Show toolchain
-        run: |
-          java -version
-          gradle --version
-
       - name: Run JVM and Android unit tests
         run: >-
           gradle
@@ -59,7 +54,6 @@ jobs:
           :app:testDebugUnitTest
           --stacktrace
           --console=plain
-          --no-daemon
           --parallel
 
   android-build:
@@ -81,15 +75,30 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
-      - name: Show toolchain
-        run: |
-          java -version
-          gradle --version
-
       - name: Verify Android SDK
         run: |
-          test -n "$ANDROID_HOME"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list >/dev/null
+          test -n "${ANDROID_HOME:-}"
+          test -d "$ANDROID_HOME/platforms/android-36"
+          test -d "$ANDROID_HOME/ndk/27.2.12479018"
+
+      - name: Cache exact native build state
+        uses: actions/cache@v4
+        with:
+          path: |
+            core/runtime-android/.cxx
+            core/runtime-android/src/.cxx
+          key: >-
+            native-${{ runner.os }}-
+            ${{ hashFiles(
+              'gradle.properties',
+              'settings.gradle.kts',
+              'build.gradle.kts',
+              'gradle/libs.versions.toml',
+              'core/runtime-android/build.gradle.kts',
+              'core/runtime-android/src/main/cpp/**',
+              'core/runtime-android/src/main/cpp/cmake/**',
+              '.github/workflows/ci.yml'
+            ) }}
 
       - name: Assemble debug APK
         run: >-
@@ -98,7 +107,6 @@ jobs:
           :app:assembleDebug
           --stacktrace
           --console=plain
-          --no-daemon
           --parallel
 
       - name: Upload debug APK
@@ -134,7 +142,6 @@ jobs:
           :app:lintDebug
           --stacktrace
           --console=plain
-          --no-daemon
 
       - name: Upload lint report
         if: always()
