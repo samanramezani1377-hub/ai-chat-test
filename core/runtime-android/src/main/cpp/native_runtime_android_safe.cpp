@@ -302,10 +302,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     // completed. A failed decode must never advertise a partially-built state
     // as a valid prefix for the next turn.
 
-    // Explicitly position every batch. This is required when resuming after a
-    // cached prefix; a long prior response must never make the next decode start
-    // from an implicit position.
-    const int batch_capacity = std::max(1, n_ctx);
+    // The context is intentionally configured with a physical batch/ubatch of 128 on Android.
+    // Never pass the entire 4K context as one llama_decode() batch: llama_decode() requires
+    // callers to split larger prompt batches according to llama_n_batch(). Passing a 3K-4K
+    // token prompt directly here was the long-prompt crash path and could also corrupt the
+    // second-turn cache state on devices with strict OpenCL memory limits.
+    const int decode_batch_size = std::max(1, (int) llama_n_batch(g_context));
+    const int batch_capacity = decode_batch_size;
     llama_batch batch = llama_batch_init(batch_capacity, 0, 1);
     if (!batch.token || !batch.pos || !batch.n_seq_id || !batch.seq_id || !batch.logits) {
         llama_batch_free(batch);
@@ -314,80 +317,103 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         checkpoint("NATIVE_GENERATE_BATCH_INIT_FAILED");
         return 9;
     }
-    auto fill_batch = [&](const llama_token *tokens, int count, int start_pos) {
+    auto fill_batch = [&](const llama_token *tokens, int count, int start_pos, bool output_last) {
         batch.n_tokens = count;
         for (int i = 0; i < count; ++i) {
             batch.token[i] = tokens[i];
             batch.pos[i] = (llama_pos) (start_pos + i);
             batch.n_seq_id[i] = 1;
             batch.seq_id[i][0] = 0;
-            batch.logits[i] = (i == count - 1) ? 1 : 0;
+            batch.logits[i] = (output_last && i == count - 1) ? 1 : 0;
         }
     };
-    if (reuse_prefix < prompt_tokens.size()) {
-        const int suffix_count = (int) (prompt_tokens.size() - reuse_prefix);
-        fill_batch(prompt_tokens.data() + reuse_prefix, suffix_count, (int) reuse_prefix);
-    } else {
-        batch.n_tokens = 0;
-    }
-    if (llama_model_has_encoder(g_model)) {
-        fill_batch(prompt_tokens.data(), (int) prompt_tokens.size(), 0);
-        if (llama_encode(g_context, batch)) {
-            llama_batch_free(batch);
-            env->DeleteLocalRef(listener_class);
-            llama_sampler_free(sampler);
-            checkpoint("NATIVE_GENERATE_ENCODE_FAILED");
-            return 9;
-        }
-        llama_token decoder_start = llama_model_decoder_start_token(g_model);
-        if (decoder_start == LLAMA_TOKEN_NULL) decoder_start = llama_vocab_bos(vocab);
-        fill_batch(&decoder_start, 1, 0);
-    }
-    append_native_trace((std::string("NATIVE_GENERATE_PARAMS promptTokens=") + std::to_string(n_prompt) + " maxTokens=" + std::to_string(max_predict) + " temperature=" + std::to_string(temp) + " topK=" + std::to_string(k) + " topP=" + std::to_string(p) + " minP=" + std::to_string(mp)).c_str());
+
+    append_native_trace((std::string("NATIVE_GENERATE_BATCH_CONFIG nBatch=") +
+        std::to_string(decode_batch_size) + " promptTokens=" +
+        std::to_string(n_prompt) + " reusedTokens=" +
+        std::to_string(reuse_prefix)).c_str());
+
     int generated = 0;
     int position = (int) reuse_prefix;
     std::string pending_utf8;
     int result = 0;
     const auto generation_started_at = std::chrono::steady_clock::now();
     bool prefill_recorded = false;
-    while (position + batch.n_tokens < n_prompt + max_predict) {
+
+    // Prefill the new prompt in physical batches. Only the final prompt token
+    // requests logits because that is the token used to sample the first output.
+    int prompt_offset = (int) reuse_prefix;
+    while (prompt_offset < n_prompt) {
         if (g_stop.load(std::memory_order_relaxed)) { result = 9; checkpoint("NATIVE_GENERATE_STOPPED"); break; }
+        const int count = std::min(decode_batch_size, n_prompt - prompt_offset);
+        const bool final_prompt_batch = prompt_offset + count == n_prompt;
+        fill_batch(prompt_tokens.data() + prompt_offset, count, prompt_offset, final_prompt_batch);
         const int decode_result = llama_decode(g_context, batch);
-        if (!prefill_recorded && decode_result == 0) {
-            const auto now = std::chrono::steady_clock::now();
-            const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - generation_started_at).count();
-            append_native_trace((std::string("NATIVE_PREFILL_COMPLETED promptTokens=") + std::to_string(n_prompt) + " reusedTokens=" + std::to_string(reuse_prefix) + " prefillMs=" + std::to_string(prefill_ms)).c_str());
-            prefill_recorded = true;
-        }
         if (decode_result != 0) {
-            append_native_trace((std::string("NATIVE_GENERATE_DECODE_FAILED code=") + std::to_string(decode_result)).c_str());
+            append_native_trace((std::string("NATIVE_GENERATE_PREFILL_FAILED code=") + std::to_string(decode_result) +
+                " offset=" + std::to_string(prompt_offset) + " count=" + std::to_string(count)).c_str());
             g_cached_prompt_tokens.clear();
             llama_memory_clear(memory, true);
-            checkpoint("NATIVE_GENERATE_DECODE_FAILED_CACHE_RESET");
+            checkpoint("NATIVE_GENERATE_PREFILL_FAILED_CACHE_RESET");
             result = 10;
             break;
         }
-        position += batch.n_tokens;
-        const llama_token token = llama_sampler_sample(sampler, g_context, -1);
-        llama_sampler_accept(sampler, token);
-        if (llama_vocab_is_eog(vocab, token)) { checkpoint("NATIVE_GENERATE_EOG"); break; }
-        char piece[1024];
-        int piece_size = llama_token_to_piece(vocab, token, piece, (int) sizeof(piece), 0, true);
-        if (piece_size < 0) { append_native_trace((std::string("NATIVE_GENERATE_TOKEN_TO_PIECE_FAILED size=") + std::to_string(piece_size)).c_str()); checkpoint("NATIVE_GENERATE_TOKEN_TO_PIECE_FAILED"); result = 11; break; }
-        if (piece_size > 0) {
-            // llama_token_to_piece() deliberately does not null-terminate its output.
-            // Consume exactly piece_size bytes and keep incomplete UTF-8 sequences
-            // until the following token supplies the remaining bytes.
-            pending_utf8.append(piece, static_cast<size_t>(piece_size));
-            if (!emit_complete_utf8(env, listener, on_token, pending_utf8)) {
-                checkpoint("NATIVE_GENERATE_JSTRING_FAILED");
-                result = 12;
+        position = prompt_offset + count;
+        prompt_offset += count;
+        if (final_prompt_batch) {
+            const auto now = std::chrono::steady_clock::now();
+            const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - generation_started_at).count();
+            append_native_trace((std::string("NATIVE_PREFILL_COMPLETED promptTokens=") +
+                std::to_string(n_prompt) + " reusedTokens=" + std::to_string(reuse_prefix) +
+                " prefillMs=" + std::to_string(prefill_ms)).c_str());
+            prefill_recorded = true;
+        }
+    }
+
+    if (result == 0) {
+        while (generated < max_predict) {
+            if (g_stop.load(std::memory_order_relaxed)) { result = 9; checkpoint("NATIVE_GENERATE_STOPPED"); break; }
+
+            const llama_token token = llama_sampler_sample(sampler, g_context, -1);
+            llama_sampler_accept(sampler, token);
+            if (llama_vocab_is_eog(vocab, token)) { checkpoint("NATIVE_GENERATE_EOG"); break; }
+
+            char piece[1024];
+            int piece_size = llama_token_to_piece(vocab, token, piece, (int) sizeof(piece), 0, true);
+            if (piece_size < 0) {
+                append_native_trace((std::string("NATIVE_GENERATE_TOKEN_TO_PIECE_FAILED size=") + std::to_string(piece_size)).c_str());
+                checkpoint("NATIVE_GENERATE_TOKEN_TO_PIECE_FAILED");
+                result = 11;
                 break;
             }
+            if (piece_size > 0) {
+                pending_utf8.append(piece, static_cast<size_t>(piece_size));
+                if (!emit_complete_utf8(env, listener, on_token, pending_utf8)) {
+                    checkpoint("NATIVE_GENERATE_JSTRING_FAILED");
+                    result = 12;
+                    break;
+                }
+            }
+            ++generated;
+            if (generated >= max_predict) break;
+
+            // Decode exactly one sampled token. This keeps generation memory bounded
+            // while retaining the full prompt/context and without changing sampling.
+            fill_batch(&token, 1, position, true);
+            const int decode_result = llama_decode(g_context, batch);
+            if (decode_result != 0) {
+                append_native_trace((std::string("NATIVE_GENERATE_DECODE_FAILED code=") + std::to_string(decode_result) +
+                    " generated=" + std::to_string(generated)).c_str());
+                g_cached_prompt_tokens.clear();
+                llama_memory_clear(memory, true);
+                checkpoint("NATIVE_GENERATE_DECODE_FAILED_CACHE_RESET");
+                result = 10;
+                break;
+            }
+            ++position;
         }
-        ++generated;
-        fill_batch(&token, 1, position);
     }
+
     if (!pending_utf8.empty() && result == 0) {
         // A valid model output should not leave a partial UTF-8 sequence behind.
         // Emit it as U+FFFD rather than passing unterminated bytes to JNI.
