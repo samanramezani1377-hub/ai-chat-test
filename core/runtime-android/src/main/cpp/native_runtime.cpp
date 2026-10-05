@@ -172,7 +172,7 @@ static void checkpoint(const char *event) {
 static void free_all() {
     clear_android_generation_cache();
     if (g_sampler) { llama_sampler_free(g_sampler); g_sampler = nullptr; }
-    if (g_context) { llama_free(g_context); g_context = nullptr; }
+    if (g_context) { llama_synchronize(g_context); llama_free(g_context); g_context = nullptr; }
     g_context_length = 0;
     if (g_model) { llama_model_free(g_model); g_model = nullptr; }
     g_gpu = false;
