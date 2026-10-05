@@ -37,7 +37,7 @@ internal object NativeLlamaCpp {
 
     /** One serialized native activation transaction. Native side owns model/context lifetime. */
     @Synchronized
-    fun load(path: String, contextLength: Int, gpuLayers: Int): Int {
+    fun load(path: String, contextLength: Int, gpuLayers: Int, draftPath: String? = null): Int {
         require(gpuLayers > 0) { "OpenCL GPU-only runtime requires at least one GPU layer" }
         require(path.isNotBlank()) { "Model path must not be blank" }
         val file = File(path)
@@ -47,7 +47,7 @@ internal object NativeLlamaCpp {
         ensureNativeInitialized()
         Log.i(TAG, "ACTIVATION_LOAD_BEGIN ctx_len=$contextLength gpu_layers=$gpuLayers file=${file.name}")
         return try {
-            val result = nativeLoad(path, contextLength, gpuLayers)
+            val result = nativeLoad(path, contextLength, gpuLayers, draftPath)
             Log.i(TAG, "ACTIVATION_LOAD_END result=$result gpu_layers=$gpuLayers")
             result
         } catch (t: Throwable) {
@@ -131,7 +131,7 @@ internal object NativeLlamaCpp {
     private interface TokenListener { fun onToken(token: String) }
     @JvmStatic private external fun nativeInit(enableGpu: Boolean)
     @JvmStatic private external fun nativeInstallFatalHandlers()
-    @JvmStatic private external fun nativeLoad(path: String, contextLength: Int, gpuLayers: Int): Int
+    @JvmStatic private external fun nativeLoad(path: String, contextLength: Int, gpuLayers: Int, draftPath: String?): Int
     @JvmStatic private external fun nativeCountTokens(prompt: String): Int
     @JvmStatic private external fun nativeGenerate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float, listener: TokenListener): Int
     @JvmStatic private external fun nativeStop()
