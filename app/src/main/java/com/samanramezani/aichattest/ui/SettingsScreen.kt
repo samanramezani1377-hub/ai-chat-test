@@ -1,14 +1,14 @@
-package com.samanramezani.aichattest.ui
+package com.samanramezani1377.aichattest.ui
 
 import android.content.Context
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.InferenceSettingsStore
@@ -29,65 +29,12 @@ private const val KEY_SEED = "seed"
 private const val KEY_STOPS = "stop_sequences"
 private const val KEY_MAX_ACTION_STEPS = "max_action_steps"
 
-private val aiSections = listOf("مدل", "پاسخ", "زمینه", "عامل")
-private val appSections = listOf("برنامه", "لاگ و عیب‌یابی", "عملکرد", "امنیت و تأیید")
+private val sections = listOf("مدل", "پاسخ", "زمینه", "عامل")
 
-private enum class InferencePreset(
-    val title: String,
-    val description: String,
-    val settings: InferenceSettings,
-) {
-    FAST(
-        "سریع",
-        "پاسخ سریع‌تر و مصرف کمتر؛ مناسب گفت‌وگوی روزمره و دستگاه‌های ضعیف‌تر.",
-        InferenceSettings(
-            temperature = 0.7,
-            maxNewTokens = 256,
-            topK = 32,
-            topP = 0.9,
-            minP = 0.0,
-            repeatPenalty = 1.1,
-            seed = null,
-            stopSequences = emptyList(),
-            contextLength = 2048,
-            recentMessages = 6,
-            maxActionSteps = 2,
-        ),
-    ),
-    BALANCED(
-        "استاندارد",
-        "تعادل پیشنهادی بین کیفیت، سرعت و مصرف منابع؛ گزینه مناسب برای استفاده معمول.",
-        InferenceSettings(
-            temperature = 0.7,
-            maxNewTokens = 512,
-            topK = 40,
-            topP = 0.9,
-            minP = 0.0,
-            repeatPenalty = 1.1,
-            seed = null,
-            stopSequences = emptyList(),
-            contextLength = 4096,
-            recentMessages = 10,
-            maxActionSteps = 4,
-        ),
-    ),
-    DEEP(
-        "عمیق",
-        "فضای بیشتر برای پاسخ‌های طولانی و چندمرحله‌ای؛ کندتر و پرمصرف‌تر.",
-        InferenceSettings(
-            temperature = 0.65,
-            maxNewTokens = 1024,
-            topK = 50,
-            topP = 0.92,
-            minP = 0.0,
-            repeatPenalty = 1.1,
-            seed = null,
-            stopSequences = emptyList(),
-            contextLength = 8192,
-            recentMessages = 20,
-            maxActionSteps = 6,
-        ),
-    ),
+private enum class InferencePreset(val title: String, val description: String, val settings: InferenceSettings) {
+    FAST("سریع", "برای گفت‌وگوی روزمره", InferenceSettings(temperature=.7, maxNewTokens=256, topK=32, topP=.9, minP=0.0, repeatPenalty=1.1, contextLength=2048, recentMessages=6, maxActionSteps=2)),
+    BALANCED("استاندارد", "پیشنهاد من برای استفاده معمول", InferenceSettings(temperature=.7, maxNewTokens=512, topK=40, topP=.9, minP=0.0, repeatPenalty=1.1, contextLength=4096, recentMessages=10, maxActionSteps=4)),
+    DEEP("عمیق", "پاسخ طولانی‌تر، مصرف بیشتر", InferenceSettings(temperature=.65, maxNewTokens=1024, topK=50, topP=.92, minP=0.0, repeatPenalty=1.1, contextLength=8192, recentMessages=20, maxActionSteps=6)),
 }
 
 @Composable
@@ -97,94 +44,40 @@ fun SettingsScreen(
 ) {
     var section by remember { mutableStateOf("مدل") }
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = UiTokens.pagePadding),
-        contentPadding = PaddingValues(top = UiTokens.sectionGap, bottom = 36.dp),
-        verticalArrangement = Arrangement.spacedBy(UiTokens.sectionGap),
+        Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 40.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text("تنظیمات", style = MaterialTheme.typography.headlineMedium)
-                Text("تنظیمات ساده برای استفاده روزمره؛ گزینه‌های تخصصی فقط وقتی لازم باشند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("اینجا فقط چیزهایی را می‌بینی که روی تجربه مدل اثر می‌گذارند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        item { SettingsGroup("هوش مصنوعی", aiSections, section) { section = it } }
-        item { SettingsGroup("برنامه", appSections, section) { section = it } }
-        item { HorizontalDivider() }
+        item {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                sections.forEach { name ->
+                    FilterChip(
+                        selected = section == name,
+                        onClick = { section = name },
+                        label = { Text(name) },
+                    )
+                }
+            }
+        }
         item {
             when (section) {
-            "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
-            "پاسخ" -> InferenceControls()
-            "زمینه" -> ContextControls()
-            "عامل" -> AgentControls()
-            "برنامه" -> SettingsInfo("برنامه", "مدل و پاسخ‌ها روی دستگاه اجرا می‌شوند و inference به API ابری متکی نیست.")
-            "لاگ و عیب‌یابی" -> SettingsInfo("لاگ و عیب‌یابی", "گزارش Runtime، TTFT، زمان تولید، تنظیمات، Runtime Trace و Action Trace از داده واقعی جمع می‌شوند. گزارش کامل و گزارش خطا از صفحه عیب‌یابی قابل کپی هستند.")
-            "عملکرد" -> SettingsInfo("عملکرد", "Performance بدون مقدار ساختگی از Runtime اندازه‌گیری می‌شود. برای تشخیص TTFT و سرعت تولید، صفحه عیب‌یابی آخرین metrics واقعی را نمایش می‌دهد.")
-            "امنیت و تأیید" -> SettingsInfo("امنیت و تأیید", "Actionهای حساس قبل از اجرا نیازمند تأیید هستند. این سیاست بخشی از مسیر واقعی Agent است و برای جلوگیری از دور زدن کنترل امنیتی، خاموش‌کردن عمومی آن ارائه نشده است.")
-        } }
-    }
-}
-
-@Composable
-private fun InferenceControls() {
-    val context = LocalContext.current
-    var settings by remember { mutableStateOf(loadSettings(context)) }
-    var dirty by remember { mutableStateOf(false) }
-    fun update(value: InferenceSettings) { settings = value; dirty = true }
-    fun apply() { saveSettings(context, settings); dirty = false }
-
-    Column(verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
-        Text("استنتاج", style = MaterialTheme.typography.titleLarge)
-        Text("یک پروفایل آماده انتخاب کنید یا بعد از انتخاب، هر مقدار را به‌صورت سفارشی تغییر دهید. انتخاب پروفایل فقط مقادیر همین تنظیمات را تغییر می‌دهد و تا زمان اعمال، روی Runtime اجرا نمی‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-        UiSurface {
-            Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("پروفایل آماده", style = MaterialTheme.typography.titleMedium)
-                Text("سریع · استاندارد · عمیق", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                InferencePresetSelector(settings, ::update)
+                "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
+                "پاسخ" -> InferenceControls()
+                "زمینه" -> ContextControls()
+                "عامل" -> AgentControls()
             }
         }
-
-        UiSurface {
-            Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("تنظیمات سفارشی", style = MaterialTheme.typography.titleMedium)
-                Text("هر تغییری در کنترل‌های زیر یعنی تنظیمات سفارشی شما؛ نیازی نیست یکی از پروفایل‌ها را برای همیشه انتخاب کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Temperature: %.2f".format(settings.temperature))
-                Slider(value = settings.temperature.toFloat(), onValueChange = { update(settings.copy(temperature = it.toDouble())) }, valueRange = 0f..2f)
-                Text("Top-P: %.2f".format(settings.topP ?: 0.9))
-                Slider(value = (settings.topP ?: 0.9).toFloat(), onValueChange = { update(settings.copy(topP = it.toDouble())) }, valueRange = 0f..1f)
-                Text("Top-K: ${settings.topK ?: 40}")
-                Slider(value = (settings.topK ?: 40).toFloat(), onValueChange = { update(settings.copy(topK = it.toInt())) }, valueRange = 0f..128f)
-                Text("Min-P: %.2f".format(settings.minP ?: 0.0))
-                Slider(value = (settings.minP ?: 0.0).toFloat(), onValueChange = { update(settings.copy(minP = it.toDouble())) }, valueRange = 0f..1f)
-                Text("Repeat Penalty: %.2f".format(settings.repeatPenalty ?: 1.1))
-                Slider(value = (settings.repeatPenalty ?: 1.1).toFloat(), onValueChange = { update(settings.copy(repeatPenalty = it.toDouble())) }, valueRange = 0.8f..2f)
-                Text("Max New Tokens: ${settings.maxNewTokens}")
-                Slider(value = settings.maxNewTokens.toFloat(), onValueChange = { update(settings.copy(maxNewTokens = it.toInt().coerceAtLeast(1))) }, valueRange = 64f..2048f, steps = 31)
-                Text("Context Length: ${settings.contextLength ?: 4096}")
-                Slider(value = (settings.contextLength ?: 4096).toFloat(), onValueChange = { update(settings.copy(contextLength = it.toInt().coerceAtLeast(256))) }, valueRange = 256f..8192f, steps = 31)
-                Text("Seed: ${settings.seed ?: "تصادفی"}")
-            }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
-            Button(onClick = ::apply, Modifier.weight(1f).heightIn(min = UiTokens.minimumTouchTarget), enabled = dirty) { Text("اعمال تنظیمات") }
-            OutlinedButton(onClick = { settings = InferenceSettings(); apply() }, Modifier.weight(1f).heightIn(min = UiTokens.minimumTouchTarget)) { Text("بازنشانی") }
-        }
-        Text(if (dirty) "تغییرات ذخیره نشده‌اند." else "تنظیمات ذخیره و برای Generation بعدی آماده‌اند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun InferencePresetSelector(settings: InferenceSettings, onSelect: (InferenceSettings) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        InferencePreset.values().forEach { preset ->
-            val selected = settings == preset.settings
-            OutlinedButton(
-                onClick = { onSelect(preset.settings) },
-                modifier = Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget),
-            ) {
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(if (selected) "✓ ${preset.title}" else preset.title, style = MaterialTheme.typography.titleSmall)
-                    Text(preset.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        item {
+            Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("معماری محلی", style = MaterialTheme.typography.titleSmall)
+                    Text("مدل و inference روی دستگاه اجرا می‌شوند؛ این برنامه برای پاسخ‌گویی به API ابری متکی نیست.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -192,47 +85,156 @@ private fun InferencePresetSelector(settings: InferenceSettings, onSelect: (Infe
 }
 
 @Composable
-private fun ContextControls() {
-    val context = LocalContext.current
-    var settings by remember { mutableStateOf(loadSettings(context)) }
-    var dirty by remember { mutableStateOf(false) }
-    fun update(value: InferenceSettings) { settings = value; dirty = true }
-    fun apply() { saveSettings(context, settings); dirty = false }
-
-    Column(verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
-        Text("زمینه", style = MaterialTheme.typography.titleLarge)
-        Text("تعداد پیام‌های اخیر که Context Builder برای درخواست بعدی در نظر می‌گیرد قابل تنظیم است. Summary، Persistent Task Context و Workspace Context همچنان مالکیت جداگانه در Core دارند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        UiSurface {
-            Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Recent Messages: ${settings.recentMessages}")
-                Slider(value = settings.recentMessages.toFloat(), onValueChange = { update(settings.copy(recentMessages = it.toInt().coerceIn(0, 50))) }, valueRange = 0f..50f, steps = 49)
-                Text("پیش‌فرض: ۱۰ · بازه قابل تنظیم: ۰ تا ۵۰", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }        }
-        Button(onClick = ::apply, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget), enabled = dirty) { Text("اعمال تنظیمات زمینه") }
-        Text(if (dirty) "تغییرات ذخیره نشده‌اند." else "تنظیمات زمینه ذخیره و برای Context بعدی آماده‌اند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescriptor>, error: String?, onImport: () -> Unit, onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)?, onDelete: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (active != null) "مدل آماده است" else "اول یک مدل اضافه کن", style = MaterialTheme.typography.headlineSmall)
+                Text(active?.displayName ?: "یک فایل GGUF از حافظه گوشی انتخاب کن.", color = MaterialTheme.colorScheme.onPrimaryContainer)
+                if (active != null) {
+                    Text("GGUF · " + active.quantization, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    if (onDeactivate != null) OutlinedButton(onClick = onDeactivate) { Text("خارج‌کردن از حافظه") }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onImport, modifier = Modifier.weight(1f).height(50.dp)) { Text("افزودن مدل") }
+            OutlinedButton(onClick = onRefresh, modifier = Modifier.height(50.dp)) { Text("تازه‌سازی") }
+        }
+        if (error != null) ErrorCard(error)
+        Text("مدل‌های روی دستگاه", style = MaterialTheme.typography.titleMedium)
+        if (models.isEmpty()) {
+            Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                Text("هنوز فایل GGUF وارد نشده است.", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            models.forEach { model -> ModelCard(model, model.id == active?.id, onActivate, onDelete) }
+        }
     }
 }
 
-@Composable
-private fun AgentControls() {
-    val context = LocalContext.current
-    var settings by remember { mutableStateOf(loadSettings(context)) }
-    var dirty by remember { mutableStateOf(false) }
-    fun update(value: InferenceSettings) { settings = value; dirty = true }
-    fun apply() { saveSettings(context, settings); dirty = false }
-
-    Column(verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) {
-        Text("عامل", style = MaterialTheme.typography.titleLarge)
-        Text("حداکثر تعداد Action واقعی که Agent برای هر درخواست می‌تواند اجرا کند. مقدار پیش‌فرض ۴ است و فقط برای جلوگیری از چرخه‌های بی‌نهایت استفاده می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        UiSurface {
-            Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Max Action Steps: ${settings.maxActionSteps}")
-                Slider(value = settings.maxActionSteps.toFloat(), onValueChange = { update(settings.copy(maxActionSteps = it.toInt().coerceIn(0, 16))) }, valueRange = 0f..16f, steps = 15)
-                Text("پیش‌فرض: ۴ · بازه قابل تنظیم: ۰ تا ۱۶", color = MaterialTheme.colorScheme.onSurfaceVariant)
+@Composable private fun ModelCard(model: ModelDescriptor, active: Boolean, onActivate: (String) -> Unit, onDelete: (String) -> Unit) {
+    var details by remember { mutableStateOf(false) }
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth()) {
+                Column(Modifier.weight(1f)) {
+                    Text(model.displayName, style = MaterialTheme.typography.titleMedium)
+                    Text("GGUF · " + model.quantization, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(if (active) "فعال" else "آماده", color = if (active) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (!active) Button(onClick = { onActivate(model.id) }) { Text("فعال‌سازی") }
+                TextButton(onClick = { details = !details }) { Text(if (details) "بستن" else "جزئیات") }
+                TextButton(onClick = { onDelete(model.id) }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("حذف") }
+            }
+            if (details) {
+                HorizontalDivider()
+                Text("شناسه: " + model.id, style = MaterialTheme.typography.bodySmall)
+                Text("وضعیت: " + model.state, style = MaterialTheme.typography.bodySmall)
             }
         }
-        Button(onClick = ::apply, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget), enabled = dirty) { Text("اعمال تنظیمات عامل") }
-        Text(if (dirty) "تغییرات ذخیره نشده‌اند." else "تنظیمات عامل ذخیره و برای اجرای بعدی آماده‌اند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable private fun ErrorCard(message: String) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
+        Text(message, Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onErrorContainer)
+    }
+}
+
+@Composable private fun InferenceControls() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var settings by remember { mutableStateOf(loadSettings(context)) }
+    var dirty by remember { mutableStateOf(false) }
+    fun update(v: InferenceSettings) { settings = v; dirty = true }
+    fun apply() { saveSettings(context, settings); dirty = false }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("پاسخ", style = MaterialTheme.typography.titleLarge)
+        Text("پروفایل آماده را انتخاب کن؛ اگر لازم شد بعداً تنظیمات دقیق را باز کن.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                InferencePreset.values().forEach { preset ->
+                    val selected = settings == preset.settings
+                    Surface(
+                        Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        onClick = { update(preset.settings) },
+                    ) {
+                        Column(Modifier.padding(13.dp)) {
+                            Text((if (selected) "✓ " else "") + preset.title, style = MaterialTheme.typography.titleSmall)
+                            Text(preset.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+        var advanced by remember { mutableStateOf(false) }
+        TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "بستن تنظیمات پیشرفته" else "تنظیمات پیشرفته") }
+        if (advanced) AdvancedInference(settings, ::update)
+        SaveRow(dirty, ::apply) { settings = InferenceSettings(); apply() }
+    }
+}
+
+@Composable private fun AdvancedInference(settings: InferenceSettings, update: (InferenceSettings) -> Unit) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text("Temperature: %.2f".format(settings.temperature))
+            Slider(value = settings.temperature.toFloat(), onValueChange = { update(settings.copy(temperature = it.toDouble())) }, valueRange = 0f..2f)
+            Text("Top-P: %.2f".format(settings.topP ?: .9))
+            Slider(value = (settings.topP ?: .9).toFloat(), onValueChange = { update(settings.copy(topP = it.toDouble())) }, valueRange = 0f..1f)
+            Text("Top-K: " + (settings.topK ?: 40))
+            Slider(value = (settings.topK ?: 40).toFloat(), onValueChange = { update(settings.copy(topK = it.toInt())) }, valueRange = 0f..128f)
+            Text("Repeat Penalty: %.2f".format(settings.repeatPenalty ?: 1.1))
+            Slider(value = (settings.repeatPenalty ?: 1.1).toFloat(), onValueChange = { update(settings.copy(repeatPenalty = it.toDouble())) }, valueRange = .8f..2f)
+            Text("Max New Tokens: " + settings.maxNewTokens)
+            Slider(value = settings.maxNewTokens.toFloat(), onValueChange = { update(settings.copy(maxNewTokens = it.toInt().coerceAtLeast(1))) }, valueRange = 64f..2048f, steps = 31)
+        }
+    }
+}
+
+@Composable private fun ContextControls() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var settings by remember { mutableStateOf(loadSettings(context)) }
+    var dirty by remember { mutableStateOf(false) }
+    fun apply() { saveSettings(context, settings); dirty = false }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("زمینه", style = MaterialTheme.typography.titleLarge)
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                Text("پیام‌های اخیر: " + settings.recentMessages)
+                Slider(value = settings.recentMessages.toFloat(), onValueChange = { settings = settings.copy(recentMessages = it.toInt().coerceIn(0, 50)); dirty = true }, valueRange = 0f..50f, steps = 49)
+                Text("بیشتر = حافظه مکالمه بیشتر و مصرف حافظه بالاتر.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        SaveRow(dirty, ::apply) { settings = InferenceSettings(); apply() }
+    }
+}
+
+@Composable private fun AgentControls() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var settings by remember { mutableStateOf(loadSettings(context)) }
+    var dirty by remember { mutableStateOf(false) }
+    fun apply() { saveSettings(context, settings); dirty = false }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("عامل", style = MaterialTheme.typography.titleLarge)
+        Text("تعداد اقدام‌هایی که Agent می‌تواند پشت‌سرهم انجام دهد.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                Text("حداکثر اقدام: " + settings.maxActionSteps)
+                Slider(value = settings.maxActionSteps.toFloat(), onValueChange = { settings = settings.copy(maxActionSteps = it.toInt().coerceIn(0, 16)); dirty = true }, valueRange = 0f..16f, steps = 15)
+            }
+        }
+        SaveRow(dirty, ::apply) { settings = InferenceSettings(); apply() }
+    }
+}
+
+@Composable private fun SaveRow(dirty: Boolean, apply: () -> Unit, reset: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(onClick = apply, enabled = dirty, modifier = Modifier.weight(1f).height(48.dp)) { Text("ذخیره") }
+        OutlinedButton(onClick = reset, modifier = Modifier.weight(1f).height(48.dp)) { Text("پیش‌فرض") }
     }
 }
 
@@ -242,7 +244,7 @@ private fun loadSettings(context: Context): InferenceSettings {
     val d = InferenceSettings()
     val loaded = d.copy(
         temperature = p.getFloat(KEY_TEMPERATURE, d.temperature.toFloat()).toDouble(),
-        topP = if (p.contains(KEY_TOP_P)) p.getFloat(KEY_TOP_P, (d.topP ?: 0.9).toFloat()).toDouble() else d.topP,
+        topP = if (p.contains(KEY_TOP_P)) p.getFloat(KEY_TOP_P, (d.topP ?: .9).toFloat()).toDouble() else d.topP,
         topK = if (p.contains(KEY_TOP_K)) p.getInt(KEY_TOP_K, d.topK ?: 40) else d.topK,
         minP = if (p.contains(KEY_MIN_P)) p.getFloat(KEY_MIN_P, (d.minP ?: 0.0).toFloat()).toDouble() else d.minP,
         repeatPenalty = if (p.contains(KEY_REPEAT)) p.getFloat(KEY_REPEAT, (d.repeatPenalty ?: 1.1).toFloat()).toDouble() else d.repeatPenalty,
@@ -258,8 +260,7 @@ private fun loadSettings(context: Context): InferenceSettings {
 }
 
 private fun migrateSettings(p: android.content.SharedPreferences) {
-    val version = p.getInt(KEY_SCHEMA_VERSION, 0)
-    if (version < 2) {
+    if (p.getInt(KEY_SCHEMA_VERSION, 0) < 2) {
         if (!p.contains(KEY_RECENT_MESSAGES)) p.edit().putInt(KEY_RECENT_MESSAGES, 10).apply()
         p.edit().putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION).apply()
     }
@@ -282,20 +283,3 @@ private fun saveSettings(context: Context, settings: InferenceSettings) {
         .apply()
     InferenceSettingsStore.current = settings
 }
-
-@Composable
-private fun SettingsInfo(title: String, message: String) {
-    UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) { Text(title, style = MaterialTheme.typography.titleLarge); Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
-}
-
-@Composable private fun SettingsGroup(title: String, sections: List<String>, selected: String, onSelect: (String) -> Unit) {
-    UiSurface { Column(Modifier.padding(vertical = 8.dp)) { Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = UiTokens.compactPadding, vertical = 8.dp)); sections.forEach { name -> TextButton(onClick = { onSelect(name) }, modifier = Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget).semantics { contentDescription = if (selected == name) "$name، انتخاب شده" else name }, contentPadding = PaddingValues(horizontal = UiTokens.compactPadding, vertical = 8.dp)) { Text(if (selected == name) "● $name" else name, Modifier.fillMaxWidth()) } } } }
-}
-
-@Composable private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescriptor>, error: String?, onImport: () -> Unit, onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)?, onDelete: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) { Text("مدل", style = MaterialTheme.typography.titleLarge); UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("مدل فعلی", style = MaterialTheme.typography.labelLarge); Text(active?.displayName ?: "مدلی فعال نیست", style = MaterialTheme.typography.titleMedium); Text(if (active != null) "آماده استفاده در گفت‌وگو" else "برای شروع، یک مدل محلی وارد و فعال کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant); if (active != null && onDeactivate != null) OutlinedButton(onClick = onDeactivate, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("خارج‌کردن مدل از حافظه") } } }; Button(onClick = onImport, Modifier.fillMaxWidth().heightIn(min = UiTokens.minimumTouchTarget)) { Text("انتخاب فایل مدل از گوشی") }; Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) { Text("مدیریت مدل‌ها", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f)); TextButton(onClick = onRefresh, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text("به‌روزرسانی") } }; if (models.isEmpty()) EmptyState() else models.forEach { model -> ModelCard(model, model.id == active?.id, onActivate, onDelete) }; if (error != null) ErrorSurface(error) }
-}
-
-@Composable private fun EmptyState() { UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("مدل محلی واردشده‌ای وجود ندارد.", style = MaterialTheme.typography.titleMedium); Text("از انتخاب فایل مدل برای واردکردن یک فایل GGUF استفاده کنید.", color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
-@Composable private fun ErrorSurface(message: String) { Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.errorContainer) { Text(message, Modifier.padding(UiTokens.compactPadding), color = MaterialTheme.colorScheme.onErrorContainer) } }
-@Composable private fun ModelCard(model: ModelDescriptor, active: Boolean, onActivate: (String) -> Unit, onDelete: (String) -> Unit) { var expanded by remember { mutableStateOf(false) }; UiSurface { Column(Modifier.padding(UiTokens.compactPadding), verticalArrangement = Arrangement.spacedBy(7.dp)) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiTokens.itemGap)) { Column(Modifier.weight(1f)) { Text(model.displayName, style = MaterialTheme.typography.titleMedium); Text("GGUF · ${model.quantization}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Text(if (active) "فعال" else "غیرفعال", style = MaterialTheme.typography.labelLarge) }; Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { if (!active) OutlinedButton(onClick = { onActivate(model.id) }, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text("فعال‌سازی") }; TextButton(onClick = { expanded = !expanded }, Modifier.heightIn(min = UiTokens.minimumTouchTarget)) { Text(if (expanded) "بستن" else "جزئیات") }; TextButton(onClick = { onDelete(model.id) }, Modifier.heightIn(min = UiTokens.minimumTouchTarget), colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("حذف") } }; if (expanded) { HorizontalDivider(); Text("شناسه مدل: ${model.id}", style = MaterialTheme.typography.bodySmall); Text("وضعیت: ${model.state}", style = MaterialTheme.typography.bodySmall); Text("کمّیت‌سازی: ${model.quantization}", style = MaterialTheme.typography.bodySmall) } } } }
