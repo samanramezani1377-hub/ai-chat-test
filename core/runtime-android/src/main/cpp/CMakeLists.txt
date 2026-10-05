@@ -70,13 +70,13 @@ target_include_directories(ai_chat_runtime PRIVATE
 # The runtime is a single arm64 production native library. Strip unused sections
 # and symbols at link time to reduce the installed footprint without changing inference.
 target_compile_options(ai_chat_runtime PRIVATE
-    $<$<CONFIG:Release>:-Os>
-    $<$<CONFIG:Release>:-ffunction-sections>
-    $<$<CONFIG:Release>:-fdata-sections>
+    -Os
+    -ffunction-sections
+    -fdata-sections
 )
 target_link_options(ai_chat_runtime PRIVATE
-    $<$<CONFIG:Release>:-Wl,--gc-sections>
-    $<$<CONFIG:Release>:-Wl,--strip-all>
+    -Wl,--gc-sections
+    -Wl,--strip-all
 )
 
 target_link_libraries(ai_chat_runtime llama android log OpenCL)
