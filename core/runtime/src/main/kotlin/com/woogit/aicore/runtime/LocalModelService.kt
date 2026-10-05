@@ -85,7 +85,9 @@ class LocalModelService(
                             )
                         )
                     }
-                    runtime.unload()
+                    if (activeId != null) {
+                        runtime.unload()
+                    }
                     runtime.load(model)
                     when (val persisted = repository.setActive(id)) {
                         is ModelResult.Success -> {
