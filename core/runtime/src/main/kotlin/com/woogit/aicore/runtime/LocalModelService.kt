@@ -101,9 +101,17 @@ class LocalModelService(
                         }
                     }
                 } catch (t: OutOfMemoryError) {
+                    // A failed target load must never leave a half-loaded native runtime
+                    // or a persisted active-model pointer behind.
+                    runCatching { runtime.unload() }
+                    runCatching { repository.setActive(null) }
                     activeId = null
                     ModelResult.Failure(ModelError.OutOfMemory("Not enough memory to load model", t))
                 } catch (t: Throwable) {
+                    // Always tear down both the previous/partial native state and the
+                    // persisted active state before reporting activation failure.
+                    runCatching { runtime.unload() }
+                    runCatching { repository.setActive(null) }
                     activeId = null
                     ModelResult.Failure(ModelError.LoadFailed("Unable to load model", t))
                 }
