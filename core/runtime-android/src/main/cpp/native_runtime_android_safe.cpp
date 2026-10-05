@@ -9,6 +9,7 @@ static void clear_android_generation_cache() {}
 #include <vector>
 #include <string>
 #include <chrono>
+#include <cstring>
 
 // Keep the JNI implementation in native_runtime.cpp. Its own fatal handler is
 // retained under a private name; the Android-specific handler below is installed
