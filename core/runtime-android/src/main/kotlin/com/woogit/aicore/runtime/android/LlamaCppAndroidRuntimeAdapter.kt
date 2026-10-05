@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicBoolean
+import java.io.File
 import kotlin.math.roundToInt
 
 /** Direct llama.cpp Android runtime. OpenCL is the only supported inference backend. */
