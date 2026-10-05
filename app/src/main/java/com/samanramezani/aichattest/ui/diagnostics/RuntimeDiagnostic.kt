@@ -48,7 +48,7 @@ internal data class RuntimeDiagnostic(
 
     private fun nativeValue(key: String): String? {
         val text = nativeDiagnostics ?: return null
-        val line = text.lineSequence().lastOrNull { it.contains("NATIVE_PREFILL_COMPLETED") || it.contains("NATIVE_GENERATE_COMPLETED") } ?: return null
+        val line = text.lineSequence().reversed().firstOrNull { (it.contains("NATIVE_PREFILL_COMPLETED") || it.contains("NATIVE_GENERATE_COMPLETED")) && it.contains("$key=") } ?: return null
         return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
     }
 }
