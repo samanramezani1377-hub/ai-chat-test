@@ -17,6 +17,11 @@ internal data class NativePerformance(
     val generatedTokens: Int? = null,
     val generationMs: Long? = null,
     val decodeTokensPerSec: Double? = null,
+    val speculativeDraftTokens: Int? = null,
+    val speculativeAcceptedTokens: Int? = null,
+    val speculativeAcceptanceRate: Double? = null,
+    val speculativeSteps: Int? = null,
+    val speculativeMeanAcceptedPerStep: Double? = null,
 ) {
     val decodeMs: Long?
         get() = if (generationMs != null && prefillMs != null) (generationMs - prefillMs).coerceAtLeast(0L) else null
@@ -44,6 +49,11 @@ internal data class RuntimeDiagnostic(
             generatedTokens = nativeValue("generatedTokens")?.toIntOrNull(),
             generationMs = nativeValue("generationMs")?.toLongOrNull(),
             decodeTokensPerSec = nativeValue("decodeTokensPerSec")?.toDoubleOrNull(),
+            speculativeDraftTokens = nativeValue("draftTokens")?.toIntOrNull(),
+            speculativeAcceptedTokens = nativeValue("acceptedTokens")?.toIntOrNull(),
+            speculativeAcceptanceRate = nativeValue("acceptanceRate")?.toDoubleOrNull(),
+            speculativeSteps = nativeValue("steps")?.toIntOrNull(),
+            speculativeMeanAcceptedPerStep = nativeValue("meanAcceptedPerStep")?.toDoubleOrNull(),
         )
 
     private fun nativeValue(key: String): String? {
@@ -81,6 +91,13 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Decode Time: ${perf.decodeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Decode Generated Tokens: ${perf.generatedTokens ?: "N/A"}")
     appendLine("Decode Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine()
+    appendLine("===== SPECULATIVE DECODING =====")
+    appendLine("Draft Tokens: ${perf.speculativeDraftTokens ?: "N/A"}")
+    appendLine("Accepted Tokens: ${perf.speculativeAcceptedTokens ?: "N/A"}")
+    appendLine("Acceptance Rate: ${perf.speculativeAcceptanceRate?.let { "%.1f%%".format(it) } ?: "N/A"}")
+    appendLine("Speculation Steps: ${perf.speculativeSteps ?: "N/A"}")
+    appendLine("Mean Accepted / Step: ${perf.speculativeMeanAcceptedPerStep?.let { "%.2f".format(it) } ?: "N/A"}")
     appendLine()
     val current = settings
     appendLine("Temperature: ${current?.temperature ?: "N/A"}")
@@ -131,6 +148,13 @@ internal fun RuntimeDiagnostic.errorReport(): String = buildString {
     appendLine("Decode Time: ${perf.decodeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Decode Generated Tokens: ${perf.generatedTokens ?: "N/A"}")
     appendLine("Decode Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine()
+    appendLine("===== SPECULATIVE DECODING =====")
+    appendLine("Draft Tokens: ${perf.speculativeDraftTokens ?: "N/A"}")
+    appendLine("Accepted Tokens: ${perf.speculativeAcceptedTokens ?: "N/A"}")
+    appendLine("Acceptance Rate: ${perf.speculativeAcceptanceRate?.let { "%.1f%%".format(it) } ?: "N/A"}")
+    appendLine("Speculation Steps: ${perf.speculativeSteps ?: "N/A"}")
+    appendLine("Mean Accepted / Step: ${perf.speculativeMeanAcceptedPerStep?.let { "%.2f".format(it) } ?: "N/A"}")
     appendLine()
     appendLine("Error: ${error ?: "N/A"}")
     if (!rawError.isNullOrBlank() && rawError != error) appendLine("Raw Error: $rawError")
