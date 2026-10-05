@@ -302,11 +302,11 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         // specializations for the long-vocabulary lm_head. Enable those explicitly
         // so the Android process does not depend on an external shell environment.
         // The dispatcher still decides whether a given tensor shape can use them.
-        setenv("GGML_OPENCL_Q6K_GEMV_TILED", "1", 1);
+        setenv("GGML_OPENCL_Q6K_GEMV_TILED", "0", 1);
         setenv("GGML_OPENCL_Q6K_GEMV_O4", "1", 1);
         setenv("GGML_OPENCL_Q6K_GEMV_O4_GLOBAL", "1", 1);
         unsetenv("GGML_DISABLE_OPENCL");
-        append_native_trace("OPENCL_Q6K_SPECIALIZED_KERNELS tiled=1 o4=1 o4_global=1");
+        append_native_trace("OPENCL_Q6K_SPECIALIZED_KERNELS tiled=0 o4=1 o4_global=1");
         append_native_trace("OPENCL_BACKEND_LOAD_ALL_STARTED");
         ggml_backend_load_all();
         append_native_trace("OPENCL_BACKEND_LOAD_ALL_RETURNED");
