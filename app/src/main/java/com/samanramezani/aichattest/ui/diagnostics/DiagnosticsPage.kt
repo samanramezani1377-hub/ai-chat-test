@@ -1,17 +1,21 @@
-package com.samanramezani.aichattest.ui.diagnostics
+package com.samanramezani1377.aichattest.ui.diagnostics
 
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import com.samanramezani.aichattest.ui.components.SimplePage
 import com.samanramezani.aichattest.ui.state.ExecutionState
 import com.woogit.aicore.actions.ActionTraceStore
@@ -19,8 +23,8 @@ import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
 import java.text.DateFormat
 import java.util.Date
 
-private const val DISPLAY_RUNTIME_EVENTS = 20
-private const val DISPLAY_ACTION_EVENTS = 10
+private const val DISPLAY_RUNTIME_EVENTS = 12
+private const val DISPLAY_ACTION_EVENTS = 8
 
 @Composable
 internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
@@ -28,7 +32,8 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
     val runtime by RuntimeDiagnosticsStore.snapshot.collectAsState()
     val actionTraces by ActionTraceStore.events.collectAsState()
     LaunchedEffect(Unit) { RuntimeDiagnosticsStore.refreshNativeEvent() }
-    val selectedActionTraces = actionTraces.filter { execution == null || it.executionId == execution.id }
+
+    val selectedActions = actionTraces.filter { execution == null || it.executionId == execution.id }
     val diagnostic = RuntimeDiagnostic(
         model = runtime.model,
         runtime = runtime.runtime,
@@ -39,7 +44,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         error = error ?: execution?.error,
         rawError = execution?.error,
         executionId = execution?.id,
-        actionTrace = selectedActionTraces,
+        actionTrace = selectedActions,
         runtimeTrace = runtime.trace,
     )
     val report = buildString {
@@ -52,117 +57,125 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         append("\n\n===== LAST NATIVE EVENT =====\n")
         append(runtime.lastNativeEvent ?: "N/A")
     }
-    val recentRuntimeEvents = runtime.trace.takeLast(DISPLAY_RUNTIME_EVENTS)
-    val recentActionEvents = selectedActionTraces.takeLast(DISPLAY_ACTION_EVENTS)
+    val recentRuntime = runtime.trace.takeLast(DISPLAY_RUNTIME_EVENTS)
+    val recentActions = selectedActions.takeLast(DISPLAY_ACTION_EVENTS)
+    val hasError = !diagnostic.error.isNullOrBlank()
+    val speed = runtime.generation?.let {
+        val seconds = it.generationTimeMs?.toDouble()?.div(1000.0)
+        if (seconds != null && seconds > 0 && it.outputTokens != null) "%.1f".format(it.outputTokens / seconds) else "—"
+    } ?: "—"
 
     SimplePage("عیب‌یابی") {
-        Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = if (diagnostic.error.isNullOrBlank()) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { Text(if (diagnostic.error.isNullOrBlank()) "اجرای اخیر بدون خطا گزارش شده" else "یک خطا در اجرای اخیر ثبت شده", style = MaterialTheme.typography.titleLarge); Text(if (diagnostic.error.isNullOrBlank()) "جزئیات فنی پایین‌تر قرار دارد و فقط برای بررسی مشکل لازم است." else "برای ارسال گزارش به پشتیبانی، «کپی گزارش خطا» را بزنید.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+        Surface(
+            Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            color = if (hasError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
+        ) {
+            Row(Modifier.padding(18.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Icon(if (hasError) Icons.Default.ErrorOutline else Icons.Default.CheckCircle, null, modifier = Modifier.size(30.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(if (hasError) "یک اجرای ناموفق ثبت شده" else "همه‌چیز عادی به نظر می‌رسد", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        if (hasError) "گزارش خطا را کپی کن تا بتوانیم دقیقاً مسیر شکست را بررسی کنیم."
+                        else "آخرین Runtime بدون خطای ثبت‌شده تمام شده است.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { copyToClipboard(context, "گزارش کامل", report) }, modifier = Modifier.weight(1f)) { Text("کپی گزارش کامل") }
-            OutlinedButton(onClick = { copyToClipboard(context, "نتیجه خطا", errorReport) }, modifier = Modifier.weight(1f)) { Text("کپی نتیجه خطا") }
+            Button(onClick = { copyToClipboard(context, "گزارش خطا", errorReport) }, modifier = Modifier.weight(1f).height(50.dp)) {
+                Icon(Icons.Default.ContentCopy, null); Spacer(Modifier.width(7.dp)); Text("کپی خطا")
+            }
+            OutlinedButton(onClick = { copyToClipboard(context, "گزارش کامل", report) }, modifier = Modifier.weight(1f).height(50.dp)) {
+                Text("گزارش کامل")
+            }
         }
 
-        Text("وضعیت اجرا", style = MaterialTheme.typography.titleLarge)
-        Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
-            Column(Modifier.padding(12.dp)) {
-                MetricRow("وضعیت", diagnostic.status)
-                MetricRow("Execution", diagnostic.executionId ?: "N/A")
-                MetricRow("مدل", diagnostic.model?.displayName ?: "N/A")
-                MetricRow("Runtime", "${diagnostic.runtime.name} ${diagnostic.runtime.version}")
-                MetricRow("Backend", diagnostic.runtime.backend ?: "N/A")
-                MetricRow("GPU Layers", diagnostic.runtime.gpuLayers?.toString() ?: "N/A")
-                if (!diagnostic.error.isNullOrBlank()) {
-                    Spacer(Modifier.height(6.dp))
-                    Text("Error: ${diagnostic.error}", color = MaterialTheme.colorScheme.onErrorContainer)
+        Text("آنچه اخیراً اتفاق افتاد", style = MaterialTheme.typography.titleLarge)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MetricCard("TTFT", runtime.generation?.firstTokenTimeMs?.let { "$it ms" } ?: "—", Modifier.weight(1f))
+            MetricCard("سرعت", if (speed == "—") "—" else "$speed tok/s", Modifier.weight(1f))
+            MetricCard("خروجی", runtime.generation?.outputTokens?.toString() ?: "—", Modifier.weight(1f))
+        }
+
+        Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                InfoLine("وضعیت", diagnostic.status)
+                InfoLine("مدل", diagnostic.model?.displayName ?: "—")
+                InfoLine("Runtime", diagnostic.runtime.name + " " + diagnostic.runtime.version)
+                InfoLine("Backend", diagnostic.runtime.backend ?: "OpenCL")
+                InfoLine("GPU Layers", diagnostic.runtime.gpuLayers?.toString() ?: "—")
+                if (hasError) Text(diagnostic.error ?: "", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
+        if (runtime.lastNativeEvent != null) {
+            Text("آخرین رویداد Native", style = MaterialTheme.typography.titleMedium)
+            Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
+                Row(Modifier.padding(13.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Icon(Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.secondary)
+                    Text(runtime.lastNativeEvent ?: "", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                 }
             }
         }
 
-        Text("آخرین رویداد Native", style = MaterialTheme.typography.titleLarge)
-        Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
-            Text(runtime.lastNativeEvent ?: "هنوز رویداد Native ثبت نشده است.", Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall)
-        }
-        Text("فقط رویدادهای اخیر برای خوانایی نمایش داده می‌شوند؛ trace کامل همچنان در گزارش کامل قابل کپی است.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-
-        Text("Timeline · Runtime", style = MaterialTheme.typography.titleLarge)
-        if (recentRuntimeEvents.isEmpty()) Text("Trace Runtime ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        else recentRuntimeEvents.forEach { event ->
-            Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
-                Column(Modifier.padding(10.dp)) {
-                    Text(event.type.toString(), style = MaterialTheme.typography.labelLarge)
-                    Text(DateFormat.getDateTimeInstance().format(Date(event.timestampMs)), style = MaterialTheme.typography.bodySmall)
-                    event.message?.let { Text(it) }
+        Text("Timeline", style = MaterialTheme.typography.titleMedium)
+        if (recentRuntime.isEmpty()) {
+            Text("رویدادی ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            recentRuntime.reversed().forEach { event ->
+                Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Column(Modifier.padding(11.dp)) {
+                        Text(event.type.toString(), style = MaterialTheme.typography.labelLarge)
+                        Text(DateFormat.getDateTimeInstance().format(Date(event.timestampMs)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        event.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    }
                 }
             }
         }
 
-        Text("Timeline · Action", style = MaterialTheme.typography.titleLarge)
-        if (recentActionEvents.isEmpty()) Text("Trace عملیات برای این Execution ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        else recentActionEvents.forEach { event ->
-            Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
-                Column(Modifier.padding(10.dp)) {
-                    Text(event.type.toString(), style = MaterialTheme.typography.labelLarge)
-                    Text(DateFormat.getDateTimeInstance().format(Date(event.timestampMs)), style = MaterialTheme.typography.bodySmall)
-                    event.message?.let { Text(it) }
+        if (recentActions.isNotEmpty()) {
+            Text("Action timeline", style = MaterialTheme.typography.titleMedium)
+            recentActions.reversed().forEach { event ->
+                Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Column(Modifier.padding(11.dp)) {
+                        Text(event.type.toString(), style = MaterialTheme.typography.labelLarge)
+                        Text(DateFormat.getDateTimeInstance().format(Date(event.timestampMs)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        event.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    }
                 }
             }
         }
 
-        Text("عملکرد", style = MaterialTheme.typography.titleLarge)
-        MetricRow("زمان بارگذاری مدل", runtime.loadTimeMs?.let { "$it ms" } ?: "N/A")
-        MetricRow("زمان تا اولین توکن (TTFT)", runtime.generation?.firstTokenTimeMs?.let { "$it ms" } ?: "N/A")
-        MetricRow("زمان تولید", runtime.generation?.generationTimeMs?.let { "$it ms" } ?: "N/A")
-        MetricRow("توکن ورودی", runtime.generation?.inputTokens?.toString() ?: "N/A")
-        MetricRow("توکن خروجی", runtime.generation?.outputTokens?.toString() ?: "N/A")
-        MetricRow("سرعت", runtime.generation?.let { generation ->
-            val seconds = generation.generationTimeMs?.toDouble()?.div(1000.0)
-            val outputTokens = generation.outputTokens
-            if (seconds == null || seconds <= 0.0 || outputTokens == null) "N/A" else "%.2f tok/s".format(outputTokens / seconds)
-        } ?: "N/A")
-
-        Text("مشخصات فنی", style = MaterialTheme.typography.titleLarge)
-        MetricRow("مدل", runtime.model?.displayName ?: "N/A")
-        MetricRow("فرمت", runtime.model?.format?.toString() ?: "N/A")
-        MetricRow("Quantization", runtime.model?.quantization?.toString() ?: "N/A")
-        MetricRow("Runtime", runtime.runtime.name)
-        MetricRow("نسخه", runtime.runtime.version)
-        MetricRow("Backend", runtime.runtime.backend ?: "N/A")
-        MetricRow("Threads", runtime.runtime.threads?.toString() ?: "N/A")
-        MetricRow("GPU Layers", runtime.runtime.gpuLayers?.toString() ?: "N/A")
-        MetricRow("Context", runtime.runtime.contextLength?.toString() ?: "N/A")
-
-        Text("پارامترهای پاسخ", style = MaterialTheme.typography.titleLarge)
-        runtime.settings?.let { settings ->
-            MetricRow("Temperature", settings.temperature.toString())
-            MetricRow("Top-P", settings.topP?.toString() ?: "N/A")
-            MetricRow("Top-K", settings.topK?.toString() ?: "N/A")
-            MetricRow("Min-P", settings.minP?.toString() ?: "N/A")
-            MetricRow("Repeat Penalty", settings.repeatPenalty?.toString() ?: "N/A")
-            MetricRow("Max New Tokens", settings.maxNewTokens.toString())
-            MetricRow("Context Length", settings.contextLength?.toString() ?: "N/A")
-            MetricRow("Seed", settings.seed?.toString() ?: "N/A")
-            MetricRow("Stop Sequences", settings.stopSequences.size.toString())
-        } ?: Text("برای آخرین Generation تنظیماتی ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-        Text("جزئیات اجرای اخیر", style = MaterialTheme.typography.titleLarge)
-        if (execution == null) Text("Execution ثبت‌شده‌ای وجود ندارد.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        else {
-            MetricRow("Execution", execution.id)
-            MetricRow("Action", execution.action)
-            MetricRow("وضعیت", execution.status)
-            MetricRow("شروع", DateFormat.getDateTimeInstance().format(Date(execution.startedAt)))
-            MetricRow("پایان", execution.finishedAt?.let { DateFormat.getDateTimeInstance().format(Date(it)) } ?: "N/A")
-            MetricRow("Approval", if (execution.approvalRequired) "لازم است" else "لازم نیست")
-            execution.error?.let { Text("Error: $it", color = MaterialTheme.colorScheme.error) }
+        Text("مشخصات فنی", style = MaterialTheme.typography.titleMedium)
+        Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                InfoLine("فرمت", runtime.model?.format?.toString() ?: "—")
+                InfoLine("Quantization", runtime.model?.quantization?.toString() ?: "—")
+                InfoLine("Threads", runtime.runtime.threads?.toString() ?: "—")
+                InfoLine("Context", runtime.runtime.contextLength?.toString() ?: "—")
+                InfoLine("Load time", runtime.loadTimeMs?.let { "$it ms" } ?: "—")
+                InfoLine("Generation", runtime.generation?.generationTimeMs?.let { "$it ms" } ?: "—")
+            }
         }
     }
 }
 
-@Composable
-private fun MetricRow(label: String, value: String) {
+@Composable private fun MetricCard(label: String, value: String, modifier: Modifier) {
+    Surface(modifier, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
+        Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.titleMedium)
+        }
+    }
+}
+
+@Composable private fun InfoLine(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, Modifier.weight(1f))
+        Text(value, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
     }
 }
 
