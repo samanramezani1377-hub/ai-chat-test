@@ -23,7 +23,6 @@ import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.domain.ModelResult
 import com.woogit.aicore.conversation.ConversationRecord
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -66,17 +65,18 @@ internal fun MainScreen(container: AppContainer) {
     fun refreshHistory() { scope.launch(Dispatchers.Default) { val records = history.recent(recentLimit); withContext(Dispatchers.Main) { conversations = records } } }
     LaunchedEffect(Unit) {
         val startup = withContext(Dispatchers.Default) {
-            val restore = async { manager?.restoreActive() }
             val records = history.recent(recentLimit)
             val record = records.firstOrNull() ?: history.create("گفت‌وگوی جدید")
             val loadedMessages = history.messages(record.id).map { UiMessage(it.role, it.content, it.id) }
-            restore.await()
-            StartupSnapshot(history.recent(recentLimit), record, loadedMessages)
+            StartupSnapshot(records, record, loadedMessages)
         }
         conversations = startup.conversations
         current = startup.record
         messages = startup.messages
-        refreshModels()
+        scope.launch(Dispatchers.Default) {
+            manager?.restoreActive()
+            refreshModels()
+        }
     }
     BackHandler(enabled = sidebarOpen || quickMenuOpen) { if (sidebarOpen) sidebarOpen = false else quickMenuOpen = false }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri == null || manager == null) return@rememberLauncherForActivityResult; importBusy = true; runtimeStatus = "در حال وارد کردن مدل…"; diagnostic = null; scope.launch { try { val result = withContext(Dispatchers.IO) { manager.import(uri) }; when (result) { is ModelResult.Success -> { runtimeStatus = "مدل وارد شد؛ برای فعال‌سازی آماده است."; diagnostic = null }; is ModelResult.Failure -> diagnostic = result.error.message } } catch (t: Throwable) { diagnostic = t.message ?: "وارد کردن مدل ناموفق بود." } finally { withContext(Dispatchers.Main) { importBusy = false; if (diagnostic == null && activeModel == null) runtimeStatus = "مدل وارد شد؛ برای فعال‌سازی آماده است." else if (diagnostic != null) runtimeStatus = "خطا" }; refreshModels() } } }
