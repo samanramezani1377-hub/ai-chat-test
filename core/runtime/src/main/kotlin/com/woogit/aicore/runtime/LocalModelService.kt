@@ -77,6 +77,14 @@ class LocalModelService(
                 }
 
                 try {
+                    if (activeId == id) {
+                        return@withLock ModelResult.Success(
+                            model.copy(
+                                state = ModelState.ACTIVE,
+                                runtimeCompatibility = RuntimeCompatibility(true, null),
+                            )
+                        )
+                    }
                     runtime.unload()
                     runtime.load(model)
                     when (val persisted = repository.setActive(id)) {
@@ -112,10 +120,11 @@ class LocalModelService(
                 when (val result = repository.getActive()) {
                     is ModelResult.Success -> {
                         val model = result.value
-                        if (model != null && activeId != model.id) {
-                            runtime.load(model)
-                            activeId = model.id
-                        }
+                        // Generation must never implicitly activate/reload a model.
+                        // The runtime is loaded explicitly by activate()/restoreActive().
+                        // Re-loading here can allocate a second native model/context while
+                        // the previous generation has just completed, which is unsafe on
+                        // mobile OpenCL and was the source of second-message crashes.
                         model
                     }
                     is ModelResult.Failure -> return@withLock result
