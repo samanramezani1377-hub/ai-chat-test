@@ -23,6 +23,7 @@ import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.domain.ModelResult
 import com.woogit.aicore.conversation.ConversationRecord
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -55,7 +56,6 @@ internal fun MainScreen(container: AppContainer) {
     var activeStreamId by remember { mutableStateOf<String?>(null) }
 
     data class StartupSnapshot(
-        val restore: ModelResult<* >?,
         val conversations: List<ConversationRecord>,
         val record: ConversationRecord,
         val messages: List<UiMessage>,
@@ -70,7 +70,8 @@ internal fun MainScreen(container: AppContainer) {
             val records = history.recent(recentLimit)
             val record = records.firstOrNull() ?: history.create("گفت‌وگوی جدید")
             val loadedMessages = history.messages(record.id).map { UiMessage(it.role, it.content, it.id) }
-            StartupSnapshot(restore.await(), history.recent(recentLimit), record, loadedMessages)
+            restore.await()
+            StartupSnapshot(history.recent(recentLimit), record, loadedMessages)
         }
         conversations = startup.conversations
         current = startup.record
