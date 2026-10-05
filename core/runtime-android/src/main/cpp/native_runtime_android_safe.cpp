@@ -538,7 +538,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         g_cached_prompt_tokens = prompt_tokens;
         if (!model_uses_recurrent_memory()) {
             g_cached_prompt_state.clear();
-        }        append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISHED tokens=") + std::to_string(g_cached_prompt_tokens.size())).c_str());
+        }
+        append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISHED tokens=") + std::to_string(g_cached_prompt_tokens.size())).c_str());
     } else if (prefill_recorded) {
         g_cached_prompt_tokens.clear();
         g_cached_prompt_state.clear();
