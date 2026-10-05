@@ -31,7 +31,7 @@ class GgufInspectorTest {
     }
 
     @Test
-    fun `inspects Qwen3.5 GGUF with Q6_K quantization`() {
+    fun `inspects Qwen3_5 GGUF with Q6_K quantization`() {
         val file = Files.createTempFile("qwen35-test-", ".gguf")
         try {
             Files.write(file, buildMinimalQwen35Q6K())
