@@ -216,6 +216,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     }
     checkpoint("NATIVE_GENERATE_CONTEXT_RECREATE_STARTED");
     if (g_context) {
+        // OpenCL work can still be in flight after the last decode. Never destroy
+        // the context until the backend has completed all queued GPU work.
+        llama_synchronize(g_context);
         llama_free(g_context);
         g_context = nullptr;
     }
