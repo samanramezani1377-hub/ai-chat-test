@@ -31,6 +31,22 @@ class GgufInspectorTest {
     }
 
     @Test
+    fun `inspects modern Q5_K_M and Q5_K_S file types`() {
+        val cases = listOf(17 to Quantization.Q5_K_M, 19 to Quantization.Q5_K_S)
+        cases.forEach { (fileType, expected) ->
+            val file = Files.createTempFile("q5-test-", ".gguf")
+            try {
+                Files.write(file, buildMinimalWithFileType(fileType))
+                val result = kotlinx.coroutines.runBlocking { GgufInspector().inspect(file) }
+                val inspection = assertIs<ModelResult.Success<*>>(result).value as com.woogit.aicore.domain.ModelInspection
+                assertEquals(expected, inspection.quantization)
+            } finally {
+                Files.deleteIfExists(file)
+            }
+        }
+    }
+
+    @Test
     fun `inspects Qwen3_5 GGUF with Q6_K quantization`() {
         val file = Files.createTempFile("qwen35-test-", ".gguf")
         try {
@@ -79,6 +95,21 @@ class GgufInspectorTest {
         val field = value.javaClass.getDeclaredField("count")
         field.isAccessible = true
         return field.getLong(value)
+    }
+
+    private fun buildMinimalWithFileType(fileType: Int): ByteArray {
+        val out = mutableListOf<Byte>()
+        out.addAll("GGUF".encodeToByteArray().toList())
+        out.writeIntLE(3)
+        out.writeLongLE(1)
+        out.writeLongLE(2)
+        out.writeString("general.architecture")
+        out.writeIntLE(8)
+        out.writeString("qwen3")
+        out.writeString("general.file_type")
+        out.writeIntLE(4)
+        out.writeIntLE(fileType)
+        return out.toByteArray()
     }
 
     private fun buildMinimalQwen3Q6K(): ByteArray {
