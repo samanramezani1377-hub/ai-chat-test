@@ -143,7 +143,8 @@ class LlamaCppAndroidRuntimeAdapter(
         is ModelResult.Failure -> throw RuntimeFailure(result.error)
     }
 
-    suspend fun generateResult(request: GenerationRequest, onToken: suspend (String) -> Unit): ModelResult<GenerationResult> {
+    suspend fun generateResult(request: GenerationRequest, onToken: suspend (String) -> Unit): ModelResult<GenerationResult> =
+        nativeOperationMutex.withLock {
         currentCoroutineContext().ensureActive()
         if (loadedContextLength == null) return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
         val settings = request.settings
@@ -164,8 +165,7 @@ class LlamaCppAndroidRuntimeAdapter(
         val output = StringBuilder()
         val pending = StringBuilder()
         val maxStopLength = settings.stopSequences.maxOfOrNull { it.length } ?: 0
-        return nativeOperationMutex.withLock {
-            try {
+        try {
                 NativeLlamaCpp.generate(
                 prompt = prompt,
                 maxTokens = settings.maxNewTokens.coerceAtLeast(1),
@@ -217,7 +217,6 @@ class LlamaCppAndroidRuntimeAdapter(
             }
             } finally { stopRequested.set(false) }
         }
-    }
     /**
      * Keep as much recent conversation as possible while reserving the full generation
      * budget. The actual GGUF vocabulary counts tokens, so mixed Persian/English text
@@ -240,7 +239,7 @@ class LlamaCppAndroidRuntimeAdapter(
                 "lfm2" -> Lfm2PromptFormatter.format(candidate)
                 else -> Qwen3PromptFormatter.format(candidate)
             }
-            val tokenCount = nativeOperationMutex.withLock { NativeLlamaCpp.countTokens(formatted) }
+            val tokenCount = NativeLlamaCpp.countTokens(formatted)
             if (tokenCount < 0 || tokenCount > budget) {
                 selected.removeFirst()
                 break
