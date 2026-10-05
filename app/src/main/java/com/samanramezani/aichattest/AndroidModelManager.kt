@@ -12,6 +12,7 @@ import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.runtime.FileModelImporter
 import com.woogit.aicore.runtime.FileModelRepository
 import com.woogit.aicore.runtime.LocalModelService
+import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
 import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -143,15 +144,34 @@ class AndroidModelManager(
     suspend fun activeModel(): ModelResult<ModelDescriptor?> = service.activeModel()
 
     suspend fun restoreActive(): ModelResult<ModelDescriptor?> = withContext(Dispatchers.IO) {
-        val active = (service.activeModel() as? ModelResult.Success)?.value
-        runtime.setDraftPath(active?.let { (draftForModel(it.id) as? ModelResult.Success)?.value?.path?.toString() })
-        service.restoreActive()
+        // Target activation is deliberately independent from speculative decoding.
+        // Never let a persisted/broken draft participate in target model load.
+        runtime.setDraftPath(null)
+        val result = service.restoreActive()
+        if (result is ModelResult.Success && result.value != null) {
+            attachDraftAfterTargetLoad(result.value.id)
+        }
+        result
     }
 
     suspend fun activate(id: String): ModelResult<ModelDescriptor> = withContext(Dispatchers.IO) {
-        val draft = (draftForModel(id) as? ModelResult.Success)?.value
-        runtime.setDraftPath(draft?.path?.toString())
-        service.activate(id)
+        // The target must always load with speculative decoding disabled. Draft state
+        // is connected only after the target runtime has reported a successful load.
+        runtime.setDraftPath(null)
+        val result = service.activate(id)
+        if (result is ModelResult.Success) {
+            attachDraftAfterTargetLoad(result.value.id)
+        }
+        result
+    }
+
+    private suspend fun attachDraftAfterTargetLoad(modelId: String) {
+        val draft = (draftForModel(modelId) as? ModelResult.Success)?.value
+        val draftPath = draft?.path?.takeIf { Files.isRegularFile(it) && Files.isReadable(it) }?.toString()
+        runtime.setDraftPath(draftPath)
+        if (draft != null && draftPath == null) {
+            RuntimeDiagnosticsStore.recordNativeEvent("SPECULATIVE_DRAFT_IGNORED_INVALID file=${draft.path}")
+        }
     }
 
     suspend fun deactivate(): ModelResult<Unit> = withContext(Dispatchers.IO) {
