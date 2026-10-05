@@ -1,4 +1,7 @@
 #include "llama.h"
+#include "common.h"
+#include "sampling.h"
+#include "speculative.h"
 #include <vector>
 
 // Tokens represented by the resident prompt prefix in the native KV cache.
@@ -25,6 +28,10 @@ static void clear_android_generation_cache() {
 #include <mutex>
 
 static std::mutex g_native_runtime_mutex;
+static bool g_spec_requested=false;
+static std::string g_spec_draft_path;
+static common_speculative_init_result_ptr g_spec_init;
+static common_speculative_ptr g_spec;
 
 // Keep the JNI implementation in native_runtime.cpp. Its own fatal handler is
 // retained under a private name; the Android-specific handler below is installed
@@ -32,6 +39,61 @@ static std::mutex g_native_runtime_mutex;
 #define install_native_fatal_handlers install_native_fatal_handlers_legacy
 #include "native_runtime.cpp"
 #undef install_native_fatal_handlers
+
+static bool init_speculative_runtime() {
+    if (!g_spec_requested || g_spec_draft_path.empty() || !g_model || !g_context) return false;
+    try {
+        common_params p;
+        p.model.path=g_spec_draft_path; p.n_ctx=(int)llama_n_ctx(g_context); p.n_batch=128; p.n_ubatch=128;
+        p.n_parallel=1; p.n_sequences=1; p.n_gpu_layers=99;
+        p.speculative.types={COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE};
+        p.speculative.draft.mparams.path=g_spec_draft_path;
+        p.speculative.draft.n_max=4; p.speculative.draft.n_gpu_layers=99;
+        g_spec_init=common_speculative_init_from_params(p,g_model,g_context);
+        if(!g_spec_init || !g_spec_init->context()){g_spec_init.reset();return false;}
+        p.speculative.draft.ctx_tgt=g_context; p.speculative.draft.ctx_dft=g_spec_init->context();
+        g_spec=common_speculative_init(p.speculative,1);
+        if(!g_spec){g_spec_init.reset();return false;}
+        append_native_trace((std::string("SPECULATIVE_READY draft=")+g_spec_draft_path+" nMax=4").c_str());
+        return true;
+    } catch(const std::exception &e){append_native_trace((std::string("SPECULATIVE_EXCEPTION ")+e.what()).c_str());g_spec.reset();g_spec_init.reset();return false;}
+}
+
+static common_params_sampling spec_sampling(float temperature,int top_k,float top_p,float min_p){
+    common_params_sampling p; p.top_k=std::max(0,top_k); p.top_p=std::clamp(top_p,0.f,1.f); p.min_p=std::clamp(min_p,0.f,1.f);
+    p.temp=std::max(0.f,temperature); p.penalty_last_n=64; p.penalty_repeat=1.1f;
+    p.samplers={COMMON_SAMPLER_TYPE_PENALTIES,COMMON_SAMPLER_TYPE_TOP_K,COMMON_SAMPLER_TYPE_TOP_P,COMMON_SAMPLER_TYPE_MIN_P,COMMON_SAMPLER_TYPE_TEMPERATURE};
+    return p;
+}
+
+static int generate_spec(JNIEnv *env,jobject listener,jmethodID on_token,const std::vector<llama_token>& inp,int max_tokens,float temperature,int top_k,float top_p,float min_p){
+    llama_context *dctx=g_spec_init?g_spec_init->context():nullptr; if(!g_spec||!dctx||inp.empty()) return -1;
+    llama_memory_clear(llama_get_memory(g_context),true); llama_memory_clear(llama_get_memory(dctx),true);
+    common_params_sampling sp=spec_sampling(temperature,top_k,top_p,min_p); common_sampler_ptr smp(common_sampler_init(g_model,sp)); if(!smp) return -1;
+    const llama_vocab *v=llama_model_get_vocab(g_model);
+    common_batch bp(g_context); for(size_t i=0;i+1<inp.size();++i) bp.add(inp[i],(llama_pos)i,0,false);
+    if(bp.size()){if(llama_decode(g_context,bp.get())!=0)return 10;if(!common_speculative_process(g_spec.get(),bp))return 10;}
+    llama_token last=inp.back(); llama_tokens hist(inp.begin(),inp.end()-1); common_speculative_begin(g_spec.get(),0,hist);
+    int pos=(int)hist.size(),gen=0; llama_tokens draft; common_batch bt(g_context);
+    while(gen<max_tokens&&!g_stop.load()){
+        auto &dp=common_speculative_get_draft_params(g_spec.get(),0); dp={}; dp.drafting=true; dp.n_max=std::min(4,max_tokens-gen-1); dp.pos0=pos; dp.id_last=last; dp.prompt=&hist; dp.result=&draft; draft.clear(); common_speculative_draft(g_spec.get());
+        bt.clear(); bt.add(last,pos,0,true); for(size_t i=0;i<draft.size();++i) bt.add(draft[i],pos+1+(llama_pos)i,0,true);
+        if(llama_decode(g_context,bt.get())!=0)return 10;
+        std::vector<int> idx; for(size_t i=0;i<=draft.size();++i)idx.push_back((int)i);
+        auto ids=common_sampler_sample_and_accept_n(smp.get(),g_context,idx,draft); if(ids.empty())return 10;
+        const int acc=(int)ids.size()-1; const llama_pos rollback=pos+acc;
+        if(!llama_memory_seq_rm(llama_get_memory(g_context),0,rollback,-1))return 20;
+        if(!llama_memory_seq_rm(llama_get_memory(dctx),0,rollback,-1))return 20;
+        for(size_t i=0;i<ids.size();++i){
+            llama_token tok=ids[i]; char piece[1024]; int z=llama_token_to_piece(v,tok,piece,sizeof(piece),0,true);
+            if(z>0){jstring out=env->NewStringUTF(std::string(piece,(size_t)z).c_str()); if(!out)return 12; env->CallVoidMethod(listener,on_token,out);env->DeleteLocalRef(out);if(env->ExceptionCheck()){env->ExceptionClear();return 12;}}
+            ++gen; if(llama_vocab_is_eog(v,tok)||gen>=max_tokens)return 0;
+            hist.push_back(last); last=tok; if(i<ids.size()-1)++pos;
+        }
+        draft.clear();
+    }
+    return 0;
+}
 
 static bool model_uses_recurrent_memory() {
     return g_model && (llama_model_is_recurrent(g_model) || llama_model_is_hybrid(g_model));
@@ -239,6 +301,15 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     const llama_vocab * vocab = llama_model_get_vocab(g_model);
     if (!vocab) { checkpoint("NATIVE_GENERATE_VOCAB_MISSING"); return 4; }
     const int n_prompt = -llama_tokenize(vocab, prompt_text.c_str(), prompt_text.size(), nullptr, 0, true, true);
+    if (g_spec) {
+        std::vector<llama_token> spec_tokens((size_t)n_prompt);
+        if (llama_tokenize(vocab,prompt_text.c_str(),prompt_text.size(),spec_tokens.data(),spec_tokens.size(),true,true)<0) return 5;
+        const int sr=generate_spec(env,listener,on_token,spec_tokens,std::min((int)max_tokens,(int)llama_n_ctx(g_context)-n_prompt-1),(float)temperature,(int)top_k,(float)top_p,(float)min_p);
+        append_native_trace((std::string("SPECULATIVE_GENERATE_RETURNED code=")+std::to_string(sr)).c_str());
+        if(sr==0||sr==9)return sr;
+        llama_memory_clear(llama_get_memory(g_context),true);
+        llama_memory_clear(llama_get_memory(g_spec_init->context()),true);
+    }
     if (n_prompt <= 0) { checkpoint("NATIVE_GENERATE_TOKENIZE_COUNT_FAILED"); return 5; }
     std::vector<llama_token> prompt_tokens((size_t) n_prompt);
     if (llama_tokenize(vocab, prompt_text.c_str(), prompt_text.size(), prompt_tokens.data(), prompt_tokens.size(), true, true) < 0) { checkpoint("NATIVE_GENERATE_TOKENIZE_FAILED"); return 5; }
