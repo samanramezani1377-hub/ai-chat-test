@@ -74,14 +74,6 @@ fun SettingsScreen(
                 "عامل" -> AgentControls()
             }
         }
-        item {
-            Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("معماری محلی", style = MaterialTheme.typography.titleSmall)
-                    Text("مدل و inference روی دستگاه اجرا می‌شوند؛ این برنامه برای پاسخ‌گویی به API ابری متکی نیست.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
     }
 }
 
