@@ -187,7 +187,42 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     const std::string prompt_text(prompt);
     env->ReleaseStringUTFChars(jprompt, prompt);
     g_stop.store(false, std::memory_order_relaxed);
-    llama_memory_clear(llama_get_memory(g_context), true);
+
+    // Recreate only the llama.cpp context between turns. Keep the model weights
+    // resident, but do not reuse the previous OpenCL graph/KV state. On mobile
+    // OpenCL drivers, the second decode can otherwise enter a stale graph after
+    // a completed turn and crash the process. Conversation history and model
+    // weights remain unchanged; only the lightweight runtime context is rebuilt.
+    const uint32_t preserved_ctx = g_context ? llama_n_ctx(g_context) : 4096;
+    if (g_context) {
+        checkpoint("NATIVE_GENERATE_CONTEXT_RESET_STARTED");
+        llama_free(g_context);
+        g_context = nullptr;
+    }
+    if (!g_model) {
+        checkpoint("NATIVE_GENERATE_CONTEXT_RESET_NO_MODEL");
+        return 2;
+    }
+    llama_context_params reset_cp = llama_context_default_params();
+    reset_cp.n_ctx = preserved_ctx;
+    reset_cp.n_batch = std::min<uint32_t>(reset_cp.n_ctx, 128);
+    reset_cp.n_ubatch = reset_cp.n_batch;
+    reset_cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    reset_cp.type_k = GGML_TYPE_F16;
+    reset_cp.type_v = GGML_TYPE_F16;
+    reset_cp.offload_kqv = true;
+    reset_cp.n_seq_max = 1;
+    reset_cp.n_threads = threads();
+    reset_cp.n_threads_batch = threads();
+    checkpoint("NATIVE_GENERATE_CONTEXT_RESET_INIT");
+    g_context = llama_init_from_model(g_model, reset_cp);
+    if (!g_context) {
+        checkpoint("NATIVE_GENERATE_CONTEXT_RESET_FAILED");
+        return 2;
+    }
+    llama_set_abort_callback(g_context, abort_callback, nullptr);
+    checkpoint("NATIVE_GENERATE_CONTEXT_RESET_COMPLETED");
+
     const llama_vocab * vocab = llama_model_get_vocab(g_model);
     if (!vocab) { checkpoint("NATIVE_GENERATE_VOCAB_MISSING"); return 4; }
     const int n_prompt = -llama_tokenize(vocab, prompt_text.c_str(), prompt_text.size(), nullptr, 0, true, true);
