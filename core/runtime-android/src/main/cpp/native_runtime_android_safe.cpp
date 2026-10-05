@@ -79,9 +79,11 @@ static int generate_spec(JNIEnv *env,jobject listener,jmethodID on_token,const s
         auto &dp=common_speculative_get_draft_params(g_spec.get(),0); dp={}; dp.drafting=true; dp.n_max=std::min(4,max_tokens-gen-1); dp.pos0=pos; dp.id_last=last; dp.prompt=&hist; dp.result=&draft; draft.clear(); common_speculative_draft(g_spec.get());
         bt.clear(); bt.add(last,pos,0,true); for(size_t i=0;i<draft.size();++i) bt.add(draft[i],pos+1+(llama_pos)i,0,true);
         if(llama_decode(g_context,bt.get())!=0)return 10;
+        if(!common_speculative_process(g_spec.get(),bt))return 10;
         std::vector<int> idx; for(size_t i=0;i<=draft.size();++i)idx.push_back((int)i);
         auto ids=common_sampler_sample_and_accept_n(smp.get(),g_context,idx,draft); if(ids.empty())return 10;
         const int acc=(int)ids.size()-1; const llama_pos rollback=pos+acc;
+        common_speculative_accept(g_spec.get(),0,(uint16_t)acc);
         if(!llama_memory_seq_rm(llama_get_memory(g_context),0,rollback,-1))return 20;
         if(!llama_memory_seq_rm(llama_get_memory(dctx),0,rollback,-1))return 20;
         for(size_t i=0;i<ids.size();++i){
