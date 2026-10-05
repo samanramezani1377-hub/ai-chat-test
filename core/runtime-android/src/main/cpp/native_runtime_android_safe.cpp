@@ -276,7 +276,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     }
 
     const bool cache_supported = !llama_model_has_encoder(g_model) && !model_uses_recurrent_memory();
-    bool cache_reused = cache_supported && !g_cached_prompt_tokens.empty();
+    // A cache is useful only when the new prompt actually shares a prefix.
+    // Reusing an empty prefix would merely add bookkeeping without saving compute.
+    bool cache_reused = cache_supported && !g_cached_prompt_tokens.empty() && common_prefix > 0;
     size_t reuse_prefix = 0;
     append_native_trace((std::string("NATIVE_KV_CACHE_PREFIX_CHECK supported=") + (cache_supported ? "1" : "0") + " cachedTokens=" + std::to_string(g_cached_prompt_tokens.size()) + " commonPrefix=" + std::to_string(common_prefix)).c_str());
     if (!cache_reused) {
@@ -339,7 +341,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     int position = (int) reuse_prefix;
     std::string pending_utf8;
     int result = 0;
+    // JNI callbacks are expensive on Android. Keep native token generation
+    // token-by-token, but deliver a small batch to Kotlin to reduce per-token
+    // JNI/UTF-16 allocation overhead without changing model sampling.
+    static constexpr int kStreamChunkTokens = 4;
+    int tokens_since_emit = 0;
     const auto generation_started_at = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point prefill_finished_at = generation_started_at;
     bool prefill_recorded = false;
 
     // Prefill the new prompt in physical batches. Only the final prompt token
@@ -365,6 +373,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         prompt_offset += count;
         if (final_prompt_batch) {
             const auto now = std::chrono::steady_clock::now();
+            prefill_finished_at = now;
             const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - generation_started_at).count();
             append_native_trace((std::string("NATIVE_PREFILL_COMPLETED promptTokens=") +
                 std::to_string(n_prompt) + " reusedTokens=" + std::to_string(reuse_prefix) +
@@ -391,13 +400,17 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             }
             if (piece_size > 0) {
                 pending_utf8.append(piece, static_cast<size_t>(piece_size));
+            }
+            ++generated;
+            ++tokens_since_emit;
+            if (tokens_since_emit >= kStreamChunkTokens) {
                 if (!emit_complete_utf8(env, listener, on_token, pending_utf8)) {
                     checkpoint("NATIVE_GENERATE_JSTRING_FAILED");
                     result = 12;
                     break;
                 }
+                tokens_since_emit = 0;
             }
-            ++generated;
             if (generated >= max_predict) break;
 
             // Decode exactly one sampled token. This keeps generation memory bounded
@@ -418,6 +431,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     }
 
     if (!pending_utf8.empty() && result == 0) {
+        // Flush the final stream chunk before handling any partial UTF-8 sequence.
+        if (!emit_complete_utf8(env, listener, on_token, pending_utf8)) {
+            checkpoint("NATIVE_GENERATE_JSTRING_FAILED_FINAL_FLUSH");
+            result = 12;
+        }
+    }
+    if (!pending_utf8.empty() && result == 0) {
         // A valid model output should not leave a partial UTF-8 sequence behind.
         // Emit it as U+FFFD rather than passing unterminated bytes to JNI.
         pending_utf8.clear();
@@ -434,7 +454,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     llama_sampler_free(sampler);
     const auto generation_finished_at = std::chrono::steady_clock::now();
     const auto generation_ms = std::chrono::duration_cast<std::chrono::milliseconds>(generation_finished_at - generation_started_at).count();
-    const double decode_tokens_per_sec = generated > 0 && generation_ms > 0 ? (1000.0 * static_cast<double>(generated) / static_cast<double>(generation_ms)) : 0.0;
+    const auto decode_ms = std::chrono::duration_cast<std::chrono::milliseconds>(generation_finished_at - prefill_finished_at).count();
+    const double decode_tokens_per_sec = generated > 0 && decode_ms > 0 ? (1000.0 * static_cast<double>(generated) / static_cast<double>(decode_ms)) : 0.0;
     if (prefill_recorded && (result == 0 || result == 9)) {
         g_cached_prompt_tokens = prompt_tokens;
         append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISHED tokens=") + std::to_string(g_cached_prompt_tokens.size())).c_str());
@@ -443,7 +464,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         llama_memory_clear(memory, true);
         checkpoint("NATIVE_KV_CACHE_NOT_PUBLISHED_AFTER_FAILED_GENERATION");
     }
-    append_native_trace((std::string("NATIVE_GENERATE_COMPLETED generatedTokens=") + std::to_string(generated) + " result=" + std::to_string(result) + " generationMs=" + std::to_string(generation_ms) + " decodeTokensPerSec=" + std::to_string(decode_tokens_per_sec)).c_str());
+    append_native_trace((std::string("NATIVE_GENERATE_COMPLETED generatedTokens=") + std::to_string(generated) +
+        " result=" + std::to_string(result) +
+        " generationMs=" + std::to_string(generation_ms) +
+        " prefillMs=" + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(prefill_finished_at - generation_started_at).count()) +
+        " decodeMs=" + std::to_string(decode_ms) +
+        " decodeTokensPerSec=" + std::to_string(decode_tokens_per_sec) +
+        " streamChunkTokens=" + std::to_string(kStreamChunkTokens)).c_str());
     checkpoint(result == 0 ? "NATIVE_GENERATE_RETURNED_SUCCESS" : "NATIVE_GENERATE_RETURNED_FAILURE");
     return result;
 }
