@@ -60,9 +60,10 @@ class GgufModelValidator(
 
         // Both architectures are implemented by the pinned llama.cpp runtime.
         // LFM2.5 GGUFs declare general.architecture = "lfm2".
-        private val DEFAULT_ARCHITECTURES = setOf("qwen3", "lfm2")
+        private val DEFAULT_ARCHITECTURES = setOf("qwen3", "qwen35", "lfm2")
 
-        // Keep the existing Q6_K baseline and allow the LFM2.5 Q8_0 checkpoint.
+        // Qwen3 and Qwen3.5 use the same Q6_K baseline in this app; LFM2.5
+        // remains supported at Q8_0 as before.
         private val DEFAULT_QUANTIZATIONS = setOf(Quantization.Q6_K, Quantization.Q8_0)
     }
 }
