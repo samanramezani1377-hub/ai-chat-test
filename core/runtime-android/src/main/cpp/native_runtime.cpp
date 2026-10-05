@@ -316,6 +316,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     // batch is unnecessarily large for interactive single-message generation.
     cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
     cp.n_ubatch = cp.n_batch;
+    // This runtime serves exactly one interactive generation sequence. Keep the
+    // recurrent/hybrid state single-sequence as well; LFM2/LFM2.5 uses that state.
+    cp.n_seq_max = 1;
     cp.n_threads = threads(); cp.n_threads_batch = threads();
     checkpoint("CONTEXT_INIT_STARTED"); g_context = llama_init_from_model(g_model, cp);
     checkpoint(g_context ? "CONTEXT_INIT_RETURNED_SUCCESS" : "CONTEXT_INIT_RETURNED_FAILED");
