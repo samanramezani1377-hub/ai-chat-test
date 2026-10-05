@@ -409,6 +409,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     int generated = 0;
     int position = (int) reuse_prefix;
     std::string pending_utf8;
+    const char * stop_reason = "UNKNOWN";
     int result = 0;
     // JNI callbacks are expensive on Android. Keep native token generation
     // token-by-token, but deliver a small batch to Kotlin to reduce per-token
@@ -424,7 +425,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     append_native_trace((std::string("NATIVE_PREFILL_STARTED promptTokens=") + std::to_string(n_prompt) + " reusedTokens=" + std::to_string(reuse_prefix) + " remainingTokens=" + std::to_string(n_prompt - (int) reuse_prefix)).c_str());
     int prompt_offset = (int) reuse_prefix;
     while (prompt_offset < n_prompt) {
-        if (g_stop.load(std::memory_order_relaxed)) { result = 9; checkpoint("NATIVE_GENERATE_STOPPED"); break; }
+        if (g_stop.load(std::memory_order_relaxed)) { result = 9; stop_reason = "USER_STOP"; checkpoint("NATIVE_GENERATE_STOPPED"); break; }
         const int count = std::min(decode_batch_size, n_prompt - prompt_offset);
         const bool final_prompt_batch = prompt_offset + count == n_prompt;
         fill_batch(prompt_tokens.data() + prompt_offset, count, prompt_offset, final_prompt_batch);
@@ -440,6 +441,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         }
         position = prompt_offset + count;
         prompt_offset += count;
+        append_native_trace((std::string("NATIVE_PREFILL_PROGRESS processed=") +
+            std::to_string(prompt_offset) + " total=" + std::to_string(n_prompt) +
+            " reused=" + std::to_string(reuse_prefix)).c_str());
         if (final_prompt_batch) {
             const auto now = std::chrono::steady_clock::now();
             prefill_finished_at = now;
@@ -517,7 +521,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
 
             const llama_token token = llama_sampler_sample(sampler, g_context, -1);
             llama_sampler_accept(sampler, token);
-            if (llama_vocab_is_eog(vocab, token)) { checkpoint("NATIVE_GENERATE_EOG"); break; }
+            if (llama_vocab_is_eog(vocab, token)) { stop_reason = "EOS"; checkpoint("NATIVE_GENERATE_EOG"); break; }
 
             char piece[1024];
             int piece_size = llama_token_to_piece(vocab, token, piece, (int) sizeof(piece), 0, true);
@@ -525,6 +529,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                 append_native_trace((std::string("NATIVE_GENERATE_TOKEN_TO_PIECE_FAILED size=") + std::to_string(piece_size)).c_str());
                 checkpoint("NATIVE_GENERATE_TOKEN_TO_PIECE_FAILED");
                 result = 11;
+                stop_reason = "TOKEN_TO_PIECE_ERROR";
                 break;
             }
             if (piece_size > 0) {
@@ -536,11 +541,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                 if (!emit_complete_utf8(env, listener, on_token, pending_utf8)) {
                     checkpoint("NATIVE_GENERATE_JSTRING_FAILED");
                     result = 12;
+                    stop_reason = "STREAM_CALLBACK_ERROR";
                     break;
                 }
                 tokens_since_emit = 0;
             }
-            if (generated >= max_predict) break;
+            if (generated >= max_predict) { stop_reason = requested_max > max_predict ? "CONTEXT_LIMIT" : "MAX_TOKENS"; break; }
 
             // Decode exactly one sampled token. This keeps generation memory bounded
             // while retaining the full prompt/context and without changing sampling.
@@ -553,6 +559,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                 llama_memory_clear(memory, true);
                 checkpoint("NATIVE_GENERATE_DECODE_FAILED_CACHE_RESET");
                 result = 10;
+                stop_reason = "DECODE_ERROR";
                 break;
             }
             ++position;
@@ -597,6 +604,15 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         llama_memory_clear(memory, true);
         checkpoint("NATIVE_KV_CACHE_NOT_PUBLISHED_AFTER_FAILED_GENERATION");
     }
+    if (stop_reason == std::string("UNKNOWN") && result == 0) {
+        stop_reason = generated >= max_predict
+                ? (requested_max > max_predict ? "CONTEXT_LIMIT" : "MAX_TOKENS")
+                : "COMPLETED";
+    }
+    append_native_trace((std::string("NATIVE_STOP_REASON reason=") + stop_reason +
+        " generatedTokens=" + std::to_string(generated) +
+        " requestedMaxTokens=" + std::to_string(requested_max) +
+        " effectiveMaxTokens=" + std::to_string(max_predict)).c_str());
     append_native_trace((std::string("NATIVE_GENERATE_COMPLETED generatedTokens=") + std::to_string(generated) +
         " result=" + std::to_string(result) +
         " generationMs=" + std::to_string(generation_ms) +
