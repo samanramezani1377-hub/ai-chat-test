@@ -46,13 +46,21 @@ static bool init_generation_context() {
     cp.n_ctx = g_context_length;
     cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
     cp.n_ubatch = cp.n_batch;
-    cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    // Let llama.cpp select the backend-safe attention implementation. The previous
+    // forced-disabled path expanded attention work and was a major mobile decode
+    // cost at 8K context. AUTO preserves the normal attention math while allowing
+    // OpenCL to use its optimized path when supported.
+    cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
     cp.type_k = GGML_TYPE_F16;
     cp.type_v = GGML_TYPE_F16;
     cp.offload_kqv = true;
     cp.n_seq_max = 1;
-    cp.n_threads = threads();
-    cp.n_threads_batch = threads();
+    const int runtime_threads = threads();
+    cp.n_threads = runtime_threads;
+    cp.n_threads_batch = runtime_threads;
+    append_native_trace((std::string("NATIVE_CONTEXT_THREADS generation=") +
+        std::to_string(cp.n_threads) + " batch=" +
+        std::to_string(cp.n_threads_batch) + " flashAttn=auto").c_str());
     g_context = llama_init_from_model(g_model, cp);
     if (!g_context) return false;
     llama_set_abort_callback(g_context, abort_callback, nullptr);
