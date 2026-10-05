@@ -100,6 +100,8 @@ internal object NativeLlamaCpp {
         }
     }
 
+    fun countTokens(prompt: String): Int = nativeCountTokens(prompt)
+
     fun generate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float): Flow<String> = callbackFlow {
         val listener = object : TokenListener {
             override fun onToken(token: String) { trySend(token) }
@@ -124,6 +126,7 @@ internal object NativeLlamaCpp {
     @JvmStatic private external fun nativeInit(enableGpu: Boolean)
     @JvmStatic private external fun nativeInstallFatalHandlers()
     @JvmStatic private external fun nativeLoad(path: String, contextLength: Int, gpuLayers: Int): Int
+    @JvmStatic private external fun nativeCountTokens(prompt: String): Int
     @JvmStatic private external fun nativeGenerate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float, listener: TokenListener): Int
     @JvmStatic private external fun nativeStop()
     @JvmStatic private external fun nativeUnload()
