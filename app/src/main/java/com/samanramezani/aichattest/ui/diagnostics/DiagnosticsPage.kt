@@ -94,6 +94,14 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             InfoLine("Context", runtime.runtime.contextLength?.toString() ?: "—")
         }
 
+        SectionCard("شتاب‌دهی Speculative") {
+            InfoLine("Draft tokens", nativePerf.speculativeDraftTokens?.toString() ?: "—")
+            InfoLine("Accepted tokens", nativePerf.speculativeAcceptedTokens?.toString() ?: "—")
+            InfoLine("Acceptance rate", nativePerf.speculativeAcceptanceRate?.let { "%.1f%%".format(it) } ?: "—")
+            InfoLine("Speculation steps", nativePerf.speculativeSteps?.toString() ?: "—")
+            InfoLine("Mean accepted / step", nativePerf.speculativeMeanAcceptedPerStep?.let { "%.2f".format(it) } ?: "—")
+        }
+
         SectionCard("ورودی و خروجی") {
             InfoLine("Prompt tokens", nativePerf.promptTokens?.toString() ?: "—")
             InfoLine("Output tokens", generation?.outputTokens?.toString() ?: nativePerf.generatedTokens?.toString() ?: "—")
