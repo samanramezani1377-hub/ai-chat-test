@@ -12,6 +12,7 @@ static void clear_android_generation_cache() { g_cached_prompt_tokens.clear(); }
 #include <chrono>
 #include <cstring>
 #include <limits>
+#include <mutex>
 
 static std::mutex g_native_runtime_mutex;
 
