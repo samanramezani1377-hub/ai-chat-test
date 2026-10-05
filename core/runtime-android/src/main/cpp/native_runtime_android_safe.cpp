@@ -254,6 +254,14 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     if (temp <= 0.0f) {
         llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
     } else {
+        // Keep the domain setting effective: the Kotlin runtime exposes a
+        // repeat penalty of 1.1 by default, but the native path previously
+        // ignored it entirely. Apply it before top-k/top-p so the candidate
+        // set is shaped once and sampling remains bounded.
+        constexpr float kRepeatPenalty = 1.1f;
+        constexpr int kRepeatLastN = 64;
+        llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
+            llama_vocab_n_tokens(vocab), kRepeatLastN, kRepeatPenalty, 0.0f, 0.0f));
         if (k > 0) llama_sampler_chain_add(sampler, llama_sampler_init_top_k(k));
         if (p > 0.0f && p < 1.0f) llama_sampler_chain_add(sampler, llama_sampler_init_top_p(p, 1));
         if (mp > 0.0f) llama_sampler_chain_add(sampler, llama_sampler_init_min_p(mp, 1));
