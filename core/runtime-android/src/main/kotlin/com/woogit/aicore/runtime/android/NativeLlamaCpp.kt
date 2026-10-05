@@ -8,6 +8,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.io.File
 
 internal object NativeLlamaCpp {
@@ -112,8 +113,13 @@ internal object NativeLlamaCpp {
             else close(IllegalStateException("llama.cpp generation failed: code=$result"))
         }
         awaitClose {
-            if (!worker.isCompleted) nativeStop()
-            worker.cancel()
+            if (!worker.isCompleted) {
+                // callbackFlow cancellation does not interrupt a blocking JNI call.
+                // Stop the native decode and wait for it to return before releasing
+                // the Flow, otherwise the next generation can race the previous one.
+                nativeStop()
+                runBlocking { worker.join() }
+            }
         }
     }
 
