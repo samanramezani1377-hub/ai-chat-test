@@ -34,9 +34,30 @@ static std::mutex g_native_marker_mutex;
 static std::mutex g_backend_init_mutex;
 static bool g_backend_initialized = false;
 static bool g_gpu_backend_loaded = false;
+static uint32_t g_context_length = 0;
 
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
+static bool init_generation_context();
 static int threads() { return std::clamp((int)std::max(1u, std::thread::hardware_concurrency()) - 2, 2, 4); }
+
+static bool init_generation_context() {
+    if (!g_model || g_context_length == 0) return false;
+    llama_context_params cp = llama_context_default_params();
+    cp.n_ctx = g_context_length;
+    cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
+    cp.n_ubatch = cp.n_batch;
+    cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    cp.type_k = GGML_TYPE_F16;
+    cp.type_v = GGML_TYPE_F16;
+    cp.offload_kqv = true;
+    cp.n_seq_max = 1;
+    cp.n_threads = threads();
+    cp.n_threads_batch = threads();
+    g_context = llama_init_from_model(g_model, cp);
+    if (!g_context) return false;
+    llama_set_abort_callback(g_context, abort_callback, nullptr);
+    return true;
+}
 
 static void append_native_trace(const char *text) {
     if (!text || !*text || g_native_trace_file.empty()) return;
@@ -152,6 +173,7 @@ static void free_all() {
     clear_android_generation_cache();
     if (g_sampler) { llama_sampler_free(g_sampler); g_sampler = nullptr; }
     if (g_context) { llama_free(g_context); g_context = nullptr; }
+    g_context_length = 0;
     if (g_model) { llama_model_free(g_model); g_model = nullptr; }
     g_gpu = false;
 }
@@ -310,29 +332,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     const int requested = ctx_len > 0 ? ctx_len : 4096;
     const int effective = std::max(1, std::min(requested, trained));
     checkpoint((std::string("MODEL_READY trained_ctx=") + std::to_string(trained) + " effective_ctx=" + std::to_string(effective)).c_str());
-    llama_context_params cp = llama_context_default_params();
-    cp.n_ctx = (uint32_t)effective;
-    // Keep graph/batch working sets small on mobile GPUs. The previous 512-token
-    // batch is unnecessarily large for interactive single-message generation.
-    cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
-    cp.n_ubatch = cp.n_batch;
-    // OpenCL/Adreno has a known class of long-prompt Flash Attention crashes
-    // around tiled Android execution. This app prioritizes stable multi-turn
-    // local inference, so keep Flash Attention explicitly disabled.
-    cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
-    // Keep the KV cache in the portable F16 format. OpenCL SET_ROWS support for
-    // quantized KV formats is device-dependent and can abort inside graph setup.
-    cp.type_k = GGML_TYPE_F16;
-    cp.type_v = GGML_TYPE_F16;
-    cp.offload_kqv = true;
-    // This runtime serves exactly one interactive generation sequence. Keep the
-    // recurrent/hybrid state single-sequence as well; LFM2/LFM2.5 uses that state.
-    cp.n_seq_max = 1;
-    cp.n_threads = threads(); cp.n_threads_batch = threads();
-    checkpoint("CONTEXT_INIT_STARTED"); g_context = llama_init_from_model(g_model, cp);
-    checkpoint(g_context ? "CONTEXT_INIT_RETURNED_SUCCESS" : "CONTEXT_INIT_RETURNED_FAILED");
-    if (!g_context) { checkpoint("CONTEXT_INIT_FAILED"); free_all(); return 2; }
-    llama_set_abort_callback(g_context, abort_callback, nullptr); checkpoint("NATIVE_LOAD_COMPLETED"); return 0;
+    g_context_length = (uint32_t)effective;
+    checkpoint("CONTEXT_INIT_STARTED");
+    const bool context_ready = init_generation_context();
+    checkpoint(context_ready ? "CONTEXT_INIT_RETURNED_SUCCESS" : "CONTEXT_INIT_RETURNED_FAILED");
+    if (!context_ready) { checkpoint("CONTEXT_INIT_FAILED"); free_all(); return 2; }
+    checkpoint("NATIVE_LOAD_COMPLETED"); return 0;
 }
 
 extern "C" JNIEXPORT void JNICALL
