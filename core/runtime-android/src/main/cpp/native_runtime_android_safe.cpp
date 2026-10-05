@@ -6,9 +6,13 @@ static std::vector<llama_token> g_cached_prompt_tokens;
 // Hybrid/recurrent models cannot safely trim their recurrent state with
 // llama_memory_seq_rm(). Keep an exact post-prefill sequence snapshot instead.
 static std::vector<uint8_t> g_cached_prompt_state;
+// ON_DEVICE sequence states keep large recurrent tensors in backend device buffers.
+// The host vector then contains only the small serialized state metadata.
+static bool g_cached_prompt_state_on_device = false;
 static void clear_android_generation_cache() {
     g_cached_prompt_tokens.clear();
     g_cached_prompt_state.clear();
+    g_cached_prompt_state_on_device = false;
 }
 
 #include <signal.h>
@@ -311,17 +315,25 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         // still an exact prefix. Partial trimming of recurrent state is invalid.
         if (exact_cached_prefix && !g_cached_prompt_state.empty()) {
             llama_memory_clear(memory, true);
-            const size_t restored = llama_state_seq_set_data(
-                    g_context,
-                    g_cached_prompt_state.data(),
-                    g_cached_prompt_state.size(),
-                    0);
+            const size_t restored = g_cached_prompt_state_on_device
+                    ? llama_state_seq_set_data_ext(
+                            g_context,
+                            g_cached_prompt_state.data(),
+                            g_cached_prompt_state.size(),
+                            0,
+                            LLAMA_STATE_SEQ_FLAGS_ON_DEVICE)
+                    : llama_state_seq_set_data(
+                            g_context,
+                            g_cached_prompt_state.data(),
+                            g_cached_prompt_state.size(),
+                            0);
             if (restored > 0) {
                 cache_reused = true;
                 reuse_prefix = g_cached_prompt_tokens.size();
                 append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_RESTORED tokens=") +
                     std::to_string(reuse_prefix) + " bytes=" +
-                    std::to_string(restored)).c_str());
+                    std::to_string(restored) + " mode=" +
+                    (g_cached_prompt_state_on_device ? "on_device" : "host")).c_str());
             } else {
                 cache_reused = false;
                 g_cached_prompt_state.clear();
@@ -389,7 +401,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     };
 
     append_native_trace((std::string("NATIVE_GENERATE_BATCH_CONFIG nBatch=") +
-        std::to_string(decode_batch_size) + " promptTokens=" +
+        std::to_string(decode_batch_size) + " nUbatch=" +
+        std::to_string(llama_n_ubatch(g_context)) + " promptTokens=" +
         std::to_string(n_prompt) + " reusedTokens=" +
         std::to_string(reuse_prefix)).c_str());
 
@@ -443,28 +456,58 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     // checkpoint that can be restored on the next request.
     if (prefill_recorded && model_uses_recurrent_memory()) {
         static constexpr size_t kMaxHybridStateBytes = 128u * 1024u * 1024u;
-        const size_t state_size = llama_state_seq_get_size(g_context, 0);
-        if (state_size > 0 && state_size <= kMaxHybridStateBytes) {
-            g_cached_prompt_state.resize(state_size);
-            const size_t written = llama_state_seq_get_data(
+        g_cached_prompt_state.clear();
+        g_cached_prompt_state_on_device = false;
+
+        // Prefer llama.cpp's device-resident sequence-state path. It keeps the
+        // recurrent tensors in backend buffers instead of copying them to host RAM.
+        const size_t device_state_size = llama_state_seq_get_size_ext(
+                g_context, 0, LLAMA_STATE_SEQ_FLAGS_ON_DEVICE);
+        if (device_state_size > 0 && device_state_size <= kMaxHybridStateBytes) {
+            g_cached_prompt_state.resize(device_state_size);
+            const size_t written = llama_state_seq_get_data_ext(
                     g_context,
                     g_cached_prompt_state.data(),
                     g_cached_prompt_state.size(),
-                    0);
+                    0,
+                    LLAMA_STATE_SEQ_FLAGS_ON_DEVICE);
             if (written > 0) {
                 g_cached_prompt_state.resize(written);
+                g_cached_prompt_state_on_device = true;
                 append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_CAPTURED tokens=") +
                     std::to_string(prompt_tokens.size()) + " bytes=" +
-                    std::to_string(written)).c_str());
+                    std::to_string(written) + " mode=on_device").c_str());
             } else {
                 g_cached_prompt_state.clear();
-                append_native_trace("NATIVE_KV_CACHE_HYBRID_STATE_CAPTURE_FAILED");
+                append_native_trace("NATIVE_KV_CACHE_HYBRID_STATE_ON_DEVICE_CAPTURE_FAILED");
             }
-        } else {
-            g_cached_prompt_state.clear();
-            append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_SKIPPED bytes=") +
-                std::to_string(state_size) + " limit=" +
-                std::to_string(kMaxHybridStateBytes)).c_str());
+        }
+
+        // Bounded host fallback for builds/backends where ON_DEVICE is unavailable.
+        if (g_cached_prompt_state.empty()) {
+            const size_t state_size = llama_state_seq_get_size(g_context, 0);
+            if (state_size > 0 && state_size <= kMaxHybridStateBytes) {
+                g_cached_prompt_state.resize(state_size);
+                const size_t written = llama_state_seq_get_data(
+                        g_context,
+                        g_cached_prompt_state.data(),
+                        g_cached_prompt_state.size(),
+                        0);
+                if (written > 0) {
+                    g_cached_prompt_state.resize(written);
+                    append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_CAPTURED tokens=") +
+                        std::to_string(prompt_tokens.size()) + " bytes=" +
+                        std::to_string(written) + " mode=host_fallback").c_str());
+                } else {
+                    g_cached_prompt_state.clear();
+                    append_native_trace("NATIVE_KV_CACHE_HYBRID_STATE_CAPTURE_FAILED");
+                }
+            } else {
+                g_cached_prompt_state.clear();
+                append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_SKIPPED bytes=") +
+                    std::to_string(state_size) + " limit=" +
+                    std::to_string(kMaxHybridStateBytes)).c_str());
+            }
         }
     }
 
