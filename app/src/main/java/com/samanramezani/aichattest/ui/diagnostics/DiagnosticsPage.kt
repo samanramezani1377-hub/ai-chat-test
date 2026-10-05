@@ -194,12 +194,15 @@ private fun MetricCard(label: String, value: String, modifier: Modifier, icon: a
 }
 
 @Composable
-private fun SectionCard(title: String, color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surface) {
+private fun SectionCard(
+    title: String,
+    color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surface,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = color, tonalElevation = 1.dp) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            @Suppress("UNUSED_PARAMETER")
-            Unit
+            content()
         }
     }
 }
