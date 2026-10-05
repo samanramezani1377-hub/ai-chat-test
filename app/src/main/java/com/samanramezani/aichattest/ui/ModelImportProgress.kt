@@ -17,7 +17,7 @@ import com.woogit.aicore.domain.ModelDescriptor
 
 /** Settings entry point with explicit UI state for a model import in progress. */
 @Composable
-fun SettingsScreen(
+fun SettingsImportProgress(
     models: List<ModelDescriptor>,
     active: ModelDescriptor?,
     error: String?,
@@ -52,7 +52,7 @@ fun SettingsScreen(
                 }
             }
         }
-        SettingsScreen(
+        SettingsScreenBase(
             models = models,
             active = active,
             error = error,
