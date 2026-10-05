@@ -11,6 +11,9 @@ static void clear_android_generation_cache() { g_cached_prompt_tokens.clear(); }
 #include <string>
 #include <chrono>
 #include <cstring>
+#include <limits>
+
+static std::mutex g_native_runtime_mutex;
 
 // Keep the JNI implementation in native_runtime.cpp. Its own fatal handler is
 // retained under a private name; the Android-specific handler below is installed
@@ -179,12 +182,18 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeCountTokens(
         JNIEnv * env,
         jclass,
         jstring jprompt) {
+    std::lock_guard<std::mutex> runtime_lock(g_native_runtime_mutex);
     if (!g_model || !jprompt) return -1;
     const llama_vocab * vocab = llama_model_get_vocab(g_model);
     if (!vocab) return -1;
     const char * prompt = env->GetStringUTFChars(jprompt, nullptr);
     if (!prompt) return -1;
-    const int32_t text_len = static_cast<int32_t>(std::strlen(prompt));
+    const size_t text_size = std::strlen(prompt);
+    if (text_size > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+        env->ReleaseStringUTFChars(jprompt, prompt);
+        return -2;
+    }
+    const int32_t text_len = static_cast<int32_t>(text_size);
     const int count = -llama_tokenize(vocab, prompt, text_len, nullptr, 0, true, true);
     env->ReleaseStringUTFChars(jprompt, prompt);
     return count >= 0 ? count : -2;
@@ -201,6 +210,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         jfloat top_p,
         jfloat min_p,
         jobject listener) {
+    std::lock_guard<std::mutex> runtime_lock(g_native_runtime_mutex);
     checkpoint("NATIVE_GENERATE_ENTERED");
     if (!g_context || !g_model) { checkpoint("NATIVE_GENERATE_NO_MODEL"); return 2; }
     if (!jprompt || !listener) { checkpoint("NATIVE_GENERATE_INVALID_ARGUMENT"); return 3; }
