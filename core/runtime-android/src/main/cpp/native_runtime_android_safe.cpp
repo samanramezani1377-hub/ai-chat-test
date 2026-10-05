@@ -33,6 +33,16 @@ static std::string g_spec_draft_path;
 static common_speculative_init_result_ptr g_spec_init;
 static common_speculative_ptr g_spec;
 
+static void append_speculative_stats_trace(int draft_tokens, int accepted_tokens, int steps) {
+    const double rate = draft_tokens > 0 ? (100.0 * static_cast<double>(accepted_tokens) / static_cast<double>(draft_tokens)) : 0.0;
+    const double mean = steps > 0 ? (static_cast<double>(accepted_tokens) / static_cast<double>(steps)) : 0.0;
+    append_native_trace((std::string("SPECULATIVE_STATS draftTokens=") + std::to_string(draft_tokens) +
+        " acceptedTokens=" + std::to_string(accepted_tokens) +
+        " acceptanceRate=" + std::to_string(rate) +
+        " steps=" + std::to_string(steps) +
+        " meanAcceptedPerStep=" + std::to_string(mean)).c_str());
+}
+
 // Keep the JNI implementation in native_runtime.cpp. Its own fatal handler is
 // retained under a private name; the Android-specific handler below is installed
 // explicitly after nativeInit() returns, so it cannot be accidentally shadowed.
@@ -72,28 +82,37 @@ static int generate_spec(JNIEnv *env,jobject listener,jmethodID on_token,const s
     common_params_sampling sp=spec_sampling(temperature,top_k,top_p,min_p); common_sampler_ptr smp(common_sampler_init(g_model,sp)); if(!smp) return -1;
     const llama_vocab *v=llama_model_get_vocab(g_model);
     common_batch bp(g_context); for(size_t i=0;i+1<inp.size();++i) bp.add(inp[i],(llama_pos)i,0,false);
-    if(bp.size()){if(llama_decode(g_context,bp.get())!=0)return 10;if(!common_speculative_process(g_spec.get(),bp))return 10;}
+    if(bp.size()){if(llama_decode(g_context,bp.get())!=0){ finish_spec_stats(); return 10; }if(!common_speculative_process(g_spec.get(),bp)){ finish_spec_stats(); return 10; }}
     llama_token last=inp.back(); llama_tokens hist(inp.begin(),inp.end()-1); common_speculative_begin(g_spec.get(),0,hist);
     int pos=(int)hist.size(),gen=0; llama_tokens draft; common_batch bt(g_context);
+    int speculative_draft_tokens=0;
+    int speculative_accepted_tokens=0;
+    int speculative_steps=0;
+    auto finish_spec_stats = [&]() { append_speculative_stats_trace(speculative_draft_tokens, speculative_accepted_tokens, speculative_steps); };
     while(gen<max_tokens&&!g_stop.load()){
         auto &dp=common_speculative_get_draft_params(g_spec.get(),0); dp={}; dp.drafting=true; dp.n_max=std::min(4,max_tokens-gen-1); dp.pos0=pos; dp.id_last=last; dp.prompt=&hist; dp.result=&draft; draft.clear(); common_speculative_draft(g_spec.get());
+        speculative_draft_tokens += static_cast<int>(draft.size());
         bt.clear(); bt.add(last,pos,0,true); for(size_t i=0;i<draft.size();++i) bt.add(draft[i],pos+1+(llama_pos)i,0,true);
-        if(llama_decode(g_context,bt.get())!=0)return 10;
-        if(!common_speculative_process(g_spec.get(),bt))return 10;
+        if(llama_decode(g_context,bt.get())!=0){ finish_spec_stats(); return 10; }
+        if(!common_speculative_process(g_spec.get(),bt)){ finish_spec_stats(); return 10; }
         std::vector<int> idx; for(size_t i=0;i<=draft.size();++i)idx.push_back((int)i);
-        auto ids=common_sampler_sample_and_accept_n(smp.get(),g_context,idx,draft); if(ids.empty())return 10;
-        const int acc=(int)ids.size()-1; const llama_pos rollback=pos+acc;
+        auto ids=common_sampler_sample_and_accept_n(smp.get(),g_context,idx,draft); if(ids.empty()){ finish_spec_stats(); return 10; }
+        const int acc=(int)ids.size()-1;
+        speculative_accepted_tokens += acc;
+        ++speculative_steps;
+        const llama_pos rollback=pos+acc;
         common_speculative_accept(g_spec.get(),0,(uint16_t)acc);
-        if(!llama_memory_seq_rm(llama_get_memory(g_context),0,rollback,-1))return 20;
-        if(!llama_memory_seq_rm(llama_get_memory(dctx),0,rollback,-1))return 20;
+        if(!llama_memory_seq_rm(llama_get_memory(g_context),0,rollback,-1)){ finish_spec_stats(); return 20; }
+        if(!llama_memory_seq_rm(llama_get_memory(dctx),0,rollback,-1)){ finish_spec_stats(); return 20; }
         for(size_t i=0;i<ids.size();++i){
             llama_token tok=ids[i]; char piece[1024]; int z=llama_token_to_piece(v,tok,piece,sizeof(piece),0,true);
-            if(z>0){jstring out=env->NewStringUTF(std::string(piece,(size_t)z).c_str()); if(!out)return 12; env->CallVoidMethod(listener,on_token,out);env->DeleteLocalRef(out);if(env->ExceptionCheck()){env->ExceptionClear();return 12;}}
-            ++gen; if(llama_vocab_is_eog(v,tok)||gen>=max_tokens)return 0;
+            if(z>0){jstring out=env->NewStringUTF(std::string(piece,(size_t)z).c_str()); if(!out){ finish_spec_stats(); return 12; } env->CallVoidMethod(listener,on_token,out);env->DeleteLocalRef(out);if(env->ExceptionCheck()){env->ExceptionClear(); finish_spec_stats(); return 12;}}
+            ++gen; if(llama_vocab_is_eog(v,tok)||gen>=max_tokens){ finish_spec_stats(); return 0; }
             hist.push_back(last); last=tok; if(i<ids.size()-1)++pos;
         }
         draft.clear();
     }
+    finish_spec_stats();
     return 0;
 }
 
