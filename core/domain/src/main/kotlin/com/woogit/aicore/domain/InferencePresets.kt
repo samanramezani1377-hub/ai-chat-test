@@ -19,7 +19,7 @@ enum class InferencePreset(
     STANDARD(
         title = "استاندارد",
         description = "تعادل پیشنهادی بین کیفیت، سرعت و مصرف منابع؛ گزینه مناسب برای استفاده معمول.",
-        settings = InferenceSettings(temperature = 0.7, maxNewTokens = 512, topK = 40, topP = 0.9, minP = 0.0, repeatPenalty = 1.1, seed = null, stopSequences = emptyList(), contextLength = 4096, recentMessages = 10, maxActionSteps = 4),
+        settings = InferenceSettings(temperature = 0.7, maxNewTokens = 512, topK = 40, topP = 0.9, minP = 0.0, repeatPenalty = 1.1, seed = null, stopSequences = emptyList(), contextLength = 8192, recentMessages = 10, maxActionSteps = 4),
     ),
     DEEP(
         title = "عمیق",
