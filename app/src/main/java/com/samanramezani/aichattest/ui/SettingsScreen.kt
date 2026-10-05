@@ -110,7 +110,7 @@ private fun DraftModelPanel(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Column(Modifier.weight(1f)) {
                         Text(draft.displayName, style = MaterialTheme.typography.bodyMedium)
-                        Text(draft.quantization, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(draft.quantization.toString(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (!selected) TextButton(onClick = { onAssign(draft.id) }) { Text("اتصال") }
                     TextButton(onClick = { onDelete(draft.id) }) { Text("حذف") }
