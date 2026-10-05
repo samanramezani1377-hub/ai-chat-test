@@ -223,7 +223,7 @@ class LlamaCppAndroidRuntimeAdapter(
      * budget. The actual GGUF vocabulary counts tokens, so mixed Persian/English text
      * is handled without a character-based guess.
      */
-    private fun trimMessagesToContext(
+    private suspend fun trimMessagesToContext(
         messages: List<com.woogit.aicore.domain.ChatMessage>,
         maxNewTokens: Int,
     ): List<com.woogit.aicore.domain.ChatMessage> {
@@ -240,7 +240,7 @@ class LlamaCppAndroidRuntimeAdapter(
                 "lfm2" -> Lfm2PromptFormatter.format(candidate)
                 else -> Qwen3PromptFormatter.format(candidate)
             }
-            val tokenCount = NativeLlamaCpp.countTokens(formatted)
+            val tokenCount = nativeOperationMutex.withLock { NativeLlamaCpp.countTokens(formatted) }
             if (tokenCount < 0 || tokenCount > budget) {
                 selected.removeFirst()
                 break
