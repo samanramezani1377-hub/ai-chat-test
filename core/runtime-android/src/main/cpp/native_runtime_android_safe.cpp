@@ -1,9 +1,9 @@
 #include "llama.h"
+#include <vector>
 
-// Hook used by the Android wrapper to invalidate token/cache bookkeeping whenever
-// the native model/context is replaced or unloaded. KV reuse is intentionally disabled
-// for this mobile runtime, so there is no separate Android-side cache to invalidate.
-static void clear_android_generation_cache() {}
+// Tokens represented by the resident prompt prefix in the native KV cache.
+static std::vector<llama_token> g_cached_prompt_tokens;
+static void clear_android_generation_cache() { g_cached_prompt_tokens.clear(); }
 #include <signal.h>
 #include <unistd.h>
 #include <vector>
@@ -205,28 +205,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     env->ReleaseStringUTFChars(jprompt, prompt);
     g_stop.store(false, std::memory_order_relaxed);
 
-    // Diagnostic isolation mode: do not carry KV/recurrent state or its backend
-    // allocations from one user turn into the next. llama.cpp still needs KV cache
-    // during a single generation, but each turn gets a brand-new context/cache.
-    // This deliberately trades turn-to-turn latency for maximum isolation while we
-    // determine whether persistent OpenCL/KV state is the source of the crash.
-    if (!g_model) {
-        checkpoint("NATIVE_GENERATE_MODEL_UNAVAILABLE");
+    if (!g_model || !g_context) {
+        checkpoint("NATIVE_GENERATE_CONTEXT_UNAVAILABLE");
         return 2;
     }
-    checkpoint("NATIVE_GENERATE_CONTEXT_RECREATE_STARTED");
-    if (g_context) {
-        // OpenCL work can still be in flight after the last decode. Never destroy
-        // the context until the backend has completed all queued GPU work.
-        llama_synchronize(g_context);
-        llama_free(g_context);
-        g_context = nullptr;
-    }
-    if (!init_generation_context()) {
-        checkpoint("NATIVE_GENERATE_CONTEXT_RECREATE_FAILED");
-        return 2;
-    }
-    checkpoint("NATIVE_GENERATE_CONTEXT_RECREATE_COMPLETED");
 
     const llama_vocab * vocab = llama_model_get_vocab(g_model);
     if (!vocab) { checkpoint("NATIVE_GENERATE_VOCAB_MISSING"); return 4; }
@@ -263,8 +245,51 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         checkpoint("NATIVE_GENERATE_LISTENER_METHOD_MISSING");
         return 8;
     }
-    llama_batch batch = llama_batch_get_one(prompt_tokens.data(), (int32_t) prompt_tokens.size());
+    llama_memory_t memory = llama_get_memory(g_context);
+    if (!memory) {
+        checkpoint("NATIVE_GENERATE_MEMORY_UNAVAILABLE");
+        return 8;
+    }
+
+    size_t common_prefix = 0;
+    while (common_prefix < g_cached_prompt_tokens.size() &&
+           common_prefix < prompt_tokens.size() &&
+           g_cached_prompt_tokens[common_prefix] == prompt_tokens[common_prefix]) {
+        ++common_prefix;
+    }
+
+    bool cache_reused = !g_cached_prompt_tokens.empty() && !llama_model_has_encoder(g_model);
+    size_t reuse_prefix = 0;
+    if (!cache_reused) {
+        llama_memory_clear(memory, true);
+        g_cached_prompt_tokens.clear();
+        checkpoint("NATIVE_KV_CACHE_MISS_CLEARED");
+    } else {
+        const bool exact_prompt = common_prefix == prompt_tokens.size() &&
+                                  common_prefix == g_cached_prompt_tokens.size();
+        reuse_prefix = exact_prompt && common_prefix > 0 ? common_prefix - 1 : common_prefix;
+        if (!llama_memory_seq_rm(memory, 0, (llama_pos) reuse_prefix, -1)) {
+            llama_memory_clear(memory, true);
+            g_cached_prompt_tokens.clear();
+            reuse_prefix = 0;
+            cache_reused = false;
+            checkpoint("NATIVE_KV_CACHE_PARTIAL_REMOVE_UNSUPPORTED");
+        } else {
+            append_native_trace((std::string("NATIVE_KV_CACHE_HIT reusedTokens=") +
+                std::to_string(reuse_prefix) + " promptTokens=" +
+                std::to_string(prompt_tokens.size())).c_str());
+        }
+    }
+
+    llama_batch batch;
+    if (reuse_prefix < prompt_tokens.size()) {
+        batch = llama_batch_get_one(prompt_tokens.data() + reuse_prefix,
+                                    (int32_t) (prompt_tokens.size() - reuse_prefix));
+    } else {
+        batch = llama_batch_get_one(prompt_tokens.data(), 0);
+    }
     if (llama_model_has_encoder(g_model)) {
+        batch = llama_batch_get_one(prompt_tokens.data(), (int32_t) prompt_tokens.size());
         if (llama_encode(g_context, batch)) {
             env->DeleteLocalRef(listener_class);
             llama_sampler_free(sampler);
@@ -288,7 +313,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         if (!prefill_recorded && decode_result == 0) {
             const auto now = std::chrono::steady_clock::now();
             const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - generation_started_at).count();
-            append_native_trace((std::string("NATIVE_PREFILL_COMPLETED promptTokens=") + std::to_string(n_prompt) + " reusedTokens=" + std::to_string(0) + " prefillMs=" + std::to_string(prefill_ms)).c_str());
+            append_native_trace((std::string("NATIVE_PREFILL_COMPLETED promptTokens=") + std::to_string(n_prompt) + " reusedTokens=" + std::to_string(reuse_prefix) + " prefillMs=" + std::to_string(prefill_ms)).c_str());
             prefill_recorded = true;
         }
         if (decode_result != 0) { append_native_trace((std::string("NATIVE_GENERATE_DECODE_FAILED code=") + std::to_string(decode_result)).c_str()); checkpoint("NATIVE_GENERATE_DECODE_FAILED"); result = 10; break; }
@@ -329,6 +354,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     const auto generation_finished_at = std::chrono::steady_clock::now();
     const auto generation_ms = std::chrono::duration_cast<std::chrono::milliseconds>(generation_finished_at - generation_started_at).count();
     const double decode_tokens_per_sec = generated > 0 && generation_ms > 0 ? (1000.0 * static_cast<double>(generated) / static_cast<double>(generation_ms)) : 0.0;
+    if (prefill_recorded) {
+        g_cached_prompt_tokens = prompt_tokens;
+    }
     append_native_trace((std::string("NATIVE_GENERATE_COMPLETED generatedTokens=") + std::to_string(generated) + " result=" + std::to_string(result) + " generationMs=" + std::to_string(generation_ms) + " decodeTokensPerSec=" + std::to_string(decode_tokens_per_sec)).c_str());
     checkpoint(result == 0 ? "NATIVE_GENERATE_RETURNED_SUCCESS" : "NATIVE_GENERATE_RETURNED_FAILURE");
     return result;
