@@ -27,29 +27,31 @@ import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
 
-private val Ink = Color(0xFFEDEDF3)
-private val Muted = Color(0xFF9B9BA8)
-private val Canvas = Color(0xFF101116)
-private val Surface = Color(0xFF171820)
-private val Surface2 = Color(0xFF20222C)
-private val Accent = Color(0xFF9B8CFF)
-private val Accent2 = Color(0xFF67D6C4)
-private val Warning = Color(0xFFFFB86B)
+private val Ink = Color(0xFF18352A)
+private val Muted = Color(0xFF66736C)
+private val Canvas = Color(0xFFFFFFFF)
+private val Surface = Color(0xFFFFFFFF)
+private val Surface2 = Color(0xFFF1F6F3)
+private val Accent = Color(0xFF0B5D3B)
+private val Accent2 = Color(0xFF2E7D5A)
+private val Warning = Color(0xFFB26A00)
+private val Border = Color(0xFFD7E2DC)
 
 @Composable
 internal fun AppTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = darkColorScheme(
-            primary = Accent, onPrimary = Color(0xFF18142E),
-            primaryContainer = Color(0xFF302B55), onPrimaryContainer = Color(0xFFE8E2FF),
-            secondary = Accent2, onSecondary = Color(0xFF08201C),
-            secondaryContainer = Color(0xFF193D38), onSecondaryContainer = Color(0xFFD0FFF6),
-            tertiary = Warning, onTertiary = Color(0xFF2A1806),
+        colorScheme = lightColorScheme(
+            primary = Accent, onPrimary = Color.White,
+            primaryContainer = Color(0xFFDDEFE6), onPrimaryContainer = Color(0xFF063B26),
+            secondary = Accent2, onSecondary = Color.White,
+            secondaryContainer = Color(0xFFE4F2EC), onSecondaryContainer = Color(0xFF123E2C),
+            tertiary = Warning, onTertiary = Color.White,
+            tertiaryContainer = Color(0xFFFFEFD6), onTertiaryContainer = Color(0xFF4A2B00),
             background = Canvas, onBackground = Ink,
             surface = Surface, onSurface = Ink,
             surfaceVariant = Surface2, onSurfaceVariant = Muted,
-            outline = Color(0xFF41434E), error = Color(0xFFFF716D),
-            errorContainer = Color(0xFF4A2022), onErrorContainer = Color(0xFFFFDAD8),
+            outline = Border, error = Color(0xFFBA1A1A),
+            errorContainer = Color(0xFFFFDAD6), onErrorContainer = Color(0xFF410002),
         ),
         shapes = Shapes(
             small = RoundedCornerShape(12.dp), medium = RoundedCornerShape(16.dp),
@@ -121,7 +123,7 @@ internal fun Sidebar(
     onDelete: (ConversationRecord) -> Unit, onMore: () -> Unit, canShowMore: Boolean,
 ) {
     Box(Modifier.fillMaxSize()) {
-        Spacer(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .62f)).clickable(onClick = onClose))
+        Spacer(Modifier.fillMaxSize().background(Color(0xFF12352A).copy(alpha = .18f)).clickable(onClick = onClose))
         Surface(
             Modifier.fillMaxHeight().fillMaxWidth(.88f).align(AbsoluteAlignment.CenterRight).zIndex(10f),
             shape = RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp),
