@@ -148,8 +148,11 @@ class AndroidModelManager(
         // Never let a persisted/broken draft participate in target model load.
         runtime.setDraftPath(null)
         val result = service.restoreActive()
-        if (result is ModelResult.Success && result.value != null) {
-            attachDraftAfterTargetLoad(result.value.id)
+        if (result is ModelResult.Success) {
+            val restored = result.value
+            if (restored != null) {
+                attachDraftAfterTargetLoad(restored.id)
+            }
         }
         result
     }
