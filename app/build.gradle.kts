@@ -19,7 +19,6 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
-    // Keep only resources/code actually reachable in the release APK.
     }
 
     compileOptions {
@@ -41,7 +40,7 @@ android {
 
     packagingOptions {
         jniLibs {
-            // Keep native .so files in the APK so Android does not extract a second copy on install.
+            // Keep native libraries uncompressed and avoid a second extracted copy on disk.
             useLegacyPackaging = false
         }
     }
@@ -59,9 +58,10 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
-    implementation(platform("androidx.compose:compose-bom:2025.02.00"))
+    // Current stable Compose BOM: keeps the complete UI stack on a compatible modern release.
+    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.ui:ui")
-        implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.foundation:foundation-layout")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
@@ -69,12 +69,12 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
-    implementation("androidx.activity:activity-compose:1.10.1")
-    implementation("androidx.core:core-ktx:1.17.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.core:core-ktx:1.19.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.compose.material3:material3-adaptive-navigation-suite")
 
-    androidTestImplementation(platform("androidx.compose:compose-bom:2025.02.00"))
+    androidTestImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
 }
