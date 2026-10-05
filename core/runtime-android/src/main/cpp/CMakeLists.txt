@@ -45,7 +45,7 @@ set(GGML_OPENCL_USE_ADRENO_BIN_KERNELS OFF CACHE BOOL "Do not use vendor-specifi
 set(GGML_VULKAN OFF CACHE BOOL "Vulkan is intentionally disabled" FORCE)
 set(GGML_OPENCL_USE_SVM OFF CACHE BOOL "Avoid vendor SVM driver instability on Android" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
@@ -79,7 +79,7 @@ target_link_options(ai_chat_runtime PRIVATE
     -Wl,--strip-all
 )
 
-target_link_libraries(ai_chat_runtime llama android log OpenCL)
+target_link_libraries(ai_chat_runtime llama llama-common android log OpenCL)
 
 target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"
