@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <vector>
 #include <string>
+#include <chrono>
 
 // Keep the JNI implementation in native_runtime.cpp. Its own fatal handler is
 // retained under a private name; the Android-specific handler below is installed
@@ -234,9 +235,17 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     int position = 0;
     std::string pending_utf8;
     int result = 0;
+    const auto generation_started_at = std::chrono::steady_clock::now();
+    bool prefill_recorded = false;
     while (position + batch.n_tokens < n_prompt + max_predict) {
         if (g_stop.load(std::memory_order_relaxed)) { result = 9; checkpoint("NATIVE_GENERATE_STOPPED"); break; }
         const int decode_result = llama_decode(g_context, batch);
+        if (!prefill_recorded && decode_result == 0) {
+            const auto now = std::chrono::steady_clock::now();
+            const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - generation_started_at).count();
+            append_native_trace((std::string("NATIVE_PREFILL_COMPLETED promptTokens=") + std::to_string(n_prompt) + " reusedTokens=" + std::to_string(decode_from) + " prefillMs=" + std::to_string(prefill_ms)).c_str());
+            prefill_recorded = true;
+        }
         if (decode_result != 0) { append_native_trace((std::string("NATIVE_GENERATE_DECODE_FAILED code=") + std::to_string(decode_result)).c_str()); checkpoint("NATIVE_GENERATE_DECODE_FAILED"); result = 10; break; }
         position += batch.n_tokens;
         const llama_token token = llama_sampler_sample(sampler, g_context, -1);
@@ -272,7 +281,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     }
     env->DeleteLocalRef(listener_class);
     llama_sampler_free(sampler);
-    append_native_trace((std::string("NATIVE_GENERATE_COMPLETED generatedTokens=") + std::to_string(generated) + " result=" + std::to_string(result)).c_str());
+    const auto generation_finished_at = std::chrono::steady_clock::now();
+    const auto generation_ms = std::chrono::duration_cast<std::chrono::milliseconds>(generation_finished_at - generation_started_at).count();
+    const double decode_tokens_per_sec = generated > 0 && generation_ms > 0 ? (1000.0 * static_cast<double>(generated) / static_cast<double>(generation_ms)) : 0.0;
+    append_native_trace((std::string("NATIVE_GENERATE_COMPLETED generatedTokens=") + std::to_string(generated) + " result=" + std::to_string(result) + " generationMs=" + std::to_string(generation_ms) + " decodeTokensPerSec=" + std::to_string(decode_tokens_per_sec)).c_str());
     checkpoint(result == 0 ? "NATIVE_GENERATE_RETURNED_SUCCESS" : "NATIVE_GENERATE_RETURNED_FAILURE");
     return result;
 }
