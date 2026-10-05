@@ -205,26 +205,25 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     env->ReleaseStringUTFChars(jprompt, prompt);
     g_stop.store(false, std::memory_order_relaxed);
 
-    // Keep the resident llama context and OpenCL graph allocations alive between
-    // turns. Recreating the context here adds avoidable latency and repeatedly
-    // allocates/frees GPU resources. Start every turn from an empty llama memory
-    // instead; this clears the KV/recurrent state without changing model weights,
-    // sampling parameters, GPU offload, or context capacity.
-    if (!g_model || !g_context) {
-        checkpoint("NATIVE_GENERATE_CONTEXT_UNAVAILABLE");
+    // Diagnostic isolation mode: do not carry KV/recurrent state or its backend
+    // allocations from one user turn into the next. llama.cpp still needs KV cache
+    // during a single generation, but each turn gets a brand-new context/cache.
+    // This deliberately trades turn-to-turn latency for maximum isolation while we
+    // determine whether persistent OpenCL/KV state is the source of the crash.
+    if (!g_model) {
+        checkpoint("NATIVE_GENERATE_MODEL_UNAVAILABLE");
         return 2;
     }
-    checkpoint("NATIVE_GENERATE_MEMORY_CLEAR_STARTED");
-    llama_memory_t memory = llama_get_memory(g_context);
-    if (!memory) {
-        checkpoint("NATIVE_GENERATE_MEMORY_UNAVAILABLE");
+    checkpoint("NATIVE_GENERATE_CONTEXT_RECREATE_STARTED");
+    if (g_context) {
+        llama_free(g_context);
+        g_context = nullptr;
+    }
+    if (!init_generation_context()) {
+        checkpoint("NATIVE_GENERATE_CONTEXT_RECREATE_FAILED");
         return 2;
     }
-    // Clear token metadata but keep already-allocated backend buffers resident. This is
-    // the same reuse pattern used by llama.cpp's benchmark/mobile examples and avoids
-    // needless OpenCL buffer churn between turns.
-    llama_memory_clear(memory, false);
-    checkpoint("NATIVE_GENERATE_MEMORY_CLEAR_COMPLETED");
+    checkpoint("NATIVE_GENERATE_CONTEXT_RECREATE_COMPLETED");
 
     const llama_vocab * vocab = llama_model_get_vocab(g_model);
     if (!vocab) { checkpoint("NATIVE_GENERATE_VOCAB_MISSING"); return 4; }
