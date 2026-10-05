@@ -45,7 +45,7 @@ static bool init_generation_context() {
     if (!g_model || g_context_length == 0) return false;
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx = g_context_length;
-    cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
+    cp.n_batch = std::min<uint32_t>(cp.n_ctx, 256);
     cp.n_ubatch = cp.n_batch;
     // Let llama.cpp select the backend-safe attention implementation. The previous
     // forced-disabled path expanded attention work and was a major mobile decode
