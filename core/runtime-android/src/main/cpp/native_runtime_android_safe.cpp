@@ -376,13 +376,24 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     if (!vocab) { checkpoint("NATIVE_GENERATE_VOCAB_MISSING"); return 4; }
     const int n_prompt = -llama_tokenize(vocab, prompt_text.c_str(), prompt_text.size(), nullptr, 0, true, true);
     if (g_spec) {
-        std::vector<llama_token> spec_tokens((size_t)n_prompt);
-        if (llama_tokenize(vocab,prompt_text.c_str(),prompt_text.size(),spec_tokens.data(),spec_tokens.size(),true,true)<0) return 5;
-        const int sr=generate_spec(env,listener,on_token,spec_tokens,std::min((int)max_tokens,(int)llama_n_ctx(g_context)-n_prompt-1),(float)temperature,(int)top_k,(float)top_p,(float)min_p);
-        append_native_trace((std::string("SPECULATIVE_GENERATE_RETURNED code=")+std::to_string(sr)).c_str());
-        if(sr==0||sr==9)return sr;
-        llama_memory_clear(llama_get_memory(g_context),true);
-        llama_memory_clear(llama_get_memory(g_spec_init->context()),true);
+        jclass spec_listener_class = env->GetObjectClass(listener);
+        jmethodID spec_on_token = spec_listener_class ? env->GetMethodID(spec_listener_class, "onToken", "(Ljava/lang/String;)V") : nullptr;
+        if (spec_on_token) {
+            std::vector<llama_token> spec_tokens((size_t)n_prompt);
+            if (llama_tokenize(vocab,prompt_text.c_str(),prompt_text.size(),spec_tokens.data(),spec_tokens.size(),true,true)<0) {
+                if (spec_listener_class) env->DeleteLocalRef(spec_listener_class);
+                return 5;
+            }
+            const int spec_capacity = std::max(1, (int)llama_n_ctx(g_context) - n_prompt - 1);
+            const int sr=generate_spec(env,listener,spec_on_token,spec_tokens,std::min((int)max_tokens,spec_capacity),(float)temperature,(int)top_k,(float)top_p,(float)min_p);
+            append_native_trace((std::string("SPECULATIVE_GENERATE_RETURNED code=")+std::to_string(sr)).c_str());
+            if (spec_listener_class) env->DeleteLocalRef(spec_listener_class);
+            if(sr==0||sr==9)return sr;
+            llama_memory_clear(llama_get_memory(g_context),true);
+            llama_memory_clear(llama_get_memory(g_spec_init->context()),true);
+        } else if (spec_listener_class) {
+            env->DeleteLocalRef(spec_listener_class);
+        }
     }
     if (n_prompt <= 0) { checkpoint("NATIVE_GENERATE_TOKENIZE_COUNT_FAILED"); return 5; }
     std::vector<llama_token> prompt_tokens((size_t) n_prompt);
