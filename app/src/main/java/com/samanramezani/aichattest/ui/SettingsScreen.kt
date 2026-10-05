@@ -1,4 +1,4 @@
-package com.samanramezani1377.aichattest.ui
+package com.samanramezani.aichattest.ui
 
 import android.content.Context
 import androidx.compose.foundation.horizontalScroll

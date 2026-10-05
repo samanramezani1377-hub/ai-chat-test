@@ -1,4 +1,4 @@
-package com.samanramezani1377.aichattest.ui.components
+package com.samanramezani.aichattest.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -20,7 +20,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.samanramezani1377.aichattest.ui.navigation.AppDestination
+import com.samanramezani.aichattest.ui.navigation.AppDestination
 import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.conversation.ConversationRecord
 import kotlinx.coroutines.delay

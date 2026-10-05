@@ -1,4 +1,4 @@
-package com.samanramezani1377.aichattest.ui.components
+package com.samanramezani.aichattest.ui.components
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn

@@ -1,4 +1,4 @@
-package com.samanramezani1377.aichattest.ui.diagnostics
+package com.samanramezani.aichattest.ui.diagnostics
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -16,7 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
-import com.samanramezani1377.aichattest.ui.components.SimplePage
+import com.samanramezani.aichattest.ui.components.SimplePage
 import com.samanramezani.aichattest.ui.state.ExecutionState
 import com.woogit.aicore.actions.ActionTraceStore
 import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
