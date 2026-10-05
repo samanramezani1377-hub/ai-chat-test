@@ -243,7 +243,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         if (!prefill_recorded && decode_result == 0) {
             const auto now = std::chrono::steady_clock::now();
             const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - generation_started_at).count();
-            append_native_trace((std::string("NATIVE_PREFILL_COMPLETED promptTokens=") + std::to_string(n_prompt) + " reusedTokens=" + std::to_string(decode_from) + " prefillMs=" + std::to_string(prefill_ms)).c_str());
+            append_native_trace((std::string("NATIVE_PREFILL_COMPLETED promptTokens=") + std::to_string(n_prompt) + " reusedTokens=" + std::to_string(0) + " prefillMs=" + std::to_string(prefill_ms)).c_str());
             prefill_recorded = true;
         }
         if (decode_result != 0) { append_native_trace((std::string("NATIVE_GENERATE_DECODE_FAILED code=") + std::to_string(decode_result)).c_str()); checkpoint("NATIVE_GENERATE_DECODE_FAILED"); result = 10; break; }
