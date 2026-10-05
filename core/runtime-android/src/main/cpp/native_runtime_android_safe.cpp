@@ -302,16 +302,38 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     // completed. A failed decode must never advertise a partially-built state
     // as a valid prefix for the next turn.
 
-    llama_batch batch;
+    // Explicitly position every batch. This is required when resuming after a
+    // cached prefix; a long prior response must never make the next decode start
+    // from an implicit position.
+    const int batch_capacity = std::max(1, std::min(128, n_ctx));
+    llama_batch batch = llama_batch_init(batch_capacity, 0, 1);
+    if (!batch.token || !batch.pos || !batch.n_seq_id || !batch.seq_id || !batch.logits) {
+        llama_batch_free(batch);
+        env->DeleteLocalRef(listener_class);
+        llama_sampler_free(sampler);
+        checkpoint("NATIVE_GENERATE_BATCH_INIT_FAILED");
+        return 9;
+    }
+    auto fill_batch = [&](const llama_token *tokens, int count, int start_pos) {
+        batch.n_tokens = count;
+        for (int i = 0; i < count; ++i) {
+            batch.token[i] = tokens[i];
+            batch.pos[i] = (llama_pos) (start_pos + i);
+            batch.n_seq_id[i] = 1;
+            batch.seq_id[i][0] = 0;
+            batch.logits[i] = (i == count - 1) ? 1 : 0;
+        }
+    };
     if (reuse_prefix < prompt_tokens.size()) {
-        batch = llama_batch_get_one(prompt_tokens.data() + reuse_prefix,
-                                    (int32_t) (prompt_tokens.size() - reuse_prefix));
+        const int suffix_count = (int) (prompt_tokens.size() - reuse_prefix);
+        fill_batch(prompt_tokens.data() + reuse_prefix, suffix_count, (int) reuse_prefix);
     } else {
-        batch = llama_batch_get_one(prompt_tokens.data(), 0);
+        batch.n_tokens = 0;
     }
     if (llama_model_has_encoder(g_model)) {
-        batch = llama_batch_get_one(prompt_tokens.data(), (int32_t) prompt_tokens.size());
+        fill_batch(prompt_tokens.data(), (int) prompt_tokens.size(), 0);
         if (llama_encode(g_context, batch)) {
+            llama_batch_free(batch);
             env->DeleteLocalRef(listener_class);
             llama_sampler_free(sampler);
             checkpoint("NATIVE_GENERATE_ENCODE_FAILED");
@@ -319,7 +341,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         }
         llama_token decoder_start = llama_model_decoder_start_token(g_model);
         if (decoder_start == LLAMA_TOKEN_NULL) decoder_start = llama_vocab_bos(vocab);
-        batch = llama_batch_get_one(&decoder_start, 1);
+        fill_batch(&decoder_start, 1, 0);
     }
     append_native_trace((std::string("NATIVE_GENERATE_PARAMS promptTokens=") + std::to_string(n_prompt) + " maxTokens=" + std::to_string(max_predict) + " temperature=" + std::to_string(temp) + " topK=" + std::to_string(k) + " topP=" + std::to_string(p) + " minP=" + std::to_string(mp)).c_str());
     int generated = 0;
@@ -364,7 +386,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             }
         }
         ++generated;
-        batch = llama_batch_get_one(const_cast<llama_token *>(&token), 1);
+        fill_batch(&token, 1, position);
     }
     if (!pending_utf8.empty() && result == 0) {
         // A valid model output should not leave a partial UTF-8 sequence behind.
@@ -378,6 +400,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             if (env->ExceptionCheck()) env->ExceptionClear();
         }
     }
+    llama_batch_free(batch);
     env->DeleteLocalRef(listener_class);
     llama_sampler_free(sampler);
     const auto generation_finished_at = std::chrono::steady_clock::now();
