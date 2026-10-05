@@ -16,7 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
-import com.samanramezani.aichattest.ui.components.SimplePage
+import com.samanramezani1377.aichattest.ui.components.SimplePage
 import com.samanramezani.aichattest.ui.state.ExecutionState
 import com.woogit.aicore.actions.ActionTraceStore
 import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
@@ -64,7 +64,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
     val nativePerf = diagnostic.nativePerformance
     val speed = runtime.generation?.let {
         val seconds = it.generationTimeMs?.toDouble()?.div(1000.0)
-        if (seconds != null && seconds > 0 && it.outputTokens != null) "%.1f".format(it.outputTokens / seconds) else "—"
+        if (seconds != null && seconds > 0 && it.outputTokens != null) "%.1f".format(it.outputTokens!!.toDouble() / seconds) else "—"
     } ?: "—"
 
     SimplePage("عیب‌یابی") {
