@@ -430,6 +430,36 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         }
     }
 
+    // Snapshot the post-prefill state before any sampled token mutates the
+    // recurrent memory. This gives hybrid Qwen-family models an exact turn
+    // checkpoint that can be restored on the next request.
+    if (prefill_recorded && model_uses_recurrent_memory()) {
+        static constexpr size_t kMaxHybridStateBytes = 128u * 1024u * 1024u;
+        const size_t state_size = llama_state_seq_get_size(g_context, 0);
+        if (state_size > 0 && state_size <= kMaxHybridStateBytes) {
+            g_cached_prompt_state.resize(state_size);
+            const size_t written = llama_state_seq_get_data(
+                    g_context,
+                    g_cached_prompt_state.data(),
+                    g_cached_prompt_state.size(),
+                    0);
+            if (written > 0) {
+                g_cached_prompt_state.resize(written);
+                append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_CAPTURED tokens=") +
+                    std::to_string(prompt_tokens.size()) + " bytes=" +
+                    std::to_string(written)).c_str());
+            } else {
+                g_cached_prompt_state.clear();
+                append_native_trace("NATIVE_KV_CACHE_HYBRID_STATE_CAPTURE_FAILED");
+            }
+        } else {
+            g_cached_prompt_state.clear();
+            append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_SKIPPED bytes=") +
+                std::to_string(state_size) + " limit=" +
+                std::to_string(kMaxHybridStateBytes)).c_str());
+        }
+    }
+
     if (result == 0) {
         while (generated < max_predict) {
             if (g_stop.load(std::memory_order_relaxed)) { result = 9; checkpoint("NATIVE_GENERATE_STOPPED"); break; }
@@ -506,39 +536,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     const double decode_tokens_per_sec = generated > 0 && decode_ms > 0 ? (1000.0 * static_cast<double>(generated) / static_cast<double>(decode_ms)) : 0.0;
     if (prefill_recorded && (result == 0 || result == 9)) {
         g_cached_prompt_tokens = prompt_tokens;
-        if (model_uses_recurrent_memory()) {
-            // Capture the complete hybrid state before generation mutates it.
-            // This is the only safe reusable checkpoint for a path-dependent
-            // recurrent component. Cap host-side snapshots to avoid turning
-            // prompt caching into an OOM source on low-memory Android devices.
-            static constexpr size_t kMaxHybridStateBytes = 128u * 1024u * 1024u;
-            const size_t state_size = llama_state_seq_get_size(g_context, 0);
-            if (state_size > 0 && state_size <= kMaxHybridStateBytes) {
-                g_cached_prompt_state.resize(state_size);
-                const size_t written = llama_state_seq_get_data(
-                        g_context,
-                        g_cached_prompt_state.data(),
-                        g_cached_prompt_state.size(),
-                        0);
-                if (written > 0) {
-                    g_cached_prompt_state.resize(written);
-                    append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_PUBLISHED tokens=") +
-                        std::to_string(g_cached_prompt_tokens.size()) + " bytes=" +
-                        std::to_string(written)).c_str());
-                } else {
-                    g_cached_prompt_state.clear();
-                    append_native_trace("NATIVE_KV_CACHE_HYBRID_STATE_PUBLISH_FAILED");
-                }
-            } else {
-                g_cached_prompt_state.clear();
-                append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_SKIPPED bytes=") +
-                    std::to_string(state_size) + " limit=" +
-                    std::to_string(kMaxHybridStateBytes)).c_str());
-            }
-        } else {
+        if (!model_uses_recurrent_memory()) {
             g_cached_prompt_state.clear();
-        }
-        append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISHED tokens=") + std::to_string(g_cached_prompt_tokens.size())).c_str());
+        }        append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISHED tokens=") + std::to_string(g_cached_prompt_tokens.size())).c_str());
     } else if (prefill_recorded) {
         g_cached_prompt_tokens.clear();
         g_cached_prompt_state.clear();
