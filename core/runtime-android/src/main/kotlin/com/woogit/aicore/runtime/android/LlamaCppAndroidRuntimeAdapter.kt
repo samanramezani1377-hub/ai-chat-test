@@ -14,6 +14,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
@@ -27,6 +29,8 @@ class LlamaCppAndroidRuntimeAdapter(
     }
 
     private val stopRequested = AtomicBoolean(false)
+    /** Serializes model load/unload and generation. */
+    private val nativeOperationMutex = Mutex()
     @Volatile private var gpuLayersMode = gpuLayers
     @Volatile private var selectedGpuLayers = 0
     @Volatile private var selectedCpuThreads = 2
@@ -64,7 +68,14 @@ class LlamaCppAndroidRuntimeAdapter(
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_SKIPPED_ALREADY_LOADED file=${model.path.toFile().name} context=$loadedContextLength gpuLayers=$selectedGpuLayers")
             return ModelResult.Success(Unit)
         }
-        unload()
+        stopRequested.set(true)
+        NativeLlamaCpp.unload()
+        stopRequested.set(false)
+        selectedGpuLayers = 0
+        selectedBackend = "OpenCL"
+        loadedContextLength = null
+        loadedArchitecture = "unknown"
+        loadedModelPath = null
         val file = model.path.toFile()
         if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
         val startedAt = System.nanoTime()
@@ -112,7 +123,11 @@ class LlamaCppAndroidRuntimeAdapter(
         }
     }
 
-    override suspend fun unload() {
+    override suspend fun unload() = nativeOperationMutex.withLock {
+        unloadUnsafe()
+    }
+
+    private fun unloadUnsafe() {
         stopRequested.set(true)
         NativeLlamaCpp.unload()
         stopRequested.set(false)
@@ -148,8 +163,9 @@ class LlamaCppAndroidRuntimeAdapter(
         val output = StringBuilder()
         val pending = StringBuilder()
         val maxStopLength = settings.stopSequences.maxOfOrNull { it.length } ?: 0
-        return try {
-            NativeLlamaCpp.generate(
+        return nativeOperationMutex.withLock {
+            try {
+                NativeLlamaCpp.generate(
                 prompt = prompt,
                 maxTokens = settings.maxNewTokens.coerceAtLeast(1),
                 temperature = if (loadedArchitecture == "lfm2") 0.3f else settings.temperature.toFloat().coerceAtLeast(0f),
@@ -198,7 +214,8 @@ class LlamaCppAndroidRuntimeAdapter(
                 RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_FAILED, t.message)
                 ModelResult.Failure(RuntimeErrorMapper.inferenceFailure(t))
             }
-        } finally { stopRequested.set(false) }
+            } finally { stopRequested.set(false) }
+        }
     }
 
     override suspend fun stopGeneration() {
