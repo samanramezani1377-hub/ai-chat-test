@@ -20,14 +20,14 @@ import androidx.compose.ui.unit.dp
 import com.woogit.aicore.domain.ModelDescriptor
 
 @Composable
-fun SettingsScreen(
+fun DraftModelPanel(
     models: List<ModelDescriptor>, active: ModelDescriptor?, error: String?, onImport: () -> Unit,
     draftModels: List<ModelDescriptor>, activeDraft: ModelDescriptor?, onImportDraft: () -> Unit,
     onAssignDraft: (String?) -> Unit, onDeleteDraft: (String) -> Unit,
     onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)?, onDelete: (String) -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
-        SettingsScreen(models, active, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
+        ModelManagementBase(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
         Surface(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp),
             shape = RoundedCornerShape(20.dp),
