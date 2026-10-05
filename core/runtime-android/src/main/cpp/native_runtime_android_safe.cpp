@@ -430,7 +430,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         }
     }
 
-    if (!pending_utf8.empty() && result == 0) {
+    if (!pending_utf8.empty() && (result == 0 || result == 9)) {
         // Flush the final stream chunk before handling any partial UTF-8 sequence.
         if (!emit_complete_utf8(env, listener, on_token, pending_utf8)) {
             checkpoint("NATIVE_GENERATE_JSTRING_FAILED_FINAL_FLUSH");
