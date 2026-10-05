@@ -61,7 +61,7 @@ class LlamaCppAndroidRuntimeAdapter(
         }
     }
 
-    suspend fun loadResult(model: ModelDescriptor): ModelResult<Unit> {
+    suspend fun loadResult(model: ModelDescriptor): ModelResult<Unit> = nativeOperationMutex.withLock {
         currentCoroutineContext().ensureActive()
         val requestedPath = model.path.toFile().absolutePath
         if (loadedContextLength != null && loadedModelPath == requestedPath) {
@@ -216,9 +216,7 @@ class LlamaCppAndroidRuntimeAdapter(
                 ModelResult.Failure(RuntimeErrorMapper.inferenceFailure(t))
             }
             } finally { stopRequested.set(false) }
-        }
     }
-
     /**
      * Keep as much recent conversation as possible while reserving the full generation
      * budget. The actual GGUF vocabulary counts tokens, so mixed Persian/English text
