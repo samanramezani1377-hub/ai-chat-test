@@ -56,12 +56,13 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
     val recentActionEvents = selectedActionTraces.takeLast(DISPLAY_ACTION_EVENTS)
 
     SimplePage("عیب‌یابی") {
+        Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = if (diagnostic.error.isNullOrBlank()) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { Text(if (diagnostic.error.isNullOrBlank()) "اجرای اخیر بدون خطا گزارش شده" else "یک خطا در اجرای اخیر ثبت شده", style = MaterialTheme.typography.titleLarge); Text(if (diagnostic.error.isNullOrBlank()) "جزئیات فنی پایین‌تر قرار دارد و فقط برای بررسی مشکل لازم است." else "برای ارسال گزارش به پشتیبانی، «کپی گزارش خطا» را بزنید.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { copyToClipboard(context, "گزارش کامل", report) }, modifier = Modifier.weight(1f)) { Text("کپی گزارش کامل") }
             OutlinedButton(onClick = { copyToClipboard(context, "نتیجه خطا", errorReport) }, modifier = Modifier.weight(1f)) { Text("کپی نتیجه خطا") }
         }
 
-        Text("خلاصه خطا", style = MaterialTheme.typography.titleLarge)
+        Text("وضعیت اجرا", style = MaterialTheme.typography.titleLarge)
         Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
             Column(Modifier.padding(12.dp)) {
                 MetricRow("وضعیت", diagnostic.status)
@@ -83,7 +84,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         }
         Text("فقط رویدادهای اخیر برای خوانایی نمایش داده می‌شوند؛ trace کامل همچنان در گزارش کامل قابل کپی است.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
 
-        Text("رویدادهای اخیر Runtime", style = MaterialTheme.typography.titleLarge)
+        Text("Timeline · Runtime", style = MaterialTheme.typography.titleLarge)
         if (recentRuntimeEvents.isEmpty()) Text("Trace Runtime ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         else recentRuntimeEvents.forEach { event ->
             Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
@@ -95,7 +96,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             }
         }
 
-        Text("رویدادهای اخیر Action", style = MaterialTheme.typography.titleLarge)
+        Text("Timeline · Action", style = MaterialTheme.typography.titleLarge)
         if (recentActionEvents.isEmpty()) Text("Trace عملیات برای این Execution ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         else recentActionEvents.forEach { event ->
             Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
@@ -107,7 +108,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             }
         }
 
-        Text("عملکرد Runtime", style = MaterialTheme.typography.titleLarge)
+        Text("عملکرد", style = MaterialTheme.typography.titleLarge)
         MetricRow("زمان بارگذاری مدل", runtime.loadTimeMs?.let { "$it ms" } ?: "N/A")
         MetricRow("زمان تا اولین توکن (TTFT)", runtime.generation?.firstTokenTimeMs?.let { "$it ms" } ?: "N/A")
         MetricRow("زمان تولید", runtime.generation?.generationTimeMs?.let { "$it ms" } ?: "N/A")
@@ -119,7 +120,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             if (seconds == null || seconds <= 0.0 || outputTokens == null) "N/A" else "%.2f tok/s".format(outputTokens / seconds)
         } ?: "N/A")
 
-        Text("Runtime", style = MaterialTheme.typography.titleLarge)
+        Text("مشخصات فنی", style = MaterialTheme.typography.titleLarge)
         MetricRow("مدل", runtime.model?.displayName ?: "N/A")
         MetricRow("فرمت", runtime.model?.format?.toString() ?: "N/A")
         MetricRow("Quantization", runtime.model?.quantization?.toString() ?: "N/A")
@@ -130,7 +131,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         MetricRow("GPU Layers", runtime.runtime.gpuLayers?.toString() ?: "N/A")
         MetricRow("Context", runtime.runtime.contextLength?.toString() ?: "N/A")
 
-        Text("پارامترهای Generation", style = MaterialTheme.typography.titleLarge)
+        Text("پارامترهای پاسخ", style = MaterialTheme.typography.titleLarge)
         runtime.settings?.let { settings ->
             MetricRow("Temperature", settings.temperature.toString())
             MetricRow("Top-P", settings.topP?.toString() ?: "N/A")
@@ -143,7 +144,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             MetricRow("Stop Sequences", settings.stopSequences.size.toString())
         } ?: Text("برای آخرین Generation تنظیماتی ثبت نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-        Text("Execution", style = MaterialTheme.typography.titleLarge)
+        Text("جزئیات اجرای اخیر", style = MaterialTheme.typography.titleLarge)
         if (execution == null) Text("Execution ثبت‌شده‌ای وجود ندارد.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         else {
             MetricRow("Execution", execution.id)
