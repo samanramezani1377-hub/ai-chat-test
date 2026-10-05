@@ -46,6 +46,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         executionId = execution?.id,
         actionTrace = selectedActions,
         runtimeTrace = runtime.trace,
+        nativeDiagnostics = runtime.lastNativeEvent,
     )
     val report = buildString {
         append(diagnostic.report())
@@ -60,6 +61,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
     val recentRuntime = runtime.trace.takeLast(DISPLAY_RUNTIME_EVENTS)
     val recentActions = selectedActions.takeLast(DISPLAY_ACTION_EVENTS)
     val hasError = !diagnostic.error.isNullOrBlank()
+    val nativePerf = diagnostic.nativePerformance
     val speed = runtime.generation?.let {
         val seconds = it.generationTimeMs?.toDouble()?.div(1000.0)
         if (seconds != null && seconds > 0 && it.outputTokens != null) "%.1f".format(it.outputTokens / seconds) else "—"
@@ -98,6 +100,19 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             MetricCard("TTFT", runtime.generation?.firstTokenTimeMs?.let { "$it ms" } ?: "—", Modifier.weight(1f))
             MetricCard("سرعت", if (speed == "—") "—" else "$speed tok/s", Modifier.weight(1f))
             MetricCard("خروجی", runtime.generation?.outputTokens?.toString() ?: "—", Modifier.weight(1f))
+        }
+
+        Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
+            Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("اندازه‌گیری Native", style = MaterialTheme.typography.titleMedium)
+                InfoLine("Prefill", nativePerf.prefillMs?.let { "$it ms" } ?: "—")
+                InfoLine("Prompt tokens", nativePerf.promptTokens?.toString() ?: "—")
+                InfoLine("KV reused", nativePerf.reusedTokens?.toString() ?: "—")
+                InfoLine("Decode", nativePerf.decodeMs?.let { "$it ms" } ?: "—")
+                InfoLine("Generated", nativePerf.generatedTokens?.toString() ?: "—")
+                InfoLine("Decode speed", nativePerf.decodeTokensPerSec?.let { "%.2f tok/s".format(it) } ?: "—")
+                Text("فقط دادهٔ خام عملکرد ثبت می‌شود؛ تشخیص گلوگاه با بررسی گزارش انجام می‌شود.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
 
         Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface) {
