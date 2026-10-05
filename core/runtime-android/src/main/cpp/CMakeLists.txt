@@ -40,7 +40,7 @@ FetchContent_MakeAvailable(opencl_icd_loader)
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 set(GGML_OPENCL ON CACHE BOOL "Use OpenCL GPU backend" FORCE)
-set(GGML_OPENCL_USE_ADRENO_KERNELS OFF CACHE BOOL "Use portable OpenCL kernels, not Adreno-specific kernels" FORCE)
+set(GGML_OPENCL_USE_ADRENO_KERNELS ON CACHE BOOL "Use Adreno-optimized OpenCL kernels when the runtime GPU is Adreno; automatically remains generic on other GPUs" FORCE)
 set(GGML_OPENCL_USE_ADRENO_BIN_KERNELS OFF CACHE BOOL "Do not use vendor-specific Adreno binary kernels" FORCE)
 set(GGML_VULKAN OFF CACHE BOOL "Vulkan is intentionally disabled" FORCE)
 set(GGML_OPENCL_USE_SVM OFF CACHE BOOL "Avoid vendor SVM driver instability on Android" FORCE)
