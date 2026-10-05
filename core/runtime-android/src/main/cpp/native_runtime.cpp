@@ -37,6 +37,7 @@ static bool g_gpu_backend_loaded = false;
 static uint32_t g_context_length = 0;
 
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
+static void append_native_trace(const char *text);
 static bool init_generation_context();
 static int threads() { return std::clamp((int)std::max(1u, std::thread::hardware_concurrency()) - 2, 2, 4); }
 
@@ -165,7 +166,7 @@ static void install_native_fatal_handlers() {
     sigaction(SIGABRT, &action, nullptr);
     sigaction(SIGILL, &action, nullptr);
     sigaction(SIGFPE, &action, nullptr);
-}
+    }
 
 static void checkpoint(const char *event) {
     LOGI("NATIVE_CHECKPOINT %s", event);
