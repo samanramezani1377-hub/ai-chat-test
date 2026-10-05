@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
-set(LLAMA_CPP_TAG "2ca15f5404760548c39e7b92bd43116a09414a1a" CACHE STRING "Pinned llama.cpp revision with LFM2 and Android OpenCL support")
+set(LLAMA_CPP_TAG "d2e54583c7452353eb35d40431281f6ee984332f" CACHE STRING "Pinned llama.cpp v0.5.0 with current Qwen3.5/OpenCL support")
 set(FETCHCONTENT_QUIET OFF)
 set(FETCHCONTENT_BASE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../.cxx/fetch-content" CACHE PATH "Stable FetchContent base directory")
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "Do not update pinned FetchContent dependencies")
@@ -37,9 +37,6 @@ set(ENABLE_OPENCL_LAYER OFF CACHE BOOL "" FORCE)
 set(ENABLE_OPENCL_ICD_LOADER ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(opencl_icd_loader)
 
-# Android's CMake toolchain does not expose a linkable system OpenCL library.
-# The ICD loader target above is our portable link-time OpenCL implementation;
-# the real vendor OpenCL implementation is discovered dynamically at runtime.
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 set(GGML_OPENCL ON CACHE BOOL "Use OpenCL GPU backend" FORCE)
@@ -68,6 +65,18 @@ target_include_directories(ai_chat_runtime PRIVATE
     ${llama_cpp_SOURCE_DIR}/include
     ${llama_cpp_SOURCE_DIR}/ggml/include
     ${opencl_headers_SOURCE_DIR}
+)
+
+# The runtime is a single arm64 production native library. Strip unused sections
+# and symbols at link time to reduce the installed footprint without changing inference.
+target_compile_options(ai_chat_runtime PRIVATE
+    $<$<CONFIG:Release>:-Os>
+    $<$<CONFIG:Release>:-ffunction-sections>
+    $<$<CONFIG:Release>:-fdata-sections>
+)
+target_link_options(ai_chat_runtime PRIVATE
+    $<$<CONFIG:Release>:-Wl,--gc-sections>
+    $<$<CONFIG:Release>:-Wl,--strip-all>
 )
 
 target_link_libraries(ai_chat_runtime llama android log OpenCL)
