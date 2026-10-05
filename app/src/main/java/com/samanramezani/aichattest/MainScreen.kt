@@ -54,10 +54,29 @@ internal fun MainScreen(container: AppContainer) {
     var recentLimit by remember { mutableIntStateOf(20) }
     var activeStreamId by remember { mutableStateOf<String?>(null) }
 
+    data class StartupSnapshot(
+        val restore: ModelResult<* >?,
+        val conversations: List<ConversationRecord>,
+        val record: ConversationRecord,
+        val messages: List<UiMessage>,
+    )
+
     fun loadConversation(record: ConversationRecord) { current = record; messages = history.messages(record.id).map { UiMessage(it.role, it.content, it.id) } }
     fun refreshModels() { scope.launch(Dispatchers.Default) { val listed = manager?.models(); val active = manager?.activeModel(); withContext(Dispatchers.Main) { models = (listed as? ModelResult.Success)?.value ?: emptyList(); activeModel = (active as? ModelResult.Success)?.value; if (!generating && !approvalBusy && !importBusy && !activationBusy) runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس" } } }
     fun refreshHistory() { scope.launch(Dispatchers.Default) { val records = history.recent(recentLimit); withContext(Dispatchers.Main) { conversations = records } } }
-    LaunchedEffect(Unit) { manager?.let { withContext(Dispatchers.Default) { it.restoreActive() } }; refreshModels(); val records = history.recent(recentLimit); val record = records.firstOrNull() ?: history.create("گفت‌وگوی جدید"); conversations = history.recent(recentLimit); loadConversation(record) }
+    LaunchedEffect(Unit) {
+        val startup = withContext(Dispatchers.Default) {
+            val restore = async { manager?.restoreActive() }
+            val records = history.recent(recentLimit)
+            val record = records.firstOrNull() ?: history.create("گفت‌وگوی جدید")
+            val loadedMessages = history.messages(record.id).map { UiMessage(it.role, it.content, it.id) }
+            StartupSnapshot(restore.await(), history.recent(recentLimit), record, loadedMessages)
+        }
+        conversations = startup.conversations
+        current = startup.record
+        messages = startup.messages
+        refreshModels()
+    }
     BackHandler(enabled = sidebarOpen || quickMenuOpen) { if (sidebarOpen) sidebarOpen = false else quickMenuOpen = false }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri == null || manager == null) return@rememberLauncherForActivityResult; importBusy = true; runtimeStatus = "در حال وارد کردن مدل…"; diagnostic = null; scope.launch { try { val result = withContext(Dispatchers.IO) { manager.import(uri) }; when (result) { is ModelResult.Success -> { runtimeStatus = "مدل وارد شد؛ برای فعال‌سازی آماده است."; diagnostic = null }; is ModelResult.Failure -> diagnostic = result.error.message } } catch (t: Throwable) { diagnostic = t.message ?: "وارد کردن مدل ناموفق بود." } finally { withContext(Dispatchers.Main) { importBusy = false; if (diagnostic == null && activeModel == null) runtimeStatus = "مدل وارد شد؛ برای فعال‌سازی آماده است." else if (diagnostic != null) runtimeStatus = "خطا" }; refreshModels() } } }
     fun activateModel(id: String) { val m = manager ?: return; if (generating || approvalBusy || importBusy || activationBusy) return; activationBusy = true; runtimeStatus = "در حال فعال‌سازی…"; diagnostic = null; scope.launch(Dispatchers.Default) { val result = m.activate(id); withContext(Dispatchers.Main) { activationBusy = false; when (result) { is ModelResult.Success -> { activeModel = result.value; runtimeStatus = "آماده"; diagnostic = null }; is ModelResult.Failure -> { runtimeStatus = "خطا"; diagnostic = result.error.message } }; refreshModels() } } }
