@@ -5,9 +5,6 @@
 static std::vector<llama_token> g_cached_prompt_tokens;
 static void clear_android_generation_cache() { g_cached_prompt_tokens.clear(); }
 
-static bool model_uses_recurrent_memory() {
-    return g_model && (llama_model_is_recurrent(g_model) || llama_model_is_hybrid(g_model));
-}
 #include <signal.h>
 #include <unistd.h>
 #include <vector>
@@ -21,6 +18,10 @@ static bool model_uses_recurrent_memory() {
 #define install_native_fatal_handlers install_native_fatal_handlers_legacy
 #include "native_runtime.cpp"
 #undef install_native_fatal_handlers
+
+static bool model_uses_recurrent_memory() {
+    return g_model && (llama_model_is_recurrent(g_model) || llama_model_is_hybrid(g_model));
+}
 
 static void android_fatal_signal_handler(int signal_number, siginfo_t * info, void * raw_context) {
     if (g_native_fatal_fd >= 0) {
