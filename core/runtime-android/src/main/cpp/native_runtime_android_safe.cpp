@@ -55,19 +55,33 @@ static bool init_speculative_runtime() {
     if (!g_spec_requested || g_spec_draft_path.empty() || !g_model || !g_context) return false;
     try {
         common_params p;
-        p.model.path=g_spec_draft_path; p.n_ctx=(int)llama_n_ctx(g_context); p.n_batch=128; p.n_ubatch=128;
-        p.n_parallel=1; p.n_sequences=1; p.n_gpu_layers=99;
-        p.speculative.types={COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE};
-        p.speculative.draft.mparams.path=g_spec_draft_path;
-        p.speculative.draft.n_max=4; p.speculative.draft.n_gpu_layers=99;
-        g_spec_init=common_speculative_init_from_params(p,g_model,g_context);
-        if(!g_spec_init || !g_spec_init->context()){g_spec_init.reset();return false;}
-        p.speculative.draft.ctx_tgt=g_context; p.speculative.draft.ctx_dft=g_spec_init->context();
-        g_spec=common_speculative_init(p.speculative,1);
-        if(!g_spec){g_spec_init.reset();return false;}
-        append_native_trace((std::string("SPECULATIVE_READY draft=")+g_spec_draft_path+" nMax=4").c_str());
+        p.model.path = g_spec_draft_path;
+        p.n_ctx = (int) llama_n_ctx(g_context);
+        p.n_batch = 128; p.n_ubatch = 128;
+        p.n_parallel = 1; p.n_sequences = 1; p.n_gpu_layers = 99;
+        p.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE };
+        p.speculative.draft.mparams.path = g_spec_draft_path;
+        p.speculative.draft.n_max = 4;
+        p.speculative.draft.n_gpu_layers = 99;
+        g_spec_init = common_speculative_init_from_params(p, g_model, g_context);
+        if (!g_spec_init || !g_spec_init->context() || !g_spec_init->model()) { g_spec_init.reset(); return false; }
+        if (!common_speculative_are_compatible(g_model, g_spec_init->model())) {
+            append_native_trace("SPECULATIVE_INCOMPATIBLE_VOCAB");
+            g_spec_init.reset();
+            return false;
+        }
+        p.speculative.draft.ctx_tgt = g_context;
+        p.speculative.draft.ctx_dft = g_spec_init->context();
+        g_spec = common_speculative_init(p.speculative, 1);
+        if (!g_spec) { g_spec_init.reset(); return false; }
+        append_native_trace((std::string("SPECULATIVE_READY draft=") + g_spec_draft_path + " nMax=4").c_str());
         return true;
-    } catch(const std::exception &e){append_native_trace((std::string("SPECULATIVE_EXCEPTION ")+e.what()).c_str());if (g_spec) { common_speculative_free(g_spec); g_spec = nullptr; }g_spec_init.reset();return false;}
+    } catch (const std::exception &e) {
+        append_native_trace((std::string("SPECULATIVE_EXCEPTION ") + e.what()).c_str());
+        if (g_spec) { common_speculative_free(g_spec); g_spec = nullptr; }
+        g_spec_init.reset();
+        return false;
+    }
 }
 
 static common_params_sampling spec_sampling(float temperature,int top_k,float top_p,float min_p){
