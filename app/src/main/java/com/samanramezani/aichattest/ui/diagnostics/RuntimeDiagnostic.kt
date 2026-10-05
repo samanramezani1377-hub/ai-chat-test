@@ -10,6 +10,18 @@ import com.woogit.aicore.runtime.RuntimeTraceEvent
 private const val RECENT_RUNTIME_EVENTS = 20
 private const val RECENT_ACTION_EVENTS = 10
 
+internal data class NativePerformance(
+    val prefillMs: Long? = null,
+    val promptTokens: Int? = null,
+    val reusedTokens: Int? = null,
+    val generatedTokens: Int? = null,
+    val generationMs: Long? = null,
+    val decodeTokensPerSec: Double? = null,
+) {
+    val decodeMs: Long?
+        get() = if (generationMs != null && prefillMs != null) (generationMs - prefillMs).coerceAtLeast(0L) else null
+}
+
 internal data class RuntimeDiagnostic(
     val model: ModelDescriptor?,
     val runtime: RuntimeInfo,
@@ -22,9 +34,27 @@ internal data class RuntimeDiagnostic(
     val executionId: String? = null,
     val actionTrace: List<ActionTraceEvent> = emptyList(),
     val runtimeTrace: List<RuntimeTraceEvent> = emptyList(),
-)
+    val nativeDiagnostics: String? = null,
+) {
+    val nativePerformance: NativePerformance
+        get() = NativePerformance(
+            prefillMs = nativeValue("prefillMs")?.toLongOrNull(),
+            promptTokens = nativeValue("promptTokens")?.toIntOrNull(),
+            reusedTokens = nativeValue("reusedTokens")?.toIntOrNull(),
+            generatedTokens = nativeValue("generatedTokens")?.toIntOrNull(),
+            generationMs = nativeValue("generationMs")?.toLongOrNull(),
+            decodeTokensPerSec = nativeValue("decodeTokensPerSec")?.toDoubleOrNull(),
+        )
+
+    private fun nativeValue(key: String): String? {
+        val text = nativeDiagnostics ?: return null
+        val line = text.lineSequence().lastOrNull { it.contains("NATIVE_PREFILL_COMPLETED") || it.contains("NATIVE_GENERATE_COMPLETED") } ?: return null
+        return Regex("""\\b${Regex.escape(key)}=([^\\s]+)""").find(line)?.groupValues?.get(1)
+    }
+}
 
 internal fun RuntimeDiagnostic.report(): String = buildString {
+    val perf = nativePerformance
     appendLine("AI Chat Test — Runtime Diagnostic Report")
     appendLine()
     appendLine("Model: ${model?.displayName ?: "N/A"}")
@@ -42,7 +72,15 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Generation Time: ${generation?.generationTimeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Prompt Tokens: ${generation?.inputTokens ?: "N/A"}")
     appendLine("Output Tokens: ${generation?.outputTokens ?: "N/A"}")
-    appendLine("Tokens/sec: ${tokensPerSecond(generation)?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine("Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: tokensPerSecond(generation)?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine()
+    appendLine("===== NATIVE PERFORMANCE =====")
+    appendLine("Prefill Time: ${perf.prefillMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Prefill Prompt Tokens: ${perf.promptTokens ?: "N/A"}")
+    appendLine("KV Cache Reused Tokens: ${perf.reusedTokens ?: "N/A"}")
+    appendLine("Decode Time: ${perf.decodeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Decode Generated Tokens: ${perf.generatedTokens ?: "N/A"}")
+    appendLine("Decode Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: "N/A"}")
     appendLine()
     val current = settings
     appendLine("Temperature: ${current?.temperature ?: "N/A"}")
@@ -70,6 +108,7 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
 }
 
 internal fun RuntimeDiagnostic.errorReport(): String = buildString {
+    val perf = nativePerformance
     appendLine("AI Chat Test — Error Report")
     appendLine("Status: $status")
     appendLine("Execution: ${executionId ?: "N/A"}")
@@ -77,6 +116,22 @@ internal fun RuntimeDiagnostic.errorReport(): String = buildString {
     appendLine("Runtime: ${runtime.name} ${runtime.version}")
     appendLine("Backend: ${runtime.backend ?: "N/A"}")
     appendLine("GPU Layers: ${runtime.gpuLayers ?: "N/A"}")
+    appendLine("Context: ${runtime.contextLength ?: "N/A"}")
+    appendLine("Load Time: ${loadTimeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("TTFT: ${generation?.firstTokenTimeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Generation Time: ${generation?.generationTimeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Prompt Tokens: ${generation?.inputTokens ?: perf.promptTokens ?: "N/A"}")
+    appendLine("Output Tokens: ${generation?.outputTokens ?: perf.generatedTokens ?: "N/A"}")
+    appendLine("Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: tokensPerSecond(generation)?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine()
+    appendLine("===== NATIVE PERFORMANCE =====")
+    appendLine("Prefill Time: ${perf.prefillMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Prefill Prompt Tokens: ${perf.promptTokens ?: "N/A"}")
+    appendLine("KV Cache Reused Tokens: ${perf.reusedTokens ?: "N/A"}")
+    appendLine("Decode Time: ${perf.decodeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Decode Generated Tokens: ${perf.generatedTokens ?: "N/A"}")
+    appendLine("Decode Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine()
     appendLine("Error: ${error ?: "N/A"}")
     if (!rawError.isNullOrBlank() && rawError != error) appendLine("Raw Error: $rawError")
     appendLine()
