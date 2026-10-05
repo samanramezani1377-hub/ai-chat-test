@@ -39,6 +39,7 @@ static uint32_t g_context_length = 0;
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
 static void append_native_trace(const char *text);
 static bool init_generation_context();
+static bool init_speculative_runtime();
 static int generation_threads() {
     const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
     // Decode is memory-bandwidth bound; keep a bounded number of workers and
@@ -59,6 +60,7 @@ static bool init_generation_context() {
     cp.n_ctx = g_context_length;
     cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
     cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 128);
+    cp.n_rs_seq = g_spec_requested ? 4 : 0;
     // Let llama.cpp select the backend-safe attention implementation. The previous
     // forced-disabled path expanded attention work and was a major mobile decode
     // cost at 8K context. AUTO preserves the normal attention math while allowing
@@ -339,12 +341,14 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jclass, jstring jpath, jint ctx_len, jint gpu_layers) {
+Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jclass, jstring jpath, jint ctx_len, jint gpu_layers, jstring jdraftpath) {
     checkpoint("NATIVE_LOAD_STARTED");
     append_native_trace((std::string("ACTIVATION_NATIVE_LOAD_STARTED ctx_len=") + std::to_string((int)ctx_len) + " gpu_layers=" + std::to_string((int)gpu_layers)).c_str());
     checkpoint("FREE_OLD_RUNTIME_STARTED"); free_all(); checkpoint("FREE_OLD_RUNTIME_RETURNED"); g_stop.store(false);
     const char *path = env->GetStringUTFChars(jpath, nullptr);
     if (!path) { checkpoint("PATH_UTF8_FAILED"); return 3; }
+    g_spec_draft_path.clear(); g_spec_requested = false;
+    if (jdraftpath) { const char *dp = env->GetStringUTFChars(jdraftpath, nullptr); if (dp && *dp) { g_spec_draft_path = dp; g_spec_requested = true; } if (dp) env->ReleaseStringUTFChars(jdraftpath, dp); }
     const std::string preflight = gguf_preflight(path); checkpoint(preflight.c_str());
     if (gpu_layers <= 0) {
         checkpoint("OPENCL_GPU_ONLY_REJECTED_INVALID_GPU_LAYERS");
