@@ -169,6 +169,22 @@ static bool emit_complete_utf8(JNIEnv * env, jobject listener, jmethodID on_toke
 }
 
 extern "C" JNIEXPORT jint JNICALL
+Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeCountTokens(
+        JNIEnv * env,
+        jclass,
+        jstring jprompt) {
+    if (!g_model || !jprompt) return -1;
+    const llama_vocab * vocab = llama_model_get_vocab(g_model);
+    if (!vocab) return -1;
+    const char * prompt = env->GetStringUTFChars(jprompt, nullptr);
+    if (!prompt) return -1;
+    const int32_t text_len = static_cast<int32_t>(std::strlen(prompt));
+    const int count = -llama_tokenize(vocab, prompt, text_len, nullptr, 0, true, true);
+    env->ReleaseStringUTFChars(jprompt, prompt);
+    return count >= 0 ? count : -2;
+}
+
+extern "C" JNIEXPORT jint JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         JNIEnv * env,
         jclass,
@@ -203,7 +219,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         checkpoint("NATIVE_GENERATE_MEMORY_UNAVAILABLE");
         return 2;
     }
-    llama_memory_clear(memory, true);
+    // Clear token metadata but keep already-allocated backend buffers resident. This is
+    // the same reuse pattern used by llama.cpp's benchmark/mobile examples and avoids
+    // needless OpenCL buffer churn between turns.
+    llama_memory_clear(memory, false);
     checkpoint("NATIVE_GENERATE_MEMORY_CLEAR_COMPLETED");
 
     const llama_vocab * vocab = llama_model_get_vocab(g_model);
