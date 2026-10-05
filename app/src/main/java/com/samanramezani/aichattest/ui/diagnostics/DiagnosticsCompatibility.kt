@@ -12,5 +12,5 @@ internal fun DiagnosticsPage(
     execution: ExecutionState?,
     activeModel: ModelDescriptor?,
 ) {
-    DiagnosticsPage(error = null, execution = execution)
+    DiagnosticsPage(null, execution)
 }
