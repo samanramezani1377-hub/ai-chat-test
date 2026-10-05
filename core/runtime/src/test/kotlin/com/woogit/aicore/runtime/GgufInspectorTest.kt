@@ -54,7 +54,7 @@ class GgufInspectorTest {
             val inspection = assertIs<ModelResult.Success<*>>(result).value as com.woogit.aicore.domain.ModelInspection
 
             assertEquals("qwen3", inspection.metadata.architecture)
-            assertEquals(151_936L, (inspection.metadata.raw["tokenizer.ggml.tokens"] as? Any)?.let { arrayInfoCount(it) })
+            assertEquals(151_936L, arrayInfoCount(inspection.metadata.raw["tokenizer.ggml.tokens"]!!))
             assertEquals(Quantization.Q6_K, inspection.quantization)
         } finally {
             Files.deleteIfExists(file)
