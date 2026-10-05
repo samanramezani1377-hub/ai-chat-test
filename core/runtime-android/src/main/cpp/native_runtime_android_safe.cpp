@@ -3,7 +3,13 @@
 
 // Tokens represented by the resident prompt prefix in the native KV cache.
 static std::vector<llama_token> g_cached_prompt_tokens;
-static void clear_android_generation_cache() { g_cached_prompt_tokens.clear(); }
+// Hybrid/recurrent models cannot safely trim their recurrent state with
+// llama_memory_seq_rm(). Keep an exact post-prefill sequence snapshot instead.
+static std::vector<uint8_t> g_cached_prompt_state;
+static void clear_android_generation_cache() {
+    g_cached_prompt_tokens.clear();
+    g_cached_prompt_state.clear();
+}
 
 #include <signal.h>
 #include <unistd.h>
@@ -275,16 +281,57 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         ++common_prefix;
     }
 
-    const bool cache_supported = !llama_model_has_encoder(g_model) && !model_uses_recurrent_memory();
-    // A cache is useful only when the new prompt actually shares a prefix.
-    // Reusing an empty prefix would merely add bookkeeping without saving compute.
+    const bool hybrid_memory = model_uses_recurrent_memory();
+    // Attention-only models can trim the resident KV cache by sequence position.
+    // Hybrid/recurrent models cannot: their recurrent state is path-dependent.
+    // For those models we reuse only an exact cached prompt state captured
+    // immediately after prompt prefill and before generation.
+    const bool cache_supported = !llama_model_has_encoder(g_model);
     bool cache_reused = cache_supported && !g_cached_prompt_tokens.empty() && common_prefix > 0;
     size_t reuse_prefix = 0;
-    append_native_trace((std::string("NATIVE_KV_CACHE_PREFIX_CHECK supported=") + (cache_supported ? "1" : "0") + " cachedTokens=" + std::to_string(g_cached_prompt_tokens.size()) + " commonPrefix=" + std::to_string(common_prefix)).c_str());
-    if (!cache_reused) {
+    const bool exact_cached_prefix = !g_cached_prompt_tokens.empty() &&
+            common_prefix == g_cached_prompt_tokens.size();
+    append_native_trace((std::string("NATIVE_KV_CACHE_PREFIX_CHECK supported=") +
+        (cache_supported ? "1" : "0") +
+        " hybrid=" + (hybrid_memory ? "1" : "0") +
+        " cachedTokens=" + std::to_string(g_cached_prompt_tokens.size()) +
+        " commonPrefix=" + std::to_string(common_prefix) +
+        " stateBytes=" + std::to_string(g_cached_prompt_state.size())).c_str());
+
+    if (hybrid_memory) {
+        // A hybrid state is safe to reuse only when the entire cached prompt is
+        // still an exact prefix. Partial trimming of recurrent state is invalid.
+        if (exact_cached_prefix && !g_cached_prompt_state.empty()) {
+            llama_memory_clear(memory, true);
+            const size_t restored = llama_state_seq_set_data(
+                    g_context,
+                    g_cached_prompt_state.data(),
+                    g_cached_prompt_state.size(),
+                    0);
+            if (restored > 0) {
+                cache_reused = true;
+                reuse_prefix = g_cached_prompt_tokens.size();
+                append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_RESTORED tokens=") +
+                    std::to_string(reuse_prefix) + " bytes=" +
+                    std::to_string(restored)).c_str());
+            } else {
+                cache_reused = false;
+                g_cached_prompt_state.clear();
+                g_cached_prompt_tokens.clear();
+                checkpoint("NATIVE_KV_CACHE_HYBRID_STATE_RESTORE_FAILED");
+            }
+        } else {
+            cache_reused = false;
+            g_cached_prompt_state.clear();
+            g_cached_prompt_tokens.clear();
+            llama_memory_clear(memory, true);
+            checkpoint("NATIVE_KV_CACHE_HYBRID_REBUILD");
+        }
+    } else if (!cache_reused) {
         llama_memory_clear(memory, true);
         g_cached_prompt_tokens.clear();
-        checkpoint(cache_supported ? "NATIVE_KV_CACHE_MISS_CLEARED" : "NATIVE_KV_CACHE_REBUILD_HYBRID");
+        g_cached_prompt_state.clear();
+        checkpoint("NATIVE_KV_CACHE_MISS_CLEARED");
     } else {
         const bool exact_prompt = common_prefix == prompt_tokens.size() &&
                                   common_prefix == g_cached_prompt_tokens.size();
@@ -292,6 +339,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         if (!llama_memory_seq_rm(memory, 0, (llama_pos) reuse_prefix, -1)) {
             llama_memory_clear(memory, true);
             g_cached_prompt_tokens.clear();
+            g_cached_prompt_state.clear();
             reuse_prefix = 0;
             cache_reused = false;
             checkpoint("NATIVE_KV_CACHE_PARTIAL_REMOVE_UNSUPPORTED");
@@ -458,9 +506,42 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     const double decode_tokens_per_sec = generated > 0 && decode_ms > 0 ? (1000.0 * static_cast<double>(generated) / static_cast<double>(decode_ms)) : 0.0;
     if (prefill_recorded && (result == 0 || result == 9)) {
         g_cached_prompt_tokens = prompt_tokens;
+        if (model_uses_recurrent_memory()) {
+            // Capture the complete hybrid state before generation mutates it.
+            // This is the only safe reusable checkpoint for a path-dependent
+            // recurrent component. Cap host-side snapshots to avoid turning
+            // prompt caching into an OOM source on low-memory Android devices.
+            static constexpr size_t kMaxHybridStateBytes = 128u * 1024u * 1024u;
+            const size_t state_size = llama_state_seq_get_size(g_context, 0);
+            if (state_size > 0 && state_size <= kMaxHybridStateBytes) {
+                g_cached_prompt_state.resize(state_size);
+                const size_t written = llama_state_seq_get_data(
+                        g_context,
+                        g_cached_prompt_state.data(),
+                        g_cached_prompt_state.size(),
+                        0);
+                if (written > 0) {
+                    g_cached_prompt_state.resize(written);
+                    append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_PUBLISHED tokens=") +
+                        std::to_string(g_cached_prompt_tokens.size()) + " bytes=" +
+                        std::to_string(written)).c_str());
+                } else {
+                    g_cached_prompt_state.clear();
+                    append_native_trace("NATIVE_KV_CACHE_HYBRID_STATE_PUBLISH_FAILED");
+                }
+            } else {
+                g_cached_prompt_state.clear();
+                append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_SKIPPED bytes=") +
+                    std::to_string(state_size) + " limit=" +
+                    std::to_string(kMaxHybridStateBytes)).c_str());
+            }
+        } else {
+            g_cached_prompt_state.clear();
+        }
         append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISHED tokens=") + std::to_string(g_cached_prompt_tokens.size())).c_str());
     } else if (prefill_recorded) {
         g_cached_prompt_tokens.clear();
+        g_cached_prompt_state.clear();
         llama_memory_clear(memory, true);
         checkpoint("NATIVE_KV_CACHE_NOT_PUBLISHED_AFTER_FAILED_GENERATION");
     }
