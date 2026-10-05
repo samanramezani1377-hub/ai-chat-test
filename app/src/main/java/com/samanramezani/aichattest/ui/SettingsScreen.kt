@@ -70,7 +70,7 @@ fun SettingsScreen(
         }
         item {
             when (section) {
-                "مدل" -> ModelManagement(active, models, error, onImport, draftModels, activeDraft, onImportDraft, onAssignDraft, onDeleteDraft, onRefresh, onActivate, onDeactivate, onDelete)
+                "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
                 "پاسخ" -> InferenceControls()
                 "زمینه" -> ContextControls()
                 "عامل" -> AgentControls()
