@@ -47,10 +47,15 @@ class AgentOrchestrator(
 ) {
     suspend fun generate(
         settings: InferenceSettings,
-        requestedRecentMessages: Int = 10,
+        requestedRecentMessages: Int = Int.MAX_VALUE,
         onToken: suspend (String) -> Unit
     ): GenerationResult {
-        val context = contextProvider.build(requestedRecentMessages)
+        // Do not use a small fixed message-count window for chat memory. The runtime
+        // already performs token-aware context trimming against the real model context.
+        // Keeping the complete stored history here guarantees the next turn sees the
+        // previous user message and the model's previous answer.
+        val contextLimit = if (requestedRecentMessages <= 0) Int.MAX_VALUE else requestedRecentMessages
+        val context = contextProvider.build(contextLimit)
         val request = requestFactory.create(context, settings)
         return runtime.generate(request, onToken)
     }
