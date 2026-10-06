@@ -35,6 +35,8 @@ static std::string g_target_model_path;
 static double g_spec_accept_ema=1.0;
 static common_speculative_init_result_ptr g_spec_init;
 static common_speculative * g_spec = nullptr;
+static volatile const char * g_spec_phase = "IDLE";
+static void set_spec_phase(const char * phase) { g_spec_phase = phase ? phase : "UNKNOWN"; }
 static void append_native_trace(const char *text);
 
 struct NativeDecodeProfile {
@@ -86,9 +88,32 @@ static void append_speculative_stats_trace(int draft_tokens, int accepted_tokens
 #include "native_runtime.cpp"
 #undef install_native_fatal_handlers
 
+static void disable_speculative_runtime(const char * reason) {
+    set_spec_phase("DISABLE_BEGIN");
+    append_native_trace((std::string("SPECULATIVE_DISABLED reason=") + (reason ? reason : "unknown")).c_str());
+    if (g_spec) {
+        set_spec_phase("DISABLE_FREE_SPEC");
+        common_speculative_free(g_spec);
+        g_spec = nullptr;
+    }
+    g_spec_init.reset();
+    g_spec_accept_ema = 1.0;
+    set_spec_phase("DISABLE_DONE");
+}
+
 static bool init_speculative_runtime() {
-    if (!g_spec_requested || !g_model || !g_context) return false;
+    set_spec_phase("INIT_ENTER");
+    append_native_trace("SPECULATIVE_INIT_ENTERED");
+    if (!g_spec_requested || !g_model || !g_context) {
+        set_spec_phase("INIT_NOT_READY");
+        return false;
+    }
+    if (g_spec || g_spec_init) {
+        append_native_trace("SPECULATIVE_DOUBLE_INIT_GUARD");
+        disable_speculative_runtime("double_init_guard");
+    }
     try {
+        set_spec_phase("INIT_BUILD_PARAMS");
         common_params p;
         p.model.path = g_target_model_path;
         p.n_ctx = (int) llama_n_ctx(g_context);
@@ -100,7 +125,10 @@ static bool init_speculative_runtime() {
 
         if (g_spec_mtp) {
             p.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_MTP };
+            set_spec_phase("INIT_FROM_PARAMS");
+            append_native_trace("SPECULATIVE_INIT_FROM_PARAMS_BEGIN");
             g_spec_init = common_speculative_init_from_params(p, g_model, g_context);
+            append_native_trace("SPECULATIVE_INIT_FROM_PARAMS_END");
             if (!g_spec_init || !g_spec_init->context()) {
                 g_spec_init.reset();
                 append_native_trace("MTP_INIT_CONTEXT_FAILED");
@@ -123,15 +151,23 @@ static bool init_speculative_runtime() {
             p.speculative.draft.ctx_dft = g_spec_init->context();
         }
 
+        set_spec_phase("INIT_SPEC_OBJECT");
+        append_native_trace("SPECULATIVE_OBJECT_INIT_BEGIN");
         g_spec = common_speculative_init(p.speculative, 1);
-        if (!g_spec) { g_spec_init.reset(); return false; }
+        append_native_trace("SPECULATIVE_OBJECT_INIT_END");
+        if (!g_spec) {
+            append_native_trace("SPECULATIVE_OBJECT_INIT_FAILED");
+            g_spec_init.reset();
+            set_spec_phase("INIT_SPEC_OBJECT_FAILED");
+            return false;
+        }
+        set_spec_phase("READY");
         append_native_trace((std::string("SPECULATIVE_READY mode=") +
             (g_spec_mtp ? "MTP" : "DRAFT") + " nMax=3").c_str());
         return true;
     } catch (const std::exception &e) {
         append_native_trace((std::string("SPECULATIVE_EXCEPTION ") + e.what()).c_str());
-        if (g_spec) { common_speculative_free(g_spec); g_spec = nullptr; }
-        g_spec_init.reset();
+        disable_speculative_runtime("exception");
         return false;
     }
 }
@@ -165,8 +201,14 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
         append_native_trace((std::string("SPECULATIVE_PERFORMANCE generationMs=") + std::to_string(ms) +
             " tokensPerSec=" + std::to_string(tps)).c_str());
     };
+    set_spec_phase("GENERATE_ENTER");
+    append_native_trace((std::string("SPECULATIVE_GENERATE_ENTER promptTokens=") +
+        std::to_string(inp.size()) + " maxTokens=" + std::to_string(max_tokens)).c_str());
     llama_context * dctx = g_spec_init ? g_spec_init->context() : nullptr;
-    if (!g_spec || !dctx || inp.empty() || !on_token) { finish(); return -1; }
+    if (!g_spec || !dctx || inp.empty() || !on_token) {
+        set_spec_phase("GENERATE_INVALID_STATE");
+        finish(); return -1;
+    }
 
     llama_memory_clear(llama_get_memory(g_context), true);
     llama_memory_clear(llama_get_memory(dctx), true);
@@ -187,7 +229,9 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
     };
 
     llama_tokens hist(inp.begin(), inp.end()-1);
+    set_spec_phase("GENERATE_BEGIN_SPECULATIVE");
     common_speculative_begin(g_spec, 0, hist);
+    append_native_trace("SPEC_BEGIN_DONE");
 
     for (int off=0; off<n_prompt-1; off+=cap) {
         int n=std::min(cap,n_prompt-1-off);
@@ -204,7 +248,12 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
         dp={}; dp.drafting=true;
         const int adaptiveMax = g_spec_accept_ema > 0.82 ? 5 : (g_spec_accept_ema > 0.62 ? 3 : 2);
         dp.n_max=std::min(adaptiveMax,max_tokens-generated-1); dp.pos0=pos; dp.id_last=last; dp.prompt=&hist;
-        llama_tokens draft; dp.result=&draft; common_speculative_draft(g_spec);
+        llama_tokens draft; dp.result=&draft;
+        set_spec_phase("DRAFT_GENERATE_BEGIN");
+        append_native_trace((std::string("SPEC_DRAFT_GENERATE_BEGIN pos=") + std::to_string(pos) +
+            " nMax=" + std::to_string(dp.n_max)).c_str());
+        common_speculative_draft(g_spec);
+        append_native_trace((std::string("SPEC_DRAFT_GENERATE_END tokens=") + std::to_string(draft.size())).c_str());
         draft_tokens+=(int)draft.size();
 
         if(draft.empty()){
@@ -231,7 +280,9 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
         if(llama_decode(g_context,batch)!=0){llama_batch_free(batch);finish();return 10;}
 
         std::vector<int> idx; for(size_t i=0;i<=draft.size();++i) idx.push_back((int)i);
+        set_spec_phase("VERIFY_SAMPLE_ACCEPT");
         auto ids=common_sampler_sample_and_accept_n(smp.get(),g_context,idx,draft);
+        append_native_trace((std::string("SPEC_SAMPLE_ACCEPT_END ids=") + std::to_string(ids.size())).c_str());
         if(ids.empty()){llama_batch_free(batch);finish();return 10;}
         const int acc=std::max(0,(int)ids.size()-1); accepted_tokens+=acc; ++steps;
         if (!draft.empty()) {
@@ -241,11 +292,14 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
                 std::to_string(roundRate) + " ema=" + std::to_string(g_spec_accept_ema) +
                 " nextMax=" + std::to_string(g_spec_accept_ema > 0.82 ? 5 : (g_spec_accept_ema > 0.62 ? 3 : 2))).c_str());
         }
+        set_spec_phase("ACCEPT_DRAFT");
         common_speculative_accept(g_spec,0,(uint16_t)acc);
+        append_native_trace((std::string("SPEC_ACCEPT_DONE accepted=") + std::to_string(acc)).c_str());
 
         // draft-simple::draft() has already advanced the Draft context through
         // the proposed tokens. Verify must never feed that same batch back into
         // Draft. Keep only the accepted prefix for the next speculative round.
+        set_spec_phase("DRAFT_ROLLBACK");
         const llama_pos draft_rollback_from = pos + (llama_pos) acc + 1;
         const llama_pos draft_decoded_end = pos + (llama_pos) draft.size() + 1;
         if(draft_rollback_from < draft_decoded_end &&
@@ -500,8 +554,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             append_native_trace((std::string("SPECULATIVE_GENERATE_RETURNED code=")+std::to_string(sr)).c_str());
             if (spec_listener_class) env->DeleteLocalRef(spec_listener_class);
             if(sr==0||sr==9)return sr;
+            append_native_trace("SPECULATIVE_FALLBACK_TO_TARGET");
+            disable_speculative_runtime("generation_failure");
             llama_memory_clear(llama_get_memory(g_context),true);
-            llama_memory_clear(llama_get_memory(g_spec_init->context()),true);
         } else if (spec_listener_class) {
             env->DeleteLocalRef(spec_listener_class);
         }
