@@ -25,8 +25,8 @@ string(REPLACE
     _src "${_src}")
 
 string(REPLACE
-    "profiling_results.insert(profiling_results.end(),\n        std::make_move_iterator(profiling_info.begin()),\n        std::make_move_iterator(profiling_info.end()));\n    profiling_info.clear();"
-    "profiling_results.insert(profiling_results.end(),\n        std::make_move_iterator(profiling_info.begin()),\n        std::make_move_iterator(profiling_info.end()));\n    profiling_info.clear();\n    // Persist accumulated results after every 2048-event batch so the Android UI\n    // can inspect the profile immediately after a generation without unloading.\n    write_profiling_info();"
+    "    profiling_info.clear();"
+    "    profiling_info.clear();\n    // Persist accumulated results after every 2048-event batch so the Android UI\n    // can inspect the profile immediately after a generation without unloading.\n    write_profiling_info();"
     _src "${_src}")
 
 string(REPLACE
