@@ -19,8 +19,7 @@ android {
                 // Validation is intentionally debug-only while native loading is under investigation.
                 // Keep the native build strictly single-ABI; the app also packages arm64-v8a only.
                 abiFilters += "arm64-v8a"
-                arguments += listOf("-DAI_CHAT_OPENCL_PROFILING=ON",
-                    "-DLLAMA_BUILD_COMMON=OFF",
+                arguments += listOf(                    "-DLLAMA_BUILD_COMMON=OFF",
                     "-DLLAMA_BUILD_TESTS=OFF",
                     "-DLLAMA_BUILD_EXAMPLES=OFF",
                     "-DLLAMA_BUILD_TOOLS=OFF",
@@ -45,6 +44,24 @@ android {
             path = file("src/main/cpp/CMakeLists.txt")
         }
     }
+
+    buildTypes {
+        debug {
+            externalNativeBuild {
+                cmake {
+                    arguments += "-DAI_CHAT_OPENCL_PROFILING=ON"
+                }
+            }
+        }
+        release {
+            externalNativeBuild {
+                cmake {
+                    arguments += "-DAI_CHAT_OPENCL_PROFILING=OFF"
+                }
+            }
+        }
+    }
+
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
