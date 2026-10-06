@@ -135,12 +135,32 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
+      - name: Cache exact native build state
+        uses: actions/cache@v4
+        with:
+          path: |
+            core/runtime-android/.cxx
+            core/runtime-android/src/.cxx
+          key: >-
+            native-lint-${{ runner.os }}-
+            ${{ hashFiles(
+              'gradle.properties',
+              'settings.gradle.kts',
+              'build.gradle.kts',
+              'gradle/libs.versions.toml',
+              'core/runtime-android/build.gradle.kts',
+              'core/runtime-android/src/main/cpp/**',
+              'core/runtime-android/src/main/cpp/cmake/**',
+              '.github/workflows/ci.yml'
+            ) }}
+
       - name: Run Android lint
         run: >-
           gradle
           :app:lintDebug
           --stacktrace
           --console=plain
+          --configuration-cache
 
       - name: Upload lint report
         if: always()
