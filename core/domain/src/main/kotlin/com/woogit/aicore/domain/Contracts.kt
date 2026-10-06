@@ -30,7 +30,7 @@ data class InferenceSettings(
     /** Balanced default for local instruction-following models. */
     val temperature: Double = 0.7,
     /** Practical response size that keeps mobile inference responsive. */
-    val maxNewTokens: Int = 512,
+    val maxNewTokens: Int = 2048,
     /** Common local-LLM sampling defaults; nullable means explicitly disabled only when chosen by the user. */
     val topK: Int? = 40,
     val topP: Double? = 0.9,
