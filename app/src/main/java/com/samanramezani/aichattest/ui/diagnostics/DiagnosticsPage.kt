@@ -111,6 +111,19 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             InfoLine("KV reused", nativePerf.reusedTokens?.toString() ?: "0")
         }
 
+        SectionCard("پروفایل گلوگاه Decode") {
+            InfoLine("Decode واقعی llama_decode", nativePerf.profileDecodeMs?.let { "$it ms" } ?: "—")
+            InfoLine("دسترسی/همگام‌سازی logits", nativePerf.profileLogitsSyncMs?.let { "$it ms" } ?: "—")
+            InfoLine("Sampling روی CPU", nativePerf.profileSamplingMs?.let { "$it ms" } ?: "—")
+            InfoLine("JNI/UI callback", nativePerf.profileCallbackMs?.let { "$it ms" } ?: "—")
+            InfoLine("تعداد گام‌های token", nativePerf.profileTokenSteps?.toString() ?: "—")
+            InfoLine("دسترسی‌های logits", nativePerf.profileLogitsAccesses?.toString() ?: "—")
+            InfoLine("تعداد callback", nativePerf.profileCallbackCalls?.toString() ?: "—")
+            InfoLine("زمان محاسبه‌شده", nativePerf.profileAccountedMs?.let { "$it ms" } ?: "—")
+            InfoLine("زمان باقیمانده", nativePerf.profileUnaccountedMs?.let { "$it ms" } ?: "—")
+            InfoLine("بازه Decode", nativePerf.profileDecodeWindowMs?.let { "$it ms" } ?: "—")
+        }
+
         if (hasError) {
             SectionCard("خطای ثبت‌شده", MaterialTheme.colorScheme.errorContainer) {
                 Text(diagnostic.error ?: "خطای نامشخص", color = MaterialTheme.colorScheme.onErrorContainer)
