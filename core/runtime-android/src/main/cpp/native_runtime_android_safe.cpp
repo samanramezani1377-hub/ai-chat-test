@@ -170,7 +170,9 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
         if(draft.empty()){
             fill(&last,1,pos,true);
             common_batch one(g_context); one.add(last,pos,0,true);
-            if(llama_decode(g_context,batch)!=0 || !common_speculative_process(g_spec,one)){llama_batch_free(batch);finish();return 10;}
+            // common_speculative_draft() has already seeded Draft with `last` at `pos`.
+            // Do not feed that same token back into Draft on an empty-draft round.
+            if(llama_decode(g_context,batch)!=0){llama_batch_free(batch);finish();return 10;}
             llama_token tok=common_sampler_sample(smp.get(),g_context,0);
             common_sampler_accept(smp.get(),tok,true); common_speculative_accept(g_spec,0,0);
             if(!emit_spec_token(env,listener,on_token,vocab,tok)){llama_batch_free(batch);finish();return 12;}
