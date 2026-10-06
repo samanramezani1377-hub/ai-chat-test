@@ -170,6 +170,7 @@ class LlamaCppAndroidRuntimeAdapter(
         val prompt = try {
             when (loadedArchitecture) {
                 "lfm2" -> Lfm2PromptFormatter.format(safeMessages)
+                "llama" -> MiniCpm5PromptFormatter.format(safeMessages)
                 else -> Qwen3PromptFormatter.format(safeMessages)
             }
         } catch (t: Throwable) {
@@ -189,10 +190,18 @@ class LlamaCppAndroidRuntimeAdapter(
                 NativeLlamaCpp.generate(
                 prompt = prompt,
                 maxTokens = settings.maxNewTokens.coerceAtLeast(1),
-                temperature = if (loadedArchitecture == "lfm2") 0.3f else settings.temperature.toFloat().coerceAtLeast(0f),
+                temperature = when (loadedArchitecture) {
+                    "lfm2" -> 0.3f
+                    "llama" -> 1.0f
+                    else -> settings.temperature.toFloat().coerceAtLeast(0f)
+                },
                 topK = (settings.topK ?: 40).coerceAtLeast(0),
                 topP = (settings.topP ?: 0.9).toFloat().coerceIn(0f, 1f),
-                minP = if (loadedArchitecture == "lfm2") 0.15f else (settings.minP ?: 0.05).toFloat().coerceIn(0f, 1f)
+                minP = when (loadedArchitecture) {
+                    "lfm2" -> 0.15f
+                    "llama" -> 0.0f
+                    else -> (settings.minP ?: 0.05).toFloat().coerceIn(0f, 1f)
+                }
             ).collect { chunk ->
                 currentCoroutineContext().ensureActive()
                 if (chunk.isEmpty() || stopRequested.get()) return@collect
@@ -294,6 +303,7 @@ class LlamaCppAndroidRuntimeAdapter(
     private fun formatMessages(messages: List<com.woogit.aicore.domain.ChatMessage>): String =
         when (loadedArchitecture) {
             "lfm2" -> Lfm2PromptFormatter.format(messages)
+            "llama" -> MiniCpm5PromptFormatter.format(messages)
             else -> Qwen3PromptFormatter.format(messages)
         }
 
