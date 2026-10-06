@@ -844,35 +844,18 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         " stateBytes=" + std::to_string(g_cached_prompt_state.size())).c_str());
 
     if (hybrid_memory) {
-        // A hybrid state is safe to reuse only when the entire cached prompt is
-        // still an exact prefix. Partial trimming of recurrent state is invalid.
-        if (exact_cached_prefix && !g_cached_prompt_state.empty()) {
-            llama_memory_clear(memory, true);
-            const size_t restored = g_cached_prompt_state_on_device
-                    ? llama_state_seq_set_data_ext(
-                            g_context,
-                            g_cached_prompt_state.data(),
-                            g_cached_prompt_state.size(),
-                            0,
-                            LLAMA_STATE_SEQ_FLAGS_ON_DEVICE)
-                    : llama_state_seq_set_data(
-                            g_context,
-                            g_cached_prompt_state.data(),
-                            g_cached_prompt_state.size(),
-                            0);
-            if (restored > 0) {
-                cache_reused = true;
-                reuse_prefix = g_cached_prompt_tokens.size();
-                append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_RESTORED tokens=") +
-                    std::to_string(reuse_prefix) + " bytes=" +
-                    std::to_string(restored) + " mode=" +
-                    (g_cached_prompt_state_on_device ? "on_device" : "host")).c_str());
-            } else {
-                cache_reused = false;
-                g_cached_prompt_state.clear();
-                g_cached_prompt_tokens.clear();
-                checkpoint("NATIVE_KV_CACHE_HYBRID_STATE_RESTORE_FAILED");
-            }
+        // For a live Android conversation the resident recurrent/KV state is
+        // already sitting in g_context after generation. If the next prompt
+        // starts with the exact cached token sequence, keep that state in place
+        // and append only the new suffix. Do NOT serialize/restore the hybrid
+        // state here: ON_DEVICE sequence-state restore has known failure modes
+        // and is unnecessary while the same runtime/context remains alive.
+        if (exact_cached_prefix) {
+            cache_reused = true;
+            reuse_prefix = g_cached_prompt_tokens.size();
+            append_native_trace((std::string("NATIVE_KV_CACHE_HIT mode=resident_hybrid reusedTokens=") +
+                std::to_string(reuse_prefix) + " promptTokens=" +
+                std::to_string(prompt_tokens.size())).c_str());
         } else {
             cache_reused = false;
             g_cached_prompt_state.clear();
@@ -940,6 +923,11 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         std::to_string(reuse_prefix)).c_str());
 
     int generated = 0;
+    // Only tokens that have actually been decoded into g_context belong in the
+    // resident cache. The sampled token that reaches EOS/max-tokens before the
+    // next llama_decode() is intentionally not included.
+    std::vector<llama_token> generated_decoded_tokens;
+    generated_decoded_tokens.reserve((size_t) max_predict);
     int position = (int) reuse_prefix;
     std::string pending_utf8;
     const char * stop_reason = "UNKNOWN";
@@ -988,65 +976,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         }
     }
 
-    // Snapshot the post-prefill state before any sampled token mutates the
-    // recurrent memory. This gives hybrid Qwen-family models an exact turn
-    // checkpoint that can be restored on the next request.
-    if (prefill_recorded && model_uses_recurrent_memory()) {
-        static constexpr size_t kMaxHybridStateBytes = 128u * 1024u * 1024u;
-        g_cached_prompt_state.clear();
-        g_cached_prompt_state_on_device = false;
-
-        // Prefer llama.cpp's device-resident sequence-state path. It keeps the
-        // recurrent tensors in backend buffers instead of copying them to host RAM.
-        const size_t device_state_size = llama_state_seq_get_size_ext(
-                g_context, 0, LLAMA_STATE_SEQ_FLAGS_ON_DEVICE);
-        if (device_state_size > 0 && device_state_size <= kMaxHybridStateBytes) {
-            g_cached_prompt_state.resize(device_state_size);
-            const size_t written = llama_state_seq_get_data_ext(
-                    g_context,
-                    g_cached_prompt_state.data(),
-                    g_cached_prompt_state.size(),
-                    0,
-                    LLAMA_STATE_SEQ_FLAGS_ON_DEVICE);
-            if (written > 0) {
-                g_cached_prompt_state.resize(written);
-                g_cached_prompt_state_on_device = true;
-                append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_CAPTURED tokens=") +
-                    std::to_string(prompt_tokens.size()) + " bytes=" +
-                    std::to_string(written) + " mode=on_device").c_str());
-            } else {
-                g_cached_prompt_state.clear();
-                append_native_trace("NATIVE_KV_CACHE_HYBRID_STATE_ON_DEVICE_CAPTURE_FAILED");
-            }
-        }
-
-        // Bounded host fallback for builds/backends where ON_DEVICE is unavailable.
-        if (g_cached_prompt_state.empty()) {
-            const size_t state_size = llama_state_seq_get_size(g_context, 0);
-            if (state_size > 0 && state_size <= kMaxHybridStateBytes) {
-                g_cached_prompt_state.resize(state_size);
-                const size_t written = llama_state_seq_get_data(
-                        g_context,
-                        g_cached_prompt_state.data(),
-                        g_cached_prompt_state.size(),
-                        0);
-                if (written > 0) {
-                    g_cached_prompt_state.resize(written);
-                    append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_CAPTURED tokens=") +
-                        std::to_string(prompt_tokens.size()) + " bytes=" +
-                        std::to_string(written) + " mode=host_fallback").c_str());
-                } else {
-                    g_cached_prompt_state.clear();
-                    append_native_trace("NATIVE_KV_CACHE_HYBRID_STATE_CAPTURE_FAILED");
-                }
-            } else {
-                g_cached_prompt_state.clear();
-                append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_STATE_SKIPPED bytes=") +
-                    std::to_string(state_size) + " limit=" +
-                    std::to_string(kMaxHybridStateBytes)).c_str());
-            }
-        }
-    }
+    // Keep the live recurrent/KV state resident in g_context. We intentionally
+    // avoid sequence-state serialization here; the next turn can reuse this
+    // resident state directly when its token prefix matches the cached tokens.
 
     reset_decode_profile();
     if (result == 0) {
@@ -1118,6 +1050,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                 stop_reason = "DECODE_ERROR";
                 break;
             }
+            generated_decoded_tokens.push_back(token);
             ++position;
         }
     }
@@ -1151,11 +1084,22 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     const auto profile_prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(prefill_finished_at - generation_started_at).count();
     append_decode_profile_trace(generation_ms, profile_prefill_ms);
     if (prefill_recorded && (result == 0 || result == 9)) {
+        // Publish the complete resident sequence, including the assistant
+        // tokens that were actually decoded. On the next turn, the user's new
+        // prompt contains that assistant output as part of the conversation
+        // prefix, so those tokens can be reused without another prefill pass.
         g_cached_prompt_tokens = prompt_tokens;
-        if (!model_uses_recurrent_memory()) {
-            g_cached_prompt_state.clear();
-        }
-        append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISHED tokens=") + std::to_string(g_cached_prompt_tokens.size())).c_str());
+        g_cached_prompt_tokens.insert(
+                g_cached_prompt_tokens.end(),
+                generated_decoded_tokens.begin(),
+                generated_decoded_tokens.end());
+        g_cached_prompt_state.clear();
+        g_cached_prompt_state_on_device = false;
+        append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISHED tokens=") +
+            std::to_string(g_cached_prompt_tokens.size()) +
+            " promptTokens=" + std::to_string(prompt_tokens.size()) +
+            " generatedDecodedTokens=" + std::to_string(generated_decoded_tokens.size()) +
+            " mode=" + (hybrid_memory ? "resident_hybrid" : "resident_kv")).c_str());
     } else if (prefill_recorded) {
         g_cached_prompt_tokens.clear();
         g_cached_prompt_state.clear();
