@@ -52,11 +52,11 @@ static int64_t elapsed_ms(const std::chrono::steady_clock::time_point &a,
                           const std::chrono::steady_clock::time_point &b) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count();
 }
-static void append_decode_profile_trace() {
+static void append_decode_profile_trace(int64_t generation_ms, int64_t prefill_ms) {
     const int64_t accounted = g_decode_profile.decode_ms + g_decode_profile.logits_sync_ms +
         g_decode_profile.sampling_ms + g_decode_profile.callback_ms;
-    const int64_t total = g_decode_profile.decode_ms + g_decode_profile.logits_sync_ms +
-        g_decode_profile.sampling_ms + g_decode_profile.callback_ms;
+    const int64_t decode_window = std::max<int64_t>(0, generation_ms - prefill_ms);
+    const int64_t unaccounted = std::max<int64_t>(0, decode_window - accounted);
     append_native_trace((std::string("NATIVE_PERF_PROFILE decodeMs=") +
         std::to_string(g_decode_profile.decode_ms) + " logitsSyncMs=" +
         std::to_string(g_decode_profile.logits_sync_ms) + " samplingMs=" +
@@ -865,7 +865,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     const auto generation_ms = std::chrono::duration_cast<std::chrono::milliseconds>(generation_finished_at - generation_started_at).count();
     const auto decode_ms = std::chrono::duration_cast<std::chrono::milliseconds>(generation_finished_at - prefill_finished_at).count();
     const double decode_tokens_per_sec = generated > 0 && decode_ms > 0 ? (1000.0 * static_cast<double>(generated) / static_cast<double>(decode_ms)) : 0.0;
-    append_decode_profile_trace();
+    const auto profile_prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(prefill_finished_at - generation_started_at).count();
+    append_decode_profile_trace(generation_ms, profile_prefill_ms);
     if (prefill_recorded && (result == 0 || result == 9)) {
         g_cached_prompt_tokens = prompt_tokens;
         if (!model_uses_recurrent_memory()) {
