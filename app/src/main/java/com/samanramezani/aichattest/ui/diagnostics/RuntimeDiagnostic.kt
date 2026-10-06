@@ -22,6 +22,16 @@ internal data class NativePerformance(
     val speculativeAcceptanceRate: Double? = null,
     val speculativeSteps: Int? = null,
     val speculativeMeanAcceptedPerStep: Double? = null,
+    val profileDecodeMs: Long? = null,
+    val profileLogitsSyncMs: Long? = null,
+    val profileSamplingMs: Long? = null,
+    val profileCallbackMs: Long? = null,
+    val profileTokenSteps: Int? = null,
+    val profileLogitsAccesses: Int? = null,
+    val profileCallbackCalls: Int? = null,
+    val profileAccountedMs: Long? = null,
+    val profileUnaccountedMs: Long? = null,
+    val profileDecodeWindowMs: Long? = null,
 ) {
     val decodeMs: Long?
         get() = if (generationMs != null && prefillMs != null) (generationMs - prefillMs).coerceAtLeast(0L) else null
@@ -54,11 +64,27 @@ internal data class RuntimeDiagnostic(
             speculativeAcceptanceRate = nativeValue("acceptanceRate")?.toDoubleOrNull(),
             speculativeSteps = nativeValue("steps")?.toIntOrNull(),
             speculativeMeanAcceptedPerStep = nativeValue("meanAcceptedPerStep")?.toDoubleOrNull(),
+            profileDecodeMs = nativeProfileValue("decodeMs")?.toLongOrNull(),
+            profileLogitsSyncMs = nativeProfileValue("logitsSyncMs")?.toLongOrNull(),
+            profileSamplingMs = nativeProfileValue("samplingMs")?.toLongOrNull(),
+            profileCallbackMs = nativeProfileValue("callbackMs")?.toLongOrNull(),
+            profileTokenSteps = nativeProfileValue("tokenSteps")?.toIntOrNull(),
+            profileLogitsAccesses = nativeProfileValue("logitsAccesses")?.toIntOrNull(),
+            profileCallbackCalls = nativeProfileValue("callbackCalls")?.toIntOrNull(),
+            profileAccountedMs = nativeProfileValue("accountedMs")?.toLongOrNull(),
+            profileUnaccountedMs = nativeProfileValue("unaccountedMs")?.toLongOrNull(),
+            profileDecodeWindowMs = nativeProfileValue("decodeWindowMs")?.toLongOrNull(),
         )
 
     private fun nativeValue(key: String): String? {
         val text = nativeDiagnostics ?: return null
-        val line = text.lineSequence().toList().asReversed().firstOrNull { (it.contains("NATIVE_PREFILL_COMPLETED") || it.contains("NATIVE_GENERATE_COMPLETED")) && it.contains("$key=") } ?: return null
+        val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("$key=") } ?: return null
+        return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
+    }
+
+    private fun nativeProfileValue(key: String): String? {
+        val text = nativeDiagnostics ?: return null
+        val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("NATIVE_PERF_PROFILE") && it.contains("$key=") } ?: return null
         return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
     }
 }
@@ -92,7 +118,18 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Decode Generated Tokens: ${perf.generatedTokens ?: "N/A"}")
     appendLine("Decode Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: "N/A"}")
     appendLine()
-    appendLine("===== SPECULATIVE DECODING =====")
+    appendLine("===== DECODE BOTTLENECK PROFILE =====")
+    appendLine("Measured Decode Calls: ${perf.profileDecodeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Logits Access / Sync: ${perf.profileLogitsSyncMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("CPU Sampling: ${perf.profileSamplingMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("JNI/UI Callback: ${perf.profileCallbackMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Token Steps: ${perf.profileTokenSteps ?: "N/A"}")
+    appendLine("Logits Accesses: ${perf.profileLogitsAccesses ?: "N/A"}")
+    appendLine("Callback Calls: ${perf.profileCallbackCalls ?: "N/A"}")
+    appendLine("Accounted Decode Time: ${perf.profileAccountedMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Unaccounted Decode Time: ${perf.profileUnaccountedMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Decode Window: ${perf.profileDecodeWindowMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine()    appendLine("===== SPECULATIVE DECODING =====")
     appendLine("Draft Tokens: ${perf.speculativeDraftTokens ?: "N/A"}")
     appendLine("Accepted Tokens: ${perf.speculativeAcceptedTokens ?: "N/A"}")
     appendLine("Acceptance Rate: ${perf.speculativeAcceptanceRate?.let { "%.1f%%".format(it) } ?: "N/A"}")
