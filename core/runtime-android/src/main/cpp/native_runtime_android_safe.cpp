@@ -155,7 +155,15 @@ static bool emit_spec_token(JNIEnv *env, jobject listener, jmethodID on_token, c
 
 static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, const std::vector<llama_token>& inp, int max_tokens, float temperature, int top_k, float top_p, float min_p) {
     int draft_tokens = 0, accepted_tokens = 0, steps = 0;
-    auto finish = [&]() { append_speculative_stats_trace(draft_tokens, accepted_tokens, steps); };
+    const auto speculative_started = std::chrono::steady_clock::now();
+    auto finish = [&]() {
+        append_speculative_stats_trace(draft_tokens, accepted_tokens, steps);
+        const auto finished = std::chrono::steady_clock::now();
+        const auto ms = elapsed_ms(speculative_started, finished);
+        const double tps = ms > 0 ? (1000.0 * static_cast<double>(accepted_tokens) / static_cast<double>(ms)) : 0.0;
+        append_native_trace((std::string("SPECULATIVE_PERFORMANCE generationMs=") + std::to_string(ms) +
+            " tokensPerSec=" + std::to_string(tps)).c_str());
+    };
     llama_context * dctx = g_spec_init ? g_spec_init->context() : nullptr;
     if (!g_spec || !dctx || inp.empty() || !on_token) { finish(); return -1; }
 
