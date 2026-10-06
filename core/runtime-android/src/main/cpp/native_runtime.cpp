@@ -395,7 +395,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     const bool context_ready = init_generation_context();
     checkpoint(context_ready ? "CONTEXT_INIT_RETURNED_SUCCESS" : "CONTEXT_INIT_RETURNED_FAILED");
     if (!context_ready) { checkpoint("CONTEXT_INIT_FAILED"); free_all(); return 2; }
+    append_native_trace("TARGET_RUNTIME_READY_BEFORE_SPECULATIVE");
     if (g_spec_requested) {
+        append_native_trace("SPECULATIVE_ATTACH_AFTER_TARGET_READY");
         const bool spec_ready = init_speculative_runtime();
         checkpoint(spec_ready ? "SPECULATIVE_INIT_RETURNED_SUCCESS" : "SPECULATIVE_INIT_RETURNED_FAILED");
     }
