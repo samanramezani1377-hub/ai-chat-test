@@ -6,6 +6,7 @@ import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeTraceEvent
+import com.woogit.aicore.runtime.OpenClGpuProfile
 
 private const val RECENT_RUNTIME_EVENTS = 20
 private const val RECENT_ACTION_EVENTS = 10
@@ -53,6 +54,7 @@ internal data class RuntimeDiagnostic(
     val actionTrace: List<ActionTraceEvent> = emptyList(),
     val runtimeTrace: List<RuntimeTraceEvent> = emptyList(),
     val nativeDiagnostics: String? = null,
+    val openClProfile: OpenClGpuProfile? = null,
 ) {
     val nativePerformance: NativePerformance
         get() = NativePerformance(
@@ -133,6 +135,10 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Decode Generated Tokens: ${perf.generatedTokens ?: "N/A"}")
     appendLine("Decode Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: "N/A"}")
     appendLine()
+    appendLine("===== GPU / OPENCL KERNEL PROFILE =====")
+    openClProfile?.reportLines()?.forEach(::appendLine)
+        ?: appendLine("OpenCL GPU profile: N/A")
+    appendLine()
     appendLine("===== DECODE BOTTLENECK PROFILE =====")
     appendLine("Measured Decode Calls: ${perf.profileDecodeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Logits Access / Sync: ${perf.profileLogitsSyncMs?.let { "$it ms" } ?: "N/A"}")
@@ -144,6 +150,18 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Accounted Decode Time: ${perf.profileAccountedMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Unaccounted Decode Time: ${perf.profileUnaccountedMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Decode Window: ${perf.profileDecodeWindowMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine()
+    appendLine("===== GPU / OPENCL KERNEL PROFILE =====")
+    val gpu = openClProfile
+    if (gpu == null) {
+        appendLine("OpenCL GPU profile: N/A")
+    } else {
+        gpu.reportLines().forEach(::appendLine)
+        appendLine("Top kernels:")
+        gpu.topKernels.forEach { k ->
+            appendLine("  ${k.kernelName}: ${String.format(java.util.Locale.US, "%.3f ms", k.executionMs)}")
+        }
+    }
     appendLine()
     appendLine("===== SPECULATIVE DECODING =====")
     appendLine("Draft Tokens: ${perf.speculativeDraftTokens ?: "N/A"}")
