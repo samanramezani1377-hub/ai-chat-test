@@ -66,6 +66,10 @@ set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
 
+if (AI_CHAT_OPENCL_PROFILING)
+    include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_opencl_profiling.cmake")
+endif()
+
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp)
 
 target_include_directories(ai_chat_runtime PRIVATE
