@@ -4,6 +4,7 @@ import com.woogit.aicore.domain.ModelError
 import com.woogit.aicore.domain.ModelFormat
 import com.woogit.aicore.domain.ModelInspection
 import com.woogit.aicore.domain.ModelResult
+import com.woogit.aicore.domain.ModelValidator
 import com.woogit.aicore.domain.Quantization
 import com.woogit.aicore.domain.ValidationStatus
 
