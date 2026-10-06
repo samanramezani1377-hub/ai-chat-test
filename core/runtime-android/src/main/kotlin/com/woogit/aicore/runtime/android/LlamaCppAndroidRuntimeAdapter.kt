@@ -42,6 +42,7 @@ class LlamaCppAndroidRuntimeAdapter(
     @Volatile private var latestGeneration: GenerationResult? = null
     @Volatile private var latestLoadTimeMs: Long? = null
     @Volatile private var selectedDraftPath: String? = null
+    @Volatile private var loadedDraftPath: String? = null
 
     init { require(gpuLayers == GPU_LAYERS_MAX) { "Unsupported diagnostic GPU layer mode: $gpuLayers" } }
 
@@ -71,7 +72,8 @@ class LlamaCppAndroidRuntimeAdapter(
     suspend fun loadResult(model: ModelDescriptor): ModelResult<Unit> = nativeOperationMutex.withLock {
         currentCoroutineContext().ensureActive()
         val requestedPath = model.path.toFile().absolutePath
-        if (loadedContextLength != null && loadedModelPath == requestedPath) {
+        val requestedDraftPath = selectedDraftPath?.let(::File)?.takeIf { it.isFile && it.canRead() }?.absolutePath
+        if (loadedContextLength != null && loadedModelPath == requestedPath && loadedDraftPath == requestedDraftPath) {
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_SKIPPED_ALREADY_LOADED file=${model.path.toFile().name} context=$loadedContextLength gpuLayers=$selectedGpuLayers")
             return ModelResult.Success(Unit)
         }
@@ -83,6 +85,7 @@ class LlamaCppAndroidRuntimeAdapter(
         loadedContextLength = null
         loadedArchitecture = "unknown"
         loadedModelPath = null
+        loadedDraftPath = null
         val file = model.path.toFile()
         if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
         val startedAt = System.nanoTime()
@@ -116,6 +119,7 @@ class LlamaCppAndroidRuntimeAdapter(
             loadedContextLength = NativeLlamaCpp.contextLength().takeIf { it > 0 } ?: requested
             loadedArchitecture = model.metadata.architecture?.lowercase() ?: "unknown"
             loadedModelPath = file.absolutePath
+            loadedDraftPath = draftFile?.absolutePath
             latestGeneration = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_RUNTIME_READY backend=$selectedBackend gpuPercent=$requestedGpuPercent gpuLayers=$selectedGpuLayers context=$loadedContextLength")
@@ -129,6 +133,7 @@ class LlamaCppAndroidRuntimeAdapter(
             loadedContextLength = null
             loadedArchitecture = "unknown"
             loadedModelPath = null
+            loadedDraftPath = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
             RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_FAILED, "MODEL_LOAD_DIAGNOSTIC_FAILED ${t.message}")
             ModelResult.Failure(RuntimeErrorMapper.loadFailure(t, file.absolutePath))
@@ -148,6 +153,7 @@ class LlamaCppAndroidRuntimeAdapter(
         loadedContextLength = null
         loadedArchitecture = "unknown"
         loadedModelPath = null
+        loadedDraftPath = null
     }
 
     override suspend fun generate(request: GenerationRequest, onToken: suspend (String) -> Unit): GenerationResult = when (val result = generateResult(request, onToken)) {
