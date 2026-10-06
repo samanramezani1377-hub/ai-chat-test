@@ -134,7 +134,6 @@ static bool init_speculative_runtime() {
         // common_speculative_init() later consumes p.speculative. Keeping these
         // objects identical prevents the draft context and speculative object
         // from disagreeing about model/cache/context configuration.
-        draft_params.model.path = g_spec_draft_path;
         draft_params.n_ctx = (int) llama_n_ctx(g_context);
         draft_params.n_batch = 128;
         draft_params.n_ubatch = 128;
@@ -144,12 +143,10 @@ static bool init_speculative_runtime() {
         draft_params.speculative.draft.ctx_tgt = g_context;
         draft_params.speculative.draft.n_max = 3;
         draft_params.speculative.draft.n_gpu_layers = 99;
-        draft_params.speculative.draft.mparams.path = g_spec_draft_path;
 
         p.speculative.draft.ctx_tgt = g_context;
         p.speculative.draft.n_max = 3;
         p.speculative.draft.n_gpu_layers = 99;
-        p.speculative.draft.mparams.path = g_spec_draft_path;
 
         if (g_spec_mtp) {
             p.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_MTP };
@@ -166,6 +163,8 @@ static bool init_speculative_runtime() {
         } else {
             p.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE };
             draft_params.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE };
+            draft_params.model.path = g_spec_draft_path;
+            p.speculative.draft.mparams.path = g_spec_draft_path;
             // draft_params.model.path and mparams.path are intentionally both
             // set above; keep the speculative object synchronized as well.
             append_native_trace((std::string("SPECULATIVE_DRAFT_PARAM_PATH=") + g_spec_draft_path).c_str());
