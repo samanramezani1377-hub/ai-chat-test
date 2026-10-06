@@ -149,8 +149,11 @@ static bool init_speculative_runtime() {
             p.speculative.draft.ctx_dft = g_spec_init->context();
         } else {
             p.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE };
-            p.speculative.draft.mparams.path = g_spec_draft_path;
-            g_spec_init = common_speculative_init_from_params(p, g_model, g_context);
+            draft_params.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE };
+            draft_params.speculative.draft.mparams.path = g_spec_draft_path;
+            draft_params.speculative.draft.n_gpu_layers = 99;
+            append_native_trace((std::string("SPECULATIVE_DRAFT_PARAM_PATH=") + g_spec_draft_path).c_str());
+            g_spec_init = common_speculative_init_from_params(draft_params, g_model, g_context);
             if (!g_spec_init || !g_spec_init->context() || !g_spec_init->model()) {
                 g_spec_init.reset();
                 return false;
@@ -213,152 +216,313 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
         append_native_trace((std::string("SPECULATIVE_PERFORMANCE generationMs=") + std::to_string(ms) +
             " tokensPerSec=" + std::to_string(tps)).c_str());
     };
+
     set_spec_phase("GENERATE_ENTER");
     append_native_trace((std::string("SPECULATIVE_GENERATE_ENTER promptTokens=") +
         std::to_string(inp.size()) + " maxTokens=" + std::to_string(max_tokens)).c_str());
+
     llama_context * dctx = g_spec_init ? g_spec_init->context() : nullptr;
-    if (!g_spec || !dctx || inp.empty() || !on_token) {
+    if (!g_spec || !dctx || inp.size() < 2 || !on_token) {
         set_spec_phase("GENERATE_INVALID_STATE");
-        finish(); return -1;
+        finish();
+        return -1;
     }
 
     llama_memory_clear(llama_get_memory(g_context), true);
     llama_memory_clear(llama_get_memory(dctx), true);
+
     common_params_sampling sp = spec_sampling(temperature, top_k, top_p, min_p);
     common_sampler_ptr smp(common_sampler_init(g_model, sp));
     const llama_vocab * vocab = llama_model_get_vocab(g_model);
-    if (!smp || !vocab) { finish(); return -1; }
+    if (!smp || !vocab) {
+        finish();
+        return -1;
+    }
 
     const int n_prompt = (int) inp.size();
     const int cap = std::max(1, (int) llama_n_batch(g_context));
-    llama_batch batch = llama_batch_init(cap, 0, 1);
-    if (!batch.token || !batch.pos || !batch.n_seq_id || !batch.seq_id || !batch.logits) {
-        llama_batch_free(batch); finish(); return -1;
+    if (n_prompt - 1 > cap) {
+        append_native_trace((std::string("SPECULATIVE_PROMPT_BATCH_LIMIT promptMinusLast=") +
+            std::to_string(n_prompt - 1) + " nBatch=" + std::to_string(cap)).c_str());
+        finish();
+        return 10;
     }
-    auto fill = [&](const llama_token *t, int n, int pos, bool last) {
-        batch.n_tokens=n;
-        for(int i=0;i<n;++i){ batch.token[i]=t[i]; batch.pos[i]=(llama_pos)(pos+i); batch.n_seq_id[i]=1; batch.seq_id[i][0]=0; batch.logits[i]=(last&&i==n-1)?1:0; }
+
+    llama_batch batch = llama_batch_init(cap + 1, 0, 1);
+    if (!batch.token || !batch.pos || !batch.n_seq_id || !batch.seq_id || !batch.logits) {
+        llama_batch_free(batch);
+        finish();
+        return -1;
+    }
+
+    auto fill = [&](const llama_tokens & tokens, int pos, bool last_logits) {
+        batch.n_tokens = (int) tokens.size();
+        for (int i = 0; i < batch.n_tokens; ++i) {
+            batch.token[i] = tokens[(size_t)i];
+            batch.pos[i] = (llama_pos)(pos + i);
+            batch.n_seq_id[i] = 1;
+            batch.seq_id[i][0] = 0;
+            batch.logits[i] = (last_logits && i == batch.n_tokens - 1) ? 1 : 0;
+        }
     };
 
-    llama_tokens hist(inp.begin(), inp.end()-1);
+    const llama_seq_id seq_id = 0;
+    llama_tokens prompt_tgt(inp.begin(), inp.end() - 1);
+    prompt_tgt.reserve(llama_n_ctx(g_context));
+    llama_token id_last = inp.back();
+    int n_past = (int) prompt_tgt.size();
+    int n_predict = 0;
 
-    // Canonical llama.cpp speculative lifecycle:
-    // 1) evaluate the Target prompt and feed that prompt batch into the
-    //    speculative implementation;
-    // 2) only then call common_speculative_begin().
-    //
-    // Calling begin() before Target prefill is unsafe for hybrid/recurrent
-    // models (Qwen3.5/Qwen3.8): the speculative implementation must observe
-    // the already-prefilled Target state before generation starts.
+    // This is the exact lifecycle used by the pinned llama.cpp speculative example:
+    // Target prefill -> common_speculative_process(prompt) -> common_speculative_begin().
     set_spec_phase("SPECULATIVE_PREFILL_BEGIN");
     append_native_trace("SPECULATIVE_PREFILL_BEGIN");
 
-    for (int off=0; off<n_prompt-1; off+=cap) {
-        int n=std::min(cap,n_prompt-1-off);
-        common_batch cb(g_context);
-        for(int i=0;i<n;++i) cb.add(inp[(size_t)off+i],(llama_pos)(off+i),0,false);
-        fill(inp.data()+off,n,off,false);
-        if(llama_decode(g_context,batch)!=0){
-            append_native_trace("SPECULATIVE_TARGET_PREFILL_FAILED");
-            llama_batch_free(batch);finish();return 10;
+    {
+        common_batch batch_prompt(g_context);
+        for (size_t i = 0; i < prompt_tgt.size(); ++i) {
+            batch_prompt.add(prompt_tgt[i], (llama_pos)i, seq_id, false);
         }
-        if(!common_speculative_process(g_spec,cb)){
+
+        fill(prompt_tgt, 0, false);
+        if (llama_decode(g_context, batch) != 0) {
+            append_native_trace("SPECULATIVE_TARGET_PREFILL_FAILED");
+            llama_batch_free(batch);
+            finish();
+            return 10;
+        }
+
+        if (!common_speculative_process(g_spec, batch_prompt)) {
             append_native_trace("SPECULATIVE_PREFILL_PROCESS_FAILED");
-            llama_batch_free(batch);finish();return 10;
+            llama_batch_free(batch);
+            finish();
+            return 10;
         }
     }
 
     set_spec_phase("GENERATE_BEGIN_SPECULATIVE");
-    common_speculative_begin(g_spec, 0, hist);
+    common_speculative_begin(g_spec, seq_id, prompt_tgt);
     append_native_trace("SPEC_BEGIN_DONE");
 
-    llama_token last=inp.back();
-    int pos=(int)hist.size(), generated=0;
-    while(generated<max_tokens && !g_stop.load(std::memory_order_relaxed)){
-        auto &dp=common_speculative_get_draft_params(g_spec,0);
-        dp={}; dp.drafting=true;
-        const int adaptiveMax = g_spec_accept_ema > 0.82 ? 5 : (g_spec_accept_ema > 0.62 ? 3 : 2);
-        dp.n_max=std::min(adaptiveMax,max_tokens-generated-1); dp.pos0=pos; dp.id_last=last; dp.prompt=&hist;
-        llama_tokens draft; dp.result=&draft;
-        set_spec_phase("DRAFT_GENERATE_BEGIN");
-        append_native_trace((std::string("SPEC_DRAFT_GENERATE_BEGIN pos=") + std::to_string(pos) +
-            " nMax=" + std::to_string(dp.n_max)).c_str());
-        common_speculative_draft(g_spec);
-        append_native_trace((std::string("SPEC_DRAFT_GENERATE_END tokens=") + std::to_string(draft.size())).c_str());
-        draft_tokens+=(int)draft.size();
+    // Qwen3.5/Qwen3.8 are hybrid/recurrent. Their memory backend may support
+    // only full sequence removal, so use llama.cpp's checkpoint mechanism rather
+    // than assuming llama_memory_seq_rm() can roll back arbitrary positions.
+    const common_context_seq_rm_type tgt_rm = common_context_can_seq_rm(g_context);
+    const common_context_seq_rm_type dft_rm = common_context_can_seq_rm(dctx);
+    const bool use_ckpt_tgt = tgt_rm == COMMON_CONTEXT_SEQ_RM_TYPE_FULL;
+    const bool use_ckpt_dft = dft_rm == COMMON_CONTEXT_SEQ_RM_TYPE_FULL;
+    append_native_trace((std::string("SPEC_CONTEXT_ROLLBACK target=") + std::to_string((int)tgt_rm) +
+        " draft=" + std::to_string((int)dft_rm) +
+        " targetCheckpoint=" + (use_ckpt_tgt ? "1" : "0") +
+        " draftCheckpoint=" + (use_ckpt_dft ? "1" : "0")).c_str());
 
-        if(draft.empty()){
-            fill(&last,1,pos,true);
-            common_batch one(g_context); one.add(last,pos,0,true);
-            // common_speculative_draft() has already seeded Draft with `last` at `pos`.
-            // Do not feed that same token back into Draft on an empty-draft round.
-            if(llama_decode(g_context,batch)!=0){llama_batch_free(batch);finish();return 10;}
-            llama_token tok=common_sampler_sample(smp.get(),g_context,0);
-            common_sampler_accept(smp.get(),tok,true); common_speculative_accept(g_spec,0,0);
-            if(!emit_spec_token(env,listener,on_token,vocab,tok)){llama_batch_free(batch);finish();return 12;}
-            ++generated; hist.push_back(last); last=tok; ++pos; continue;
+    common_batch batch_tgt(g_context);
+    llama_tokens draft;
+    common_prompt_checkpoint ckpt;
+
+    while (n_predict < max_tokens && !g_stop.load(std::memory_order_relaxed)) {
+        if (draft.empty()) {
+            ckpt.update_pos(
+                prompt_tgt.size(),
+                llama_memory_seq_pos_min(llama_get_memory(g_context), seq_id),
+                llama_memory_seq_pos_max(llama_get_memory(g_context), seq_id)
+            );
+
+            if (use_ckpt_dft) {
+                ckpt.update_dft(dctx, seq_id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+            }
+
+            int n_draft_max = (int) llama_n_ctx(g_context) - n_past - 2;
+            n_draft_max = std::min(n_draft_max, max_tokens - n_predict - 1);
+            n_draft_max = std::max(n_draft_max, 0);
+
+            common_speculative_get_draft_params(g_spec, seq_id) = {
+                true,
+                n_draft_max,
+                n_past,
+                id_last,
+                &prompt_tgt,
+                &draft,
+                nullptr,
+                temperature,
+                LLAMA_DEFAULT_SEED,
+            };
+
+            set_spec_phase("DRAFT_GENERATE_BEGIN");
+            append_native_trace((std::string("SPEC_DRAFT_GENERATE_BEGIN pos=") +
+                std::to_string(n_past) + " nMax=" + std::to_string(n_draft_max)).c_str());
+
+            common_speculative_draft(g_spec);
+
+            append_native_trace((std::string("SPEC_DRAFT_GENERATE_END tokens=") +
+                std::to_string(draft.size())).c_str());
+            draft_tokens += (int) draft.size();
+
+            if (!draft.empty() && use_ckpt_tgt) {
+                ckpt.update_tgt(g_context, seq_id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+            }
+
+            // The draft model has already advanced through its proposal. Restore
+            // the checkpoint before target verification, exactly as upstream does.
+            if (use_ckpt_dft) {
+                ckpt.load_dft(dctx, seq_id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+            }
+            if (dctx) {
+                const llama_pos rm_from = ckpt.pos_max + 1;
+                if (!llama_memory_seq_rm(llama_get_memory(dctx), seq_id, rm_from, -1)) {
+                    append_native_trace((std::string("SPEC_DRAFT_ROLLBACK_FAILED from=") +
+                        std::to_string(rm_from)).c_str());
+                    llama_batch_free(batch);
+                    finish();
+                    return 20;
+                }
+            }
+        } else if (use_ckpt_tgt && ckpt.empty()) {
+            append_native_trace("SPEC_CHECKPOINT_MISSING_FOR_PARTIAL_DRAFT");
+            llama_batch_free(batch);
+            finish();
+            return 20;
         }
 
-        std::vector<llama_token> verify; verify.reserve(draft.size()+1);
-        verify.push_back(last); verify.insert(verify.end(),draft.begin(),draft.end());
-        fill(verify.data(),(int)verify.size(),pos,true);
-        common_batch cb(g_context);
-        for(size_t i=0;i<verify.size();++i) cb.add(verify[i],(llama_pos)(pos+i),0,i+1==verify.size());
-        append_native_trace((std::string("SPEC_VERIFY targetStart=") + std::to_string(pos) +
-            " verifyCount=" + std::to_string(verify.size()) +
-            " draftCount=" + std::to_string(draft.size()) +
-            " note=target_only").c_str());
-        if(llama_decode(g_context,batch)!=0){llama_batch_free(batch);finish();return 10;}
+        // Verify [id_last, draft...] on the target.
+        batch_tgt.clear();
+        batch_tgt.add(id_last, n_past++, seq_id, true);
+        for (size_t i = 0; i < draft.size(); ++i) {
+            batch_tgt.add(draft[i], n_past + (int)i, seq_id, true);
+        }
 
-        std::vector<int> idx; for(size_t i=0;i<=draft.size();++i) idx.push_back((int)i);
+        const int verify_count = batch_tgt.size();
+        append_native_trace((std::string("SPEC_VERIFY_BEGIN targetStart=") +
+            std::to_string(n_past - 1) + " verifyCount=" + std::to_string(verify_count) +
+            " draftCount=" + std::to_string(draft.size())).c_str());
+
+        if (llama_process(g_context, LLAMA_PROCESS_TYPE_DECODE, batch_tgt.get()) != 0) {
+            append_native_trace("SPEC_VERIFY_TARGET_DECODE_FAILED");
+            llama_batch_free(batch);
+            finish();
+            return 10;
+        }
+
+        // The speculative implementation must see the exact target verification
+        // batch before accept(). This drives the draft/MTP implementation state.
+        if (!common_speculative_process(g_spec, batch_tgt)) {
+            append_native_trace("SPEC_VERIFY_SPECULATIVE_PROCESS_FAILED");
+            llama_batch_free(batch);
+            finish();
+            return 10;
+        }
+        append_native_trace("SPEC_VERIFY_SPECULATIVE_PROCESS_DONE");
+
+        common_sampler_ptr smp_save;
+        if (use_ckpt_tgt) {
+            smp_save.reset(common_sampler_clone(smp.get()));
+        }
+
+        const size_t n_draft = draft.size();
         set_spec_phase("VERIFY_SAMPLE_ACCEPT");
-        auto ids=common_sampler_sample_and_accept_n(smp.get(),g_context,idx,draft);
-        append_native_trace((std::string("SPEC_SAMPLE_ACCEPT_END ids=") + std::to_string(ids.size())).c_str());
-        if(ids.empty()){llama_batch_free(batch);finish();return 10;}
-        const int acc=std::max(0,(int)ids.size()-1); accepted_tokens+=acc; ++steps;
-        if (!draft.empty()) {
-            const double roundRate = static_cast<double>(acc) / static_cast<double>(draft.size());
-            g_spec_accept_ema = 0.75 * g_spec_accept_ema + 0.25 * roundRate;
+        auto ids = common_sampler_sample_and_accept_n(smp.get(), g_context, draft);
+        append_native_trace((std::string("SPEC_SAMPLE_ACCEPT_END ids=") +
+            std::to_string(ids.size())).c_str());
+
+        if (ids.empty()) {
+            append_native_trace("SPEC_SAMPLE_ACCEPT_EMPTY");
+            llama_batch_free(batch);
+            finish();
+            return 10;
+        }
+
+        const int accepted = std::max(0, (int)ids.size() - 1);
+        accepted_tokens += accepted;
+        ++steps;
+
+        if (n_draft > 0) {
+            const double round_rate = static_cast<double>(accepted) / static_cast<double>(n_draft);
+            g_spec_accept_ema = 0.75 * g_spec_accept_ema + 0.25 * round_rate;
             append_native_trace((std::string("SPECULATIVE_ADAPT acceptance=") +
-                std::to_string(roundRate) + " ema=" + std::to_string(g_spec_accept_ema) +
-                " nextMax=" + std::to_string(g_spec_accept_ema > 0.82 ? 5 : (g_spec_accept_ema > 0.62 ? 3 : 2))).c_str());
+                std::to_string(round_rate) + " ema=" + std::to_string(g_spec_accept_ema)).c_str());
         }
+
+        // Hybrid/recurrent target rollback must restore the exact state before
+        // the speculative proposal when the target accepted only part of it.
+        if (use_ckpt_tgt && accepted < (int)n_draft) {
+            append_native_trace((std::string("SPEC_PARTIAL_ACCEPTANCE accepted=") +
+                std::to_string(accepted) + " drafted=" + std::to_string(n_draft) +
+                " action=RESTORE_CHECKPOINT").c_str());
+
+            draft = std::move(ids);
+            ckpt.load_tgt(g_context, seq_id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+            if (!llama_memory_seq_rm(llama_get_memory(g_context), seq_id, ckpt.pos_max + 1, -1)) {
+                append_native_trace("SPEC_TARGET_CHECKPOINT_ROLLBACK_FAILED");
+                llama_batch_free(batch);
+                finish();
+                return 20;
+            }
+
+            if (dctx) {
+                ckpt.load_dft(dctx, seq_id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                if (!llama_memory_seq_rm(llama_get_memory(dctx), seq_id, ckpt.pos_max + 1, -1)) {
+                    append_native_trace("SPEC_DRAFT_CHECKPOINT_ROLLBACK_FAILED");
+                    llama_batch_free(batch);
+                    finish();
+                    return 20;
+                }
+            }
+
+            prompt_tgt.resize(ckpt.n_tokens);
+            smp = std::move(smp_save);
+            n_past = (int) prompt_tgt.size();
+            continue;
+        }
+
         set_spec_phase("ACCEPT_DRAFT");
-        common_speculative_accept(g_spec,0,(uint16_t)acc);
-        append_native_trace((std::string("SPEC_ACCEPT_DONE accepted=") + std::to_string(acc)).c_str());
+        common_speculative_accept(g_spec, seq_id, (uint16_t)accepted);
+        append_native_trace((std::string("SPEC_ACCEPT_DONE accepted=") + std::to_string(accepted)).c_str());
 
-        // draft-simple::draft() has already advanced the Draft context through
-        // the proposed tokens. Verify must never feed that same batch back into
-        // Draft. Keep only the accepted prefix for the next speculative round.
-        set_spec_phase("DRAFT_ROLLBACK");
-        const llama_pos draft_rollback_from = pos + (llama_pos) acc + 1;
-        const llama_pos draft_decoded_end = pos + (llama_pos) draft.size() + 1;
-        if(draft_rollback_from < draft_decoded_end &&
-           !llama_memory_seq_rm(llama_get_memory(dctx),0,draft_rollback_from,-1)){
-            append_native_trace((std::string("SPEC_DRAFT_ROLLBACK_FAILED from=") +
-                std::to_string(draft_rollback_from) + " end=" +
-                std::to_string(draft_decoded_end) + " accepted=" +
-                std::to_string(acc)).c_str());
-            llama_batch_free(batch);finish();return 20;
+        n_past += accepted;
+        n_predict += (int)ids.size();
+
+        for (size_t i = 0; i < ids.size(); ++i) {
+            prompt_tgt.push_back(id_last);
+            id_last = ids[i];
+
+            if (llama_vocab_is_eog(vocab, id_last)) {
+                llama_batch_free(batch);
+                finish();
+                return 0;
+            }
+
+            if (!emit_spec_token(env, listener, on_token, vocab, id_last)) {
+                llama_batch_free(batch);
+                finish();
+                return 12;
+            }
         }
-        append_native_trace((std::string("SPEC_DRAFT_ROLLBACK from=") +
-            std::to_string(draft_rollback_from) + " end=" +
-            std::to_string(draft_decoded_end) + " accepted=" +
-            std::to_string(acc)).c_str());
 
-        const llama_pos rollback_from=pos+(llama_pos)ids.size();
-        const llama_pos decoded_end=pos+(llama_pos)verify.size();
-        if(rollback_from<decoded_end && !llama_memory_seq_rm(llama_get_memory(g_context),0,rollback_from,-1)){llama_batch_free(batch);finish();return 20;}
+        draft.clear();
 
-        for(size_t i=0;i<ids.size();++i){
-            llama_token tok=ids[i];
-            if(!emit_spec_token(env,listener,on_token,vocab,tok)){llama_batch_free(batch);finish();return 12;}
-            ++generated;
-            if(llama_vocab_is_eog(vocab,tok)||generated>=max_tokens){llama_batch_free(batch);finish();return 0;}
-            hist.push_back(last); last=tok; ++pos;
+        // Discard any unaccepted target/draft memory. For recurrent/hybrid
+        // contexts this call is only used where the backend explicitly supports
+        // the requested operation; otherwise the checkpoint path above handled
+        // partial rollback.
+        if (!llama_memory_seq_rm(llama_get_memory(g_context), seq_id, n_past, -1)) {
+            append_native_trace((std::string("SPEC_TARGET_TAIL_CLEAR_FAILED pos=") +
+                std::to_string(n_past)).c_str());
+            llama_batch_free(batch);
+            finish();
+            return 20;
+        }
+        if (dctx && !llama_memory_seq_rm(llama_get_memory(dctx), seq_id, n_past, -1)) {
+            append_native_trace((std::string("SPEC_DRAFT_TAIL_CLEAR_FAILED pos=") +
+                std::to_string(n_past)).c_str());
+            llama_batch_free(batch);
+            finish();
+            return 20;
         }
     }
-    llama_batch_free(batch); finish(); return 0;
+
+    llama_batch_free(batch);
+    finish();
+    return g_stop.load(std::memory_order_relaxed) ? 9 : 0;
 }
 
 static bool model_uses_recurrent_memory() {
