@@ -154,11 +154,7 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
         common_batch cb(g_context);
         for(int i=0;i<n;++i) cb.add(inp[(size_t)off+i],(llama_pos)(off+i),0,false);
         fill(inp.data()+off,n,off,false);
-        append_native_trace((std::string("SPEC_VERIFY targetStart=") + std::to_string(pos) +
-            " verifyCount=" + std::to_string(verify.size()) +
-            " draftCount=" + std::to_string(draft.size()) +
-            " note=target_only").c_str());
-        if(llama_decode(g_context,batch)!=0){llama_batch_free(batch);finish();return 10;}
+        if(llama_decode(g_context,batch)!=0 || !common_speculative_process(g_spec,cb)){llama_batch_free(batch);finish();return 10;}
     }
 
     llama_token last=inp.back();
