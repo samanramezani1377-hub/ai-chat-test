@@ -46,6 +46,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         actionTrace = selectedActions,
         runtimeTrace = runtime.trace,
         nativeDiagnostics = runtime.lastNativeEvent,
+        openClProfile = runtime.openClProfile,
     )
     val report = buildString {
         append(diagnostic.report())
@@ -94,12 +95,23 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             InfoLine("Context", runtime.runtime.contextLength?.toString() ?: "—")
         }
 
-        SectionCard("شتاب‌دهی Speculative") {
-            InfoLine("Draft tokens", nativePerf.speculativeDraftTokens?.toString() ?: "—")
-            InfoLine("Accepted tokens", nativePerf.speculativeAcceptedTokens?.toString() ?: "—")
-            InfoLine("Acceptance rate", nativePerf.speculativeAcceptanceRate?.let { "%.1f%%".format(it) } ?: "—")
-            InfoLine("Speculation steps", nativePerf.speculativeSteps?.toString() ?: "—")
-            InfoLine("Mean accepted / step", nativePerf.speculativeMeanAcceptedPerStep?.let { "%.2f".format(it) } ?: "—")
+        SectionCard("پروفایل واقعی GPU / OpenCL") {
+            val gpu = runtime.openClProfile
+            InfoLine("تعداد Kernel", gpu?.kernelCount?.toString() ?: "—")
+            InfoLine("MUL_MAT Q6_K", gpu?.q6KMulMatMs?.let { "%.3f ms".format(it) } ?: "—")
+            InfoLine("Attention", gpu?.attentionMs?.let { "%.3f ms".format(it) } ?: "—")
+            InfoLine("RoPE", gpu?.ropeMs?.let { "%.3f ms".format(it) } ?: "—")
+            InfoLine("RMSNorm", gpu?.rmsNormMs?.let { "%.3f ms".format(it) } ?: "—")
+            InfoLine("FFN", gpu?.ffnMs?.let { "%.3f ms".format(it) } ?: "—")
+            InfoLine("Softmax", gpu?.softmaxMs?.let { "%.3f ms".format(it) } ?: "—")
+            InfoLine("Kernel launch", gpu?.kernelLaunchMs?.let { "%.3f ms".format(it) } ?: "—")
+            InfoLine("Kernel submit", gpu?.kernelSubmitMs?.let { "%.3f ms".format(it) } ?: "—")
+            InfoLine("Kernel execution", gpu?.totalKernelMs?.let { "%.3f ms".format(it) } ?: "—")
+            InfoLine("Sync / completion", gpu?.syncMs?.let { "%.3f ms".format(it) } ?: "—")
+            InfoLine("Memory transfer", gpu?.memoryTransferMs?.let { "%.3f ms".format(it) } ?: "اندازه‌گیری نشده")
+            gpu?.topKernels?.forEachIndexed { index, kernel ->
+                InfoLine("Kernel ${index + 1}", "${kernel.kernelName} — %.3f ms".format(kernel.executionMs))
+            }
         }
 
         SectionCard("ورودی و خروجی") {
