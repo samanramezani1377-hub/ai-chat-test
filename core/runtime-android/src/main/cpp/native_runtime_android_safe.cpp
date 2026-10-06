@@ -184,7 +184,11 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
         fill(verify.data(),(int)verify.size(),pos,true);
         common_batch cb(g_context);
         for(size_t i=0;i<verify.size();++i) cb.add(verify[i],(llama_pos)(pos+i),0,i+1==verify.size());
-        if(llama_decode(g_context,batch)!=0 || !common_speculative_process(g_spec,cb)){llama_batch_free(batch);finish();return 10;}
+        append_native_trace((std::string("SPEC_VERIFY targetStart=") + std::to_string(pos) +
+            " verifyCount=" + std::to_string(verify.size()) +
+            " draftCount=" + std::to_string(draft.size()) +
+            " note=target_only").c_str());
+        if(llama_decode(g_context,batch)!=0){llama_batch_free(batch);finish();return 10;}
 
         std::vector<int> idx; for(size_t i=0;i<=draft.size();++i) idx.push_back((int)i);
         auto ids=common_sampler_sample_and_accept_n(smp.get(),g_context,idx,draft);
