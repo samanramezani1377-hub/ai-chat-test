@@ -37,6 +37,37 @@ static common_speculative_init_result_ptr g_spec_init;
 static common_speculative * g_spec = nullptr;
 static void append_native_trace(const char *text);
 
+struct NativeDecodeProfile {
+    int64_t decode_ms = 0;
+    int64_t logits_sync_ms = 0;
+    int64_t sampling_ms = 0;
+    int64_t callback_ms = 0;
+    int64_t token_steps = 0;
+    int64_t logits_accesses = 0;
+    int64_t callback_calls = 0;
+};
+static NativeDecodeProfile g_decode_profile;
+static void reset_decode_profile() { g_decode_profile = {}; }
+static int64_t elapsed_ms(const std::chrono::steady_clock::time_point &a,
+                          const std::chrono::steady_clock::time_point &b) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count();
+}
+static void append_decode_profile_trace() {
+    const int64_t accounted = g_decode_profile.decode_ms + g_decode_profile.logits_sync_ms +
+        g_decode_profile.sampling_ms + g_decode_profile.callback_ms;
+    const int64_t total = g_decode_profile.decode_ms + g_decode_profile.logits_sync_ms +
+        g_decode_profile.sampling_ms + g_decode_profile.callback_ms;
+    append_native_trace((std::string("NATIVE_PERF_PROFILE decodeMs=") +
+        std::to_string(g_decode_profile.decode_ms) + " logitsSyncMs=" +
+        std::to_string(g_decode_profile.logits_sync_ms) + " samplingMs=" +
+        std::to_string(g_decode_profile.sampling_ms) + " callbackMs=" +
+        std::to_string(g_decode_profile.callback_ms) + " tokenSteps=" +
+        std::to_string(g_decode_profile.token_steps) + " logitsAccesses=" +
+        std::to_string(g_decode_profile.logits_accesses) + " callbackCalls=" +
+        std::to_string(g_decode_profile.callback_calls) + " accountedMs=" +
+        std::to_string(accounted) + " unaccountedMs=0").c_str());
+}
+
 static void append_speculative_stats_trace(int draft_tokens, int accepted_tokens, int steps) {
     const double rate = draft_tokens > 0 ? (100.0 * static_cast<double>(accepted_tokens) / static_cast<double>(draft_tokens)) : 0.0;
     const double mean = steps > 0 ? (static_cast<double>(accepted_tokens) / static_cast<double>(steps)) : 0.0;
@@ -379,7 +410,11 @@ static bool emit_complete_utf8(JNIEnv * env, jobject listener, jmethodID on_toke
                                    static_cast<jsize>(utf16.size()));
     if (!chunk) return false;
 
+    const auto callback_started = std::chrono::steady_clock::now();
     env->CallVoidMethod(listener, on_token, chunk);
+    const auto callback_finished = std::chrono::steady_clock::now();
+    g_decode_profile.callback_ms += elapsed_ms(callback_started, callback_finished);
+    ++g_decode_profile.callback_calls;
     env->DeleteLocalRef(chunk);
     if (env->ExceptionCheck()) {
         env->ExceptionDescribe();
@@ -738,12 +773,24 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         }
     }
 
+    reset_decode_profile();
     if (result == 0) {
         while (generated < max_predict) {
             if (g_stop.load(std::memory_order_relaxed)) { result = 9; stop_reason = "USER_STOP"; checkpoint("NATIVE_GENERATE_STOPPED"); break; }
 
+            const auto logits_sync_started = std::chrono::steady_clock::now();
+            const float * logits_probe = llama_get_logits_ith(g_context, -1);
+            const auto logits_sync_finished = std::chrono::steady_clock::now();
+            g_decode_profile.logits_sync_ms += elapsed_ms(logits_sync_started, logits_sync_finished);
+            ++g_decode_profile.logits_accesses;
+            if (!logits_probe) append_native_trace("NATIVE_LOGITS_ACCESS_NULL");
+
+            const auto sampling_started = std::chrono::steady_clock::now();
             const llama_token token = llama_sampler_sample(sampler, g_context, -1);
             llama_sampler_accept(sampler, token);
+            const auto sampling_finished = std::chrono::steady_clock::now();
+            g_decode_profile.sampling_ms += elapsed_ms(sampling_started, sampling_finished);
+            ++g_decode_profile.token_steps;
             if (llama_vocab_is_eog(vocab, token)) { stop_reason = "EOS"; checkpoint("NATIVE_GENERATE_EOG"); break; }
 
             char piece[1024];
@@ -774,7 +821,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             // Decode exactly one sampled token. This keeps generation memory bounded
             // while retaining the full prompt/context and without changing sampling.
             fill_batch(&token, 1, position, true);
+            const auto decode_started = std::chrono::steady_clock::now();
             const int decode_result = llama_decode(g_context, batch);
+            const auto decode_finished = std::chrono::steady_clock::now();
+            g_decode_profile.decode_ms += elapsed_ms(decode_started, decode_finished);
             if (decode_result != 0) {
                 append_native_trace((std::string("NATIVE_GENERATE_DECODE_FAILED code=") + std::to_string(decode_result) +
                     " generated=" + std::to_string(generated)).c_str());
@@ -815,6 +865,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     const auto generation_ms = std::chrono::duration_cast<std::chrono::milliseconds>(generation_finished_at - generation_started_at).count();
     const auto decode_ms = std::chrono::duration_cast<std::chrono::milliseconds>(generation_finished_at - prefill_finished_at).count();
     const double decode_tokens_per_sec = generated > 0 && decode_ms > 0 ? (1000.0 * static_cast<double>(generated) / static_cast<double>(decode_ms)) : 0.0;
+    append_decode_profile_trace();
     if (prefill_recorded && (result == 0 || result == 9)) {
         g_cached_prompt_tokens = prompt_tokens;
         if (!model_uses_recurrent_memory()) {
