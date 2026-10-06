@@ -154,7 +154,11 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
         common_batch cb(g_context);
         for(int i=0;i<n;++i) cb.add(inp[(size_t)off+i],(llama_pos)(off+i),0,false);
         fill(inp.data()+off,n,off,false);
-        if(llama_decode(g_context,batch)!=0 || !common_speculative_process(g_spec,cb)){llama_batch_free(batch);finish();return 10;}
+        append_native_trace((std::string("SPEC_VERIFY targetStart=") + std::to_string(pos) +
+            " verifyCount=" + std::to_string(verify.size()) +
+            " draftCount=" + std::to_string(draft.size()) +
+            " note=target_only").c_str());
+        if(llama_decode(g_context,batch)!=0){llama_batch_free(batch);finish();return 10;}
     }
 
     llama_token last=inp.back();
@@ -196,6 +200,24 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
                 " nextMax=" + std::to_string(g_spec_accept_ema > 0.82 ? 5 : (g_spec_accept_ema > 0.62 ? 3 : 2))).c_str());
         }
         common_speculative_accept(g_spec,0,(uint16_t)acc);
+
+        // draft-simple::draft() has already advanced the Draft context through
+        // the proposed tokens. Verify must never feed that same batch back into
+        // Draft. Keep only the accepted prefix for the next speculative round.
+        const llama_pos draft_rollback_from = pos + (llama_pos) acc + 1;
+        const llama_pos draft_decoded_end = pos + (llama_pos) draft.size() + 1;
+        if(draft_rollback_from < draft_decoded_end &&
+           !llama_memory_seq_rm(llama_get_memory(dctx),0,draft_rollback_from,-1)){
+            append_native_trace((std::string("SPEC_DRAFT_ROLLBACK_FAILED from=") +
+                std::to_string(draft_rollback_from) + " end=" +
+                std::to_string(draft_decoded_end) + " accepted=" +
+                std::to_string(acc)).c_str());
+            llama_batch_free(batch);finish();return 20;
+        }
+        append_native_trace((std::string("SPEC_DRAFT_ROLLBACK from=") +
+            std::to_string(draft_rollback_from) + " end=" +
+            std::to_string(draft_decoded_end) + " accepted=" +
+            std::to_string(acc)).c_str());
 
         const llama_pos rollback_from=pos+(llama_pos)ids.size();
         const llama_pos decoded_end=pos+(llama_pos)verify.size();
