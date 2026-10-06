@@ -118,6 +118,21 @@ class AndroidModelManager(
                 Files.deleteIfExists(temp)
             }
             runtime.setDraftPath(draft?.path?.toString())
+            // A draft assignment is a live runtime connection, not only a persisted
+            // preference. Keep target-only activation intact, then reload the already
+            // active target with the selected draft. Native speculative setup happens
+            // only after the target context is fully ready.
+            val active = (repository.getActive() as? ModelResult.Success)?.value
+            if (draft != null && active != null && active.id == modelId) {
+                when (val reloaded = runtime.loadResult(active)) {
+                    is ModelResult.Failure -> return@withContext reloaded
+                    is ModelResult.Success -> RuntimeDiagnosticsStore.recordNativeEvent(
+                        "SPECULATIVE_DRAFT_CONNECTED target=${active.id} draft=${draft.id}"
+                    )
+                }
+            } else if (draft == null) {
+                RuntimeDiagnosticsStore.recordNativeEvent("SPECULATIVE_DRAFT_DISCONNECTED target=$modelId")
+            }
             ModelResult.Success(Unit)
         } catch (t: Throwable) {
             ModelResult.Failure(ModelError.Storage("Unable to save draft assignment", t))
