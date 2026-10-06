@@ -180,7 +180,16 @@ class LlamaCppAndroidRuntimeAdapter(
         RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_STARTED context=$loadedContextLength backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
         RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "context=${loadedContextLength} backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
         val promptTokens = NativeLlamaCpp.countTokens(prompt).takeIf { it >= 0 }
-        RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_PROMPT_READY context=$loadedContextLength promptTokens=${promptTokens ?: "n/a"} maxNewTokens=${settings.maxNewTokens}")
+        // Generation is explicitly bounded by the remaining context capacity. This removes
+        // the old fixed 512-token ceiling while preventing a large requested output from
+        // consuming tokens that do not fit in the loaded context.
+        val contextCapacity = loadedContextLength ?: defaultContextLength
+        val promptBudget = (contextCapacity - (promptTokens ?: 0) - 32).coerceAtLeast(1)
+        val effectiveMaxTokens = minOf(settings.maxNewTokens.coerceAtLeast(1), promptBudget)
+        RuntimeDiagnosticsStore.recordNativeEvent(
+            "NATIVE_PROMPT_READY context=$loadedContextLength promptTokens=${promptTokens ?: "n/a"} " +
+                "requestedMaxTokens=${settings.maxNewTokens} effectiveMaxTokens=$effectiveMaxTokens"
+        )
         val startedAt = System.nanoTime()
         var firstTokenAt: Long? = null
         val output = StringBuilder()
@@ -189,7 +198,7 @@ class LlamaCppAndroidRuntimeAdapter(
         try {
                 NativeLlamaCpp.generate(
                 prompt = prompt,
-                maxTokens = settings.maxNewTokens.coerceAtLeast(1),
+                maxTokens = effectiveMaxTokens,
                 temperature = when (loadedArchitecture) {
                     "lfm2" -> 0.3f
                     "llama" -> 1.0f
