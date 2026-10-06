@@ -22,7 +22,7 @@ import kotlin.math.roundToInt
 
 /** Direct llama.cpp Android runtime. OpenCL is the only supported inference backend. */
 class LlamaCppAndroidRuntimeAdapter(
-    private val defaultContextLength: Int = 4096,
+    private val defaultContextLength: Int = 8192,
     gpuLayers: Int = GPU_LAYERS_MAX,
 ) : RuntimeAdapter, RuntimeMetrics {
     companion object {
