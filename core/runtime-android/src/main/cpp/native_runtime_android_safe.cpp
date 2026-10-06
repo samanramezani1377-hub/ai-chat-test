@@ -778,19 +778,25 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         while (generated < max_predict) {
             if (g_stop.load(std::memory_order_relaxed)) { result = 9; stop_reason = "USER_STOP"; checkpoint("NATIVE_GENERATE_STOPPED"); break; }
 
+            append_native_trace((std::string("NATIVE_DECODE_STEP_STARTED step=") + std::to_string(generated + 1)).c_str());
             const auto logits_sync_started = std::chrono::steady_clock::now();
+            append_native_trace("NATIVE_LOGITS_SYNC_START");
             const float * logits_probe = llama_get_logits_ith(g_context, -1);
             const auto logits_sync_finished = std::chrono::steady_clock::now();
             g_decode_profile.logits_sync_ms += elapsed_ms(logits_sync_started, logits_sync_finished);
             ++g_decode_profile.logits_accesses;
+            append_native_trace((std::string("NATIVE_LOGITS_SYNC_END elapsedMs=") + std::to_string(elapsed_ms(logits_sync_started, logits_sync_finished))).c_str());
             if (!logits_probe) append_native_trace("NATIVE_LOGITS_ACCESS_NULL");
 
+            append_native_trace("NATIVE_SAMPLING_START");
             const auto sampling_started = std::chrono::steady_clock::now();
             const llama_token token = llama_sampler_sample(sampler, g_context, -1);
             llama_sampler_accept(sampler, token);
             const auto sampling_finished = std::chrono::steady_clock::now();
             g_decode_profile.sampling_ms += elapsed_ms(sampling_started, sampling_finished);
             ++g_decode_profile.token_steps;
+            append_native_trace((std::string("NATIVE_SAMPLING_END elapsedMs=") + std::to_string(elapsed_ms(sampling_started, sampling_finished))).c_str());
+            append_native_trace((std::string("NATIVE_TOKEN_SELECTED token=") + std::to_string((int)token)).c_str());
             if (llama_vocab_is_eog(vocab, token)) { stop_reason = "EOS"; checkpoint("NATIVE_GENERATE_EOG"); break; }
 
             char piece[1024];
@@ -825,6 +831,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             const int decode_result = llama_decode(g_context, batch);
             const auto decode_finished = std::chrono::steady_clock::now();
             g_decode_profile.decode_ms += elapsed_ms(decode_started, decode_finished);
+            append_native_trace((std::string("NATIVE_DECODE_STEP_END elapsedMs=") + std::to_string(elapsed_ms(decode_started, decode_finished)) +
+                " result=" + std::to_string(decode_result)).c_str());
             if (decode_result != 0) {
                 append_native_trace((std::string("NATIVE_GENERATE_DECODE_FAILED code=") + std::to_string(decode_result) +
                     " generated=" + std::to_string(generated)).c_str());
