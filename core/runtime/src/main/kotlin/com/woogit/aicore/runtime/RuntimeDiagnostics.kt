@@ -123,9 +123,14 @@ object RuntimeDiagnosticsStore {
         val root = System.getenv("TMPDIR")?.takeIf { it.isNotBlank() }
             ?: System.getProperty("java.io.tmpdir")?.takeIf { it.isNotBlank() }
             ?: return@runCatching null
-        val file = File(root, "cl_profiling.csv")
-        val transferFile = File(root, "cl_transfer_profile.txt")
-        if (!file.isFile || file.length() <= 0L) return@runCatching null
+        val candidates = listOf(
+            File(root, "cl_profiling.csv"),
+            File("/data/data/com.samanramezani.aichattest/cache", "cl_profiling.csv"),
+            File(".", "cl_profiling.csv"),
+        ).distinctBy { it.absolutePath }
+        val file = candidates.firstOrNull { it.isFile && it.length() > 0L }
+            ?: return@runCatching null
+        val transferFile = File(file.parentFile ?: File("."), "cl_transfer_profile.txt")
         val transferMs = transferFile.takeIf { it.isFile }?.readText()?.let { text ->
             Regex("""memory_transfer_ms=([0-9.+-Ee]+)""").find(text)?.groupValues?.get(1)?.toDoubleOrNull()
         }
