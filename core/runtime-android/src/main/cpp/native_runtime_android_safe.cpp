@@ -267,6 +267,19 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
     };
 
     const llama_seq_id seq_id = 0;
+
+    // common_context_can_seq_rm() clears the context while probing its memory
+    // capabilities in this pinned llama.cpp revision. Therefore it MUST happen
+    // before target prefill, not after common_speculative_begin().
+    const common_context_seq_rm_type tgt_rm = common_context_can_seq_rm(g_context);
+    const common_context_seq_rm_type dft_rm = common_context_can_seq_rm(dctx);
+    const bool use_ckpt_tgt = tgt_rm == COMMON_CONTEXT_SEQ_RM_TYPE_FULL;
+    const bool use_ckpt_dft = dft_rm == COMMON_CONTEXT_SEQ_RM_TYPE_FULL;
+    append_native_trace((std::string("SPEC_CONTEXT_ROLLBACK target=") + std::to_string((int)tgt_rm) +
+        " draft=" + std::to_string((int)dft_rm) +
+        " targetCheckpoint=" + (use_ckpt_tgt ? "1" : "0") +
+        " draftCheckpoint=" + (use_ckpt_dft ? "1" : "0")).c_str());
+
     llama_tokens prompt_tgt(inp.begin(), inp.end() - 1);
     prompt_tgt.reserve(llama_n_ctx(g_context));
     llama_token id_last = inp.back();
@@ -303,18 +316,6 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
     set_spec_phase("GENERATE_BEGIN_SPECULATIVE");
     common_speculative_begin(g_spec, seq_id, prompt_tgt);
     append_native_trace("SPEC_BEGIN_DONE");
-
-    // Qwen3.5/Qwen3.8 are hybrid/recurrent. Their memory backend may support
-    // only full sequence removal, so use llama.cpp's checkpoint mechanism rather
-    // than assuming llama_memory_seq_rm() can roll back arbitrary positions.
-    const common_context_seq_rm_type tgt_rm = common_context_can_seq_rm(g_context);
-    const common_context_seq_rm_type dft_rm = common_context_can_seq_rm(dctx);
-    const bool use_ckpt_tgt = tgt_rm == COMMON_CONTEXT_SEQ_RM_TYPE_FULL;
-    const bool use_ckpt_dft = dft_rm == COMMON_CONTEXT_SEQ_RM_TYPE_FULL;
-    append_native_trace((std::string("SPEC_CONTEXT_ROLLBACK target=") + std::to_string((int)tgt_rm) +
-        " draft=" + std::to_string((int)dft_rm) +
-        " targetCheckpoint=" + (use_ckpt_tgt ? "1" : "0") +
-        " draftCheckpoint=" + (use_ckpt_dft ? "1" : "0")).c_str());
 
     common_batch batch_tgt(g_context);
     llama_tokens draft;
