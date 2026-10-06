@@ -121,13 +121,25 @@ static bool init_speculative_runtime() {
         p.n_parallel = 1; p.n_sequences = 1; p.n_gpu_layers = 99;
         p.speculative.draft.n_max = 3;
         p.speculative.draft.n_gpu_layers = 99;
+
+        // Build a true draft-model parameter set before creating the draft context.
+        // common_speculative_init_from_params() derives the model loader from
+        // params.model, so passing the target params here would load the target
+        // GGUF again instead of the configured draft GGUF. That can double the
+        // resident GPU model and crash as soon as the first speculative request
+        // starts.
+        common_params draft_params = common_base_params_to_speculative(p);
+        draft_params.n_ctx = (int) llama_n_ctx(g_context);
+        draft_params.n_batch = 128; draft_params.n_ubatch = 128;
+        draft_params.n_parallel = 1; draft_params.n_sequences = 1;
+        draft_params.speculative.draft.ctx_tgt = g_context;
         p.speculative.draft.ctx_tgt = g_context;
 
         if (g_spec_mtp) {
             p.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_MTP };
             set_spec_phase("INIT_FROM_PARAMS");
             append_native_trace("SPECULATIVE_INIT_FROM_PARAMS_BEGIN");
-            g_spec_init = common_speculative_init_from_params(p, g_model, g_context);
+            g_spec_init = common_speculative_init_from_params(draft_params, g_model, g_context);
             append_native_trace("SPECULATIVE_INIT_FROM_PARAMS_END");
             if (!g_spec_init || !g_spec_init->context()) {
                 g_spec_init.reset();
