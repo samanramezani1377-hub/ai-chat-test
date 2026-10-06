@@ -174,9 +174,9 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
             phase[phase_len] = phase_src[phase_len];
             ++phase_len;
         }
-        phase[phase_len] = '\\0';
+        phase[phase_len] = '\0';
         native_write_text(g_native_fatal_fd, phase, phase_len);
-        native_write_text(g_native_fatal_fd, "\\n", 1);
+        native_write_text(g_native_fatal_fd, "\n", 1);
         native_write_hex(g_native_fatal_fd, pc_prefix, pc);
         native_write_hex(g_native_fatal_fd, lr_prefix, lr);
         native_write_hex(g_native_fatal_fd, addr_prefix, info ? (uintptr_t)info->si_addr : 0);
