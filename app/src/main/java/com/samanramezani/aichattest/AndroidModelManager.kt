@@ -166,7 +166,7 @@ class AndroidModelManager(
         if (result is ModelResult.Success) {
             val restored = result.value
             if (restored != null) {
-                attachDraftAfterTargetLoad(restored.id)
+                attachDraftAfterTargetLoad(restored)
             }
         }
         result
@@ -178,15 +178,24 @@ class AndroidModelManager(
         runtime.setDraftPath(null)
         val result = service.activate(id)
         if (result is ModelResult.Success) {
-            attachDraftAfterTargetLoad(result.value.id)
+            attachDraftAfterTargetLoad(result.value)
         }
         result
     }
 
-    private suspend fun attachDraftAfterTargetLoad(modelId: String) {
+    private suspend fun attachDraftAfterTargetLoad(model: ModelDescriptor) {
+        val modelId = model.id
         val draft = (draftForModel(modelId) as? ModelResult.Success)?.value
         val draftPath = draft?.path?.takeIf { Files.isRegularFile(it) && Files.isReadable(it) }?.toString()
         runtime.setDraftPath(draftPath)
+        if (draftPath != null) {
+            // Target activation already succeeded. Re-load the same target with the
+            // now-selected draft so speculative decoding becomes active immediately.
+            when (val connected = runtime.loadResult(model)) {
+                is ModelResult.Failure -> RuntimeDiagnosticsStore.recordNativeEvent("SPECULATIVE_DRAFT_CONNECT_FAILED target=$modelId error=${connected.error.message}")
+                is ModelResult.Success -> RuntimeDiagnosticsStore.recordNativeEvent("SPECULATIVE_DRAFT_CONNECTED target=$modelId draft=${draft.id}")
+            }
+        }
         if (draft != null && draftPath == null) {
             RuntimeDiagnosticsStore.recordNativeEvent("SPECULATIVE_DRAFT_IGNORED_INVALID file=${draft.path}")
         }
