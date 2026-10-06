@@ -51,3 +51,8 @@ string(REPLACE
 
 file(WRITE "${_src_file}" "${_src}")
 message(STATUS "AI Chat: patched llama.cpp OpenCL profiling for Android")
+
+string(REPLACE
+    "    fclose(ftrace);"
+    "    fclose(ftrace);\n\n    const std::string ai_chat_transfer_path =\n        ai_chat_tmpdir && *ai_chat_tmpdir\n            ? std::string(ai_chat_tmpdir) + \"/cl_transfer_profile.txt\"\n            : std::string(\"cl_transfer_profile.txt\");\n    FILE * ftransfer = fopen(ai_chat_transfer_path.c_str(), \"w\");\n    if (ftransfer) {\n        fprintf(ftransfer, \"memory_transfer_ms=%f count=%zu\\n\", ai_chat_transfer_exec_ns/1.e6f, ai_chat_transfer_count);\n        fclose(ftransfer);\n    }"
+    _src "${_src}")
