@@ -65,7 +65,8 @@ static void append_decode_profile_trace(int64_t generation_ms, int64_t prefill_m
         std::to_string(g_decode_profile.token_steps) + " logitsAccesses=" +
         std::to_string(g_decode_profile.logits_accesses) + " callbackCalls=" +
         std::to_string(g_decode_profile.callback_calls) + " accountedMs=" +
-        std::to_string(accounted) + " unaccountedMs=0").c_str());
+        std::to_string(accounted) + " unaccountedMs=" + std::to_string(unaccounted) +
+        " decodeWindowMs=" + std::to_string(decode_window)).c_str());
 }
 
 static void append_speculative_stats_trace(int draft_tokens, int accepted_tokens, int steps) {
