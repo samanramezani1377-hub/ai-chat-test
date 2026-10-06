@@ -241,17 +241,36 @@ static int generate_spec(JNIEnv *env, jobject listener, jmethodID on_token, cons
     };
 
     llama_tokens hist(inp.begin(), inp.end()-1);
-    set_spec_phase("GENERATE_BEGIN_SPECULATIVE");
-    common_speculative_begin(g_spec, 0, hist);
-    append_native_trace("SPEC_BEGIN_DONE");
+
+    // Canonical llama.cpp speculative lifecycle:
+    // 1) evaluate the Target prompt and feed that prompt batch into the
+    //    speculative implementation;
+    // 2) only then call common_speculative_begin().
+    //
+    // Calling begin() before Target prefill is unsafe for hybrid/recurrent
+    // models (Qwen3.5/Qwen3.8): the speculative implementation must observe
+    // the already-prefilled Target state before generation starts.
+    set_spec_phase("SPECULATIVE_PREFILL_BEGIN");
+    append_native_trace("SPECULATIVE_PREFILL_BEGIN");
 
     for (int off=0; off<n_prompt-1; off+=cap) {
         int n=std::min(cap,n_prompt-1-off);
         common_batch cb(g_context);
         for(int i=0;i<n;++i) cb.add(inp[(size_t)off+i],(llama_pos)(off+i),0,false);
         fill(inp.data()+off,n,off,false);
-        if(llama_decode(g_context,batch)!=0 || !common_speculative_process(g_spec,cb)){llama_batch_free(batch);finish();return 10;}
+        if(llama_decode(g_context,batch)!=0){
+            append_native_trace("SPECULATIVE_TARGET_PREFILL_FAILED");
+            llama_batch_free(batch);finish();return 10;
+        }
+        if(!common_speculative_process(g_spec,cb)){
+            append_native_trace("SPECULATIVE_PREFILL_PROCESS_FAILED");
+            llama_batch_free(batch);finish();return 10;
+        }
     }
+
+    set_spec_phase("GENERATE_BEGIN_SPECULATIVE");
+    common_speculative_begin(g_spec, 0, hist);
+    append_native_trace("SPEC_BEGIN_DONE");
 
     llama_token last=inp.back();
     int pos=(int)hist.size(), generated=0;
