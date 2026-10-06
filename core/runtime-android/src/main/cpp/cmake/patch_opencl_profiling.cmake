@@ -10,15 +10,16 @@ if (NOT EXISTS "${_src_file}")
 endif()
 
 file(READ "${_src_file}" _src)
-if (_src MATCHES "AI_CHAT_OPENCL_PROFILE_PATCH_V2")
+if (_src MATCHES "AI_CHAT_OPENCL_PROFILE_PATCH_V3")
     return()
 endif()
 
 string(REPLACE
     "#include \"cl-program-cache.h\""
-    "#include \"cl-program-cache.h\"\n#include <cstdlib>\n\n// AI_CHAT_OPENCL_PROFILE_PATCH_V2"
+    "#include \"cl-program-cache.h\"\n#include <cstdlib>\n\n// AI_CHAT_OPENCL_PROFILE_PATCH_V3"
     _src "${_src}")
 
+# Keep the file in the same temporary directory that the Android runtime reads.
 string(REPLACE
     "FILE * fperf = fopen(\"cl_profiling.csv\", \"w\");"
     "const char * ai_chat_tmpdir = std::getenv(\"TMPDIR\");\n    const std::string ai_chat_profile_path =\n        ai_chat_tmpdir && *ai_chat_tmpdir\n            ? std::string(ai_chat_tmpdir) + \"/cl_profiling.csv\"\n            : std::string(\"cl_profiling.csv\");\n    FILE * fperf = fopen(ai_chat_profile_path.c_str(), \"w\");"
@@ -40,22 +41,18 @@ string(REPLACE
     _src "${_src}")
 
 # The upstream backend only writes the CSV when the OpenCL context is freed.
-# The Android runtime keeps that context alive between generations, so expose
-# completed profiling batches while the process is still running.
-string(REPLACE
-    "void flush_profiling_batch() {"
-    "void write_profiling_info();\n\n    void flush_profiling_batch() {"
-    _src "${_src}")
-
+# The Android runtime keeps that context alive between generations. Write the
+# already-completed profiling results directly from flush_profiling_batch().
+# This avoids a duplicate in-class write_profiling_info() declaration.
 string(REPLACE
     "profiling_results.insert(profiling_results.end(),\n            std::make_move_iterator(profiling_info.begin()),\n            std::make_move_iterator(profiling_info.end()));\n        profiling_info.clear();"
-    "profiling_results.insert(profiling_results.end(),\n            std::make_move_iterator(profiling_info.begin()),\n            std::make_move_iterator(profiling_info.end()));\n        profiling_info.clear();\n        write_profiling_info();"
+    "profiling_results.insert(profiling_results.end(),\n            std::make_move_iterator(profiling_info.begin()),\n            std::make_move_iterator(profiling_info.end()));\n        profiling_info.clear();\n\n        {\n            const char * ai_chat_tmpdir = std::getenv(\"TMPDIR\");\n            const std::string ai_chat_profile_path =\n                ai_chat_tmpdir && *ai_chat_tmpdir\n                    ? std::string(ai_chat_tmpdir) + \"/cl_profiling.csv\"\n                    : std::string(\"cl_profiling.csv\");\n            FILE * fperf_live = fopen(ai_chat_profile_path.c_str(), \"w\");\n            if (fperf_live) {\n                fprintf(fperf_live, \"op name, kernel name, queue (ms), submit (ms), exec duration (ms), complete (ms), total (ms), global size, local size, output size\\n\");\n                for (const ProfilingInfo & info : profiling_results) {\n                    fprintf(fperf_live, \"%s,%s,%f,%f,%f,%f,%f,%zux%zux%zu,%zux%zux%zu,%zux%zux%zux%zu\\n\",\n                        info.op_name.c_str(), info.kernel_name.c_str(),\n                        info.cmd_queued_duration_ns/1.e6f,\n                        info.cmd_submit_duration_ns/1.e6f,\n                        info.cmd_duration_ns/1.e6f,\n                        info.cmd_complete_duration_ns/1.e6f,\n                        info.cmd_total_duration_ns/1.e6f,\n                        info.global_size[0], info.global_size[1], info.global_size[2],\n                        info.local_size[0], info.local_size[1], info.local_size[2],\n                        info.output_size[0], info.output_size[1], info.output_size[2], info.output_size[3]);\n                }\n                fclose(fperf_live);\n            }\n        }"
     _src "${_src}")
 
 string(REPLACE
     "if (profiling_info.size() >= 2048) {"
-    "if (profiling_info.size() >= 512) {"
+    "if (profiling_info.size() >= 256) {"
     _src "${_src}")
 
 file(WRITE "${_src_file}" "${_src}")
-message(STATUS "AI Chat: patched llama.cpp OpenCL profiling for Android (V2)")
+message(STATUS "AI Chat: patched llama.cpp OpenCL profiling for Android (V3)")
