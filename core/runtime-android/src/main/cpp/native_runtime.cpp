@@ -167,9 +167,16 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
 #endif
         const char phase_prefix[] = "NATIVE_FATAL_SPEC_PHASE=";
         native_write_text(g_native_fatal_fd, phase_prefix, sizeof(phase_prefix) - 1);
-        const char * phase = g_spec_phase ? g_spec_phase : "UNKNOWN";
-        native_write_text(g_native_fatal_fd, phase, std::strlen(phase));
-        native_write_text(g_native_fatal_fd, "\n", 1);
+        char phase[96];
+        size_t phase_len = 0;
+        const volatile char *phase_src = g_spec_phase ? g_spec_phase : "UNKNOWN";
+        while (phase_len + 1 < sizeof(phase) && phase_src[phase_len]) {
+            phase[phase_len] = phase_src[phase_len];
+            ++phase_len;
+        }
+        phase[phase_len] = '\\0';
+        native_write_text(g_native_fatal_fd, phase, phase_len);
+        native_write_text(g_native_fatal_fd, "\\n", 1);
         native_write_hex(g_native_fatal_fd, pc_prefix, pc);
         native_write_hex(g_native_fatal_fd, lr_prefix, lr);
         native_write_hex(g_native_fatal_fd, addr_prefix, info ? (uintptr_t)info->si_addr : 0);
