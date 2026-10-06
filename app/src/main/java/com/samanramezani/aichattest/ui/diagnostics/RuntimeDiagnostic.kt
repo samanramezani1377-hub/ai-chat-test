@@ -32,6 +32,9 @@ internal data class NativePerformance(
     val profileAccountedMs: Long? = null,
     val profileUnaccountedMs: Long? = null,
     val profileDecodeWindowMs: Long? = null,
+    val speculativeGenerationMs: Long? = null,
+    val speculativeTokensPerSec: Double? = null,
+    val speculativeFallbackCode: Int? = null,
 ) {
     val decodeMs: Long?
         get() = if (generationMs != null && prefillMs != null) (generationMs - prefillMs).coerceAtLeast(0L) else null
@@ -74,11 +77,23 @@ internal data class RuntimeDiagnostic(
             profileAccountedMs = nativeProfileValue("accountedMs")?.toLongOrNull(),
             profileUnaccountedMs = nativeProfileValue("unaccountedMs")?.toLongOrNull(),
             profileDecodeWindowMs = nativeProfileValue("decodeWindowMs")?.toLongOrNull(),
+            speculativeGenerationMs = nativeSpecValue("generationMs")?.toLongOrNull(),
+            speculativeTokensPerSec = nativeSpecValue("tokensPerSec")?.toDoubleOrNull(),
+            speculativeFallbackCode = nativeSpecValue("code")?.toIntOrNull(),
         )
 
     private fun nativeValue(key: String): String? {
         val text = nativeDiagnostics ?: return null
         val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("$key=") } ?: return null
+        return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
+    }
+
+    private fun nativeSpecValue(key: String): String? {
+        val text = nativeDiagnostics ?: return null
+        val lines = text.lineSequence().toList().asReversed()
+        val line = lines.firstOrNull { it.contains("SPECULATIVE_PERFORMANCE") && it.contains("$key=") }
+            ?: lines.firstOrNull { it.contains("SPECULATIVE_GENERATE_RETURNED") && it.contains("$key=") }
+            ?: return null
         return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
     }
 
@@ -135,6 +150,9 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Acceptance Rate: ${perf.speculativeAcceptanceRate?.let { "%.1f%%".format(it) } ?: "N/A"}")
     appendLine("Speculation Steps: ${perf.speculativeSteps ?: "N/A"}")
     appendLine("Mean Accepted / Step: ${perf.speculativeMeanAcceptedPerStep?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine("Speculative Generation Time: ${perf.speculativeGenerationMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Speculative Tokens/sec: ${perf.speculativeTokensPerSec?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine("Speculative Fallback Code: ${perf.speculativeFallbackCode ?: "N/A"}")
     appendLine()
     val current = settings
     appendLine("Temperature: ${current?.temperature ?: "N/A"}")
