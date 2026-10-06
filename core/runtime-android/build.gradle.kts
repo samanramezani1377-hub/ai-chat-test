@@ -19,7 +19,7 @@ android {
                 // Validation is intentionally debug-only while native loading is under investigation.
                 // Keep the native build strictly single-ABI; the app also packages arm64-v8a only.
                 abiFilters += "arm64-v8a"
-                arguments += listOf(
+                arguments += listOf("-DAI_CHAT_OPENCL_PROFILING=ON",
                     "-DLLAMA_BUILD_COMMON=OFF",
                     "-DLLAMA_BUILD_TESTS=OFF",
                     "-DLLAMA_BUILD_EXAMPLES=OFF",
