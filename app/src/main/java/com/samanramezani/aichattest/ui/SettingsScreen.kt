@@ -70,51 +70,10 @@ fun SettingsScreen(
         }
         item {
             when (section) {
-                "مدل" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete); DraftModelPanel(draftModels, activeDraft, onImportDraft, onAssignDraft, onDeleteDraft) }
+                "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
                 "پاسخ" -> InferenceControls()
                 "زمینه" -> ContextControls()
                 "عامل" -> AgentControls()
-            }
-        }
-    }
-}
-
-@Composable
-private fun DraftModelPanel(
-    drafts: List<ModelDescriptor>,
-    activeDraft: ModelDescriptor?,
-    onImport: () -> Unit,
-    onAssign: (String?) -> Unit,
-    onDelete: (String) -> Unit,
-) {
-    Surface(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("شتاب‌دهی تولید", style = MaterialTheme.typography.titleMedium)
-            Text(
-                if (activeDraft != null) "مدل درفت فعال: ${activeDraft.displayName}"
-                else "برای شتاب‌دهی، یک مدل درفت سازگار وارد کن.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onImport, modifier = Modifier.weight(1f)) { Text("افزودن درفت") }
-                if (activeDraft != null) {
-                    OutlinedButton(onClick = { onAssign(null) }) { Text("غیرفعال") }
-                }
-            }
-            drafts.forEach { draft ->
-                val selected = draft.id == activeDraft?.id
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Column(Modifier.weight(1f)) {
-                        Text(draft.displayName, style = MaterialTheme.typography.bodyMedium)
-                        Text(draft.quantization.toString(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (!selected) TextButton(onClick = { onAssign(draft.id) }) { Text("اتصال") }
-                    TextButton(onClick = { onDelete(draft.id) }) { Text("حذف") }
-                }
             }
         }
     }
