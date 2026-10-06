@@ -1,5 +1,5 @@
 # Adds app-visible OpenCL event profiling to the pinned llama.cpp source.
-// This is intentionally applied only to the profiling/debug native variant.
+# This is intentionally applied only to the profiling/debug native variant.
 if (NOT DEFINED llama_cpp_SOURCE_DIR)
     message(FATAL_ERROR "llama_cpp_SOURCE_DIR is required")
 endif()
