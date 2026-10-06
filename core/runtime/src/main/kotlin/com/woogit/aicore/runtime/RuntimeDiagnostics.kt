@@ -124,7 +124,11 @@ object RuntimeDiagnosticsStore {
             ?: System.getProperty("java.io.tmpdir")?.takeIf { it.isNotBlank() }
             ?: return@runCatching null
         val file = File(root, "cl_profiling.csv")
+        val transferFile = File(root, "cl_transfer_profile.txt")
         if (!file.isFile || file.length() <= 0L) return@runCatching null
+        val transferMs = transferFile.takeIf { it.isFile }?.readText()?.let { text ->
+            Regex("""memory_transfer_ms=([0-9.+-Ee]+)""").find(text)?.groupValues?.get(1)?.toDoubleOrNull()
+        }
 
         val rows = file.readLines().drop(1).mapNotNull { line ->
             val p = line.split(',')
@@ -168,7 +172,7 @@ object RuntimeDiagnosticsStore {
             kernelLaunchMs = rows.sumOf { it.queueMs },
             kernelSubmitMs = rows.sumOf { it.submitMs },
             syncMs = rows.sumOf { it.completeMs },
-            memoryTransferMs = null,
+            memoryTransferMs = transferMs,
             topKernels = rows.groupBy { it.kernelName }
                 .map { (name, items) -> OpenClKernelTiming(items.first().opName, name, items.sumOf { it.execMs }) }
                 .sortedByDescending { it.executionMs }
