@@ -165,6 +165,11 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
             lr = (uintptr_t)context->uc_mcontext.regs[30];
         }
 #endif
+        const char phase_prefix[] = "NATIVE_FATAL_SPEC_PHASE=";
+        native_write_text(g_native_fatal_fd, phase_prefix, sizeof(phase_prefix) - 1);
+        const char * phase = g_spec_phase ? g_spec_phase : "UNKNOWN";
+        native_write_text(g_native_fatal_fd, phase, std::strlen(phase));
+        native_write_text(g_native_fatal_fd, "\n", 1);
         native_write_hex(g_native_fatal_fd, pc_prefix, pc);
         native_write_hex(g_native_fatal_fd, lr_prefix, lr);
         native_write_hex(g_native_fatal_fd, addr_prefix, info ? (uintptr_t)info->si_addr : 0);
