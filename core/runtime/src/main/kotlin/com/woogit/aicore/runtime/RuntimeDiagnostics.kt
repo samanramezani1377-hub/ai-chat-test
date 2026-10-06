@@ -29,7 +29,7 @@ data class RuntimeDiagnosticsSnapshot(
 )
 
 object RuntimeDiagnosticsStore {
-    private const val MAX_NATIVE_DIAGNOSTIC_LINES = 20
+    private const val MAX_NATIVE_DIAGNOSTIC_LINES = 80
     private val markerFile = File(System.getProperty("java.io.tmpdir") ?: ".", "ai-chat-last-native-event.txt")
     private val preflightFile = File(System.getProperty("java.io.tmpdir") ?: ".", "ai-chat-model-preflight.txt")
     private val nativeTraceFile = File(System.getProperty("java.io.tmpdir") ?: ".", "ai-chat-native-trace.txt")
