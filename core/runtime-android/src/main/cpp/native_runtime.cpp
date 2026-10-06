@@ -364,7 +364,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     const char *path = env->GetStringUTFChars(jpath, nullptr);
     if (!path) { checkpoint("PATH_UTF8_FAILED"); return 3; }
     g_spec_draft_path.clear(); g_spec_requested = false; g_spec_mtp = false; g_target_model_path.clear(); g_spec_accept_ema = 1.0;
-    if (jdraftpath) { const char *dp = env->GetStringUTFChars(jdraftpath, nullptr); if (dp && *dp) { g_spec_draft_path = dp; g_spec_requested = true; g_spec_mtp = false; } if (dp) env->ReleaseStringUTFChars(jdraftpath, dp); }
+    // Draft/speculative decoding is removed from the product; retain the legacy JNI argument but never use it.\n    (void) jdraftpath;\n    g_spec_draft_path.clear(); g_spec_requested = false; g_spec_mtp = false; g_spec_accept_ema = 1.0;\n    append_native_trace("DRAFT_FEATURE_REMOVED");
     g_target_model_path = path;
     const std::string preflight = gguf_preflight(path); checkpoint(preflight.c_str());
     // Target activation must never implicitly enable speculative/MTP.
