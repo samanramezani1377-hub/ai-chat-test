@@ -364,10 +364,13 @@ static void append_weight_residency_trace() {
         const ggml_backend_dev_t dev = ggml_backend_buft_get_device(buft);
         const auto dev_type = dev ? ggml_backend_dev_type(dev) : GGML_BACKEND_DEVICE_TYPE_CPU;
 
-        if (is_host) {
-            host_bytes += bytes; host_tensors++; host_buffers.insert(buffer);
-        } else if (dev_type == GGML_BACKEND_DEVICE_TYPE_GPU || dev_type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+        // OpenCL buffers on Android may be host-accessible because the device is
+        // unified memory. Classify by backend device first; otherwise a real GPU
+        // buffer is incorrectly reported as "Host Tensor Memory".
+        if (dev_type == GGML_BACKEND_DEVICE_TYPE_GPU || dev_type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
             gpu_bytes += bytes; gpu_tensors++; gpu_buffers.insert(buffer);
+        } else if (is_host) {
+            host_bytes += bytes; host_tensors++; host_buffers.insert(buffer);
         } else if (dev_type == GGML_BACKEND_DEVICE_TYPE_CPU) {
             cpu_bytes += bytes; cpu_tensors++; cpu_buffers.insert(buffer);
         } else {
@@ -380,6 +383,22 @@ static void append_weight_residency_trace() {
         gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU);
     }
 
+    // Some OpenCL builds expose the device as an accelerator/other backend type
+    // instead of GGML_BACKEND_DEVICE_TYPE_GPU. Fall back to the device attached
+    // to an actual model tensor so diagnostics never report a working OpenCL
+    // backend as "unavailable".
+    if (!gpu_dev) {
+        for (const auto & entry : g_model->tensors_by_name) {
+            const ggml_tensor * tensor = entry.second;
+            if (!tensor || !tensor->buffer) continue;
+            ggml_backend_dev_t candidate = ggml_backend_buft_get_device(
+                    ggml_backend_buffer_get_type(tensor->buffer));
+            if (candidate && ggml_backend_dev_type(candidate) != GGML_BACKEND_DEVICE_TYPE_CPU) {
+                gpu_dev = candidate;
+                break;
+            }
+        }
+    }
     const char * gpu_name = gpu_dev ? ggml_backend_dev_name(gpu_dev) : "unavailable";
     const char * gpu_description = gpu_dev ? ggml_backend_dev_description(gpu_dev) : "unavailable";
     size_t free_bytes = 0, total_bytes = 0;
