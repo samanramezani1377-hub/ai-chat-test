@@ -375,12 +375,6 @@ static void append_weight_residency_trace() {
         }
     }
 
-    size_t free_bytes = 0, total_bytes = 0;
-    ggml_backend_dev_t gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
-    if (gpu_dev) {
-        ggml_backend_dev_memory(gpu_dev, &free_bytes, &total_bytes);
-    }
-
     ggml_backend_dev_t gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
     if (!gpu_dev) {
         gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU);
@@ -393,9 +387,14 @@ static void append_weight_residency_trace() {
         ggml_backend_dev_memory(gpu_dev, &free_bytes, &total_bytes);
     }
 
+    std::string gpu_name_text = gpu_name ? gpu_name : "unknown";
+    std::string gpu_description_text = gpu_description ? gpu_description : "unknown";
+    std::replace(gpu_name_text.begin(), gpu_name_text.end(), ' ', '_');
+    std::replace(gpu_description_text.begin(), gpu_description_text.end(), ' ', '_');
+
     append_native_trace((std::string("NATIVE_OPENCL_DEVICE") +
-        " name=" + (gpu_name ? gpu_name : "unknown") +
-        " description=" + (gpu_description ? gpu_description : "unknown") +
+        " name=" + gpu_name_text +
+        " description=" + gpu_description_text +
         " memoryFreeMiB=" + std::to_string((double) free_bytes / (1024.0 * 1024.0)) +
         " memoryTotalMiB=" + std::to_string((double) total_bytes / (1024.0 * 1024.0)) +
         " memoryKnown=" + ((free_bytes > 0 && total_bytes > 0) ? "1" : "0")).c_str());
