@@ -68,18 +68,21 @@ internal object Qwen3PromptFormatter {
         val thinkStart = "<think>"
         val thinkEnd = "</think>"
         val start = text.indexOf(thinkStart)
-        val end = if (start >= 0) text.indexOf(thinkEnd, start + thinkStart.length) else -1
+        // The opening <think> is part of the generation prompt, so the streamed
+        // GenerationResult normally contains reasoning followed by generated </think>.
+        val explicitEnd = if (start >= 0) text.indexOf(thinkEnd, start + thinkStart.length) else -1
+        val end = if (explicitEnd >= 0) explicitEnd else text.indexOf(thinkEnd)
 
         append("<think>\n")
-        if (start >= 0 && end >= 0) {
-            val reasoning = text.substring(start + thinkStart.length, end).trim()
+        if (end >= 0) {
+            val reasoningStart = if (start >= 0) start + thinkStart.length else 0
+            val reasoning = text.substring(reasoningStart, end).trim()
             if (reasoning.isNotEmpty()) append(reasoning).append('\n')
         }
         append("</think>\n\n")
 
-        if (start >= 0 && end >= 0) {
-            val answer = text.substring(end + thinkEnd.length).trimStart()
-            append(answer)
+        if (end >= 0) {
+            append(text.substring(end + thinkEnd.length).trimStart())
         } else {
             append(text)
         }
