@@ -14,7 +14,11 @@ private const val RECENT_ACTION_EVENTS = 10
 internal data class NativePerformance(
     val prefillMs: Long? = null,
     val promptTokens: Int? = null,
+    val cacheStatus: String? = null,
+    val cachedTokens: Int? = null,
     val reusedTokens: Int? = null,
+    val newTokens: Int? = null,
+    val cacheHitRatio: Double? = null,
     val generatedTokens: Int? = null,
     val generationMs: Long? = null,
     val decodeTokensPerSec: Double? = null,
@@ -60,7 +64,11 @@ internal data class RuntimeDiagnostic(
         get() = NativePerformance(
             prefillMs = nativeValue("prefillMs")?.toLongOrNull(),
             promptTokens = nativeValue("promptTokens")?.toIntOrNull(),
-            reusedTokens = nativeValue("reusedTokens")?.toIntOrNull(),
+            cacheStatus = nativeCacheValue("status"),
+            cachedTokens = nativeCacheValue("cachedTokens")?.toIntOrNull(),
+            reusedTokens = nativeCacheValue("reusedTokens")?.toIntOrNull(),
+            newTokens = nativeCacheValue("newTokens")?.toIntOrNull(),
+            cacheHitRatio = nativeCacheValue("hitRatio")?.toDoubleOrNull(),
             generatedTokens = nativeValue("generatedTokens")?.toIntOrNull(),
             generationMs = nativeValue("generationMs")?.toLongOrNull(),
             decodeTokensPerSec = nativeValue("decodeTokensPerSec")?.toDoubleOrNull(),
@@ -87,6 +95,12 @@ internal data class RuntimeDiagnostic(
     private fun nativeValue(key: String): String? {
         val text = nativeDiagnostics ?: return null
         val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("$key=") } ?: return null
+        return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
+    }
+
+    private fun nativeCacheValue(key: String): String? {
+        val text = nativeDiagnostics ?: return null
+        val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("NATIVE_KV_CACHE_RESULT") && it.contains("$key=") } ?: return null
         return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
     }
 
@@ -130,7 +144,11 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("===== NATIVE PERFORMANCE =====")
     appendLine("Prefill Time: ${perf.prefillMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Prefill Prompt Tokens: ${perf.promptTokens ?: "N/A"}")
+    appendLine("KV Cache Status: ${perf.cacheStatus ?: "N/A"}")
+    appendLine("KV Cache Cached Tokens: ${perf.cachedTokens ?: "N/A"}")
     appendLine("KV Cache Reused Tokens: ${perf.reusedTokens ?: "N/A"}")
+    appendLine("KV Cache New Tokens: ${perf.newTokens ?: "N/A"}")
+    appendLine("KV Cache Hit Ratio: ${perf.cacheHitRatio?.let { "%.1f%%".format(it) } ?: "N/A"}")
     appendLine("Decode Time: ${perf.decodeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Decode Generated Tokens: ${perf.generatedTokens ?: "N/A"}")
     appendLine("Decode Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: "N/A"}")
