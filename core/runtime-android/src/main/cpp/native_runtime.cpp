@@ -381,6 +381,25 @@ static void append_weight_residency_trace() {
         ggml_backend_dev_memory(gpu_dev, &free_bytes, &total_bytes);
     }
 
+    ggml_backend_dev_t gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
+    if (!gpu_dev) {
+        gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU);
+    }
+
+    const char * gpu_name = gpu_dev ? ggml_backend_dev_name(gpu_dev) : "unavailable";
+    const char * gpu_description = gpu_dev ? ggml_backend_dev_description(gpu_dev) : "unavailable";
+    size_t free_bytes = 0, total_bytes = 0;
+    if (gpu_dev) {
+        ggml_backend_dev_memory(gpu_dev, &free_bytes, &total_bytes);
+    }
+
+    append_native_trace((std::string("NATIVE_OPENCL_DEVICE") +
+        " name=" + (gpu_name ? gpu_name : "unknown") +
+        " description=" + (gpu_description ? gpu_description : "unknown") +
+        " memoryFreeMiB=" + std::to_string((double) free_bytes / (1024.0 * 1024.0)) +
+        " memoryTotalMiB=" + std::to_string((double) total_bytes / (1024.0 * 1024.0)) +
+        " memoryKnown=" + ((free_bytes > 0 && total_bytes > 0) ? "1" : "0")).c_str());
+
     append_native_trace((std::string("NATIVE_WEIGHT_RESIDENCY") +
         " gpuTensorBytes=" + std::to_string(gpu_bytes) +
         " gpuTensorMiB=" + std::to_string((double) gpu_bytes / (1024.0 * 1024.0)) +
