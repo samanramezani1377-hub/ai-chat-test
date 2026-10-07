@@ -1,11 +1,22 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
     <application
         android:name=".AIChatApplication"
         android:label="AI Chat Test"
         android:theme="@style/Theme.AIChatTest"
         android:allowBackup="true"
         android:supportsRtl="true">
+        <service
+            android:name=".ModelRuntimeForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Long-running on-device local AI model inference with native GPU runtime" />
+        </service>
         <activity
             android:name=".MainActivity"
             android:exported="true"
