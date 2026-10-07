@@ -57,8 +57,9 @@ android {
         release {
             externalNativeBuild {
                 cmake {
-                    // Production must not pay OpenCL event-profiling synchronization overhead.
-                    arguments += "-DAI_CHAT_OPENCL_PROFILING=OFF"
+                    // Keep the real OpenCL kernel profile available in the shipped
+                    // diagnostic build; the profiler writes asynchronously to app cache.
+                    arguments += "-DAI_CHAT_OPENCL_PROFILING=ON"
                 }
             }
         }
