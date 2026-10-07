@@ -43,6 +43,7 @@ static common_speculative * g_spec = nullptr;
 static volatile const char * g_spec_phase = "IDLE";
 static void set_spec_phase(const char * phase) { g_spec_phase = phase ? phase : "UNKNOWN"; }
 static void append_native_trace(const char *text);
+static void append_weight_residency_trace();
 
 struct NativeDecodeProfile {
     int64_t decode_ms = 0;
@@ -1186,6 +1187,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                 ? (requested_max > max_predict ? "CONTEXT_LIMIT" : "MAX_TOKENS")
                 : "COMPLETED";
     }
+    append_weight_residency_trace();
     append_native_trace((std::string("NATIVE_KV_CACHE_RESULT status=") +
         (cache_reused ? "HIT" : "MISS") +
         " cachedTokens=" + std::to_string(diagnostic_cached_tokens) +
