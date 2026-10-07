@@ -378,26 +378,50 @@ static void append_weight_residency_trace() {
         }
     }
 
-    ggml_backend_dev_t gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
-    if (!gpu_dev) {
-        gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU);
+    // Prefer the actual non-CPU device registered by the OpenCL backend.
+    ggml_backend_dev_t gpu_dev = nullptr;
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        ggml_backend_dev_t candidate = ggml_backend_dev_get(i);
+        if (!candidate) continue;
+        const auto type = ggml_backend_dev_type(candidate);
+        if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            gpu_dev = candidate;
+            break;
+        }
     }
 
-    // Some OpenCL builds expose the device as an accelerator/other backend type
-    // instead of GGML_BACKEND_DEVICE_TYPE_GPU. Fall back to the device attached
-    // to an actual model tensor so diagnostics never report a working OpenCL
-    // backend as "unavailable".
+    // If the registry classification is unusual, use the device actually
+    // attached to a model tensor as the authoritative runtime device.
     if (!gpu_dev) {
         for (const auto & entry : g_model->tensors_by_name) {
             const ggml_tensor * tensor = entry.second;
             if (!tensor || !tensor->buffer) continue;
             ggml_backend_dev_t candidate = ggml_backend_buft_get_device(
                     ggml_backend_buffer_get_type(tensor->buffer));
-            if (candidate && ggml_backend_dev_type(candidate) != GGML_BACKEND_DEVICE_TYPE_CPU) {
+            if (!candidate) continue;
+            const auto type = ggml_backend_dev_type(candidate);
+            if (type != GGML_BACKEND_DEVICE_TYPE_CPU && type != GGML_BACKEND_DEVICE_TYPE_ACCEL) {
                 gpu_dev = candidate;
                 break;
             }
         }
+    }
+
+    // Expose the complete registry state so a real backend-registration problem
+    // cannot be hidden behind an "unavailable" UI value.
+    append_native_trace((std::string("NATIVE_BACKEND_DEVICES count=") +
+        std::to_string(ggml_backend_dev_count())).c_str());
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        ggml_backend_dev_t candidate = ggml_backend_dev_get(i);
+        if (!candidate) continue;
+        ggml_backend_dev_props props{};
+        ggml_backend_dev_get_props(candidate, &props);
+        append_native_trace((std::string("NATIVE_BACKEND_DEVICE index=") +
+            std::to_string(i) + " name=" + (props.name ? props.name : "unknown") +
+            " description=" + (props.description ? props.description : "unknown") +
+            " type=" + std::to_string((int)props.type) +
+            " memoryFreeMiB=" + std::to_string((double)props.memory_free / (1024.0 * 1024.0)) +
+            " memoryTotalMiB=" + std::to_string((double)props.memory_total / (1024.0 * 1024.0))).c_str());
     }
     const char * gpu_name = gpu_dev ? ggml_backend_dev_name(gpu_dev) : "unavailable";
     const char * gpu_description = gpu_dev ? ggml_backend_dev_description(gpu_dev) : "unavailable";
@@ -454,11 +478,24 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
         { nullptr, nullptr },
     };
     if (gpu) {
-        if (ggml_backend_dev_t gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU)) {
+        ggml_backend_dev_t gpu_dev = nullptr;
+        for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+            ggml_backend_dev_t candidate = ggml_backend_dev_get(i);
+            if (!candidate) continue;
+            const auto type = ggml_backend_dev_type(candidate);
+            if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+                gpu_dev = candidate;
+                break;
+            }
+        }
+        if (gpu_dev) {
             overrides[0].buft = ggml_backend_dev_buffer_type(gpu_dev);
             mp.tensor_buft_overrides = overrides;
             append_native_trace((std::string("OPENCL_WEIGHT_OVERRIDE token_embd buft=") +
-                ggml_backend_buft_name(overrides[0].buft)).c_str());
+                ggml_backend_buft_name(overrides[0].buft) + " device=" +
+                ggml_backend_dev_name(gpu_dev)).c_str());
+        } else {
+            append_native_trace("OPENCL_WEIGHT_OVERRIDE token_embd FAILED_NO_GPU_DEVICE");
         }
     }
 
