@@ -72,6 +72,17 @@ set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
 
+# Static backend hardening: make the OpenCL registration visible to the final
+# runtime target as a real link dependency. This prevents linker GC from
+# discarding the backend registration object and makes a missing OpenCL target
+# a build-time error instead of a silent CPU-only runtime.
+if (NOT TARGET ggml-opencl)
+    message(FATAL_ERROR "GPU-only runtime requires the statically linked ggml-opencl target")
+endif()
+if (TARGET ggml)
+    target_compile_definitions(ggml PUBLIC GGML_USE_OPENCL=1)
+endif()
+
 if (AI_CHAT_OPENCL_PROFILING)
     include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_opencl_profiling.cmake")
 endif()
@@ -97,12 +108,13 @@ target_link_options(ai_chat_runtime PRIVATE
     -Wl,--strip-all
 )
 
-target_link_libraries(ai_chat_runtime llama llama-common android log OpenCL)
+target_link_libraries(ai_chat_runtime PRIVATE llama llama-common ggml-opencl android log OpenCL)
 
 target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"
     AI_CHAT_GPU_BACKEND_OPENCL=1
     AI_CHAT_GPU_BACKEND_VULKAN=0
+    AI_CHAT_REQUIRE_OPENCL_GPU=1
 )
 
 if (ANDROID)
