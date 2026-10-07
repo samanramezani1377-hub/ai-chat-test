@@ -90,6 +90,40 @@ static bool init_generation_context() {
     return true;
 }
 
+static bool validate_gpu_model_residency() {
+    if (!g_model) return false;
+    size_t gpu_bytes = 0, cpu_bytes = 0, other_bytes = 0;
+    size_t gpu_tensors = 0, cpu_tensors = 0, other_tensors = 0;
+    for (const auto & entry : g_model->tensors_by_name) {
+        const ggml_tensor * tensor = entry.second;
+        if (!tensor || !tensor->buffer) continue;
+        const auto * buft = ggml_backend_buffer_get_type(tensor->buffer);
+        const auto * dev = ggml_backend_buft_get_device(buft);
+        const auto type = dev ? ggml_backend_dev_type(dev) : GGML_BACKEND_DEVICE_TYPE_CPU;
+        const size_t bytes = ggml_nbytes(tensor);
+        if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            gpu_bytes += bytes; ++gpu_tensors;
+        } else if (type == GGML_BACKEND_DEVICE_TYPE_CPU) {
+            cpu_bytes += bytes; ++cpu_tensors;
+        } else {
+            other_bytes += bytes; ++other_tensors;
+        }
+    }
+    append_native_trace((std::string("OPENCL_MODEL_RESIDENCY gpuBytes=") +
+        std::to_string(gpu_bytes) + " gpuTensors=" + std::to_string(gpu_tensors) +
+        " cpuBytes=" + std::to_string(cpu_bytes) + " cpuTensors=" +
+        std::to_string(cpu_tensors) + " otherBytes=" + std::to_string(other_bytes) +
+        " otherTensors=" + std::to_string(other_tensors)).c_str());
+
+    // A tiny CPU-side tensor is not useful for inference, but a substantial CPU
+    // weight allocation means the GPU-only contract has been violated.
+    constexpr size_t kCpuWeightToleranceBytes = 64 * 1024;
+    const bool ok = gpu_bytes > 0 && cpu_bytes <= kCpuWeightToleranceBytes && other_bytes == 0;
+    append_native_trace(ok ? "OPENCL_MODEL_RESIDENCY_GPU_ONLY_OK"
+                           : "OPENCL_MODEL_RESIDENCY_GPU_ONLY_REJECTED");
+    return ok;
+}
+
 static bool register_static_opencl_backend() {
     // GGML_BACKEND_DL is disabled on Android. Explicitly register the statically
     // linked OpenCL backend so runtime discovery never depends on APK filesystem
@@ -593,7 +627,16 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     checkpoint("MODEL_LOAD_STARTED gpu_layers=OPENCL");
     g_model = load_model_android(path, mp, true);
     checkpoint(g_model ? "MODEL_LOAD_RETURNED_SUCCESS" : "MODEL_LOAD_RETURNED_FAILED");
-    if (g_model) append_weight_residency_trace();
+    if (g_model) {
+        append_weight_residency_trace();
+        if (!validate_gpu_model_residency()) {
+            checkpoint("OPENCL_GPU_ONLY_MODEL_RESIDENCY_REJECTED");
+            append_native_trace("OPENCL_GPU_ONLY_NO_CPU_WEIGHT_FALLBACK");
+            env->ReleaseStringUTFChars(jpath, path);
+            free_all();
+            return 6;
+        }
+    }
     env->ReleaseStringUTFChars(jpath, path);
     if (!g_model) {
         checkpoint("OPENCL_GPU_ONLY_MODEL_LOAD_FAILED_NO_CPU_FALLBACK");
