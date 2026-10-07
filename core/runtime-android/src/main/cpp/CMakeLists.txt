@@ -89,10 +89,16 @@ endif()
 
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp)
 
+# native_runtime.cpp intentionally includes llama.cpp/ggml internal headers for
+# strict backend and tensor-residency validation. Keep both internal source
+# directories on the include path; the public ggml include directory alone is
+# insufficient for ggml-backend-impl.h and ggml-opencl.h on this pinned revision.
 target_include_directories(ai_chat_runtime PRIVATE
     ${llama_cpp_SOURCE_DIR}/include
     ${llama_cpp_SOURCE_DIR}/src
     ${llama_cpp_SOURCE_DIR}/ggml/include
+    ${llama_cpp_SOURCE_DIR}/ggml/src
+    ${llama_cpp_SOURCE_DIR}/ggml/src/ggml-opencl
     ${opencl_headers_SOURCE_DIR}
 )
 
