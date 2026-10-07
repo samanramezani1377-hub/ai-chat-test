@@ -19,7 +19,7 @@ class Qwen3PromptFormatterTest {
         assertEquals(
             "<|im_start|>system\nYou are helpful.<|im_end|>\n" +
                 "<|im_start|>user\nسلام<|im_end|>\n" +
-                "<|im_start|>assistant\nسلام!<|im_end|>\n" +
+                "<|im_start|>assistant\n<think>\n</think>\n\nسلام!<|im_end|>\n" +
                 "<|im_start|>user\nحالت چطوره؟<|im_end|>\n" +
                 "<|im_start|>assistant\n",
             prompt
@@ -33,7 +33,7 @@ class Qwen3PromptFormatterTest {
         )
 
         assertEquals(
-            "<|im_start|>tool\ntool-result<|im_end|>\n<|im_start|>assistant\n",
+            "<|im_start|>user\n<tool_response>\ntool-result\n</tool_response><|im_end|>\n<|im_start|>assistant\n<think>\n",
             prompt
         )
     }
