@@ -6,6 +6,9 @@
 
 // Tokens represented by the resident prompt prefix in the native KV cache.
 static std::vector<llama_token> g_cached_prompt_tokens;
+// Identity of the model/context that owns the resident KV cache.
+static llama_model * g_cached_model = nullptr;
+static llama_context * g_cached_context = nullptr;
 // Hybrid/recurrent models cannot safely trim their recurrent state with
 // llama_memory_seq_rm(). Keep an exact post-prefill sequence snapshot instead.
 static std::vector<uint8_t> g_cached_prompt_state;
