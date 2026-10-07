@@ -57,7 +57,8 @@ android {
         release {
             externalNativeBuild {
                 cmake {
-                    arguments += "-DAI_CHAT_OPENCL_PROFILING=ON"
+                    // Production must not pay OpenCL event-profiling synchronization overhead.
+                    arguments += "-DAI_CHAT_OPENCL_PROFILING=OFF"
                 }
             }
         }
