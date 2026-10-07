@@ -99,6 +99,15 @@ jobs:
               '.github/workflows/ci.yml'
             ) }}
 
+      - name: Verify GPU-only runtime invariants
+        run: |
+          set -euo pipefail
+          ! grep -R "GGML_OPENCL_ADRENO_XMEM_GEMM.*1" -n core/runtime-android/src/main/cpp
+          grep -q 'GGML_OPENCL_Q6K_GEMV_TILED.*0' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'AI_CHAT_OPENCL_PROFILING=ON' core/runtime-android/build.gradle.kts
+          grep -q 'resident_max + 1' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          echo "GPU-only/KV-cache diagnostics invariants verified"
+
       - name: Assemble debug APK
         run: >-
           gradle
