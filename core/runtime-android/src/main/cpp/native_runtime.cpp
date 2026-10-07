@@ -88,6 +88,24 @@ static bool init_generation_context() {
     return true;
 }
 
+static bool has_opencl_gpu_device() {
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        if (!dev) continue;
+        const auto type = ggml_backend_dev_type(dev);
+        if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            const char * name = ggml_backend_dev_name(dev);
+            const char * desc = ggml_backend_dev_description(dev);
+            append_native_trace((std::string("OPENCL_GPU_DEVICE_FOUND name=") +
+                (name ? name : "unknown") + " description=" +
+                (desc ? desc : "unknown") + " type=" +
+                std::to_string((int)type)).c_str());
+            return true;
+        }
+    }
+    return false;
+}
+
 static void append_native_trace(const char *text) {
     if (!text || !*text || g_native_trace_file.empty()) return;
     std::lock_guard<std::mutex> lock(g_native_marker_mutex);
@@ -336,7 +354,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         append_native_trace("OPENCL_BACKEND_LOAD_ALL_STARTED");
         ggml_backend_load_all();
         append_native_trace("OPENCL_BACKEND_LOAD_ALL_RETURNED");
-        g_gpu_backend_loaded = true;
+        g_gpu_backend_loaded = has_opencl_gpu_device();
+        append_native_trace((std::string("OPENCL_BACKEND_DEVICE_STATE loaded=") +
+            (g_gpu_backend_loaded ? "1" : "0") +
+            " deviceCount=" + std::to_string(ggml_backend_dev_count())).c_str());
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
         llama_backend_init();
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_RETURNED");
@@ -521,6 +542,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     // allocate a second context during activation. Draft/speculative setup
     // happens only after the target runtime is fully ready.
     append_native_trace("SPECULATIVE_AUTO_DETECTION_DISABLED_DURING_TARGET_LOAD");
+    if (!g_gpu_backend_loaded || !has_opencl_gpu_device()) {
+        checkpoint("OPENCL_GPU_ONLY_REJECTED_NO_OPENCL_GPU_DEVICE");
+        append_native_trace("OPENCL_GPU_ONLY_NO_CPU_FALLBACK");
+        env->ReleaseStringUTFChars(jpath, path);
+        return 5;
+    }
     if (gpu_layers <= 0) {
         checkpoint("OPENCL_GPU_ONLY_REJECTED_INVALID_GPU_LAYERS");
         env->ReleaseStringUTFChars(jpath, path);
@@ -572,7 +599,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeUnload(JNIEnv *, jclass) { g_stop.store(true); free_all(); }
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeRuntimeInfo(JNIEnv *env, jclass) {
-    const std::string value = std::string(g_gpu ? "OpenCL-GPU-ONLY" : "OpenCL-UNAVAILABLE") + "; llama.cpp=" + AI_CHAT_LLAMA_CPP_SHA;
+    const std::string value = std::string(g_gpu && g_gpu_backend_loaded ? "OpenCL-GPU-ONLY" : "OpenCL-UNAVAILABLE") + "; llama.cpp=" + AI_CHAT_LLAMA_CPP_SHA;
     return env->NewStringUTF(value.c_str());
 }
 
