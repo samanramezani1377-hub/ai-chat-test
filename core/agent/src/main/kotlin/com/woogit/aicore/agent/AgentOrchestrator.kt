@@ -57,16 +57,11 @@ class AgentOrchestrator(
         // Keeping the complete stored history here guarantees the next turn sees the
         // previous user message and the model's previous answer.
         val contextLimit = if (requestedRecentMessages <= 0) Int.MAX_VALUE else requestedRecentMessages
+        val baseContext = contextProvider.build(contextLimit)
         val context = if (contextMessages != null) {
-            ConversationContext(
-                system = null,
-                persistentTask = null,
-                summary = null,
-                recentMessages = contextMessages,
-                workspace = null,
-            )
+            baseContext.copy(recentMessages = contextMessages)
         } else {
-            contextProvider.build(contextLimit)
+            baseContext
         }
         return runtime.generate(requestFactory.create(context, settings), onToken)
     }
