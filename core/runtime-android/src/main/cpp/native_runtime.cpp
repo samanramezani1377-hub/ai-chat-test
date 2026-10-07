@@ -16,6 +16,9 @@
 #include <ucontext.h>
 #include "llama.h"
 #include "gguf.h"
+#include "llama-model.h"
+#include "ggml-backend.h"
+#include <set>
 
 #define LOG_TAG "AIChatRuntime"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -343,6 +346,60 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
     }
 }
 
+static void append_weight_residency_trace() {
+    if (!g_model) return;
+
+    size_t gpu_bytes = 0, host_bytes = 0, cpu_bytes = 0, other_bytes = 0;
+    size_t gpu_tensors = 0, host_tensors = 0, cpu_tensors = 0, other_tensors = 0;
+    std::set<ggml_backend_buffer_t> gpu_buffers, host_buffers, cpu_buffers, other_buffers;
+
+    for (const auto & entry : g_model->tensors_by_name) {
+        const ggml_tensor * tensor = entry.second;
+        if (!tensor || !tensor->buffer) continue;
+
+        const size_t bytes = ggml_nbytes(tensor);
+        const ggml_backend_buffer_t buffer = tensor->buffer;
+        const ggml_backend_buffer_type_t buft = ggml_backend_buffer_get_type(buffer);
+        const bool is_host = ggml_backend_buft_is_host(buft);
+        const ggml_backend_dev_t dev = ggml_backend_buft_get_device(buft);
+        const auto dev_type = dev ? ggml_backend_dev_type(dev) : GGML_BACKEND_DEVICE_TYPE_CPU;
+
+        if (is_host) {
+            host_bytes += bytes; host_tensors++; host_buffers.insert(buffer);
+        } else if (dev_type == GGML_BACKEND_DEVICE_TYPE_GPU || dev_type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            gpu_bytes += bytes; gpu_tensors++; gpu_buffers.insert(buffer);
+        } else if (dev_type == GGML_BACKEND_DEVICE_TYPE_CPU) {
+            cpu_bytes += bytes; cpu_tensors++; cpu_buffers.insert(buffer);
+        } else {
+            other_bytes += bytes; other_tensors++; other_buffers.insert(buffer);
+        }
+    }
+
+    size_t free_bytes = 0, total_bytes = 0;
+    ggml_backend_dev_t gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
+    if (gpu_dev) {
+        ggml_backend_dev_memory(gpu_dev, &free_bytes, &total_bytes);
+    }
+
+    append_native_trace((std::string("NATIVE_WEIGHT_RESIDENCY") +
+        " gpuTensorBytes=" + std::to_string(gpu_bytes) +
+        " gpuTensorMiB=" + std::to_string((double) gpu_bytes / (1024.0 * 1024.0)) +
+        " gpuTensors=" + std::to_string(gpu_tensors) +
+        " gpuBuffers=" + std::to_string(gpu_buffers.size()) +
+        " hostTensorBytes=" + std::to_string(host_bytes) +
+        " hostTensorMiB=" + std::to_string((double) host_bytes / (1024.0 * 1024.0)) +
+        " hostTensors=" + std::to_string(host_tensors) +
+        " hostBuffers=" + std::to_string(host_buffers.size()) +
+        " cpuTensorBytes=" + std::to_string(cpu_bytes) +
+        " cpuTensorMiB=" + std::to_string((double) cpu_bytes / (1024.0 * 1024.0)) +
+        " cpuTensors=" + std::to_string(cpu_tensors) +
+        " cpuBuffers=" + std::to_string(cpu_buffers.size()) +
+        " otherTensorBytes=" + std::to_string(other_bytes) +
+        " otherTensors=" + std::to_string(other_tensors) +
+        " gpuFreeMiB=" + std::to_string((double) free_bytes / (1024.0 * 1024.0)) +
+        " gpuTotalMiB=" + std::to_string((double) total_bytes / (1024.0 * 1024.0))).c_str());
+}
+
 static llama_model *load_model_android(const char *path, llama_model_params mp, bool gpu) {
     // Avoid the mmap -> OpenCL host-pointer import path on Android. Mobile UMA OpenCL
     // drivers can fail inside buffer_from_host_ptr while the model is being initialized.
@@ -350,7 +407,25 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
     // GPU layers remain enabled without relying on the fragile mmap buffer import.
     mp.load_mode = LLAMA_LOAD_MODE_NONE;
     mp.check_tensors = false;
-    checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_STAGED" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
+    mp.no_host = true;
+
+    // llama.cpp intentionally keeps the input embedding table on CPU. For this
+    // GPU-only runtime, place token_embd on the OpenCL device too, avoiding a
+    // host-side embedding lookup/transfer on every decode step.
+    static llama_model_tensor_buft_override overrides[] = {
+        { "token_embd", nullptr },
+        { nullptr, nullptr },
+    };
+    if (gpu) {
+        if (ggml_backend_dev_t gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU)) {
+            overrides[0].buft = ggml_backend_dev_buffer_type(gpu_dev);
+            mp.tensor_buft_overrides = overrides;
+            append_native_trace((std::string("OPENCL_WEIGHT_OVERRIDE token_embd buft=") +
+                ggml_backend_buft_name(overrides[0].buft)).c_str());
+        }
+    }
+
+    checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_RESIDENT" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
     return llama_model_load_from_file(path, mp);
@@ -390,6 +465,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     checkpoint("MODEL_LOAD_STARTED gpu_layers=OPENCL");
     g_model = load_model_android(path, mp, true);
     checkpoint(g_model ? "MODEL_LOAD_RETURNED_SUCCESS" : "MODEL_LOAD_RETURNED_FAILED");
+    if (g_model) append_weight_residency_trace();
     env->ReleaseStringUTFChars(jpath, path);
     if (!g_model) {
         checkpoint("OPENCL_GPU_ONLY_MODEL_LOAD_FAILED_NO_CPU_FALLBACK");
