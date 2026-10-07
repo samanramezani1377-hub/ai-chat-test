@@ -47,6 +47,8 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         runtimeTrace = runtime.trace,
         nativeDiagnostics = runtime.lastNativeEvent,
         openClProfile = runtime.openClProfile,
+        gpuDevice = runtime.gpuDevice,
+        weightResidency = runtime.weightResidency,
     )
     val report = buildString {
         append(diagnostic.report())
