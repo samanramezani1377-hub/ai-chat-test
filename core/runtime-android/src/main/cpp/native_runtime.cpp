@@ -330,9 +330,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         // shape/device gates say it is beneficial. This does not affect the
         // one-token Q6_K GEMV path used for decode, but can reduce prompt-time
         // F16 GEMM cost without changing model math or quantization.
-        setenv("GGML_OPENCL_ADRENO_XMEM_GEMM", "1", 1);
+        unsetenv("GGML_OPENCL_ADRENO_XMEM_GEMM");
         unsetenv("GGML_DISABLE_OPENCL");
-        append_native_trace("OPENCL_Q6K_SPECIALIZED_KERNELS tiled=0 o4=1 o4_global=1 xmem_gemm=1");
+        append_native_trace("OPENCL_Q6K_SPECIALIZED_KERNELS tiled=0 o4=1 o4_global=1 xmem_gemm=0");
         append_native_trace("OPENCL_BACKEND_LOAD_ALL_STARTED");
         ggml_backend_load_all();
         append_native_trace("OPENCL_BACKEND_LOAD_ALL_RETURNED");
