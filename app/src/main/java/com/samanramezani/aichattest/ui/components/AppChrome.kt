@@ -80,7 +80,7 @@ internal fun AppHeader(
         }
         Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
             Text(title, style = MaterialTheme.typography.titleLarge)
-            Text(if (destination == AppDestination.CHAT) "اجرای محلی روی دستگاه" else "AI Chat · local runtime",
+            Text(if (destination == AppDestination.CHAT) "اجرای محلی روی دستگاه" else "رابط و ابزارهای مدل محلی",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Surface(
