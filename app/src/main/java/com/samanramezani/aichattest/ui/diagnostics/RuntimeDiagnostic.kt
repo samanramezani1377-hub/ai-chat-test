@@ -21,6 +21,7 @@ internal data class NativePerformance(
     val cacheHitRatio: Double? = null,
     val generatedTokens: Int? = null,
     val generationMs: Long? = null,
+    val decodeMs: Long? = null,
     val decodeTokensPerSec: Double? = null,
     val speculativeDraftTokens: Int? = null,
     val speculativeAcceptedTokens: Int? = null,
@@ -41,8 +42,6 @@ internal data class NativePerformance(
     val speculativeTokensPerSec: Double? = null,
     val speculativeFallbackCode: Int? = null,
 ) {
-    val decodeMs: Long?
-        get() = if (generationMs != null && prefillMs != null) (generationMs - prefillMs).coerceAtLeast(0L) else null
 }
 
 internal data class RuntimeDiagnostic(
@@ -73,6 +72,7 @@ internal data class RuntimeDiagnostic(
             cacheHitRatio = nativeCacheValue("hitRatio")?.toDoubleOrNull(),
             generatedTokens = nativeValue("generatedTokens")?.toIntOrNull(),
             generationMs = nativeValue("generationMs")?.toLongOrNull(),
+            decodeMs = nativeValue("decodeMs")?.toLongOrNull(),
             decodeTokensPerSec = nativeValue("decodeTokensPerSec")?.toDoubleOrNull(),
             speculativeDraftTokens = nativeValue("draftTokens")?.toIntOrNull(),
             speculativeAcceptedTokens = nativeValue("acceptedTokens")?.toIntOrNull(),
@@ -138,9 +138,9 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine()
     appendLine("Load Time: ${loadTimeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("TTFT: ${generation?.firstTokenTimeMs?.let { "$it ms" } ?: "N/A"}")
-    appendLine("Generation Time: ${generation?.generationTimeMs?.let { "$it ms" } ?: "N/A"}")
-    appendLine("Prompt Tokens: ${generation?.inputTokens ?: "N/A"}")
-    appendLine("Output Tokens: ${generation?.outputTokens ?: "N/A"}")
+    appendLine("Generation Time: ${perf.generationMs?.let { "$it ms" } ?: generation?.generationTimeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Prompt Tokens: ${perf.promptTokens ?: generation?.inputTokens ?: "N/A"}")
+    appendLine("Output Tokens: ${perf.generatedTokens ?: generation?.outputTokens ?: "N/A"}")
     appendLine("Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: tokensPerSecond(generation)?.let { "%.2f".format(it) } ?: "N/A"}")
     appendLine()
     appendLine("===== NATIVE PERFORMANCE =====")
@@ -241,9 +241,9 @@ internal fun RuntimeDiagnostic.errorReport(): String = buildString {
     appendLine("Context: ${runtime.contextLength ?: "N/A"}")
     appendLine("Load Time: ${loadTimeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("TTFT: ${generation?.firstTokenTimeMs?.let { "$it ms" } ?: "N/A"}")
-    appendLine("Generation Time: ${generation?.generationTimeMs?.let { "$it ms" } ?: "N/A"}")
-    appendLine("Prompt Tokens: ${generation?.inputTokens ?: perf.promptTokens ?: "N/A"}")
-    appendLine("Output Tokens: ${generation?.outputTokens ?: perf.generatedTokens ?: "N/A"}")
+    appendLine("Generation Time: ${perf.generationMs?.let { "$it ms" } ?: generation?.generationTimeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Prompt Tokens: ${perf.promptTokens ?: generation?.inputTokens ?: "N/A"}")
+    appendLine("Output Tokens: ${perf.generatedTokens ?: generation?.outputTokens ?: "N/A"}")
     appendLine("Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: tokensPerSecond(generation)?.let { "%.2f".format(it) } ?: "N/A"}")
     appendLine()
     appendLine("===== NATIVE PERFORMANCE =====")
