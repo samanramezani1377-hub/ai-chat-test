@@ -78,7 +78,7 @@ private fun parseInlineMarkdown(text: String): AnnotatedString = buildAnnotatedS
                 } else { append(text[i]); i++ }
             }
             text[i].code == 96 -> {
-                val end = text.indexOfFirst { it.code == 96 && text.indexOf(it) >= i + 1 }
+                val end = text.indexOf(96.toChar(), i + 1)
                 if (end > i + 1) { append(text.substring(i + 1, end)); i = end + 1 }
                 else { append(text[i]); i++ }
             }
