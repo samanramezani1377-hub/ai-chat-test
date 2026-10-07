@@ -125,12 +125,25 @@ object RuntimeDiagnosticsStore {
             ?: return@runCatching null
         val candidates = listOf(
             File(root, "cl_profiling.csv"),
+            File("/data/user/0/com.samanramezani.aichattest/cache", "cl_profiling.csv"),
             File("/data/data/com.samanramezani.aichattest/cache", "cl_profiling.csv"),
             File(".", "cl_profiling.csv"),
         ).distinctBy { it.absolutePath }
         val file = candidates.firstOrNull { it.isFile && it.length() > 0L }
             ?: return@runCatching null
-        val transferFile = File(file.parentFile ?: File("."), "cl_transfer_profile.txt")
+        readOpenClProfileFile(file)
+    }.getOrNull()
+
+    /**
+     * Reads one real OpenCL profiling CSV exactly as produced by the native V4 writer.
+     * Kept separate from path discovery so the file read + parse path can be tested
+     * deterministically without requiring an OpenCL-capable CI device.
+     */
+    internal fun readOpenClProfileFile(
+        file: File,
+        transferFile: File = File(file.parentFile ?: File("."), "cl_transfer_profile.txt"),
+    ): OpenClGpuProfile? = runCatching {
+        if (!file.isFile || file.length() <= 0L) return@runCatching null
         val transferMs = transferFile.takeIf { it.isFile }?.readText()?.let { text ->
             Regex("""memory_transfer_ms=([0-9.+-Ee]+)""").find(text)?.groupValues?.get(1)?.toDoubleOrNull()
         }
