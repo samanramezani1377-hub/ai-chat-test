@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -16,8 +17,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.samanramezani.aichattest.ui.state.ExecutionState
+import com.samanramezani.aichattest.ui.state.ExecutionStep
+import com.samanramezani.aichattest.ui.state.StepState
 import com.samanramezani.aichattest.ui.state.UiMessage
 import com.woogit.aicore.domain.ChatMessage
 
@@ -25,13 +30,13 @@ import com.woogit.aicore.domain.ChatMessage
 internal fun ChatPage(
     messages: List<UiMessage>, composer: String, generating: Boolean, approvalBusy: Boolean,
     onComposer: (String) -> Unit, onSend: () -> Unit, onStop: () -> Unit,
-    execution: ExecutionState?, onApprove: () -> Unit, onReject: () -> Unit, onWorkspace: () -> Unit,
+    execution: ExecutionState?, onApprove: () -> Unit, onReject: () -> Unit, onWorkspace: () -> Unit, onCopy: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             if (messages.isEmpty()) item { WelcomeState() }
-            items(messages, key = { it.id }) { MessageRow(it) }
-            if (generating) item { ThinkingPill(approvalBusy) }
+            items(messages, key = { it.id }) { MessageRow(it, onCopy) }
+            if (generating) item { AgentProgress(execution, approvalBusy) }
             if (!generating && execution != null && execution.action != "درخواست Agent") item { ActionSummary(execution, onWorkspace, onApprove, onReject, approvalBusy) }
         }
         Composer(composer, generating, approvalBusy, onComposer, onSend, onStop)
@@ -64,14 +69,50 @@ internal fun ChatPage(
     }
 }
 
-@Composable private fun ThinkingPill(approvalBusy: Boolean) {
-    Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(7.dp).background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(50)))
-                Spacer(Modifier.width(8.dp))
-                Text(if (approvalBusy) "در حال اجرای تأیید…" else "در حال تولید پاسخ…", style = MaterialTheme.typography.labelMedium)
+@Composable
+private fun AgentProgress(execution: ExecutionState?, approvalBusy: Boolean) {
+    val steps = execution?.steps.orEmpty()
+    Surface(
+        Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(Modifier.size(8.dp), shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary) {}
+                Spacer(Modifier.width(9.dp))
+                Text(
+                    when {
+                        approvalBusy -> "در حال اجرای مرحله تأیید…"
+                        steps.any { it.state == StepState.ACTIVE } -> steps.first { it.state == StepState.ACTIVE }.title
+                        else -> "در حال آماده‌سازی پاسخ…"
+                    },
+                    style = MaterialTheme.typography.labelLarge
+                )
             }
+            if (steps.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    steps.takeLast(5).forEach { step -> ProgressStep(step) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProgressStep(step: ExecutionStep) {
+    val icon = when (step.state) {
+        StepState.DONE -> "✓"
+        StepState.FAILED -> "!"
+        StepState.ACTIVE -> "•"
+        StepState.PENDING -> "○"
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Text(icon, color = if (step.state == StepState.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(step.title, style = MaterialTheme.typography.bodyMedium)
+            if (step.detail.isNotBlank()) Text(step.detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -101,7 +142,8 @@ internal fun ChatPage(
     }
 }
 
-@Composable private fun MessageRow(message: UiMessage) {
+@Composable
+private fun MessageRow(message: UiMessage, onCopy: (String) -> Unit) {
     val user = message.role == ChatMessage.Role.USER
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (user) Alignment.End else Alignment.Start) {
         if (!user) Text("مدل محلی", Modifier.padding(start = 4.dp, bottom = 5.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
@@ -111,7 +153,25 @@ internal fun ChatPage(
             color = if (user) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
             tonalElevation = if (user) 0.dp else 1.dp,
         ) {
-            Text(message.text.ifBlank { "…" }, Modifier.padding(horizontal = 16.dp, vertical = 13.dp), color = if (user) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 13.dp)) {
+                if (user) {
+                    Text(message.text.ifBlank { "…" }, color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.bodyLarge)
+                } else {
+                    if (message.text.isBlank()) {
+                        Text("در حال آماده‌سازی پاسخ…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
+                    } else {
+                        AssistantMarkdown(message.text)
+                    }
+                    if (message.text.isNotBlank()) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            IconButton(
+                                onClick = { onCopy(message.text) },
+                                modifier = Modifier.size(34.dp).semantics { contentDescription = "کپی پاسخ" }
+                            ) { Icon(Icons.Default.ContentCopy, contentDescription = "کپی") }
+                        }
+                    }
+                }
+            }
         }
     }
 }
