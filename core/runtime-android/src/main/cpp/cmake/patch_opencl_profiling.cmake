@@ -11,7 +11,7 @@ endif()
 
 file(READ "${_src_file}" _src)
 
-if (_src MATCHES "AI_CHAT_OPENCL_PROFILE_PATCH_V4")
+if (_src MATCHES "AI_CHAT_OPENCL_PROFILE_PATCH_V4" AND _src MATCHES "fperf_live" AND _src MATCHES "profiling_info.size\\(\\) >= 256")
     return()
 endif()
 
