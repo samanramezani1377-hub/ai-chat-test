@@ -74,6 +74,7 @@ add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp)
 
 target_include_directories(ai_chat_runtime PRIVATE
     ${llama_cpp_SOURCE_DIR}/include
+    ${llama_cpp_SOURCE_DIR}/src
     ${llama_cpp_SOURCE_DIR}/ggml/include
     ${opencl_headers_SOURCE_DIR}
 )
