@@ -26,8 +26,6 @@ import com.woogit.aicore.conversation.ConversationStore
 import com.woogit.aicore.conversation.DefaultContextProvider
 import com.woogit.aicore.conversation.InMemoryConversationHistoryRepository
 import com.woogit.aicore.domain.ActionRegistry
-import com.woogit.aicore.domain.ApiProviderConfig
-import com.woogit.aicore.domain.ApiProviderConfigStore
 import com.woogit.aicore.domain.CapabilityProvider
 import com.woogit.aicore.domain.ModelResult
 import com.woogit.aicore.domain.VerificationResult
@@ -35,12 +33,12 @@ import com.woogit.aicore.domain.Verifier
 import com.woogit.aicore.observability.CentralObservability
 import com.woogit.aicore.observability.ErrorReport
 import com.woogit.aicore.observability.ExecutionTraceEvent
-import com.woogit.aicore.runtime.RemoteApiRuntimeAdapter
+import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
 import java.nio.file.Files
 
-/** Application composition root. Inference is remote/API based; no local model runtime is wired. */
+/** Application composition root. Local GGUF inference is the only runtime. */
 class AppContainer(context: Context? = null) {
     companion object {
         @Volatile var latest: AppContainer? = null
@@ -58,12 +56,11 @@ class AppContainer(context: Context? = null) {
         traceStore = appContext?.let { AndroidExecutionTraceStore(it) } ?: com.woogit.aicore.observability.InMemoryExecutionTraceStore(),
     )
 
-    val modelRuntime: RuntimeAdapter = RemoteApiRuntimeAdapter { ApiProviderConfigStore.current }
+    val modelRuntime: RuntimeAdapter = LlamaCppAndroidRuntimeAdapter()
     val conversationHistory: ConversationHistoryRepository = appContext?.let { AndroidConversationHistoryRepository(it) } ?: InMemoryConversationHistoryRepository()
-    val modelManager: AndroidModelManager? = appContext?.let { AndroidModelManager(it.contentResolver, it.filesDir.toPath().resolve("models"), modelRuntime) }
-
-    fun apiConfig(): ApiProviderConfig = ApiProviderConfigStore.current
-    fun updateApiConfig(config: ApiProviderConfig) { ApiProviderConfigStore.current = config }
+    val modelManager: AndroidModelManager? = appContext?.let {
+        AndroidModelManager(it.contentResolver, it, it.filesDir.toPath().resolve("models"), modelRuntime as LlamaCppAndroidRuntimeAdapter)
+    }
 
     val actionRegistry: ActionRegistry = DefaultActionRegistry().also { registry ->
         if (workspaceRoot != null) {
@@ -71,8 +68,8 @@ class AppContainer(context: Context? = null) {
             registry.registerBuiltinFileActions(workspaceRoot)
             registry.registerProviderActions(
                 modelInfo = {
-                    val config = ApiProviderConfigStore.current
-                    "provider=${config.providerId}, model=${config.model}"
+                    val info = modelRuntime.runtimeInfo()
+                    "runtime=${info.name}, backend=${info.backend ?: "unknown"}"
                 },
                 performanceStats = {
                     val info = modelRuntime.runtimeInfo()
@@ -160,7 +157,7 @@ class AppContainer(context: Context? = null) {
     suspend fun traceForExecution(executionId: String): List<ExecutionTraceEvent> = observability.traces(executionId)
 
     suspend fun recordRuntimeFailure(message: String, raw: String = message, taskId: String? = null) {
-        reportError("Runtime", "RUNTIME_FAILED", message.ifBlank { "اجرای API با خطا مواجه شد." }, IllegalStateException(raw), taskId = taskId)
+        reportError("Runtime", "RUNTIME_FAILED", message.ifBlank { "اجرای مدل محلی با خطا مواجه شد." }, IllegalStateException(raw), taskId = taskId)
     }
 
     fun createAgentSession(conversationId: String, eventSink: suspend (AgentEvent) -> Unit = {}): AgentSession? {
@@ -194,7 +191,7 @@ class AppContainer(context: Context? = null) {
 
     private suspend fun reportError(component: String, code: String, userMessageFa: String, throwable: Throwable, actionId: String? = null, taskId: String? = null, executionId: String? = null) {
         val trace = executionId?.let { observability.traces(it) }?.joinToString("\n") { "${it.timestamp} ${it.phase}: ${it.message ?: ""}" }
-        observability.error(appVersion = appVersion, component = component, errorCode = code, userMessageFa = userMessageFa, rawMachineError = throwable.stackTraceToString(), actionId = actionId, taskId = taskId, trace = trace, runtimeInfo = modelRuntime.runtimeInfo().toString(), modelInfo = ApiProviderConfigStore.current.toString())
+        observability.error(appVersion = appVersion, component = component, errorCode = code, userMessageFa = userMessageFa, rawMachineError = throwable.stackTraceToString(), actionId = actionId, taskId = taskId, trace = trace, runtimeInfo = modelRuntime.runtimeInfo().toString(), modelInfo = modelRuntime.runtimeInfo().toString())
     }
 }
 

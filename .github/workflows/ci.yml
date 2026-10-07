@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK
         uses: actions/setup-java@v5
@@ -39,11 +39,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
-
-      - name: Show toolchain
-        run: |
-          java -version
-          gradle --version
 
       - name: Run JVM and Android unit tests
         run: >-
@@ -54,11 +49,11 @@ jobs:
           :core:domain:test
           :core:observability:test
           :core:runtime:test
+          :core:runtime-android:test
           :core:settings:test
           :app:testDebugUnitTest
           --stacktrace
           --console=plain
-          --no-daemon
           --parallel
 
   android-build:
@@ -67,7 +62,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK
         uses: actions/setup-java@v5
@@ -80,24 +75,51 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
-      - name: Show toolchain
-        run: |
-          java -version
-          gradle --version
-
       - name: Verify Android SDK
         run: |
-          test -n "$ANDROID_HOME"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list >/dev/null
+          test -n "${ANDROID_HOME:-}"
+          test -d "$ANDROID_HOME/platforms/android-36"
+
+      - name: Cache exact native build state
+        uses: actions/cache@v4
+        with:
+          path: |
+            core/runtime-android/.cxx
+            core/runtime-android/src/.cxx
+          key: >-
+            native-${{ runner.os }}-
+            ${{ hashFiles(
+              'gradle.properties',
+              'settings.gradle.kts',
+              'build.gradle.kts',
+              'gradle/libs.versions.toml',
+              'core/runtime-android/build.gradle.kts',
+              'core/runtime-android/src/main/cpp/**',
+              'core/runtime-android/src/main/cpp/cmake/**',
+              '.github/workflows/ci.yml'
+            ) }}
 
       - name: Assemble debug APK
         run: >-
           gradle
+          :core:runtime-android:assembleDebug
           :app:assembleDebug
           --stacktrace
           --console=plain
-          --no-daemon
           --parallel
+
+      - name: Verify OpenCL profiling instrumentation
+        run: |
+          set -euo pipefail
+          source_file="$(find core/runtime-android -path '*/.cxx/*' -path '*/llama_cpp-src/ggml/src/ggml-opencl/ggml-opencl.cpp' -print -quit)"
+          test -n "$source_file"
+          grep -q 'AI_CHAT_OPENCL_PROFILE_PATCH_V4' "$source_file"
+          grep -q 'fperf_live' "$source_file"
+          grep -q 'cmd_queued_duration_ns' "$source_file"
+          grep -q 'cmd_submit_duration_ns' "$source_file"
+          grep -q 'cmd_complete_duration_ns' "$source_file"
+          grep -q 'cl_profiling.csv' "$source_file"
+          echo "OpenCL profiling instrumentation is present in the compiled llama.cpp source: $source_file"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -113,7 +135,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK
         uses: actions/setup-java@v5
@@ -126,13 +148,32 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
+      - name: Cache exact native build state
+        uses: actions/cache@v4
+        with:
+          path: |
+            core/runtime-android/.cxx
+            core/runtime-android/src/.cxx
+          key: >-
+            native-lint-${{ runner.os }}-
+            ${{ hashFiles(
+              'gradle.properties',
+              'settings.gradle.kts',
+              'build.gradle.kts',
+              'gradle/libs.versions.toml',
+              'core/runtime-android/build.gradle.kts',
+              'core/runtime-android/src/main/cpp/**',
+              'core/runtime-android/src/main/cpp/cmake/**',
+              '.github/workflows/ci.yml'
+            ) }}
+
       - name: Run Android lint
         run: >-
           gradle
           :app:lintDebug
           --stacktrace
           --console=plain
-          --no-daemon
+          --configuration-cache
 
       - name: Upload lint report
         if: always()

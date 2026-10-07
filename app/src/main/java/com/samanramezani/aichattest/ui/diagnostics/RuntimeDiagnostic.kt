@@ -6,9 +6,44 @@ import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeTraceEvent
+import com.woogit.aicore.runtime.OpenClGpuProfile
 
 private const val RECENT_RUNTIME_EVENTS = 20
 private const val RECENT_ACTION_EVENTS = 10
+
+internal data class NativePerformance(
+    val prefillMs: Long? = null,
+    val promptTokens: Int? = null,
+    val cacheStatus: String? = null,
+    val cachedTokens: Int? = null,
+    val reusedTokens: Int? = null,
+    val newTokens: Int? = null,
+    val cacheHitRatio: Double? = null,
+    val generatedTokens: Int? = null,
+    val generationMs: Long? = null,
+    val decodeTokensPerSec: Double? = null,
+    val speculativeDraftTokens: Int? = null,
+    val speculativeAcceptedTokens: Int? = null,
+    val speculativeAcceptanceRate: Double? = null,
+    val speculativeSteps: Int? = null,
+    val speculativeMeanAcceptedPerStep: Double? = null,
+    val profileDecodeMs: Long? = null,
+    val profileLogitsSyncMs: Long? = null,
+    val profileSamplingMs: Long? = null,
+    val profileCallbackMs: Long? = null,
+    val profileTokenSteps: Int? = null,
+    val profileLogitsAccesses: Int? = null,
+    val profileCallbackCalls: Int? = null,
+    val profileAccountedMs: Long? = null,
+    val profileUnaccountedMs: Long? = null,
+    val profileDecodeWindowMs: Long? = null,
+    val speculativeGenerationMs: Long? = null,
+    val speculativeTokensPerSec: Double? = null,
+    val speculativeFallbackCode: Int? = null,
+) {
+    val decodeMs: Long?
+        get() = if (generationMs != null && prefillMs != null) (generationMs - prefillMs).coerceAtLeast(0L) else null
+}
 
 internal data class RuntimeDiagnostic(
     val model: ModelDescriptor?,
@@ -22,9 +57,73 @@ internal data class RuntimeDiagnostic(
     val executionId: String? = null,
     val actionTrace: List<ActionTraceEvent> = emptyList(),
     val runtimeTrace: List<RuntimeTraceEvent> = emptyList(),
-)
+    val nativeDiagnostics: String? = null,
+    val openClProfile: OpenClGpuProfile? = null,
+    val gpuDevice: com.woogit.aicore.runtime.GpuDeviceProfile? = null,
+    val weightResidency: com.woogit.aicore.runtime.GpuWeightResidency? = null,
+) {
+    val nativePerformance: NativePerformance
+        get() = NativePerformance(
+            prefillMs = nativeValue("prefillMs")?.toLongOrNull(),
+            promptTokens = nativeValue("promptTokens")?.toIntOrNull(),
+            cacheStatus = nativeCacheValue("status"),
+            cachedTokens = nativeCacheValue("cachedTokens")?.toIntOrNull(),
+            reusedTokens = nativeCacheValue("reusedTokens")?.toIntOrNull(),
+            newTokens = nativeCacheValue("newTokens")?.toIntOrNull(),
+            cacheHitRatio = nativeCacheValue("hitRatio")?.toDoubleOrNull(),
+            generatedTokens = nativeValue("generatedTokens")?.toIntOrNull(),
+            generationMs = nativeValue("generationMs")?.toLongOrNull(),
+            decodeTokensPerSec = nativeValue("decodeTokensPerSec")?.toDoubleOrNull(),
+            speculativeDraftTokens = nativeValue("draftTokens")?.toIntOrNull(),
+            speculativeAcceptedTokens = nativeValue("acceptedTokens")?.toIntOrNull(),
+            speculativeAcceptanceRate = nativeValue("acceptanceRate")?.toDoubleOrNull(),
+            speculativeSteps = nativeValue("steps")?.toIntOrNull(),
+            speculativeMeanAcceptedPerStep = nativeValue("meanAcceptedPerStep")?.toDoubleOrNull(),
+            profileDecodeMs = nativeProfileValue("decodeMs")?.toLongOrNull(),
+            profileLogitsSyncMs = nativeProfileValue("logitsSyncMs")?.toLongOrNull(),
+            profileSamplingMs = nativeProfileValue("samplingMs")?.toLongOrNull(),
+            profileCallbackMs = nativeProfileValue("callbackMs")?.toLongOrNull(),
+            profileTokenSteps = nativeProfileValue("tokenSteps")?.toIntOrNull(),
+            profileLogitsAccesses = nativeProfileValue("logitsAccesses")?.toIntOrNull(),
+            profileCallbackCalls = nativeProfileValue("callbackCalls")?.toIntOrNull(),
+            profileAccountedMs = nativeProfileValue("accountedMs")?.toLongOrNull(),
+            profileUnaccountedMs = nativeProfileValue("unaccountedMs")?.toLongOrNull(),
+            profileDecodeWindowMs = nativeProfileValue("decodeWindowMs")?.toLongOrNull(),
+            speculativeGenerationMs = nativeSpecValue("generationMs")?.toLongOrNull(),
+            speculativeTokensPerSec = nativeSpecValue("tokensPerSec")?.toDoubleOrNull(),
+            speculativeFallbackCode = nativeSpecValue("code")?.toIntOrNull(),
+        )
+
+    private fun nativeValue(key: String): String? {
+        val text = nativeDiagnostics ?: return null
+        val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("$key=") } ?: return null
+        return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
+    }
+
+    private fun nativeCacheValue(key: String): String? {
+        val text = nativeDiagnostics ?: return null
+        val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("NATIVE_KV_CACHE_RESULT") && it.contains("$key=") } ?: return null
+        return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
+    }
+
+    private fun nativeSpecValue(key: String): String? {
+        val text = nativeDiagnostics ?: return null
+        val lines = text.lineSequence().toList().asReversed()
+        val line = lines.firstOrNull { it.contains("SPECULATIVE_PERFORMANCE") && it.contains("$key=") }
+            ?: lines.firstOrNull { it.contains("SPECULATIVE_GENERATE_RETURNED") && it.contains("$key=") }
+            ?: return null
+        return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
+    }
+
+    private fun nativeProfileValue(key: String): String? {
+        val text = nativeDiagnostics ?: return null
+        val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("NATIVE_PERF_PROFILE") && it.contains("$key=") } ?: return null
+        return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
+    }
+}
 
 internal fun RuntimeDiagnostic.report(): String = buildString {
+    val perf = nativePerformance
     appendLine("AI Chat Test — Runtime Diagnostic Report")
     appendLine()
     appendLine("Model: ${model?.displayName ?: "N/A"}")
@@ -42,7 +141,68 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Generation Time: ${generation?.generationTimeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Prompt Tokens: ${generation?.inputTokens ?: "N/A"}")
     appendLine("Output Tokens: ${generation?.outputTokens ?: "N/A"}")
-    appendLine("Tokens/sec: ${tokensPerSecond(generation)?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine("Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: tokensPerSecond(generation)?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine()
+    appendLine("===== NATIVE PERFORMANCE =====")
+    appendLine("Prefill Time: ${perf.prefillMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Prefill Prompt Tokens: ${perf.promptTokens ?: "N/A"}")
+    appendLine("KV Cache Status: ${perf.cacheStatus ?: "N/A"}")
+    appendLine("KV Cache Cached Tokens: ${perf.cachedTokens ?: "N/A"}")
+    appendLine("KV Cache Reused Tokens: ${perf.reusedTokens ?: "N/A"}")
+    appendLine("KV Cache New Tokens: ${perf.newTokens ?: "N/A"}")
+    appendLine("KV Cache Hit Ratio: ${perf.cacheHitRatio?.let { "%.1f%%".format(it) } ?: "N/A"}")
+    appendLine("Decode Time: ${perf.decodeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Decode Generated Tokens: ${perf.generatedTokens ?: "N/A"}")
+    appendLine("Decode Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine()
+    appendLine("===== REAL GPU DEVICE / MEMORY =====")
+    appendLine("GPU: ${gpuDevice?.name ?: "N/A"}")
+    appendLine("GPU Description: ${gpuDevice?.description ?: "N/A"}")
+    appendLine("GPU Memory Total: ${gpuDevice?.memoryTotalMiB?.let { "%.1f MiB".format(it) } ?: "Driver did not report"}")
+    appendLine("GPU Memory Free: ${gpuDevice?.memoryFreeMiB?.let { "%.1f MiB".format(it) } ?: "Driver did not report"}")
+    appendLine("GPU Memory Used: ${gpuDevice?.memoryUsedMiB?.let { "%.1f MiB".format(it) } ?: "N/A"}")
+    appendLine("GPU Resident Tensor Memory: ${weightResidency?.gpuTensorMiB?.let { "%.1f MiB".format(it) } ?: "N/A"}")
+    appendLine("GPU Resident Tensors: ${weightResidency?.gpuTensors ?: "N/A"}")
+    appendLine("GPU Resident Buffers: ${weightResidency?.gpuBuffers ?: "N/A"}")
+    appendLine("Host Tensor Memory: ${weightResidency?.hostTensorMiB?.let { "%.1f MiB".format(it) } ?: "N/A"}")
+    appendLine()
+    appendLine("===== GPU / OPENCL KERNEL PROFILE =====")
+    openClProfile?.reportLines()?.forEach(::appendLine)
+        ?: appendLine("OpenCL GPU profile: N/A")
+    appendLine()
+    appendLine("===== DECODE BOTTLENECK PROFILE =====")
+    appendLine("Measured Decode Calls: ${perf.profileDecodeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Logits Access / Sync: ${perf.profileLogitsSyncMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("CPU Sampling: ${perf.profileSamplingMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("JNI/UI Callback: ${perf.profileCallbackMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Token Steps: ${perf.profileTokenSteps ?: "N/A"}")
+    appendLine("Logits Accesses: ${perf.profileLogitsAccesses ?: "N/A"}")
+    appendLine("Callback Calls: ${perf.profileCallbackCalls ?: "N/A"}")
+    appendLine("Accounted Decode Time: ${perf.profileAccountedMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Unaccounted Decode Time: ${perf.profileUnaccountedMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Decode Window: ${perf.profileDecodeWindowMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine()
+    appendLine("===== GPU / OPENCL KERNEL PROFILE =====")
+    val gpu = openClProfile
+    if (gpu == null) {
+        appendLine("OpenCL GPU profile: N/A")
+    } else {
+        gpu.reportLines().forEach(::appendLine)
+        appendLine("Top kernels:")
+        gpu.topKernels.forEach { k ->
+            appendLine("  ${k.kernelName}: ${String.format(java.util.Locale.US, "%.3f ms", k.executionMs)}")
+        }
+    }
+    appendLine()
+    appendLine("===== SPECULATIVE DECODING =====")
+    appendLine("Draft Tokens: ${perf.speculativeDraftTokens ?: "N/A"}")
+    appendLine("Accepted Tokens: ${perf.speculativeAcceptedTokens ?: "N/A"}")
+    appendLine("Acceptance Rate: ${perf.speculativeAcceptanceRate?.let { "%.1f%%".format(it) } ?: "N/A"}")
+    appendLine("Speculation Steps: ${perf.speculativeSteps ?: "N/A"}")
+    appendLine("Mean Accepted / Step: ${perf.speculativeMeanAcceptedPerStep?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine("Speculative Generation Time: ${perf.speculativeGenerationMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Speculative Tokens/sec: ${perf.speculativeTokensPerSec?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine("Speculative Fallback Code: ${perf.speculativeFallbackCode ?: "N/A"}")
     appendLine()
     val current = settings
     appendLine("Temperature: ${current?.temperature ?: "N/A"}")
@@ -70,6 +230,7 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
 }
 
 internal fun RuntimeDiagnostic.errorReport(): String = buildString {
+    val perf = nativePerformance
     appendLine("AI Chat Test — Error Report")
     appendLine("Status: $status")
     appendLine("Execution: ${executionId ?: "N/A"}")
@@ -77,6 +238,29 @@ internal fun RuntimeDiagnostic.errorReport(): String = buildString {
     appendLine("Runtime: ${runtime.name} ${runtime.version}")
     appendLine("Backend: ${runtime.backend ?: "N/A"}")
     appendLine("GPU Layers: ${runtime.gpuLayers ?: "N/A"}")
+    appendLine("Context: ${runtime.contextLength ?: "N/A"}")
+    appendLine("Load Time: ${loadTimeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("TTFT: ${generation?.firstTokenTimeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Generation Time: ${generation?.generationTimeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Prompt Tokens: ${generation?.inputTokens ?: perf.promptTokens ?: "N/A"}")
+    appendLine("Output Tokens: ${generation?.outputTokens ?: perf.generatedTokens ?: "N/A"}")
+    appendLine("Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: tokensPerSecond(generation)?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine()
+    appendLine("===== NATIVE PERFORMANCE =====")
+    appendLine("Prefill Time: ${perf.prefillMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Prefill Prompt Tokens: ${perf.promptTokens ?: "N/A"}")
+    appendLine("KV Cache Reused Tokens: ${perf.reusedTokens ?: "N/A"}")
+    appendLine("Decode Time: ${perf.decodeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Decode Generated Tokens: ${perf.generatedTokens ?: "N/A"}")
+    appendLine("Decode Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine()
+    appendLine("===== SPECULATIVE DECODING =====")
+    appendLine("Draft Tokens: ${perf.speculativeDraftTokens ?: "N/A"}")
+    appendLine("Accepted Tokens: ${perf.speculativeAcceptedTokens ?: "N/A"}")
+    appendLine("Acceptance Rate: ${perf.speculativeAcceptanceRate?.let { "%.1f%%".format(it) } ?: "N/A"}")
+    appendLine("Speculation Steps: ${perf.speculativeSteps ?: "N/A"}")
+    appendLine("Mean Accepted / Step: ${perf.speculativeMeanAcceptedPerStep?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine()
     appendLine("Error: ${error ?: "N/A"}")
     if (!rawError.isNullOrBlank() && rawError != error) appendLine("Raw Error: $rawError")
     appendLine()
