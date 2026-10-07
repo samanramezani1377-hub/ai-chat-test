@@ -117,7 +117,7 @@ jobs:
           --console=plain
           --parallel
 
-      - name: Verify OpenCL profiling instrumentation
+      - name: Verify OpenCL profiling and static backend linkage
         run: |
           set -euo pipefail
           source_file="$(find core/runtime-android -path '*/.cxx/*' -path '*/llama_cpp-src/ggml/src/ggml-opencl/ggml-opencl.cpp' -print -quit)"
@@ -128,6 +128,15 @@ jobs:
           grep -q 'cmd_submit_duration_ns' "$source_file"
           grep -q 'cmd_complete_duration_ns' "$source_file"
           grep -q 'cl_profiling.csv' "$source_file"
+
+          # The production runtime is intentionally static. Fail CI if the
+          # OpenCL backend target disappeared or the ggml registry was built
+          # without GGML_USE_OPENCL.
+          opencl_target="$(find core/runtime-android -path '*/.cxx/*' -type f \( -name 'build.ninja' -o -name 'rules.ninja' \) -print0 | xargs -0 grep -l 'ggml-opencl' | head -n 1 || true)"
+          test -n "$opencl_target"
+          grep -R 'GGML_USE_OPENCL' core/runtime-android/.cxx core/runtime-android/src/.cxx >/dev/null
+          grep -R 'ggml-opencl' core/runtime-android/.cxx core/runtime-android/src/.cxx >/dev/null
+          echo "Static OpenCL backend linkage verified: $opencl_target"
           echo "OpenCL profiling instrumentation is present in the compiled llama.cpp source: $source_file"
 
       - name: Upload debug APK
