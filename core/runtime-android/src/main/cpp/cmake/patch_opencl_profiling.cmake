@@ -69,6 +69,26 @@ else()
         _src "${_src}")
 endif()
 
+
+
+# V4 normalization also upgrades a pre-existing V3 patch.
+if (NOT _src MATCHES "fperf_live")
+    string(REPLACE
+        "#include \"cl-program-cache.h\""
+        "#include \"cl-program-cache.h\"\n#include <cstdlib>\n\n// AI_CHAT_OPENCL_PROFILE_PATCH_V4"
+        _src "${_src}")
+    string(REPLACE
+        "profiling_results.insert(profiling_results.end(),\n            std::make_move_iterator(profiling_info.begin()),\n            std::make_move_iterator(profiling_info.end()));\n        profiling_info.clear();"
+        "profiling_results.insert(profiling_results.end(),\n            std::make_move_iterator(profiling_info.begin()),\n            std::make_move_iterator(profiling_info.end()));\n        profiling_info.clear();\n\n        {\n            const char * ai_chat_tmpdir = std::getenv(\"TMPDIR\");\n            const std::string ai_chat_profile_path = ai_chat_tmpdir && *ai_chat_tmpdir ? std::string(ai_chat_tmpdir) + \"/cl_profiling.csv\" : std::string(\"/data/user/0/com.samanramezi.aichattest/cache/cl_profiling.csv\");\n            FILE * fperf_live = fopen(ai_chat_profile_path.c_str(), \"w\");\n            if (!fperf_live) { fperf_live = fopen(\"/data/data/com.samanramezi.aichattest/cache/cl_profiling.csv\", \"w\"); }\n            if (!fperf_live) { fperf_live = fopen(\"cl_profiling.csv\", \"w\"); }\n            if (fperf_live) {\n                fprintf(fperf_live, \"op name, kernel name, queue (ms), submit (ms), exec duration (ms), complete (ms), total (ms), global size, local size, output size\\n\");\n                for (const ProfilingInfo & info : profiling_results) {\n                    fprintf(fperf_live, \"%s,%s,%f,%f,%f,%f,%f,%zux%zux%zu,%zux%zux%zu,%zux%zux%zux%zu\\n\", info.op_name.c_str(), info.kernel_name.c_str(), info.cmd_queued_duration_ns/1.e6f, info.cmd_submit_duration_ns/1.e6f, info.cmd_duration_ns/1.e6f, info.cmd_complete_duration_ns/1.e6f, info.cmd_total_duration_ns/1.e6f, info.global_size[0], info.global_size[1], info.global_size[2], info.local_size[0], info.local_size[1], info.local_size[2], info.output_size[0], info.output_size[1], info.output_size[2], info.output_size[3]);\n                }\n                fclose(fperf_live);\n            }\n        }"
+        _src "${_src}")
+endif()
+
+# Normalize the CSV header for pre-existing V3 trees.
+string(REPLACE
+    "fprintf(fperf, \"op name, kernel name, exec duration (ms), global size, local size, output size\\n\");"
+    "fprintf(fperf, \"op name, kernel name, queue (ms), submit (ms), exec duration (ms), complete (ms), total (ms), global size, local size, output size\\n\");"
+    _src "${_src}")
+
 # Do not allow a silent no-op patch. These checks make the Android build fail
 # instead of shipping a debug APK that reports N/A.
 if (NOT _src MATCHES "AI_CHAT_OPENCL_PROFILE_PATCH_V4")
