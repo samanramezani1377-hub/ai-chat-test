@@ -18,6 +18,8 @@
 #include "gguf.h"
 #include "llama-model.h"
 #include "ggml-backend.h"
+#include "ggml-backend-impl.h"
+#include "ggml-opencl.h"
 #include <set>
 
 #define LOG_TAG "AIChatRuntime"
@@ -86,6 +88,20 @@ static bool init_generation_context() {
     if (!g_context) return false;
     llama_set_abort_callback(g_context, abort_callback, nullptr);
     return true;
+}
+
+static bool register_static_opencl_backend() {
+    // GGML_BACKEND_DL is disabled on Android. Explicitly register the statically
+    // linked OpenCL backend so runtime discovery never depends on APK filesystem
+    // scanning or a MODULE shared library that cannot be loaded from the APK.
+    const size_t before = ggml_backend_reg_count();
+    ggml_backend_register(ggml_backend_opencl_reg());
+    const size_t after = ggml_backend_reg_count();
+    const bool registered = ggml_backend_reg_by_name("OPENCL") != nullptr;
+    append_native_trace((std::string("OPENCL_STATIC_REGISTRATION before=") +
+        std::to_string(before) + " after=" + std::to_string(after) +
+        " registered=" + (registered ? "1" : "0")).c_str());
+    return registered;
 }
 
 static bool has_opencl_gpu_device() {
@@ -351,11 +367,21 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         unsetenv("GGML_OPENCL_ADRENO_XMEM_GEMM");
         unsetenv("GGML_DISABLE_OPENCL");
         append_native_trace("OPENCL_Q6K_SPECIALIZED_KERNELS tiled=0 o4=1 o4_global=1 xmem_gemm=0");
-        append_native_trace("OPENCL_BACKEND_LOAD_ALL_STARTED");
-        ggml_backend_load_all();
-        append_native_trace("OPENCL_BACKEND_LOAD_ALL_RETURNED");
-        g_gpu_backend_loaded = has_opencl_gpu_device();
-        append_native_trace((std::string("OPENCL_BACKEND_DEVICE_STATE loaded=") +
+        append_native_trace("OPENCL_STATIC_REGISTRATION_STARTED");
+        const bool opencl_registered = register_static_opencl_backend();
+        if (!opencl_registered) {
+            append_native_trace("OPENCL_STATIC_REGISTRATION_FAILED");
+            g_gpu_backend_loaded = false;
+        } else {
+            append_native_trace("OPENCL_BACKEND_LOAD_ALL_STARTED");
+            // Keep this call for any auxiliary dynamically discoverable backends,
+            // but OpenCL itself is already registered statically above.
+            ggml_backend_load_all();
+            append_native_trace("OPENCL_BACKEND_LOAD_ALL_RETURNED");
+            g_gpu_backend_loaded = has_opencl_gpu_device();
+        }
+        if (opencl_registered) g_gpu_backend_loaded = has_opencl_gpu_device();
+        append_native_trace((std::string("OPENCL_BACKEND_DEVICE_STATE loaded=")
             (g_gpu_backend_loaded ? "1" : "0") +
             " deviceCount=" + std::to_string(ggml_backend_dev_count())).c_str());
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
