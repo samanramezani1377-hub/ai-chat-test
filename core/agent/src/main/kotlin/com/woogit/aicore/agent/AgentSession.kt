@@ -41,7 +41,6 @@ class AgentSession(
         eventSink(AgentEvent.Started)
         return try {
             val initialContext = conversationStore.recent(Int.MAX_VALUE)
-            eventSink(AgentEvent.ContextReady(initialContext.size))
             var result = orchestrator.generate(effectiveSettings, effectiveRecentMessages, { token -> eventSink(AgentEvent.Token(token)) }, initialContext)
             var plan: ActionPlan? = null
             var actionResult: String? = null
@@ -77,7 +76,6 @@ class AgentSession(
                         outcome = retried
                     }
                     val retryContext = conversationStore.recent(Int.MAX_VALUE)
-                    eventSink(AgentEvent.ContextReady(retryContext.size))
                     result = orchestrator.generate(effectiveSettings, effectiveRecentMessages, { token -> eventSink(AgentEvent.Token(token)) }, retryContext)
                     resultPersisted = false
                     if (outcome.success && outcome.verified) continue
@@ -85,7 +83,6 @@ class AgentSession(
                 }
 
                 val nextContext = conversationStore.recent(Int.MAX_VALUE)
-                eventSink(AgentEvent.ContextReady(nextContext.size))
                 result = orchestrator.generate(effectiveSettings, effectiveRecentMessages, { token -> eventSink(AgentEvent.Token(token)) }, nextContext)
                 resultPersisted = false
             }
