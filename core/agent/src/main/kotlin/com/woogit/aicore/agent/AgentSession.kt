@@ -40,7 +40,9 @@ class AgentSession(
         conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.USER, content, System.currentTimeMillis()))
         eventSink(AgentEvent.Started)
         return try {
-            var result = orchestrator.generate(effectiveSettings, effectiveRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+            val initialContext = conversationStore.recent(Int.MAX_VALUE)
+            eventSink(AgentEvent.ContextReady(initialContext.size))
+            var result = orchestrator.generate(effectiveSettings, effectiveRecentMessages, { token -> eventSink(AgentEvent.Token(token)) }, initialContext)
             var plan: ActionPlan? = null
             var actionResult: String? = null
             var steps = 0
@@ -74,13 +76,17 @@ class AgentSession(
                         steps++
                         outcome = retried
                     }
-                    result = orchestrator.generate(effectiveSettings, effectiveRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+                    val retryContext = conversationStore.recent(Int.MAX_VALUE)
+                    eventSink(AgentEvent.ContextReady(retryContext.size))
+                    result = orchestrator.generate(effectiveSettings, effectiveRecentMessages, { token -> eventSink(AgentEvent.Token(token)) }, retryContext)
                     resultPersisted = false
                     if (outcome.success && outcome.verified) continue
                     continue
                 }
 
-                result = orchestrator.generate(effectiveSettings, effectiveRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+                val nextContext = conversationStore.recent(Int.MAX_VALUE)
+                eventSink(AgentEvent.ContextReady(nextContext.size))
+                result = orchestrator.generate(effectiveSettings, effectiveRecentMessages, { token -> eventSink(AgentEvent.Token(token)) }, nextContext)
                 resultPersisted = false
             }
             if (!resultPersisted) conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
