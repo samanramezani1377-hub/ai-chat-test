@@ -40,13 +40,19 @@ FetchContent_MakeAvailable(opencl_icd_loader)
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 set(GGML_OPENCL ON CACHE BOOL "Use OpenCL GPU backend" FORCE)
+# Android production runtime must link the OpenCL backend statically. Dynamic backend
+# loading is unreliable on Android because ggml_backend_load_all() cannot discover
+# MODULE libraries from the APK's native library namespace.
+set(GGML_BACKEND_DL OFF CACHE BOOL "Disable dynamic ggml backend loading on Android" FORCE)
+set(GGML_BACKEND_DIR "" CACHE STRING "No dynamic backend directory" FORCE)
 set(GGML_OPENCL_USE_ADRENO_KERNELS ON CACHE BOOL "Use Adreno-optimized OpenCL kernels when the runtime GPU is Adreno; automatically remains generic on other GPUs" FORCE)
 set(GGML_OPENCL_USE_ADRENO_BIN_KERNELS OFF CACHE BOOL "Do not use vendor-specific Adreno binary kernels" FORCE)
 set(GGML_VULKAN OFF CACHE BOOL "Vulkan is intentionally disabled" FORCE)
 set(GGML_OPENCL_USE_SVM OFF CACHE BOOL "Avoid vendor SVM driver instability on Android" FORCE)
 
-# Profiling is opt-in because OpenCL event profiling intentionally adds host/device
-# synchronization overhead. The debug APK enables it; release builds do not.
+# Profiling is enabled by the Android release configuration so the diagnostics screen
+# can expose real OpenCL kernel timing. Compare with profiling disabled only after
+# correctness and GPU registration are verified.
 option(AI_CHAT_OPENCL_PROFILING "Enable app-visible OpenCL GPU profiling" OFF)
 if (AI_CHAT_OPENCL_PROFILING)
     set(GGML_OPENCL_PROFILING ON CACHE BOOL "Enable OpenCL event profiling" FORCE)
