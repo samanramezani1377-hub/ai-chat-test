@@ -126,9 +126,9 @@ endif()
 # Normalize any existing profiling batch threshold. Upstream revisions can use
 # different formatting/thresholds; the runtime only needs a bounded live flush.
 string(REGEX REPLACE
-    "profiling_info\\.size\\\\\\(\\\\\\) *>= *[0-9]+"
+    "profiling_info\\.size\\(\\) *>= *[0-9]+"
     "profiling_info.size() >= 256"
-    _src "\${_src}")
+    _src "${_src}")
 
 # Normalize the CSV header for pre-existing V3 trees.
 string(REPLACE
