@@ -166,6 +166,11 @@ class LlamaCppAndroidRuntimeAdapter(
         currentCoroutineContext().ensureActive()
         if (loadedContextLength == null) return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
         val settings = request.settings
+        RuntimeDiagnosticsStore.recordNativeEvent(
+            "NATIVE_CONVERSATION_INPUT messages=" + request.messages.size +
+                " roles=" + request.messages.joinToString(",") { it.role.name } +
+                " contentChars=" + request.messages.sumOf { it.content.length }
+        )
         val safeMessages = trimMessagesToContext(request.messages, settings.maxNewTokens.coerceAtLeast(1))
         val prompt = try {
             when (loadedArchitecture) {
@@ -186,6 +191,11 @@ class LlamaCppAndroidRuntimeAdapter(
         val contextCapacity = loadedContextLength ?: defaultContextLength
         val promptBudget = (contextCapacity - (promptTokens ?: 0) - 32).coerceAtLeast(1)
         val effectiveMaxTokens = minOf(settings.maxNewTokens.coerceAtLeast(1), promptBudget)
+        RuntimeDiagnosticsStore.recordNativeEvent(
+            "NATIVE_PROMPT_HISTORY_SELECTED messages=${safeMessages.size} " +
+                "roles=" + safeMessages.joinToString(",") { it.role.name } +
+                " contentChars=" + safeMessages.sumOf { it.content.length }
+        )
         RuntimeDiagnosticsStore.recordNativeEvent(
             "NATIVE_PROMPT_READY context=$loadedContextLength promptTokens=${promptTokens ?: "n/a"} " +
                 "requestedMaxTokens=${settings.maxNewTokens} effectiveMaxTokens=$effectiveMaxTokens"
