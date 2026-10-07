@@ -381,7 +381,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
             g_gpu_backend_loaded = has_opencl_gpu_device();
         }
         if (opencl_registered) g_gpu_backend_loaded = has_opencl_gpu_device();
-        append_native_trace((std::string("OPENCL_BACKEND_DEVICE_STATE loaded=")
+        append_native_trace((std::string("OPENCL_BACKEND_DEVICE_STATE loaded=") +
             (g_gpu_backend_loaded ? "1" : "0") +
             " deviceCount=" + std::to_string(ggml_backend_dev_count())).c_str());
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
@@ -580,7 +580,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         return 4;
     }
     llama_model_params mp = llama_model_default_params();
-    mp.n_gpu_layers = gpu_layers;
+    mp.n_gpu_layers = 999;
+    append_native_trace((std::string("OPENCL_GPU_ONLY_ALL_LAYERS requested=") + std::to_string((int)gpu_layers) + " effective=999").c_str());
     mp.load_mode = LLAMA_LOAD_MODE_NONE;
     mp.check_tensors = false;
     checkpoint("OPENCL_GPU_DEVICE_SELECTION");
