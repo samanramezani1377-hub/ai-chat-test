@@ -108,6 +108,19 @@ jobs:
           --console=plain
           --parallel
 
+      - name: Verify OpenCL profiling instrumentation
+        run: |
+          set -euo pipefail
+          source_file="$(find core/runtime-android -path '*/.cxx/*' -path '*/llama_cpp-src/ggml/src/ggml-opencl/ggml-opencl.cpp' -print -quit)"
+          test -n "$source_file"
+          grep -q 'AI_CHAT_OPENCL_PROFILE_PATCH_V4' "$source_file"
+          grep -q 'fperf_live' "$source_file"
+          grep -q 'cmd_queued_duration_ns' "$source_file"
+          grep -q 'cmd_submit_duration_ns' "$source_file"
+          grep -q 'cmd_complete_duration_ns' "$source_file"
+          grep -q 'cl_profiling.csv' "$source_file"
+          echo "OpenCL profiling instrumentation is present in the compiled llama.cpp source: $source_file"
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
