@@ -19,9 +19,9 @@ class Qwen3PromptFormatterTest {
         assertEquals(
             "<|im_start|>system\nYou are helpful.<|im_end|>\n" +
                 "<|im_start|>user\nسلام<|im_end|>\n" +
-                "<|im_start|>assistant\n<think>\n</think>\n\nسلام!<|im_end|>\n" +
+                "<|im_start|>assistant\nسلام!<|im_end|>\n" +
                 "<|im_start|>user\nحالت چطوره؟<|im_end|>\n" +
-                "<|im_start|>assistant\n",
+                "<|im_start|>assistant\n<think>\n",
             prompt
         )
     }
@@ -34,6 +34,24 @@ class Qwen3PromptFormatterTest {
 
         assertEquals(
             "<|im_start|>user\n<tool_response>\ntool-result\n</tool_response><|im_end|>\n<|im_start|>assistant\n<think>\n",
+            prompt
+        )
+    }
+
+    @Test
+    fun preservesHistoricalReasoningWithoutCreatingEmptyThinkBlocks() {
+        val prompt = Qwen3PromptFormatter.format(
+            listOf(
+                ChatMessage(
+                    ChatMessage.Role.ASSISTANT,
+                    "<think>\nreasoning\n</think>\n\nfinal answer"
+                )
+            )
+        )
+
+        assertEquals(
+            "<|im_start|>assistant\n<think>\nreasoning\n</think>\n\nfinal answer<|im_end|>\n" +
+                "<|im_start|>assistant\n<think>\n",
             prompt
         )
     }
