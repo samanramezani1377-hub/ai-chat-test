@@ -855,11 +855,18 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     const bool cache_supported = !llama_model_has_encoder(g_model);
     const llama_pos resident_min = llama_memory_seq_pos_min(memory, 0);
     const llama_pos resident_max = llama_memory_seq_pos_max(memory, 0);
-    const bool resident_sequence_matches_cache =
-            !g_cached_prompt_tokens.empty() &&
-            resident_min == 0 &&
-            resident_max >= 0 &&
-            static_cast<size_t>(resident_max + 1) == g_cached_prompt_tokens.size();
+    // Recurrent/hybrid models expose only their latest recurrent sequence
+    // position through seq_pos_min/max; that is NOT a valid representation of
+    // the full resident state. Qwen3.8 is hybrid, so validating
+    // (resident_max + 1) against the full conversation token count incorrectly
+    // invalidated every completed cache publish and caused every next turn to
+    // become a MISS.
+    const bool resident_sequence_matches_cache = hybrid_memory
+            ? (!g_cached_prompt_tokens.empty() && resident_max >= 0)
+            : (!g_cached_prompt_tokens.empty() &&
+               resident_min == 0 &&
+               resident_max >= 0 &&
+               static_cast<size_t>(resident_max + 1) == g_cached_prompt_tokens.size());
     bool cache_reused = cache_supported && resident_sequence_matches_cache && common_prefix > 0;
     size_t reuse_prefix = 0;
     const bool exact_cached_prefix = cache_reused &&
@@ -1154,15 +1161,17 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         g_cached_context = g_context;
         const llama_pos published_min = llama_memory_seq_pos_min(memory, 0);
         const llama_pos published_max = llama_memory_seq_pos_max(memory, 0);
-        const bool resident_publish_valid =
-                published_min == 0 &&
-                published_max >= 0 &&
-                static_cast<size_t>(published_max + 1) == g_cached_prompt_tokens.size();
+        const bool resident_publish_valid = hybrid_memory
+                ? (published_max >= 0)
+                : (published_min == 0 &&
+                   published_max >= 0 &&
+                   static_cast<size_t>(published_max + 1) == g_cached_prompt_tokens.size());
         if (!resident_publish_valid) {
             append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISH_INVALID residentMin=") +
                 std::to_string(published_min) + " residentMax=" +
                 std::to_string(published_max) + " cachedTokens=" +
-                std::to_string(g_cached_prompt_tokens.size())).c_str());
+                std::to_string(g_cached_prompt_tokens.size()) +
+                " hybrid=" + (hybrid_memory ? "1" : "0")).c_str());
             g_cached_prompt_tokens.clear();
             g_cached_model = nullptr;
             g_cached_context = nullptr;
