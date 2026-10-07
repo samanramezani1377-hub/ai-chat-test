@@ -22,6 +22,7 @@ import java.nio.file.Path
 /** Android model façade: SAF import -> GGUF validation -> durable registry -> llama.cpp/OpenCL. */
 class AndroidModelManager(
     private val contentResolver: ContentResolver,
+    private val appContext: android.content.Context,
     modelDirectory: Path,
     private val runtime: LlamaCppAndroidRuntimeAdapter,
 ) {
@@ -167,6 +168,7 @@ class AndroidModelManager(
             val restored = result.value
             if (restored != null) {
                 attachDraftAfterTargetLoad(restored)
+                ModelRuntimeForegroundService.start(appContext)
             }
         }
         result
@@ -179,6 +181,7 @@ class AndroidModelManager(
         val result = service.activate(id)
         if (result is ModelResult.Success) {
             attachDraftAfterTargetLoad(result.value)
+            ModelRuntimeForegroundService.start(appContext)
         }
         result
     }
@@ -203,7 +206,11 @@ class AndroidModelManager(
 
     suspend fun deactivate(): ModelResult<Unit> = withContext(Dispatchers.IO) {
         runtime.setDraftPath(null)
-        service.deactivate()
+        val result = service.deactivate()
+        if (result is ModelResult.Success) {
+            ModelRuntimeForegroundService.stop(appContext)
+        }
+        result
     }
 
     suspend fun unload(): ModelResult<Unit> = deactivate()
