@@ -58,6 +58,30 @@ data class OpenClGpuProfile(
     }
 }
 
+data class GpuDeviceProfile(
+    val name: String,
+    val description: String,
+    val memoryFreeMiB: Double?,
+    val memoryTotalMiB: Double?,
+    val memoryKnown: Boolean,
+) {
+    val memoryUsedMiB: Double?
+        get() = if (memoryKnown && memoryFreeMiB != null && memoryTotalMiB != null) {
+            (memoryTotalMiB - memoryFreeMiB).coerceAtLeast(0.0)
+        } else null
+}
+
+data class GpuWeightResidency(
+    val gpuTensorMiB: Double?,
+    val gpuTensors: Int?,
+    val gpuBuffers: Int?,
+    val hostTensorMiB: Double?,
+    val cpuTensorMiB: Double?,
+    val otherTensorMiB: Double?,
+    val gpuFreeMiB: Double?,
+    val gpuTotalMiB: Double?,
+)
+
 data class RuntimeDiagnosticsSnapshot(
     val model: ModelDescriptor? = null,
     val runtime: RuntimeInfo = RuntimeInfo("unknown", "unknown", null),
@@ -68,6 +92,8 @@ data class RuntimeDiagnosticsSnapshot(
     val trace: List<RuntimeTraceEvent> = emptyList(),
     val lastNativeEvent: String? = null,
     val openClProfile: OpenClGpuProfile? = null,
+    val gpuDevice: GpuDeviceProfile? = null,
+    val weightResidency: GpuWeightResidency? = null,
 )
 
 object RuntimeDiagnosticsStore {
@@ -75,7 +101,7 @@ object RuntimeDiagnosticsStore {
     private val markerFile = File(System.getProperty("java.io.tmpdir") ?: ".", "ai-chat-last-native-event.txt")
     private val preflightFile = File(System.getProperty("java.io.tmpdir") ?: ".", "ai-chat-model-preflight.txt")
     private val nativeTraceFile = File(System.getProperty("java.io.tmpdir") ?: ".", "ai-chat-native-trace.txt")
-    private val state = MutableStateFlow(RuntimeDiagnosticsSnapshot(lastNativeEvent = readNativeDiagnostics(), openClProfile = readOpenClProfile()))
+    private val state = MutableStateFlow(RuntimeDiagnosticsSnapshot(lastNativeEvent = readNativeDiagnostics(), openClProfile = readOpenClProfile(), gpuDevice = readGpuDevice(), weightResidency = readWeightResidency()))
     val snapshot: StateFlow<RuntimeDiagnosticsSnapshot> = state.asStateFlow()
 
     private fun lastNativeDiagnosticLines(text: String): String =
@@ -93,7 +119,7 @@ object RuntimeDiagnosticsStore {
     }.getOrNull()
 
     fun refreshNativeEvent() {
-        state.value = state.value.copy(lastNativeEvent = readNativeDiagnostics(), openClProfile = readOpenClProfile())
+        state.value = state.value.copy(lastNativeEvent = readNativeDiagnostics(), openClProfile = readOpenClProfile(), gpuDevice = readGpuDevice(), weightResidency = readWeightResidency())
     }
 
     fun recordTrace(type: RuntimeTraceEvent.Type, message: String? = null) {
@@ -110,14 +136,47 @@ object RuntimeDiagnosticsStore {
     }
 
     fun recordLoaded(model: ModelDescriptor, loadTimeMs: Long?, runtime: RuntimeInfo) {
-        state.value = state.value.copy(model = model, runtime = runtime, loadTimeMs = loadTimeMs, generation = null, settings = null, openClProfile = readOpenClProfile())
+        state.value = state.value.copy(model = model, runtime = runtime, loadTimeMs = loadTimeMs, generation = null, settings = null, openClProfile = readOpenClProfile(), gpuDevice = readGpuDevice(), weightResidency = readWeightResidency())
         recordTrace(RuntimeTraceEvent.Type.MODEL_LOAD_COMPLETED, loadTimeMs?.let { "loadMs=$it" })
     }
 
     fun recordGeneration(settings: InferenceSettings, result: GenerationResult, runtime: RuntimeInfo) {
-        state.value = state.value.copy(runtime = runtime, generation = result, settings = settings, generationStartedAtMs = System.currentTimeMillis() - (result.generationTimeMs ?: 0L), openClProfile = readOpenClProfile())
+        state.value = state.value.copy(runtime = runtime, generation = result, settings = settings, generationStartedAtMs = System.currentTimeMillis() - (result.generationTimeMs ?: 0L), openClProfile = readOpenClProfile(), gpuDevice = readGpuDevice(), weightResidency = readWeightResidency())
         recordTrace(if (result.stopped) RuntimeTraceEvent.Type.GENERATION_STOPPED else RuntimeTraceEvent.Type.GENERATION_COMPLETED, "generationMs=${result.generationTimeMs ?: "n/a"}")
     }
+
+    private fun nativeLine(prefix: String): String? {
+        val text = readNativeDiagnostics() ?: return null
+        return text.lineSequence().toList().asReversed().firstOrNull { it.contains(prefix) }
+    }
+
+    private fun nativeField(line: String, key: String): String? =
+        Regex("""\\b${Regex.escape(key)}=([^\\s]+)""").find(line)?.groupValues?.get(1)
+
+    private fun readGpuDevice(): GpuDeviceProfile? = runCatching {
+        val line = nativeLine("NATIVE_OPENCL_DEVICE") ?: return@runCatching null
+        GpuDeviceProfile(
+            name = nativeField(line, "name")?.replace('_', ' ') ?: "unknown",
+            description = nativeField(line, "description")?.replace('_', ' ') ?: "unknown",
+            memoryFreeMiB = nativeField(line, "memoryFreeMiB")?.toDoubleOrNull(),
+            memoryTotalMiB = nativeField(line, "memoryTotalMiB")?.toDoubleOrNull(),
+            memoryKnown = nativeField(line, "memoryKnown") == "1",
+        )
+    }.getOrNull()
+
+    private fun readWeightResidency(): GpuWeightResidency? = runCatching {
+        val line = nativeLine("NATIVE_WEIGHT_RESIDENCY") ?: return@runCatching null
+        GpuWeightResidency(
+            gpuTensorMiB = nativeField(line, "gpuTensorMiB")?.toDoubleOrNull(),
+            gpuTensors = nativeField(line, "gpuTensors")?.toIntOrNull(),
+            gpuBuffers = nativeField(line, "gpuBuffers")?.toIntOrNull(),
+            hostTensorMiB = nativeField(line, "hostTensorMiB")?.toDoubleOrNull(),
+            cpuTensorMiB = nativeField(line, "cpuTensorMiB")?.toDoubleOrNull(),
+            otherTensorMiB = nativeField(line, "otherTensorMiB")?.toDoubleOrNull(),
+            gpuFreeMiB = nativeField(line, "gpuFreeMiB")?.toDoubleOrNull(),
+            gpuTotalMiB = nativeField(line, "gpuTotalMiB")?.toDoubleOrNull(),
+        )
+    }.getOrNull()
 
     private fun readOpenClProfile(): OpenClGpuProfile? = runCatching {
         val root = System.getenv("TMPDIR")?.takeIf { it.isNotBlank() }
