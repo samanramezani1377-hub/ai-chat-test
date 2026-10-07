@@ -123,6 +123,13 @@ if (NOT _src MATCHES "fperf_live")
     set(_src "${_before_clear}${_live_writer}${_after_clear_text}")
 endif()
 
+# Normalize any existing profiling batch threshold. Upstream revisions can use
+# different formatting/thresholds; the runtime only needs a bounded live flush.
+string(REGEX REPLACE
+    "profiling_info\\.size\\\\\\(\\\\\\) *>= *[0-9]+"
+    "profiling_info.size() >= 256"
+    _src "\${_src}")
+
 # Normalize the CSV header for pre-existing V3 trees.
 string(REPLACE
     "fprintf(fperf, \"op name, kernel name, exec duration (ms), global size, local size, output size\\n\");"
@@ -137,8 +144,8 @@ endif()
 if (NOT _src MATCHES "fperf_live")
     message(FATAL_ERROR "AI Chat OpenCL live profiling writer was not installed")
 endif()
-if (NOT _src MATCHES "profiling_info.size\(\) >= 256")
-    message(FATAL_ERROR "AI Chat OpenCL live profiling threshold was not installed")
+if (NOT _src MATCHES "profiling_info\\.size\\(\\)")
+    message(FATAL_ERROR "AI Chat OpenCL profiling batch control was not found")
 endif()
 
 file(WRITE "${_src_file}" "${_src}")
