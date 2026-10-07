@@ -103,7 +103,13 @@ class AgentSession(
         eventSink(AgentEvent.Started)
         conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(executionId), System.currentTimeMillis()))
         return try {
-            val result = orchestrator.generate(effectiveSettings, effectiveRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+            val resumeContext = conversationStore.recent(Int.MAX_VALUE)
+            val result = orchestrator.generate(
+                effectiveSettings,
+                effectiveRecentMessages,
+                { token -> eventSink(AgentEvent.Token(token)) },
+                resumeContext
+            )
             conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
             eventSink(AgentEvent.Completed)
             AgentSessionResult.Reply(result, null, outcome.message)
