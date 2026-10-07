@@ -134,8 +134,13 @@ jobs:
           # without GGML_USE_OPENCL.
           opencl_target="$(find core/runtime-android -path '*/.cxx/*' -type f \( -name 'build.ninja' -o -name 'rules.ninja' \) -print0 | xargs -0 grep -l 'ggml-opencl' | head -n 1 || true)"
           test -n "$opencl_target"
-          grep -R 'GGML_USE_OPENCL' core/runtime-android/.cxx core/runtime-android/src/.cxx >/dev/null
-          grep -R 'ggml-opencl' core/runtime-android/.cxx core/runtime-android/src/.cxx >/dev/null
+          native_dirs=()
+          for dir in core/runtime-android/.cxx core/runtime-android/src/.cxx; do
+            if [ -d "$dir" ]; then native_dirs+=( "$dir" ); fi
+          done
+          test "${#native_dirs[@]}" -gt 0
+          grep -R 'GGML_USE_OPENCL' "${native_dirs[@]}" >/dev/null
+          grep -R 'ggml-opencl' "${native_dirs[@]}" >/dev/null
           echo "Static OpenCL backend linkage verified: $opencl_target"
           echo "OpenCL profiling instrumentation is present in the compiled llama.cpp source: $source_file"
 
