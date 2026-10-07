@@ -1,5 +1,5 @@
 # Adds app-visible OpenCL event profiling to the pinned llama.cpp source.
-# This is intentionally applied only to the profiling/debug native variant.
+# Applied only to the profiling/debug native variant.
 if (NOT DEFINED llama_cpp_SOURCE_DIR)
     message(FATAL_ERROR "llama_cpp_SOURCE_DIR is required")
 endif()
@@ -10,49 +10,76 @@ if (NOT EXISTS "${_src_file}")
 endif()
 
 file(READ "${_src_file}" _src)
-if (_src MATCHES "AI_CHAT_OPENCL_PROFILE_PATCH_V3")
+
+if (_src MATCHES "AI_CHAT_OPENCL_PROFILE_PATCH_V4")
     return()
 endif()
 
-string(REPLACE
-    "#include \"cl-program-cache.h\""
-    "#include \"cl-program-cache.h\"\n#include <cstdlib>\n\n// AI_CHAT_OPENCL_PROFILE_PATCH_V3"
-    _src "${_src}")
+# V3 may already be present in the persistent FetchContent tree. Upgrade it
+# in-place instead of silently skipping the patch.
+if (_src MATCHES "AI_CHAT_OPENCL_PROFILE_PATCH_V3")
+    string(REPLACE
+        "AI_CHAT_OPENCL_PROFILE_PATCH_V3"
+        "AI_CHAT_OPENCL_PROFILE_PATCH_V4"
+        _src "${_src}")
+    string(REPLACE
+        "if (profiling_info.size() >= 256) {"
+        "if (profiling_info.size() >= 1) {"
+        _src "${_src}")
+    string(REPLACE
+        "if (profiling_info.size() >= 2048) {"
+        "if (profiling_info.size() >= 1) {"
+        _src "${_src}")
+else()
+    string(REPLACE
+        "#include \"cl-program-cache.h\""
+        "#include \"cl-program-cache.h\"\n#include <cstdlib>\n\n// AI_CHAT_OPENCL_PROFILE_PATCH_V4"
+        _src "${_src}")
 
-# Keep the file in the same temporary directory that the Android runtime reads.
-string(REPLACE
-    "FILE * fperf = fopen(\"cl_profiling.csv\", \"w\");"
-    "const char * ai_chat_tmpdir = std::getenv(\"TMPDIR\");\n    const std::string ai_chat_profile_path =\n        ai_chat_tmpdir && *ai_chat_tmpdir\n            ? std::string(ai_chat_tmpdir) + \"/cl_profiling.csv\"\n            : std::string(\"cl_profiling.csv\");\n    FILE * fperf = fopen(ai_chat_profile_path.c_str(), \"w\");"
-    _src "${_src}")
+    # Use the Android runtime temp directory when available; otherwise use the
+    # app cache path and finally the current directory.
+    string(REPLACE
+        "FILE * fperf = fopen(\"cl_profiling.csv\", \"w\");"
+        "const char * ai_chat_tmpdir = std::getenv(\"TMPDIR\");\n    const std::string ai_chat_profile_path =\n        ai_chat_tmpdir && *ai_chat_tmpdir\n            ? std::string(ai_chat_tmpdir) + \"/cl_profiling.csv\"\n            : std::string(\"/data/user/0/com.samanramezani.aichattest/cache/cl_profiling.csv\");\n    FILE * fperf = fopen(ai_chat_profile_path.c_str(), \"w\");\n    if (!fperf) { fperf = fopen(\"/data/data/com.samanramezani.aichattest/cache/cl_profiling.csv\", \"w\"); }\n    if (!fperf) { fperf = fopen(\"cl_profiling.csv\", \"w\"); }"
+        _src "${_src}")
 
-string(REPLACE
-    "FILE * ftrace = fopen(\"cl_trace.json\", \"w\");"
-    "const std::string ai_chat_trace_path =\n        ai_chat_tmpdir && *ai_chat_tmpdir\n            ? std::string(ai_chat_tmpdir) + \"/cl_trace.json\"\n            : std::string(\"cl_trace.json\");\n    FILE * ftrace = fopen(ai_chat_trace_path.c_str(), \"w\");"
-    _src "${_src}")
+    string(REPLACE
+        "FILE * ftrace = fopen(\"cl_trace.json\", \"w\");"
+        "const std::string ai_chat_trace_path =\n        ai_chat_tmpdir && *ai_chat_tmpdir\n            ? std::string(ai_chat_tmpdir) + \"/cl_trace.json\"\n            : std::string(\"/data/user/0/com.samanramezani.aichattest/cache/cl_trace.json\");\n    FILE * ftrace = fopen(ai_chat_trace_path.c_str(), \"w\");\n    if (!ftrace) { ftrace = fopen(\"/data/data/com.samanramezani.aichattest/cache/cl_trace.json\", \"w\"); }\n    if (!ftrace) { ftrace = fopen(\"cl_trace.json\", \"w\"); }"
+        _src "${_src}")
 
-string(REPLACE
-    "fprintf(fperf, \"op name, kernel name, exec duration (ms), global size, local size, output size\\n\");"
-    "fprintf(fperf, \"op name, kernel name, queue (ms), submit (ms), exec duration (ms), complete (ms), total (ms), global size, local size, output size\\n\");"
-    _src "${_src}")
+    string(REPLACE
+        "fprintf(fperf, \"op name, kernel name, exec duration (ms), global size, local size, output size\\n\");"
+        "fprintf(fperf, \"op name, kernel name, queue (ms), submit (ms), exec duration (ms), complete (ms), total (ms), global size, local size, output size\\n\");"
+        _src "${_src}")
 
-string(REPLACE
-    "fprintf(fperf, \"%s,%s,%f,%zux%zux%zu,%zux%zux%zu,%zux%zux%zux%zu\\n\",\n            info.op_name.c_str(), info.kernel_name.c_str(),\n            info.cmd_duration_ns/1.e6f,"
-    "fprintf(fperf, \"%s,%s,%f,%f,%f,%f,%f,%zux%zux%zu,%zux%zux%zu,%zux%zux%zux%zu\\n\",\n            info.op_name.c_str(), info.kernel_name.c_str(),\n            info.cmd_queued_duration_ns/1.e6f,\n            info.cmd_submit_duration_ns/1.e6f,\n            info.cmd_duration_ns/1.e6f,\n            info.cmd_complete_duration_ns/1.e6f,\n            info.cmd_total_duration_ns/1.e6f,"
-    _src "${_src}")
+    string(REPLACE
+        "fprintf(fperf, \"%s,%s,%f,%zux%zux%zu,%zux%zux%zu,%zux%zux%zux%zu\\n\",\n            info.op_name.c_str(), info.kernel_name.c_str(),\n            info.cmd_duration_ns/1.e6f,"
+        "fprintf(fperf, \"%s,%s,%f,%f,%f,%f,%f,%zux%zux%zu,%zux%zux%zu,%zux%zux%zux%zu\\n\",\n            info.op_name.c_str(), info.kernel_name.c_str(),\n            info.cmd_queued_duration_ns/1.e6f,\n            info.cmd_submit_duration_ns/1.e6f,\n            info.cmd_duration_ns/1.e6f,\n            info.cmd_complete_duration_ns/1.e6f,\n            info.cmd_total_duration_ns/1.e6f,"
+        _src "${_src}")
 
-# The upstream backend only writes the CSV when the OpenCL context is freed.
-# The Android runtime keeps that context alive between generations. Write the
-# already-completed profiling results directly from flush_profiling_batch().
-# This avoids a duplicate in-class write_profiling_info() declaration.
-string(REPLACE
-    "profiling_results.insert(profiling_results.end(),\n            std::make_move_iterator(profiling_info.begin()),\n            std::make_move_iterator(profiling_info.end()));\n        profiling_info.clear();"
-    "profiling_results.insert(profiling_results.end(),\n            std::make_move_iterator(profiling_info.begin()),\n            std::make_move_iterator(profiling_info.end()));\n        profiling_info.clear();\n\n        {\n            const char * ai_chat_tmpdir = std::getenv(\"TMPDIR\");\n            const std::string ai_chat_profile_path =\n                ai_chat_tmpdir && *ai_chat_tmpdir\n                    ? std::string(ai_chat_tmpdir) + \"/cl_profiling.csv\"\n                    : std::string(\"cl_profiling.csv\");\n            FILE * fperf_live = fopen(ai_chat_profile_path.c_str(), \"w\");\n            if (fperf_live) {\n                fprintf(fperf_live, \"op name, kernel name, queue (ms), submit (ms), exec duration (ms), complete (ms), total (ms), global size, local size, output size\\n\");\n                for (const ProfilingInfo & info : profiling_results) {\n                    fprintf(fperf_live, \"%s,%s,%f,%f,%f,%f,%f,%zux%zux%zu,%zux%zux%zu,%zux%zux%zux%zu\\n\",\n                        info.op_name.c_str(), info.kernel_name.c_str(),\n                        info.cmd_queued_duration_ns/1.e6f,\n                        info.cmd_submit_duration_ns/1.e6f,\n                        info.cmd_duration_ns/1.e6f,\n                        info.cmd_complete_duration_ns/1.e6f,\n                        info.cmd_total_duration_ns/1.e6f,\n                        info.global_size[0], info.global_size[1], info.global_size[2],\n                        info.local_size[0], info.local_size[1], info.local_size[2],\n                        info.output_size[0], info.output_size[1], info.output_size[2], info.output_size[3]);\n                }\n                fclose(fperf_live);\n            }\n        }"
-    _src "${_src}")
+    string(REPLACE
+        "profiling_results.insert(profiling_results.end(),\n            std::make_move_iterator(profiling_info.begin()),\n            std::make_move_iterator(profiling_info.end()));\n        profiling_info.clear();"
+        "profiling_results.insert(profiling_results.end(),\n            std::make_move_iterator(profiling_info.begin()),\n            std::make_move_iterator(profiling_info.end()));\n        profiling_info.clear();\n\n        // Android keeps the OpenCL context alive across generations, so the\n        // upstream destructor-only CSV would otherwise remain unavailable.\n        {\n            const char * ai_chat_tmpdir = std::getenv(\"TMPDIR\");\n            const std::string ai_chat_profile_path =\n                ai_chat_tmpdir && *ai_chat_tmpdir\n                    ? std::string(ai_chat_tmpdir) + \"/cl_profiling.csv\"\n                    : std::string(\"/data/user/0/com.samanramezani.aichattest/cache/cl_profiling.csv\");\n            FILE * fperf_live = fopen(ai_chat_profile_path.c_str(), \"w\");\n            if (!fperf_live) { fperf_live = fopen(\"/data/data/com.samanramezani.aichattest/cache/cl_profiling.csv\", \"w\"); }\n            if (!fperf_live) { fperf_live = fopen(\"cl_profiling.csv\", \"w\"); }\n            if (fperf_live) {\n                fprintf(fperf_live, \"op name, kernel name, queue (ms), submit (ms), exec duration (ms), complete (ms), total (ms), global size, local size, output size\\n\");\n                for (const ProfilingInfo & info : profiling_results) {\n                    fprintf(fperf_live, \"%s,%s,%f,%f,%f,%f,%f,%zux%zux%zu,%zux%zux%zu,%zux%zux%zux%zu\\n\",\n                        info.op_name.c_str(), info.kernel_name.c_str(),\n                        info.cmd_queued_duration_ns/1.e6f,\n                        info.cmd_submit_duration_ns/1.e6f,\n                        info.cmd_duration_ns/1.e6f,\n                        info.cmd_complete_duration_ns/1.e6f,\n                        info.cmd_total_duration_ns/1.e6f,\n                        info.global_size[0], info.global_size[1], info.global_size[2],\n                        info.local_size[0], info.local_size[1], info.local_size[2],\n                        info.output_size[0], info.output_size[1], info.output_size[2], info.output_size[3]);\n                }\n                fclose(fperf_live);\n            }\n        }"
+        _src "${_src}")
 
-string(REPLACE
-    "if (profiling_info.size() >= 2048) {"
-    "if (profiling_info.size() >= 256) {"
-    _src "${_src}")
+    string(REPLACE
+        "if (profiling_info.size() >= 2048) {"
+        "if (profiling_info.size() >= 1) {"
+        _src "${_src}")
+endif()
+
+# Do not allow a silent no-op patch. These checks make the Android build fail
+# instead of shipping a debug APK that reports N/A.
+if (NOT _src MATCHES "AI_CHAT_OPENCL_PROFILE_PATCH_V4")
+    message(FATAL_ERROR "AI Chat OpenCL profiling V4 marker was not installed")
+endif()
+if (NOT _src MATCHES "fperf_live")
+    message(FATAL_ERROR "AI Chat OpenCL live profiling writer was not installed")
+endif()
+if (NOT _src MATCHES "profiling_info.size\(\) >= 1")
+    message(FATAL_ERROR "AI Chat OpenCL live profiling threshold was not installed")
+endif()
 
 file(WRITE "${_src_file}" "${_src}")
-message(STATUS "AI Chat: patched llama.cpp OpenCL profiling for Android (V3)")
+message(STATUS "AI Chat: patched llama.cpp OpenCL profiling for Android (V4, live)")
