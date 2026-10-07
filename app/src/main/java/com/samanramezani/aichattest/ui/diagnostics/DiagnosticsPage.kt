@@ -95,6 +95,21 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             InfoLine("Context", runtime.runtime.contextLength?.toString() ?: "—")
         }
 
+        SectionCard("دستگاه و حافظه واقعی GPU") {
+            val device = runtime.gpuDevice
+            val residency = runtime.weightResidency
+            InfoLine("GPU", device?.name ?: "—")
+            InfoLine("شرح دستگاه", device?.description ?: "—")
+            InfoLine("حافظه کل GPU", device?.memoryTotalMiB?.let { "%.1f MiB".format(it) } ?: "گزارش نشده توسط درایور")
+            InfoLine("حافظه آزاد GPU", device?.memoryFreeMiB?.let { "%.1f MiB".format(it) } ?: "گزارش نشده توسط درایور")
+            InfoLine("حافظه مصرف‌شده GPU", device?.memoryUsedMiB?.let { "%.1f MiB".format(it) } ?: "قابل محاسبه نیست")
+            InfoLine("وزن‌های واقعاً روی GPU", residency?.gpuTensorMiB?.let { "%.1f MiB".format(it) } ?: "—")
+            InfoLine("تعداد Tensor روی GPU", residency?.gpuTensors?.toString() ?: "—")
+            InfoLine("تعداد Buffer روی GPU", residency?.gpuBuffers?.toString() ?: "—")
+            InfoLine("وزن‌های Host", residency?.hostTensorMiB?.let { "%.1f MiB".format(it) } ?: "—")
+            InfoLine("وزن‌های CPU", residency?.cpuTensorMiB?.let { "%.1f MiB".format(it) } ?: "—")
+        }
+
         SectionCard("پروفایل واقعی GPU / OpenCL") {
             val gpu = runtime.openClProfile
             InfoLine("تعداد Kernel", gpu?.kernelCount?.toString() ?: "—")
