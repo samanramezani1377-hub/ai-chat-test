@@ -97,8 +97,8 @@ static bool validate_gpu_model_residency() {
     for (const auto & entry : g_model->tensors_by_name) {
         const ggml_tensor * tensor = entry.second;
         if (!tensor || !tensor->buffer) continue;
-        const auto * buft = ggml_backend_buffer_get_type(tensor->buffer);
-        const auto * dev = ggml_backend_buft_get_device(buft);
+        const ggml_backend_buffer_type_t buft = ggml_backend_buffer_get_type(tensor->buffer);
+        const ggml_backend_dev_t dev = ggml_backend_buft_get_device(buft);
         const auto type = dev ? ggml_backend_dev_type(dev) : GGML_BACKEND_DEVICE_TYPE_CPU;
         const size_t bytes = ggml_nbytes(tensor);
         if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
