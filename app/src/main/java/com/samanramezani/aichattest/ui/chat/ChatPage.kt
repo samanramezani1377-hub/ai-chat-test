@@ -90,6 +90,7 @@ private fun AgentProgress(execution: ExecutionState?, approvalBusy: Boolean) {
                     style = MaterialTheme.typography.labelLarge
                 )
             }
+            LinearProgressIndicator(Modifier.fillMaxWidth().height(3.dp))
             if (steps.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     steps.takeLast(5).forEach { step -> ProgressStep(step) }
@@ -155,7 +156,14 @@ private fun MessageRow(message: UiMessage, onCopy: (String) -> Unit) {
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 13.dp)) {
                 if (user) {
-                    Text(message.text.ifBlank { "…" }, color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.bodyLarge)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(message.text.ifBlank { "…" }, Modifier.weight(1f), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.bodyLarge)
+                        if (message.text.isNotBlank()) {
+                            IconButton(onClick = { onCopy(message.text) }, modifier = Modifier.size(34.dp).semantics { contentDescription = "کپی پیام" }) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "کپی", tint = MaterialTheme.colorScheme.onPrimary)
+                            }
+                        }
+                    }
                 } else {
                     if (message.text.isBlank()) {
                         Text("در حال آماده‌سازی پاسخ…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
@@ -164,10 +172,9 @@ private fun MessageRow(message: UiMessage, onCopy: (String) -> Unit) {
                     }
                     if (message.text.isNotBlank()) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            IconButton(
-                                onClick = { onCopy(message.text) },
-                                modifier = Modifier.size(34.dp).semantics { contentDescription = "کپی پاسخ" }
-                            ) { Icon(Icons.Default.ContentCopy, contentDescription = "کپی") }
+                            IconButton(onClick = { onCopy(message.text) }, modifier = Modifier.size(34.dp).semantics { contentDescription = "کپی پاسخ" }) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "کپی")
+                            }
                         }
                     }
                 }
