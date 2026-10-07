@@ -57,7 +57,7 @@ android {
         release {
             externalNativeBuild {
                 cmake {
-                    arguments += "-DAI_CHAT_OPENCL_PROFILING=OFF"
+                    arguments += "-DAI_CHAT_OPENCL_PROFILING=ON"
                 }
             }
         }
