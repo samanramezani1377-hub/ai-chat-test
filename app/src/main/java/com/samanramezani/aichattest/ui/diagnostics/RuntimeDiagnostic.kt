@@ -59,6 +59,8 @@ internal data class RuntimeDiagnostic(
     val runtimeTrace: List<RuntimeTraceEvent> = emptyList(),
     val nativeDiagnostics: String? = null,
     val openClProfile: OpenClGpuProfile? = null,
+    val gpuDevice: com.woogit.aicore.runtime.GpuDeviceProfile? = null,
+    val weightResidency: com.woogit.aicore.runtime.GpuWeightResidency? = null,
 ) {
     val nativePerformance: NativePerformance
         get() = NativePerformance(
@@ -152,6 +154,17 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Decode Time: ${perf.decodeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Decode Generated Tokens: ${perf.generatedTokens ?: "N/A"}")
     appendLine("Decode Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine()
+    appendLine("===== REAL GPU DEVICE / MEMORY =====")
+    appendLine("GPU: ${gpuDevice?.name ?: "N/A"}")
+    appendLine("GPU Description: ${gpuDevice?.description ?: "N/A"}")
+    appendLine("GPU Memory Total: ${gpuDevice?.memoryTotalMiB?.let { "%.1f MiB".format(it) } ?: "Driver did not report"}")
+    appendLine("GPU Memory Free: ${gpuDevice?.memoryFreeMiB?.let { "%.1f MiB".format(it) } ?: "Driver did not report"}")
+    appendLine("GPU Memory Used: ${gpuDevice?.memoryUsedMiB?.let { "%.1f MiB".format(it) } ?: "N/A"}")
+    appendLine("GPU Resident Tensor Memory: ${weightResidency?.gpuTensorMiB?.let { "%.1f MiB".format(it) } ?: "N/A"}")
+    appendLine("GPU Resident Tensors: ${weightResidency?.gpuTensors ?: "N/A"}")
+    appendLine("GPU Resident Buffers: ${weightResidency?.gpuBuffers ?: "N/A"}")
+    appendLine("Host Tensor Memory: ${weightResidency?.hostTensorMiB?.let { "%.1f MiB".format(it) } ?: "N/A"}")
     appendLine()
     appendLine("===== GPU / OPENCL KERNEL PROFILE =====")
     openClProfile?.reportLines()?.forEach(::appendLine)
