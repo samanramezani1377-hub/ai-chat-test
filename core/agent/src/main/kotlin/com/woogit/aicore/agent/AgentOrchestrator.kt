@@ -2,6 +2,7 @@ package com.woogit.aicore.agent
 
 import com.woogit.aicore.conversation.ContextProvider
 import com.woogit.aicore.conversation.ConversationContext
+import com.woogit.aicore.conversation.ConversationMessage
 import com.woogit.aicore.domain.GenerationRequest
 import com.woogit.aicore.domain.GenerationResult
 import com.woogit.aicore.domain.InferenceSettings
@@ -68,6 +69,5 @@ class AgentOrchestrator(
             contextProvider.build(contextLimit)
         }
         return runtime.generate(requestFactory.create(context, settings), onToken)
-        return runtime.generate(request, onToken)
     }
 }
