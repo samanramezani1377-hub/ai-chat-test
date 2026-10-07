@@ -32,7 +32,7 @@ class RuntimeDiagnosticsOpenClProfileTest {
             assertEquals(4.5, profile.q6KMulMatMs)
             assertEquals(2.25, profile.attentionMs)
             assertEquals(0.75, profile.ropeMs)
-            assertEquals(0.27, profile.kernelLaunchMs)
+            assertEquals(0.27, profile.kernelLaunchMs, 1e-9)
             assertEquals(0.06, profile.kernelSubmitMs)
             assertEquals(0.15, profile.syncMs)
             assertEquals(1.75, profile.memoryTransferMs)
