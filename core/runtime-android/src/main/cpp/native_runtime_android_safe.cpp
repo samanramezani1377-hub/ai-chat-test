@@ -1140,10 +1140,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     const auto profile_prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(prefill_finished_at - generation_started_at).count();
     append_decode_profile_trace(generation_ms, profile_prefill_ms);
     if (prefill_recorded && (result == 0 || result == 9)) {
-        // Publish the complete resident sequence, including the assistant
-        // tokens that were actually decoded. On the next turn, the user's new
-        // prompt contains that assistant output as part of the conversation
-        // prefix, so those tokens can be reused without another prefill pass.
+        // Publish only the token sequence that is actually resident in the live
+        // context. The next request can then reuse the largest exact prefix.
         g_cached_prompt_tokens = prompt_tokens;
         g_cached_prompt_tokens.insert(
                 g_cached_prompt_tokens.end(),
@@ -1153,11 +1151,30 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         g_cached_prompt_state_on_device = false;
         g_cached_model = g_model;
         g_cached_context = g_context;
-        append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISHED tokens=") +
-            std::to_string(g_cached_prompt_tokens.size()) +
-            " promptTokens=" + std::to_string(prompt_tokens.size()) +
-            " generatedDecodedTokens=" + std::to_string(generated_decoded_tokens.size()) +
-            " mode=" + (hybrid_memory ? "resident_hybrid" : "resident_kv")).c_str());
+        const llama_pos published_min = llama_memory_seq_pos_min(memory, 0);
+        const llama_pos published_max = llama_memory_seq_pos_max(memory, 0);
+        const bool resident_publish_valid =
+                published_min == 0 &&
+                published_max >= 0 &&
+                static_cast<size_t>(published_max + 1) == g_cached_prompt_tokens.size();
+        if (!resident_publish_valid) {
+            append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISH_INVALID residentMin=") +
+                std::to_string(published_min) + " residentMax=" +
+                std::to_string(published_max) + " cachedTokens=" +
+                std::to_string(g_cached_prompt_tokens.size())).c_str());
+            g_cached_prompt_tokens.clear();
+            g_cached_model = nullptr;
+            g_cached_context = nullptr;
+            llama_memory_clear(memory, true);
+        } else {
+            append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISHED tokens=") +
+                std::to_string(g_cached_prompt_tokens.size()) +
+                " promptTokens=" + std::to_string(prompt_tokens.size()) +
+                " generatedDecodedTokens=" + std::to_string(generated_decoded_tokens.size()) +
+                " residentMin=" + std::to_string(published_min) +
+                " residentMax=" + std::to_string(published_max) +
+                " mode=" + (hybrid_memory ? "resident_hybrid" : "resident_kv")).c_str());
+        }
     } else if (prefill_recorded) {
         g_cached_prompt_tokens.clear();
         g_cached_prompt_state.clear();
@@ -1169,6 +1186,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                 ? (requested_max > max_predict ? "CONTEXT_LIMIT" : "MAX_TOKENS")
                 : "COMPLETED";
     }
+    append_native_trace((std::string("NATIVE_KV_CACHE_RESULT status=") +
+        (cache_reused ? "HIT" : "MISS") +
+        " cachedTokens=" + std::to_string(diagnostic_cached_tokens) +
+        " reusedTokens=" + std::to_string(diagnostic_reused_tokens) +
+        " newTokens=" + std::to_string(diagnostic_new_tokens) +
+        " hitRatio=" + std::to_string(diagnostic_hit_ratio)).c_str());
+
     append_native_trace((std::string("NATIVE_STOP_REASON reason=") + stop_reason +
         " generatedTokens=" + std::to_string(generated) +
         " requestedMaxTokens=" + std::to_string(requested_max) +
