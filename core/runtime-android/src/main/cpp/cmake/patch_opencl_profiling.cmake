@@ -24,11 +24,11 @@ if (_src MATCHES "AI_CHAT_OPENCL_PROFILE_PATCH_V3")
         _src "${_src}")
     string(REPLACE
         "if (profiling_info.size() >= 256) {"
-        "if (profiling_info.size() >= 1) {"
+        "if (profiling_info.size() >= 256) {"
         _src "${_src}")
     string(REPLACE
         "if (profiling_info.size() >= 2048) {"
-        "if (profiling_info.size() >= 1) {"
+        "if (profiling_info.size() >= 256) {"
         _src "${_src}")
 else()
     string(REPLACE
@@ -65,7 +65,7 @@ else()
 
     string(REPLACE
         "if (profiling_info.size() >= 2048) {"
-        "if (profiling_info.size() >= 1) {"
+        "if (profiling_info.size() >= 256) {"
         _src "${_src}")
 endif()
 
@@ -77,7 +77,7 @@ endif()
 if (NOT _src MATCHES "fperf_live")
     message(FATAL_ERROR "AI Chat OpenCL live profiling writer was not installed")
 endif()
-if (NOT _src MATCHES "profiling_info.size\(\) >= 1")
+if (NOT _src MATCHES "profiling_info.size\(\) >= 256")
     message(FATAL_ERROR "AI Chat OpenCL live profiling threshold was not installed")
 endif()
 
