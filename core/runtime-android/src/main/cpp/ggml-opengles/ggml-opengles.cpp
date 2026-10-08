@@ -15,10 +15,10 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <limits>
 
 namespace {
 
-static constexpr size_t kMaxSsboBytes = 128u * 1024u * 1024u - 256u;
 static const char * kName = "OpenGL ES";
 static const char * kDescription = "Generic Android OpenGL ES 3.1 GGML GPU backend";
 
@@ -657,9 +657,7 @@ static BufferContext * buffer_ctx(const ggml_tensor * tensor) {
 
 static ggml_backend_buffer_t alloc_buffer(ggml_backend_buffer_type_t, size_t size) {
     const auto & caps = opengles_runtime_info();
-    const size_t max_ssbo = caps.max_ssbo_block_size > 256 ? std::min<size_t>(
-        kMaxSsboBytes, static_cast<size_t>(caps.max_ssbo_block_size) - 256u) : 0u;
-    if (size == 0 || max_ssbo == 0 || size > max_ssbo) return nullptr;
+    if (size == 0 || size > static_cast<size_t>(std::numeric_limits<GLsizeiptr>::max())) return nullptr;
     auto * ctx = new BufferContext;
     ctx->size = size;
     ctx->virtual_base = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -670,7 +668,13 @@ static ggml_backend_buffer_t alloc_buffer(ggml_backend_buffer_type_t, size_t siz
     glGenBuffers(1, &ctx->buffer);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, ctx->buffer);
     glBufferData(GL_SHADER_STORAGE_BUFFER, static_cast<GLsizeiptr>(size), nullptr, GL_DYNAMIC_DRAW);
-    if (glGetError() != GL_NO_ERROR) {
+    const GLenum allocation_error = glGetError();
+    if (allocation_error != GL_NO_ERROR) {
+        std::fprintf(stderr,
+            "ggml-opengles buffer allocation failed size=%zu maxSsbo=%lld glError=0x%04x\\n",
+            size,
+            static_cast<long long>(caps.max_ssbo_block_size),
+            static_cast<unsigned>(allocation_error));
         glDeleteBuffers(1, &ctx->buffer);
         munmap(ctx->virtual_base, size);
         delete ctx;
@@ -729,9 +733,12 @@ static ggml_backend_buffer_t alloc_buffer(ggml_backend_buffer_type_t, size_t siz
 static const char * buft_name(ggml_backend_buffer_type_t) { return "OPENGL_ES_BUFFER"; }
 static size_t buft_alignment(ggml_backend_buffer_type_t) { return 256; }
 static size_t buft_max(ggml_backend_buffer_type_t) {
-    const auto & caps = opengles_runtime_info();
-    return caps.max_ssbo_block_size > 256 ? std::min<size_t>(
-        kMaxSsboBytes, static_cast<size_t>(caps.max_ssbo_block_size) - 256u) : 0u;
+    // GL_MAX_SHADER_STORAGE_BLOCK_SIZE limits a shader-storage binding, not the
+    // underlying buffer object's data store. Large model tensors (for example
+    // Q6_K token embeddings) can therefore live in a larger GL buffer and must
+    // not be rejected by the allocator solely because the SSBO binding limit is
+    // smaller.
+    return std::numeric_limits<size_t>::max();
 }
 static size_t buft_alloc_size(ggml_backend_buffer_type_t, const ggml_tensor * t) { return ggml_nbytes(t); }
 static bool buft_host(ggml_backend_buffer_type_t) { return false; }
