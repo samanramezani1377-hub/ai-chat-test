@@ -34,7 +34,7 @@ static ggml_backend_buffer_type ggml_buft;
 static ggml_backend_device ggml_device;
 static bool g_ready = false;
 
-static GLuint compile_compute(const char * source) {
+static GLuint compile_compute(const char * source, const char * program_name) {
     GLuint shader = glCreateShader(GL_COMPUTE_SHADER);
     glShaderSource(shader, 1, &source, nullptr);
     glCompileShader(shader);
@@ -628,20 +628,20 @@ static bool ensure_programs() {
     const auto & caps = opengles_runtime_info();
     if (g_get_rows && g_elementwise && g_q6k && g_silu && g_ssm_conv && g_rms_norm && g_unary && g_softmax && g_matmul_f32 && g_rope && g_copy && g_l2_norm && g_repeat &&
         (caps.max_compute_ssbo_blocks < 7 || g_gdn != 0)) return true;
-    if (!g_get_rows) g_get_rows = compile_compute(get_rows_shader());
-    if (!g_gdn && caps.max_compute_ssbo_blocks >= 7) g_gdn = compile_compute(gated_delta_net_shader());
-    if (!g_elementwise) g_elementwise = compile_compute(elementwise_shader());
-    if (!g_q6k) g_q6k = compile_compute(q6k_matmul_shader());
-    if (!g_silu) g_silu = compile_compute(silu_shader());
-    if (!g_ssm_conv) g_ssm_conv = compile_compute(ssm_conv_shader());
-    if (!g_rms_norm) g_rms_norm = compile_compute(rms_norm_shader());
-    if (!g_unary) g_unary = compile_compute(unary_shader());
-    if (!g_softmax) g_softmax = compile_compute(softmax_shader());
-    if (!g_matmul_f32) g_matmul_f32 = compile_compute(matmul_f32_shader());
-    if (!g_rope) g_rope = compile_compute(rope_shader());
-    if (!g_copy) g_copy = compile_compute(copy_shader());
-    if (!g_l2_norm) g_l2_norm = compile_compute(l2_norm_shader());
-    if (!g_repeat) g_repeat = compile_compute(repeat_shader());
+    if (!g_get_rows) g_get_rows = compile_compute(get_rows_shader(), "get_rows");
+    if (!g_gdn && caps.max_compute_ssbo_blocks >= 7) g_gdn = compile_compute(gated_delta_net_shader(), "gated_delta_net");
+    if (!g_elementwise) g_elementwise = compile_compute(elementwise_shader(), "elementwise");
+    if (!g_q6k) g_q6k = compile_compute(q6k_matmul_shader(), "q6k_matmul");
+    if (!g_silu) g_silu = compile_compute(silu_shader(), "silu");
+    if (!g_ssm_conv) g_ssm_conv = compile_compute(ssm_conv_shader(), "ssm_conv");
+    if (!g_rms_norm) g_rms_norm = compile_compute(rms_norm_shader(), "rms_norm");
+    if (!g_unary) g_unary = compile_compute(unary_shader(), "unary");
+    if (!g_softmax) g_softmax = compile_compute(softmax_shader(), "softmax");
+    if (!g_matmul_f32) g_matmul_f32 = compile_compute(matmul_f32_shader(), "matmul_f32");
+    if (!g_rope) g_rope = compile_compute(rope_shader(), "rope");
+    if (!g_copy) g_copy = compile_compute(copy_shader(), "copy");
+    if (!g_l2_norm) g_l2_norm = compile_compute(l2_norm_shader(), "l2_norm");
+    if (!g_repeat) g_repeat = compile_compute(repeat_shader(), "repeat");
     return g_get_rows && g_elementwise && g_q6k && g_silu && g_ssm_conv && g_rms_norm && g_unary && g_softmax && g_matmul_f32 && g_rope && g_copy && g_l2_norm && g_repeat;
 }
 
@@ -1141,7 +1141,19 @@ static ggml_guid_t backend_guid() {
 }
 
 static ggml_backend_t init_backend(ggml_backend_dev_t dev, const char *) {
-    if (!opengles_runtime_available() || !ensure_programs()) return nullptr;
+    if (!opengles_runtime_available()) {
+        const auto & caps = opengles_runtime_info();
+        std::fprintf(stderr, "OPENGL_ES_BACKEND_INIT_FAILED stage=runtime reason=%s\\n",
+            caps.failure.empty() ? "unknown" : caps.failure.c_str());
+        return nullptr;
+    }
+    if (!ensure_programs()) {
+        std::fprintf(stderr,
+            "OPENGL_ES_BACKEND_INIT_FAILED stage=shader_programs ssbo_blocks=%d max_ssbo=%lld\\n",
+            opengles_runtime_info().max_compute_ssbo_blocks,
+            static_cast<long long>(opengles_runtime_info().max_ssbo_block_size));
+        return nullptr;
+    }
     static const struct ggml_backend_i backend_i = {
         [](ggml_backend_t){ return "OpenGL ES"; },
         [](ggml_backend_t b){ delete static_cast<DeviceContext *>(b->context); delete b; },
