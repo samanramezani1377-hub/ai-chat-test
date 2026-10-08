@@ -212,7 +212,7 @@ bool opengles_runtime_init() {
 
     if (!parse_version(g_info.version.c_str())) {
         fail("OPENGL_ES_31_COMPUTE_UNAVAILABLE");
-        opengles_runtime_shutdown();
+        shutdown_locked();
         return false;
     }
 
@@ -223,13 +223,13 @@ bool opengles_runtime_init() {
     const GLenum error = glGetError();
     if (!shader || error != GL_NO_ERROR) {
         fail("OPENGL_ES_COMPUTE_SHADER_UNAVAILABLE");
-        opengles_runtime_shutdown();
+        shutdown_locked();
         return false;
     }
     glDeleteShader(shader);
     if (glGetError() != GL_NO_ERROR) {
         fail("OPENGL_ES_COMPUTE_SHADER_DELETE_FAILED");
-        opengles_runtime_shutdown();
+        shutdown_locked();
         return false;
     }
 
