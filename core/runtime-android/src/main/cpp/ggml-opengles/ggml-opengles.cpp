@@ -129,7 +129,7 @@ float q4_0(uint block, uint idx) {
     float d = half_at(base);
     uint j = idx & 31u;
     uint q = byte_u8(base + 2u + (j & 15u));
-    return d * float((j < 16u ? (q & 15u) : (q >> 4u)) - 8);
+    return d * (float(int(j < 16u ? (q & 15u) : (q >> 4u)) - 8));
 }
 float q8_0_mm(uint block, uint idx) {
     uint base = block * 34u;
