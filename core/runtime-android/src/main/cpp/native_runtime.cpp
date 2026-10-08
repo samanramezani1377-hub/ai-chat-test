@@ -357,19 +357,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
 
     std::lock_guard<std::mutex> lock(g_backend_init_mutex);
     if (!g_backend_initialized) {
-        // Keep OpenGL ES device selection capability-driven: never force an Adreno-only
-        // backend policy. The Q6_K decode path, however, has upstream shape-gated
-        // specializations for the long-vocabulary lm_head. Enable those explicitly
-        // so the Android process does not depend on an external shell environment.
-        // The dispatcher still decides whether a given tensor shape can use them.
-        // Allow upstream to select the Adreno xmem F16xF32 GEMM path where its
-        // shape/device gates say it is beneficial. This does not affect the
-        // one-token Q6_K GEMV path used for decode, but can reduce prompt-time
-        // F16 GEMM cost without changing model math or quantization.
+        // Device selection is capability-driven. No vendor-specific GPU policy is used.
+        // Model kernels are selected through GGML operation support, while unsupported
+        // operations are rejected by the GPU backend instead of opting into a CPU path.
 
-        // Do not point OCL_ICD_FILENAMES at /vendor/lib*/libOpenGL ES.so here.
-        // OpenGL ES is the production Android GPU path. The EGL probe is capability-based
-        // (ES 3.1 compute) and does not assume Qualcomm/Adreno or any other vendor.
         append_native_trace("OPENGL_ES_BACKEND_INITIALIZATION_STARTED");
         if (!opengles_runtime_init()) {
             const auto & info = opengles_runtime_info();
@@ -379,7 +370,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
             const auto & info = opengles_runtime_info();
             append_native_trace((std::string("OPENGL_ES_DEVICE vendor=") + info.vendor +
                 " renderer=" + info.renderer + " version=" + info.version +
-                " glsl=" + info.glsl_version).c_str());
+                " glsl=" + info.glsl_version +
+                " maxComputeSsboBlocks=" + std::to_string(info.max_compute_ssbo_blocks) +
+                " maxWorkgroupX=" + std::to_string(info.max_workgroup_size_x) +
+                " maxSsboBlockBytes=" + std::to_string(info.max_ssbo_block_size)).c_str());
             const size_t before = ggml_backend_reg_count();
             ggml_backend_register(ggml_backend_opengles_reg());
             const size_t after = ggml_backend_reg_count();
