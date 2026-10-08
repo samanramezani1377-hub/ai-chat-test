@@ -14,6 +14,11 @@ internal object ErrorCenter {
         val text = technical.lowercase()
 
         return when {
+            "model_not_active" in text ->
+                PersianError("MODEL-000", "مدل فعالی وجود ندارد",
+                    "برای ارسال پیام هنوز هیچ مدل محلی فعال نشده است.",
+                    "از بخش تنظیمات یک مدل GGUF را فعال کن و سپس دوباره پیام بفرست.", technical)
+
             text == "input_empty" || "پیام خالی" in text ->
                 PersianError("INPUT-001", "پیام خالی است",
                     "برای ارسال، متن پیام را وارد کن.",
