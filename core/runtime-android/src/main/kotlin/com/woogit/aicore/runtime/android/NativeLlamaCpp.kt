@@ -24,14 +24,14 @@ internal object NativeLlamaCpp {
         Log.i(TAG, "ACTIVATION_NATIVE_LIBRARY_LOAD_RETURNED")
     }
 
-    /** OpenCL is the only native backend; every model load requests full GPU offload. */
+    /** OpenGL ES is the only native inference backend; every model load requests full GPU offload. */
     private fun ensureNativeInitialized() {
         synchronized(this) {
-            Log.i(TAG, "ACTIVATION_NATIVE_INIT_REQUESTED backend=OpenCL previously_initialized=$nativeInitialized")
+            Log.i(TAG, "ACTIVATION_NATIVE_INIT_REQUESTED backend=OpenGL_ES previously_initialized=$nativeInitialized")
             nativeInit(true)
             nativeInstallFatalHandlers()
             nativeInitialized = true
-            Log.i(TAG, "ACTIVATION_NATIVE_INIT_RETURNED backend=OpenCL")
+            Log.i(TAG, "ACTIVATION_NATIVE_INIT_RETURNED backend=OpenGL_ES")
         }
     }
 
