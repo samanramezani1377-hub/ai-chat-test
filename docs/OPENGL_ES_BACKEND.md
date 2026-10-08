@@ -25,7 +25,7 @@ The Android runtime uses a generic OpenGL ES 3.1 compute backend. Model-specific
 | SOFT_MAX | F32 |
 | ROPE | F32 + I32 positions |
 | MUL_MAT | F32 x F32; Q4_0/Q6_K/Q8_0 x F32 |
-| GET_ROWS | F32/F16/Q6_K/Q8_0 weights -> F32 |
+| GET_ROWS | F32/F16/Q4_0/Q6_K/Q8_0 weights -> F32 |
 | SILU | F32 |
 | SSM_CONV | F32 |
 | GATED_DELTA_NET | F32 when the device exposes at least 7 compute SSBO blocks |
