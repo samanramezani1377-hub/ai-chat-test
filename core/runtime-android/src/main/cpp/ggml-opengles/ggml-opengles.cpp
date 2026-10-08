@@ -548,7 +548,7 @@ void main(){
  float v=x[xb];
  if(d0>=uint(n_dims) || (d0&1u)!=0u){y[yb]=v;return;}
  int axis=0; int cumulative=0;
- if((mode & 4)!=0){
+ if((mode & 8)!=0){
    if(d0/2u >= uint(s0)) { cumulative=s0; axis=1; }
    if(d0/2u >= uint(s0+s1)) { cumulative=s0+s1; axis=2; }
    if(d0/2u >= uint(s0+s1+s2)) { cumulative=s0+s1+s2; axis=3; }
