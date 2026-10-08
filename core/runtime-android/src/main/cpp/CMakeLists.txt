@@ -31,6 +31,9 @@ set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_UI OFF CACHE BOOL "" FORCE)
 set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+# GPU-only Android runtime: disable CPU_REPACK so quantized model weights are never diverted to CPU_REPACK.
+# OpenGL ES owns all model weights; CPU remains only as an internal host-side helper.
+set(GGML_CPU_REPACK OFF CACHE BOOL "Disable CPU weight repacking for GPU-only runtime" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
 
