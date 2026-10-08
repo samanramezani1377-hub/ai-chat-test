@@ -54,7 +54,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
     val report = diagnostic.report()
     val errorReport = diagnostic.errorReport()
     val hasError = !diagnostic.error.isNullOrBlank()
-    val resolvedError = diagnostic.error?.let { ErrorCenter.resolve(it) }
+    val resolvedError = if (hasError) ErrorCenter.resolve(listOf(diagnostic.error, runtime.lastNativeEvent).filterNotNull().joinToString("\n")) else null
     val generation = runtime.generation
     val nativePerf = diagnostic.nativePerformance
     val speed = generation?.let {
