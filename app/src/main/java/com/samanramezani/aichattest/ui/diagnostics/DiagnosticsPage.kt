@@ -106,6 +106,18 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             InfoLine("وزن‌های CPU", residency?.cpuTensorMiB?.let { "%.1f MiB".format(it) } ?: "—")
         }
 
+        SectionCard("Tensorهای ردشده از بررسی GPU-only") {
+            val nonGpuTensors = diagnostic.nonGpuTensorLines
+            if (nonGpuTensors.isEmpty()) {
+                Text("در لاگ ذخیره‌شده Tensor غیر-GPU مشخصی ثبت نشده است. گزارش کامل Native را هم بررسی کن.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text("این موارد توسط اعتبارسنج GPU-only به‌عنوان Tensor غیر-GPU ثبت شده‌اند:", style = MaterialTheme.typography.bodySmall)
+                nonGpuTensors.forEach { line ->
+                    Text(line, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
         SectionCard("پروفایل واقعی GPU / OpenCL") {
             val gpu = runtime.openClProfile
             InfoLine("تعداد Kernel", gpu?.kernelCount?.toString() ?: "—")
