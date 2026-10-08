@@ -641,6 +641,8 @@ static bool supports_op(ggml_backend_dev_t, const ggml_tensor * op) {
         (op->src[0]->type == GGML_TYPE_F32 || op->src[0]->type == GGML_TYPE_F16 ||
          op->src[0]->type == GGML_TYPE_Q6_K || op->src[0]->type == GGML_TYPE_Q8_0) &&
         op->src[0]->ne[0] > 0 && op->src[0]->ne[0] % (op->src[0]->type == GGML_TYPE_Q8_0 ? 32 : 1) == 0) return true;
+    if (op->op == GGML_OP_SCALE && op->type == GGML_TYPE_F32 && op->src[0] &&
+        op->src[0]->type == GGML_TYPE_F32 && ggml_is_contiguous(op->src[0])) return true;
     if (op->op == GGML_OP_SSM_CONV && op->type == GGML_TYPE_F32 &&
         op->src[0] && op->src[1] && op->src[0]->type == GGML_TYPE_F32 &&
         op->src[1]->type == GGML_TYPE_F32 &&
@@ -801,8 +803,6 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             uint64_t total=(uint64_t)op->ne[0]*op->ne[1]*op->ne[2]*op->ne[3]; glDispatchCompute((GLuint)((total+63)/64),1,1);glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);continue;
         }
 
-        if (op->op == GGML_OP_SCALE && op->src[0]->type == GGML_TYPE_F32 &&
-            op->type == GGML_TYPE_F32 && ggml_is_contiguous(op->src[0])) return true;
         if (op->op == GGML_OP_SCALE) {
             auto * a=buffer_ctx(op->src[0]); auto * c=buffer_ctx(op);
             if(!a||!c)return GGML_STATUS_FAILED;
