@@ -98,7 +98,7 @@ uniform uint y_off;
 uniform uint k;
 uniform uint rows;
 uniform uint cols;
-uniform uint x_s0, x_s1, x_s2, x_s3, y_s0, y_s1, y_s2, y_s3, x_n2, x_n3, w_type;
+uniform uint x_s0, x_s1, x_s2, x_s3, y_s0, y_s1, y_s2, y_s3, x_n2, x_n3, w_type, block_k;
 
 uint byte_u8(uint byte_offset) {
     uint word = w[(w_off + byte_offset) >> 2u];
@@ -167,9 +167,9 @@ void main() {
     uint row = out % rows;
     uint col = (out / rows) % cols;
     float sum = 0.0;
-    uint blocks = k / 256u;
+    uint blocks = k / block_k;
     for (uint b = 0u; b < blocks; ++b) {
-        for (uint j = 0u; j < 256u; ++j) {
+        for (uint j = 0u; j < block_k; ++j) {
             uint kk = b * 256u + j;
             float xv = x[(x_off >> 2u) + col*x_s1 + (out/(rows*cols))*x_s2 + kk*x_s0];
             uint wb = b + row * blocks;
@@ -967,6 +967,8 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             const GLuint wtype = op->src[0]->type == GGML_TYPE_Q6_K ? 0u :
                 (op->src[0]->type == GGML_TYPE_Q4_0 ? 1u : 2u);
             glUniform1ui(glGetUniformLocation(g_q6k, "w_type"), wtype);
+            glUniform1ui(glGetUniformLocation(g_q6k, "block_k"),
+                op->src[0]->type == GGML_TYPE_Q6_K ? 256u : 32u);
             glUniform1ui(glGetUniformLocation(g_q6k, "cols"), static_cast<GLuint>(op->src[1]->ne[1]));
             const ggml_tensor * xt=op->src[1]; const ggml_tensor * yt=op;
             glUniform1ui(glGetUniformLocation(g_q6k,"x_s0"),(GLuint)(xt->nb[0]/4)); glUniform1ui(glGetUniformLocation(g_q6k,"x_s1"),(GLuint)(xt->nb[1]/4));
