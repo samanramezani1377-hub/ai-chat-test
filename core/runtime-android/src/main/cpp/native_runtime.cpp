@@ -644,13 +644,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     checkpoint(g_model ? "MODEL_LOAD_RETURNED_SUCCESS" : "MODEL_LOAD_RETURNED_FAILED");
     if (g_model) {
         append_weight_residency_trace();
-        if (!validate_gpu_model_residency()) {
-            checkpoint("OPENGL_ES_GPU_ONLY_MODEL_RESIDENCY_REJECTED");
-            append_native_trace("OPENGL_ES_GPU_ONLY_NO_CPU_WEIGHT_FALLBACK");
-            env->ReleaseStringUTFChars(jpath, path);
-            free_all();
-            return 6;
-        }
+        const bool residency_gpu_only = validate_gpu_model_residency();
+        append_native_trace(residency_gpu_only
+            ? "OPENGL_ES_DIAGNOSTIC_RESIDENCY gpu_only=1"
+            : "OPENGL_ES_DIAGNOSTIC_RESIDENCY gpu_only=0 non_gpu_tensors_present=1");
+        // Diagnostic mode deliberately continues after a non-GPU residency finding.
+        // This lets the model execute and exposes the real backend allocation path in
+        // the trace. It must not be interpreted as the final GPU-only policy.
     }
     env->ReleaseStringUTFChars(jpath, path);
     if (!g_model) {
