@@ -334,8 +334,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
                         // llama.cpp already invalidates entries by kernel source, build
                         // options, device, driver and platform, so this is a persistence
                         // location only; it does not alter kernel selection.
-                        const std::string cl_cache_dir = base + "/ai-chat-opengles-cache";
-                        setenv("GGML_OPENGL_ES_OPENCL_KERNEL_CACHE_DIR", cl_cache_dir.c_str(), 0);
+                        const std::string gl_cache_dir = base + "/ai-chat-opengles-cache";
+                        (void) gl_cache_dir;
                         env->ReleaseStringUTFChars(tmp_dir, dir);
                     }
                     env->DeleteLocalRef(tmp_dir);
@@ -362,15 +362,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         // specializations for the long-vocabulary lm_head. Enable those explicitly
         // so the Android process does not depend on an external shell environment.
         // The dispatcher still decides whether a given tensor shape can use them.
-        setenv("GGML_OPENGL_ES_OPENCL_Q6K_GEMV_TILED", "0", 1);
-        setenv("GGML_OPENGL_ES_OPENCL_Q6K_GEMV_O4", "1", 1);
-        setenv("GGML_OPENGL_ES_OPENCL_Q6K_GEMV_O4_GLOBAL", "1", 1);
         // Allow upstream to select the Adreno xmem F16xF32 GEMM path where its
         // shape/device gates say it is beneficial. This does not affect the
         // one-token Q6_K GEMV path used for decode, but can reduce prompt-time
         // F16 GEMM cost without changing model math or quantization.
-        unsetenv("GGML_OPENGL_ES_OPENCL_ADRENO_XMEM_GEMM");
-        unsetenv("GGML_DISABLE_OPENCL");
 
         // Do not point OCL_ICD_FILENAMES at /vendor/lib*/libOpenGL ES.so here.
         // OpenGL ES is the production Android GPU path. The EGL probe is capability-based
@@ -403,7 +398,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_RETURNED");
         g_backend_initialized = true;
     } else {
-        append_native_trace("OPENGL_ES_OPENCL_BACKEND_ALREADY_INITIALIZED");
+        append_native_trace("OPENGL_ES_BACKEND_ALREADY_INITIALIZED");
         if (!g_gpu_backend_loaded) {
             append_native_trace("OPENGL_ES_BACKEND_RETRY_STARTED");
             if (opengles_runtime_init()) {
@@ -516,7 +511,7 @@ static void append_weight_residency_trace() {
     std::replace(gpu_name_text.begin(), gpu_name_text.end(), ' ', '_');
     std::replace(gpu_description_text.begin(), gpu_description_text.end(), ' ', '_');
 
-    append_native_trace((std::string("NATIVE_OPENGL_ES_OPENCL_DEVICE") +
+    append_native_trace((std::string("NATIVE_OPENGL_ES_DEVICE") +
         " name=" + gpu_name_text +
         " description=" + gpu_description_text +
         " memoryFreeMiB=" + std::to_string((double) free_bytes / (1024.0 * 1024.0)) +
