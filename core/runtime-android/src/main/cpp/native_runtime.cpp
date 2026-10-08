@@ -127,135 +127,6 @@ static bool validate_gpu_model_residency() {
 }
 
 
-static const char * opencl_error_name(cl_int code) {
-    switch (code) {
-        case CL_SUCCESS: return "CL_SUCCESS";
-        case CL_DEVICE_NOT_FOUND: return "CL_DEVICE_NOT_FOUND";
-        case CL_DEVICE_NOT_AVAILABLE: return "CL_DEVICE_NOT_AVAILABLE";
-        case CL_COMPILER_NOT_AVAILABLE: return "CL_COMPILER_NOT_AVAILABLE";
-        case CL_MEM_OBJECT_ALLOCATION_FAILURE: return "CL_MEM_OBJECT_ALLOCATION_FAILURE";
-        case CL_OUT_OF_RESOURCES: return "CL_OUT_OF_RESOURCES";
-        case CL_OUT_OF_HOST_MEMORY: return "CL_OUT_OF_HOST_MEMORY";
-        case CL_INVALID_VALUE: return "CL_INVALID_VALUE";
-        case CL_INVALID_PLATFORM: return "CL_INVALID_PLATFORM";
-#ifdef CL_PLATFORM_NOT_FOUND_KHR
-        case CL_PLATFORM_NOT_FOUND_KHR: return "CL_PLATFORM_NOT_FOUND_KHR";
-#endif
-        default: return "CL_UNKNOWN_ERROR";
-    }
-}
-
-static std::string opencl_platform_info(cl_platform_id platform, cl_platform_info info) {
-    size_t size = 0;
-    if (clGetPlatformInfo(platform, info, 0, nullptr, &size) != CL_SUCCESS || size == 0) {
-        return "<unavailable>";
-    }
-    std::string value(size, '\0');
-    if (clGetPlatformInfo(platform, info, size, value.data(), nullptr) != CL_SUCCESS) {
-        return "<unavailable>";
-    }
-    if (!value.empty() && value.back() == '\0') value.pop_back();
-    return value;
-}
-
-static void probe_android_opencl_library_visibility() {
-    append_native_trace("OPENCL_LIBRARY_VISIBILITY_PROBE_STARTED");
-    const char * candidates[] = {
-        "/vendor/lib64/libOpenGL ES.so",
-        "/vendor/lib64/libOpenGL ES_adreno.so",
-        "/system/vendor/lib64/libOpenGL ES.so",
-        "/system/vendor/lib/libOpenGL ES.so",
-        "/system_ext/lib64/libOpenGL ES_system.so",
-        "/system/lib64/libOpenGL ES.so",
-        "/vendor/lib/libOpenGL ES.so",
-    };
-    for (const char * path : candidates) {
-        struct stat st{};
-        const bool exists = stat(path, &st) == 0;
-        if (!exists) {
-            append_native_trace((std::string("OPENCL_LIBRARY_CANDIDATE path=") + path + " exists=0").c_str());
-            continue;
-        }
-        void * handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-        const char * err = dlerror();
-        append_native_trace((std::string("OPENCL_LIBRARY_CANDIDATE path=") + path +
-            " exists=1 dlopen=" + (handle ? "1" : "0") +
-            " error=" + (err ? err : "none")).c_str());
-        if (handle) dlclose(handle);
-    }
-    append_native_trace("OPENCL_LIBRARY_VISIBILITY_PROBE_COMPLETED");
-}
-
-static void probe_android_opencl_driver() {
-    append_native_trace("OPENCL_DRIVER_PROBE_STARTED");
-    cl_uint platform_count = 0;
-    const cl_int platform_result = clGetPlatformIDs(0, nullptr, &platform_count);
-    append_native_trace((std::string("OPENCL_DRIVER_PROBE_PLATFORM_RESULT code=") +
-        std::to_string((int)platform_result) + " name=" + opencl_error_name(platform_result) +
-        " platformCount=" + std::to_string(platform_count)).c_str());
-
-    if (platform_result != CL_SUCCESS || platform_count == 0) {
-        append_native_trace("OPENCL_DRIVER_PROBE_NO_PLATFORM");
-        return;
-    }
-
-    std::vector<cl_platform_id> platforms(platform_count);
-    const cl_int list_result = clGetPlatformIDs(platform_count, platforms.data(), nullptr);
-    append_native_trace((std::string("OPENCL_DRIVER_PROBE_PLATFORM_LIST code=") +
-        std::to_string((int)list_result) + " name=" + opencl_error_name(list_result)).c_str());
-    if (list_result != CL_SUCCESS) return;
-
-    for (cl_uint i = 0; i < platform_count; ++i) {
-        const std::string name = opencl_platform_info(platforms[i], CL_PLATFORM_NAME);
-        const std::string vendor = opencl_platform_info(platforms[i], CL_PLATFORM_VENDOR);
-        const std::string version = opencl_platform_info(platforms[i], CL_PLATFORM_VERSION);
-        const std::string extensions = opencl_platform_info(platforms[i], CL_PLATFORM_EXTENSIONS);
-        append_native_trace((std::string("OPENCL_PLATFORM index=") + std::to_string(i) +
-            " name=" + name + " vendor=" + vendor + " version=" + version).c_str());
-        append_native_trace((std::string("OPENCL_PLATFORM_EXTENSIONS index=") +
-            std::to_string(i) + " value=" + extensions).c_str());
-
-        cl_uint device_count = 0;
-        const cl_int device_result = clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_GPU, 0, nullptr, &device_count);
-        append_native_trace((std::string("OPENCL_GPU_PROBE index=") + std::to_string(i) +
-            " code=" + std::to_string((int)device_result) + " name=" +
-            opencl_error_name(device_result) + " deviceCount=" +
-            std::to_string(device_count)).c_str());
-        if (device_result != CL_SUCCESS || device_count == 0) continue;
-
-        std::vector<cl_device_id> devices(device_count);
-        const cl_int device_list_result = clGetDeviceIDs(
-            platforms[i], CL_DEVICE_TYPE_GPU, device_count, devices.data(), nullptr);
-        append_native_trace((std::string("OPENCL_GPU_PROBE_LIST index=") +
-            std::to_string(i) + " code=" + std::to_string((int)device_list_result) +
-            " name=" + opencl_error_name(device_list_result)).c_str());
-        if (device_list_result != CL_SUCCESS) continue;
-
-        for (cl_uint d = 0; d < device_count; ++d) {
-            auto device_info = [&](cl_device_info info) -> std::string {
-                size_t size = 0;
-                if (clGetDeviceInfo(devices[d], info, 0, nullptr, &size) != CL_SUCCESS || size == 0) {
-                    return "<unavailable>";
-                }
-                std::string value(size, '\0');
-                if (clGetDeviceInfo(devices[d], info, size, value.data(), nullptr) != CL_SUCCESS) {
-                    return "<unavailable>";
-                }
-                if (!value.empty() && value.back() == '\0') value.pop_back();
-                return value;
-            };
-            append_native_trace((std::string("OPENGL_ES_GPU_DEVICE index=") + std::to_string(i) +
-                "." + std::to_string(d) + " name=" +
-                device_info(CL_DEVICE_NAME) + " vendor=" +
-                device_info(CL_DEVICE_VENDOR) + " driver=" +
-                device_info(CL_DRIVER_VERSION) + " version=" +
-                device_info(CL_DEVICE_VERSION)).c_str());
-        }
-    }
-    append_native_trace("OPENCL_DRIVER_PROBE_COMPLETED");
-}
-
-
 static void append_native_trace(const char *text) {
     if (!text || !*text || g_native_trace_file.empty()) return;
     std::lock_guard<std::mutex> lock(g_native_marker_mutex);
@@ -463,8 +334,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
                         // llama.cpp already invalidates entries by kernel source, build
                         // options, device, driver and platform, so this is a persistence
                         // location only; it does not alter kernel selection.
-                        const std::string cl_cache_dir = base + "/ai-chat-opencl-cache";
-                        setenv("GGML_OPENCL_KERNEL_CACHE_DIR", cl_cache_dir.c_str(), 0);
+                        const std::string cl_cache_dir = base + "/ai-chat-opengles-cache";
+                        setenv("GGML_OPENGL_ES_OPENCL_KERNEL_CACHE_DIR", cl_cache_dir.c_str(), 0);
                         env->ReleaseStringUTFChars(tmp_dir, dir);
                     }
                     env->DeleteLocalRef(tmp_dir);
@@ -491,14 +362,14 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         // specializations for the long-vocabulary lm_head. Enable those explicitly
         // so the Android process does not depend on an external shell environment.
         // The dispatcher still decides whether a given tensor shape can use them.
-        setenv("GGML_OPENCL_Q6K_GEMV_TILED", "0", 1);
-        setenv("GGML_OPENCL_Q6K_GEMV_O4", "1", 1);
-        setenv("GGML_OPENCL_Q6K_GEMV_O4_GLOBAL", "1", 1);
+        setenv("GGML_OPENGL_ES_OPENCL_Q6K_GEMV_TILED", "0", 1);
+        setenv("GGML_OPENGL_ES_OPENCL_Q6K_GEMV_O4", "1", 1);
+        setenv("GGML_OPENGL_ES_OPENCL_Q6K_GEMV_O4_GLOBAL", "1", 1);
         // Allow upstream to select the Adreno xmem F16xF32 GEMM path where its
         // shape/device gates say it is beneficial. This does not affect the
         // one-token Q6_K GEMV path used for decode, but can reduce prompt-time
         // F16 GEMM cost without changing model math or quantization.
-        unsetenv("GGML_OPENCL_ADRENO_XMEM_GEMM");
+        unsetenv("GGML_OPENGL_ES_OPENCL_ADRENO_XMEM_GEMM");
         unsetenv("GGML_DISABLE_OPENCL");
 
         // Do not point OCL_ICD_FILENAMES at /vendor/lib*/libOpenGL ES.so here.
@@ -518,7 +389,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
             ggml_backend_register(ggml_backend_opengles_reg());
             const size_t after = ggml_backend_reg_count();
             const bool registered = ggml_backend_reg_by_name("OpenGL ES") != nullptr;
-            g_gpu_backend_loaded = registered && has_opencl_gpu_device();
+            g_gpu_backend_loaded = registered && has_opengles_gpu_device();
             append_native_trace((std::string("OPENGL_ES_STATIC_REGISTRATION before=") +
                 std::to_string(before) + " after=" + std::to_string(after) +
                 " registered=" + (registered ? "1" : "0") +
@@ -532,12 +403,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_RETURNED");
         g_backend_initialized = true;
     } else {
-        append_native_trace("OPENCL_BACKEND_ALREADY_INITIALIZED");
+        append_native_trace("OPENGL_ES_OPENCL_BACKEND_ALREADY_INITIALIZED");
         if (!g_gpu_backend_loaded) {
             append_native_trace("OPENGL_ES_BACKEND_RETRY_STARTED");
             if (opengles_runtime_init()) {
                 ggml_backend_register(ggml_backend_opengles_reg());
-                g_gpu_backend_loaded = ggml_backend_reg_by_name("OpenGL ES") != nullptr && has_opencl_gpu_device();
+                g_gpu_backend_loaded = ggml_backend_reg_by_name("OpenGL ES") != nullptr && has_opengles_gpu_device();
             }
             append_native_trace((std::string("OPENGL_ES_BACKEND_RETRY_RESULT loaded=") +
                 (g_gpu_backend_loaded ? "1" : "0") +
@@ -645,7 +516,7 @@ static void append_weight_residency_trace() {
     std::replace(gpu_name_text.begin(), gpu_name_text.end(), ' ', '_');
     std::replace(gpu_description_text.begin(), gpu_description_text.end(), ' ', '_');
 
-    append_native_trace((std::string("NATIVE_OPENCL_DEVICE") +
+    append_native_trace((std::string("NATIVE_OPENGL_ES_OPENCL_DEVICE") +
         " name=" + gpu_name_text +
         " description=" + gpu_description_text +
         " memoryFreeMiB=" + std::to_string((double) free_bytes / (1024.0 * 1024.0)) +
@@ -728,7 +599,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     checkpoint((std::string("MODEL_LOAD_PARAMS gpu_layers=") + std::to_string((int)mp.n_gpu_layers) +
         " load_mode=" + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
-    checkpoint("MODEL_LOAD_STARTED gpu_layers=OPENCL");
+    checkpoint("MODEL_LOAD_STARTED gpu_layers=OPENGL_ES");
     g_model = load_model_android(path, mp, true);
     checkpoint(g_model ? "MODEL_LOAD_RETURNED_SUCCESS" : "MODEL_LOAD_RETURNED_FAILED");
     if (g_model) {
