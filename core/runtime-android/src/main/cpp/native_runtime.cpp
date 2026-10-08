@@ -46,6 +46,7 @@ static uint32_t g_context_length = 0;
 
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
 static void append_native_trace(const char *text);
+static bool has_opengles_gpu_device();
 static bool init_generation_context();
 static bool init_speculative_runtime();
 static int generation_threads() {
