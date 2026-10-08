@@ -95,6 +95,7 @@ uniform uint y_off;
 uniform uint k;
 uniform uint rows;
 uniform uint cols;
+uniform uint x_s0, x_s1, x_s2, x_s3, y_s0, y_s1, y_s2, y_s3, x_n2, x_n3;
 
 uint byte_u8(uint byte_offset) {
     uint word = w[(w_off + byte_offset) >> 2u];
@@ -145,7 +146,7 @@ float q6(uint block, uint idx) {
 
 void main() {
     uint out = gl_GlobalInvocationID.x;
-    uint total = rows * cols;
+    uint total = rows * cols * x_n2 * x_n3;
     if (out >= total) return;
     uint row = out % rows;
     uint col = (out / rows) % cols;
