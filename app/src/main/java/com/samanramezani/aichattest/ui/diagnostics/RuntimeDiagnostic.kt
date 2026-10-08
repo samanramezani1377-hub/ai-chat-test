@@ -64,7 +64,15 @@ internal data class RuntimeDiagnostic(
 ) {
     val nonGpuTensorLines: List<String>
         get() = nativeDiagnostics.orEmpty().lineSequence()
-            .filter { it.contains("OPENGL_ES_NON_GPU_TENSOR") }
+            .filter {
+                it.contains("OPENGL_ES_NON_GPU_TENSOR") ||
+                    it.contains("OPENGL_ES_TENSOR_RESIDENCY")
+            }
+            .toList()
+
+    val residencySummaryLines: List<String>
+        get() = nativeDiagnostics.orEmpty().lineSequence()
+            .filter { it.contains("OPENGL_ES_RESIDENCY_SUMMARY") }
             .toList()
 
     val nativePerformance: NativePerformance
@@ -230,9 +238,15 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     if (actionTrace.isEmpty()) appendLine("N/A")
     else actionTrace.forEach { event -> appendLine("${event.timestampMs} | ${event.type} | ${event.message ?: ""}".trimEnd()) }
     appendLine()
-    appendLine("===== NON-GPU TENSORS REPORTED BY RESIDENCY CHECK =====")
-    if (nonGpuTensorLines.isEmpty()) appendLine("No non-GPU tensor detail found in captured native diagnostics.")
-    else nonGpuTensorLines.forEach(::appendLine)
+    appendLine("===== OPENGL TENSOR RESIDENCY (COPY-SAFE) =====")
+    appendLine("The lines below are captured from native runtime and identify the actual device/buffer classification for each model tensor.")
+    if (residencySummaryLines.isEmpty()) appendLine("No residency summary found in captured native diagnostics.")
+    else residencySummaryLines.forEach(::appendLine)
+    if (nonGpuTensorLines.isEmpty()) {
+        appendLine("No per-tensor residency entries found in captured native diagnostics.")
+    } else {
+        nonGpuTensorLines.forEach(::appendLine)
+    }
     appendLine()
     appendLine("===== NATIVE DIAGNOSTICS / RAW LOG =====")
     appendLine(nativeDiagnostics ?: "N/A")
