@@ -70,7 +70,7 @@ internal object ErrorCenter {
                     technical)
 
             "context" in text && ("too large" in text || "exceed" in text || "overflow" in text) ->
-                PersianError("INPUT-001", "حجم ورودی بیش از ظرفیت زمینه است",
+                PersianError("INPUT-003", "حجم ورودی بیش از ظرفیت زمینه است",
                     "متن و سابقه گفت‌وگو از ظرفیت زمینه مدل بیشتر شده است.",
                     "متن کوتاه‌تری بفرست یا تعداد پیام‌های اخیر/ظرفیت زمینه را کاهش بده.",
                     technical)
