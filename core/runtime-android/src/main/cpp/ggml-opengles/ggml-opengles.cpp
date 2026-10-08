@@ -78,7 +78,7 @@ void main() {
     uint ci = (c_off >> 2u) + i;
     float x = a[ai];
     float y = b[bi];
-    c[ci] = op == 0u ? x + y : x * y;
+    c[ci] = op == 0u ? x + y : (op == 1u ? x * y : x * b[(b_off >> 2u)]);
 })";
 }
 
@@ -625,7 +625,7 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             U("x_off",tensor_offset(op->src[0]->buffer,op->src[0])); U("w_off",tensor_offset(op->src[1]->buffer,op->src[1])); U("y_off",tensor_offset(op->buffer,op));
             U("n0",(GLuint)op->ne[0]); U("n1",(GLuint)op->ne[1]); U("n2",(GLuint)op->ne[2]); U("n3",(GLuint)op->ne[3]);
             for(int d=0;d<4;++d){U((std::string("xs")+std::to_string(d)).c_str(),(GLuint)(op->src[0]->nb[d]/4));U((std::string("ys")+std::to_string(d)).c_str(),(GLuint)(op->nb[d]/4));}
-            glUniform1f(glGetUniformLocation(g_rms_norm,"eps"),1e-5f);
+            glUniform1f(glGetUniformLocation(g_rms_norm,"eps"),*reinterpret_cast<const float *>(op->op_params));
             glDispatchCompute((GLuint)((op->ne[1]*op->ne[2]*op->ne[3]+63)/64),1,1); glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT); continue;
         }
 
@@ -677,6 +677,21 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             const ggml_tensor * ts[3]={op->src[0],op->src[1],op}; const char *pre[3]={"a","b","c"};
             for(int z=0;z<3;++z)for(int d=0;d<4;++d)U((std::string(pre[z])+"s"+std::to_string(d)).c_str(),(GLuint)(ts[z]->nb[d]/4));
             uint64_t total=(uint64_t)op->ne[0]*op->ne[1]*op->ne[2]*op->ne[3]; glDispatchCompute((GLuint)((total+63)/64),1,1);glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);continue;
+        }
+
+        if (op->op == GGML_OP_SCALE) {
+            auto * a=buffer_ctx(op->src[0]); auto * b=buffer_ctx(op->src[1]); auto * c=buffer_ctx(op);
+            if(!a||!b||!c)return GGML_STATUS_FAILED;
+            glUseProgram(g_elementwise);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,a->buffer);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER,1,b->buffer);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER,2,c->buffer);
+            glUniform1ui(glGetUniformLocation(g_elementwise,"a_off"),(GLuint)tensor_offset(op->src[0]->buffer,op->src[0]));
+            glUniform1ui(glGetUniformLocation(g_elementwise,"b_off"),(GLuint)tensor_offset(op->src[1]->buffer,op->src[1]));
+            glUniform1ui(glGetUniformLocation(g_elementwise,"c_off"),(GLuint)tensor_offset(op->buffer,op));
+            glUniform1ui(glGetUniformLocation(g_elementwise,"n"),(GLuint)ggml_nelements(op));
+            glUniform1ui(glGetUniformLocation(g_elementwise,"op"),2u);
+            glDispatchCompute((GLuint)((ggml_nelements(op)+63)/64),1,1);glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);continue;
         }
 
         if (op->op == GGML_OP_SSM_CONV) {
