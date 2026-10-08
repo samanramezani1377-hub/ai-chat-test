@@ -401,39 +401,17 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         unsetenv("GGML_OPENCL_ADRENO_XMEM_GEMM");
         unsetenv("GGML_DISABLE_OPENCL");
 
-        // Android devices normally expose the vendor OpenCL implementation outside
-        // the APK (for example under /vendor/lib64). Because this runtime embeds the
-        // Khronos ICD loader, do not rely on the process linker namespace to discover
-        // that implementation. Explicitly point the loader at the system/vendor ICD
-        // candidates before the first OpenCL API call. This is device-agnostic and
-        // does not select a CPU backend or an Adreno-only implementation.
-        const char * const opencl_icd_candidates[] = {
-            "/vendor/lib64/libOpenCL.so",
-            "/system/vendor/lib64/libOpenCL.so",
-            "/vendor/lib/libOpenCL.so",
-            "/system/vendor/lib/libOpenCL.so",
-        };
-        std::string opencl_icd_files;
-        for (const char *candidate : opencl_icd_candidates) {
-            if (access(candidate, R_OK) == 0) {
-                if (!opencl_icd_files.empty()) opencl_icd_files += ":";
-                opencl_icd_files += candidate;
-                append_native_trace((std::string("OPENCL_ICD_CANDIDATE_FOUND path=") + candidate).c_str());
-            } else {
-                append_native_trace((std::string("OPENCL_ICD_CANDIDATE_MISSING path=") + candidate).c_str());
-            }
-        }
-        if (!opencl_icd_files.empty()) {
-            setenv("OCL_ICD_FILENAMES", opencl_icd_files.c_str(), 1);
-            append_native_trace((std::string("OPENCL_ICD_FILENAMES=") + opencl_icd_files).c_str());
-        } else {
-            append_native_trace("OPENCL_ICD_FILENAMES_NO_VENDOR_LIBRARY_FOUND");
-        }
-        // Also cover Android vendor ICD registration directories used by devices
-        // whose implementation is split into a vendor loader plus an ICD file.
+        // Do not point OCL_ICD_FILENAMES at /vendor/lib*/libOpenCL.so here.
+        // On Android that path is commonly the system Khronos ICD loader itself,
+        // not the vendor GPU implementation. Feeding the loader its own library
+        // can recurse and make clGetPlatformIDs appear to hang with no platform.
+        // Let the Android/Khronos loader discover the vendor ICD through its
+        // registered vendor paths instead, and record the actual search paths.
+        unsetenv("OCL_ICD_FILENAMES");
         setenv("OCL_ICD_VENDORS",
             "/system/vendor/Khronos/OpenCL/vendors:/vendor/Khronos/OpenCL/vendors:/system_ext/vendor/Khronos/OpenCL/vendors",
             1);
+        append_native_trace("OPENCL_ICD_FILENAMES_CLEARED_ANDROID_LOADER");
         append_native_trace("OPENCL_ICD_VENDORS=/system/vendor/Khronos/OpenCL/vendors:/vendor/Khronos/OpenCL/vendors:/system_ext/vendor/Khronos/OpenCL/vendors");
         append_native_trace("OPENCL_Q6K_SPECIALIZED_KERNELS tiled=0 o4=1 o4_global=1 xmem_gemm=0");
         append_native_trace("OPENCL_STATIC_REGISTRATION_STARTED");
