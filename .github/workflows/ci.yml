@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - OpenGL
   pull_request:
     branches:
       - main
+      - OpenGL
   workflow_dispatch:
 
 permissions:
@@ -99,14 +101,21 @@ jobs:
               '.github/workflows/ci.yml'
             ) }}
 
-      - name: Verify GPU-only runtime invariants
+      - name: Verify generic OpenGL ES GPU-only invariants
         run: |
           set -euo pipefail
-          ! grep -R "GGML_OPENCL_ADRENO_XMEM_GEMM.*1" -n core/runtime-android/src/main/cpp
-          grep -q 'GGML_OPENCL_Q6K_GEMV_TILED.*0' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'AI_CHAT_OPENCL_PROFILING=ON' core/runtime-android/build.gradle.kts
-          grep -q 'resident_max + 1' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          echo "GPU-only/KV-cache diagnostics invariants verified"
+          test -f core/runtime-android/src/main/cpp/opengles_runtime.cpp
+          test -f core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
+          test -f core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles-registration.cpp
+          ! grep -R -nE 'GGML_USE_OPENCL|ggml-opencl|OpenCL|Vulkan' core/runtime-android/src/main/cpp core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_GPU_BACKEND_OPENGL=1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_REQUIRE_OPENGL_GPU=1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'OpenGL ES' core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
+          grep -q 'GGML_OP_GET_ROWS' core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
+          grep -q 'GGML_TYPE_Q4_0' core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
+          grep -q 'GGML_TYPE_Q6_K' core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
+          grep -q 'GGML_TYPE_Q8_0' core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
+          echo "Generic OpenGL ES GPU-only invariants verified"
 
       - name: Assemble debug APK
         run: >-
@@ -117,32 +126,21 @@ jobs:
           --console=plain
           --parallel
 
-      - name: Verify OpenCL profiling and static backend linkage
+      - name: Verify OpenGL ES static backend linkage
         run: |
           set -euo pipefail
-          source_file="$(find core/runtime-android -path '*/.cxx/*' -path '*/llama_cpp-src/ggml/src/ggml-opencl/ggml-opencl.cpp' -print -quit)"
+          source_file="$(find core/runtime-android -path '*/.cxx/*' -path '*/ggml-opengles/ggml-opengles.cpp' -print -quit)"
           test -n "$source_file"
-          grep -q 'AI_CHAT_OPENCL_PROFILE_PATCH_V4' "$source_file"
-          grep -q 'fperf_live' "$source_file"
-          grep -q 'cmd_queued_duration_ns' "$source_file"
-          grep -q 'cmd_submit_duration_ns' "$source_file"
-          grep -q 'cmd_complete_duration_ns' "$source_file"
-          grep -q 'cl_profiling.csv' "$source_file"
+          grep -q 'GGML_OP_GET_ROWS' "$source_file"
+          grep -q 'GGML_TYPE_Q4_0' "$source_file"
+          grep -q 'GGML_TYPE_Q6_K' "$source_file"
+          grep -q 'GGML_TYPE_Q8_0' "$source_file"
 
-          # The production runtime is intentionally static. Fail CI if the
-          # OpenCL backend target disappeared or the ggml registry was built
-          # without GGML_USE_OPENCL.
-          opencl_target="$(find core/runtime-android -path '*/.cxx/*' -type f \( -name 'build.ninja' -o -name 'rules.ninja' \) -print0 | xargs -0 grep -l 'ggml-opencl' | head -n 1 || true)"
-          test -n "$opencl_target"
-          native_dirs=()
-          for dir in core/runtime-android/.cxx core/runtime-android/src/.cxx; do
-            if [ -d "$dir" ]; then native_dirs+=( "$dir" ); fi
-          done
-          test "${#native_dirs[@]}" -gt 0
-          grep -R 'GGML_USE_OPENCL' "${native_dirs[@]}" >/dev/null
-          grep -R 'ggml-opencl' "${native_dirs[@]}" >/dev/null
-          echo "Static OpenCL backend linkage verified: $opencl_target"
-          echo "OpenCL profiling instrumentation is present in the compiled llama.cpp source: $source_file"
+          gl_target="$(find core/runtime-android -path '*/.cxx/*' -type f \( -name 'build.ninja' -o -name 'rules.ninja' \) -print0 | xargs -0 grep -l 'ggml-opengles' | head -n 1 || true)"
+          test -n "$gl_target"
+          grep -R 'GLESv3' core/runtime-android/.cxx core/runtime-android/src/.cxx >/dev/null
+          ! grep -R -nE 'ggml-opencl|GGML_USE_OPENCL|Vulkan' core/runtime-android/.cxx core/runtime-android/src/.cxx >/dev/null
+          echo "Static OpenGL ES backend linkage verified: $gl_target"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
