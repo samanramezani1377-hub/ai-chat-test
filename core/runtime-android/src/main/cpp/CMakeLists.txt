@@ -42,11 +42,10 @@ FetchContent_MakeAvailable(llama_cpp)
 set(_llama_context_cpp "${llama_cpp_SOURCE_DIR}/src/llama-context.cpp")
 file(READ "${_llama_context_cpp}" _llama_context_source)
 if(NOT _llama_context_source MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH")
-    string(REPLACE
-        "            auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
+    string(REPLACE [=[            auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
 
-            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {"
-        "            auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
+            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {]=]
+        [=[            auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
 
             // AI_CHAT_GPU_ONLY_SCHEDULER_PATCH: CPU remains initialized as a host helper,
             // but it is never inserted into the graph scheduler backend list.
@@ -54,17 +53,16 @@ if(NOT _llama_context_source MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH")
                 continue;
             }
 
-            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {"
+            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {]=]
         _llama_context_source)
-    string(REPLACE
-        "    ggml_opt_free(opt_ctx);
-}"
-        "    ggml_opt_free(opt_ctx);
+    string(REPLACE [=[    ggml_opt_free(opt_ctx);
+}]=]
+        [=[    ggml_opt_free(opt_ctx);
     if (backend_cpu) {
         ggml_backend_free(backend_cpu);
         backend_cpu = nullptr;
     }
-}"
+}]=]
         _llama_context_source)
     file(WRITE "${_llama_context_cpp}" "${_llama_context_source}")
 endif()
