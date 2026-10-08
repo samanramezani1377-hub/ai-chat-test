@@ -51,16 +51,8 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         gpuDevice = runtime.gpuDevice,
         weightResidency = runtime.weightResidency,
     )
-    val report = buildString {
-        append(diagnostic.report())
-        append("\n\n===== LAST NATIVE EVENT =====\n")
-        append(runtime.lastNativeEvent ?: "N/A")
-    }
-    val errorReport = buildString {
-        append(diagnostic.errorReport())
-        append("\n\n===== LAST NATIVE EVENT =====\n")
-        append(runtime.lastNativeEvent ?: "N/A")
-    }
+    val report = diagnostic.report()
+    val errorReport = diagnostic.errorReport()
     val hasError = !diagnostic.error.isNullOrBlank()
     val resolvedError = diagnostic.error?.let { ErrorCenter.resolve(it) }
     val generation = runtime.generation
