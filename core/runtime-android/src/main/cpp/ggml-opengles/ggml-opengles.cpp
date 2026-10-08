@@ -545,11 +545,13 @@ static GLuint g_matmul_f32 = 0;
 static GLuint g_rope = 0;
 
 static bool ensure_programs() {
-    if (g_get_rows && g_elementwise && g_q6k && g_gdn && g_silu && g_ssm_conv && g_rms_norm && g_unary && g_softmax && g_matmul_f32 && g_rope) return true;
+    const auto & caps = opengles_runtime_info();
+    if (g_get_rows && g_elementwise && g_q6k && g_silu && g_ssm_conv && g_rms_norm && g_unary && g_softmax && g_matmul_f32 && g_rope &&
+        (caps.max_compute_ssbo_blocks < 7 || g_gdn != 0)) return true;
     if (!g_get_rows) g_get_rows = compile_compute(get_rows_shader());
+    if (!g_gdn && caps.max_compute_ssbo_blocks >= 7) g_gdn = compile_compute(gated_delta_net_shader());
     if (!g_elementwise) g_elementwise = compile_compute(elementwise_shader());
     if (!g_q6k) g_q6k = compile_compute(q6k_matmul_shader());
-    if (!g_gdn) g_gdn = compile_compute(gated_delta_net_shader());
     if (!g_silu) g_silu = compile_compute(silu_shader());
     if (!g_ssm_conv) g_ssm_conv = compile_compute(ssm_conv_shader());
     if (!g_rms_norm) g_rms_norm = compile_compute(rms_norm_shader());
@@ -557,7 +559,7 @@ static bool ensure_programs() {
     if (!g_softmax) g_softmax = compile_compute(softmax_shader());
     if (!g_matmul_f32) g_matmul_f32 = compile_compute(matmul_f32_shader());
     if (!g_rope) g_rope = compile_compute(rope_shader());
-    return g_get_rows && g_elementwise && g_q6k && g_gdn && g_silu && g_ssm_conv && g_rms_norm && g_unary && g_softmax && g_matmul_f32 && g_rope;
+    return g_get_rows && g_elementwise && g_q6k && g_silu && g_ssm_conv && g_rms_norm && g_unary && g_softmax && g_matmul_f32 && g_rope;
 }
 
 static size_t tensor_offset(const ggml_backend_buffer_t buffer, const ggml_tensor * tensor) {
@@ -571,7 +573,10 @@ static BufferContext * buffer_ctx(const ggml_tensor * tensor) {
 }
 
 static ggml_backend_buffer_t alloc_buffer(ggml_backend_buffer_type_t, size_t size) {
-    if (size == 0 || size > kMaxSsboBytes) return nullptr;
+    const auto & caps = opengles_runtime_info();
+    const size_t max_ssbo = caps.max_ssbo_block_size > 256 ? std::min<size_t>(
+        kMaxSsboBytes, static_cast<size_t>(caps.max_ssbo_block_size) - 256u) : 0u;
+    if (size == 0 || max_ssbo == 0 || size > max_ssbo) return nullptr;
     auto * ctx = new BufferContext;
     ctx->size = size;
     ctx->virtual_base = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -639,7 +644,11 @@ static ggml_backend_buffer_t alloc_buffer(ggml_backend_buffer_type_t, size_t siz
 
 static const char * buft_name(ggml_backend_buffer_type_t) { return "OPENGL_ES_BUFFER"; }
 static size_t buft_alignment(ggml_backend_buffer_type_t) { return 256; }
-static size_t buft_max(ggml_backend_buffer_type_t) { return kMaxSsboBytes; }
+static size_t buft_max(ggml_backend_buffer_type_t) {
+    const auto & caps = opengles_runtime_info();
+    return caps.max_ssbo_block_size > 256 ? std::min<size_t>(
+        kMaxSsboBytes, static_cast<size_t>(caps.max_ssbo_block_size) - 256u) : 0u;
+}
 static size_t buft_alloc_size(ggml_backend_buffer_type_t, const ggml_tensor * t) { return ggml_nbytes(t); }
 static bool buft_host(ggml_backend_buffer_type_t) { return false; }
 
@@ -672,7 +681,8 @@ static bool supports_op(ggml_backend_dev_t, const ggml_tensor * op) {
         op->src[0]->ne[1] == op->src[1]->ne[1]) return true;
     if (op->op == GGML_OP_SILU && op->type == GGML_TYPE_F32 &&
         op->src[0] && op->src[0]->type == GGML_TYPE_F32) return true;
-    if (op->op == GGML_OP_GATED_DELTA_NET && op->type == GGML_TYPE_F32 &&
+    if (op->op == GGML_OP_GATED_DELTA_NET && opengles_runtime_info().max_compute_ssbo_blocks >= 7 &&
+        g_gdn != 0 && op->type == GGML_TYPE_F32 &&
         op->src[0] && op->src[1] && op->src[2] && op->src[3] && op->src[4] && op->src[5] &&
         op->src[0]->type == GGML_TYPE_F32 && op->src[1]->type == GGML_TYPE_F32 &&
         op->src[2]->type == GGML_TYPE_F32 && op->src[3]->type == GGML_TYPE_F32 &&
