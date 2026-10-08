@@ -587,10 +587,11 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
         const llama_model_tensor_buft_override tensor_buft_overrides[] = {
             { "token_embd\\.weight", ggml_backend_dev_buffer_type(opengles_dev) },
             { "output\\.weight", ggml_backend_dev_buffer_type(opengles_dev) },
+            { "cls\\.output\\.weight", ggml_backend_dev_buffer_type(opengles_dev) },
             { nullptr, nullptr }
         };
         mp.tensor_buft_overrides = tensor_buft_overrides;
-        append_native_trace("OPENGL_ES_GPU_ONLY_TENSOR_OVERRIDES enabled=1 patterns=token_embd\\.weight,output\\.weight");
+        append_native_trace("OPENGL_ES_GPU_ONLY_TENSOR_OVERRIDES enabled=1 patterns=token_embd\\.weight,output\\.weight,cls\\.output\\.weight");
     }
     checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_RESIDENT" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
