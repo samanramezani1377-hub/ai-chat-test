@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <cmath>
+#include <algorithm>
 #include <cstdio>
 #include <string>
 
