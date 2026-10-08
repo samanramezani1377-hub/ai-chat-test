@@ -62,6 +62,11 @@ internal data class RuntimeDiagnostic(
     val gpuDevice: com.woogit.aicore.runtime.GpuDeviceProfile? = null,
     val weightResidency: com.woogit.aicore.runtime.GpuWeightResidency? = null,
 ) {
+    val nonGpuTensorLines: List<String>
+        get() = nativeDiagnostics.orEmpty().lineSequence()
+            .filter { it.contains("OPENGL_ES_NON_GPU_TENSOR") }
+            .toList()
+
     val nativePerformance: NativePerformance
         get() = NativePerformance(
             prefillMs = nativeValue("prefillMs")?.toLongOrNull(),
@@ -224,6 +229,10 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Action Trace")
     if (actionTrace.isEmpty()) appendLine("N/A")
     else actionTrace.forEach { event -> appendLine("${event.timestampMs} | ${event.type} | ${event.message ?: ""}".trimEnd()) }
+    appendLine()
+    appendLine("===== NON-GPU TENSORS REPORTED BY RESIDENCY CHECK =====")
+    if (nonGpuTensorLines.isEmpty()) appendLine("No non-GPU tensor detail found in captured native diagnostics.")
+    else nonGpuTensorLines.forEach(::appendLine)
     appendLine()
     appendLine("===== NATIVE DIAGNOSTICS / RAW LOG =====")
     appendLine(nativeDiagnostics ?: "N/A")
