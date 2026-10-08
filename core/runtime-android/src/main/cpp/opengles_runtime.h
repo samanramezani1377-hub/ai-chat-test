@@ -11,6 +11,9 @@ struct OpenGLESRuntimeInfo {
     std::string version;
     std::string glsl_version;
     std::string extensions;
+    int max_compute_ssbo_blocks = 0;
+    int max_workgroup_size_x = 0;
+    int64_t max_ssbo_block_size = 0;
     std::string failure;
 };
 
