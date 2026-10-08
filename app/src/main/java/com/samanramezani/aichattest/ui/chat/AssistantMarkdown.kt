@@ -4,13 +4,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.sp
 @Composable
 internal fun AssistantMarkdown(text: String) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        val fence = String(charArrayOf(96, 96, 96))
+        val fence = "```"
         val lines = text.replace("\r\n", "\n").split('\n')
         var index = 0
         while (index < lines.size) {
@@ -78,7 +78,7 @@ private fun parseInlineMarkdown(text: String): AnnotatedString = buildAnnotatedS
                 } else { append(text[i]); i++ }
             }
             text[i].code == 96 -> {
-                val end = text.indexOf(96.toChar(), i + 1)
+                val end = text.indexOf('`', i + 1)
                 if (end > i + 1) { append(text.substring(i + 1, end)); i = end + 1 }
                 else { append(text[i]); i++ }
             }
