@@ -7,6 +7,7 @@ import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeTraceEvent
 import com.woogit.aicore.runtime.OpenClGpuProfile
+import com.samanramezani.aichattest.ui.errors.ErrorCenter
 
 private const val RECENT_RUNTIME_EVENTS = 20
 private const val RECENT_ACTION_EVENTS = 10
@@ -182,18 +183,6 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Unaccounted Decode Time: ${perf.profileUnaccountedMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Decode Window: ${perf.profileDecodeWindowMs?.let { "$it ms" } ?: "N/A"}")
     appendLine()
-    appendLine("===== GPU / OPENCL KERNEL PROFILE =====")
-    val gpu = openClProfile
-    if (gpu == null) {
-        appendLine("OpenCL GPU profile: N/A")
-    } else {
-        gpu.reportLines().forEach(::appendLine)
-        appendLine("Top kernels:")
-        gpu.topKernels.forEach { k ->
-            appendLine("  ${k.kernelName}: ${String.format(java.util.Locale.US, "%.3f ms", k.executionMs)}")
-        }
-    }
-    appendLine()
     appendLine("===== SPECULATIVE DECODING =====")
     appendLine("Draft Tokens: ${perf.speculativeDraftTokens ?: "N/A"}")
     appendLine("Accepted Tokens: ${perf.speculativeAcceptedTokens ?: "N/A"}")
@@ -217,6 +206,14 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine()
     appendLine("Status: $status")
     appendLine("Execution: ${executionId ?: "N/A"}")
+    if (!error.isNullOrBlank()) {
+        val resolved = ErrorCenter.resolve(error)
+        appendLine("Error Code: ${resolved.code}")
+        appendLine("Error Title: ${resolved.title}")
+        appendLine("Error Message: ${resolved.message}")
+        appendLine("Recommended Action: ${resolved.action}")
+        appendLine("Technical Error: ${resolved.technical}")
+    }
     if (!error.isNullOrBlank()) appendLine("Error: $error")
     if (!rawError.isNullOrBlank()) appendLine("Raw Error: $rawError")
     appendLine()
@@ -227,6 +224,9 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Action Trace")
     if (actionTrace.isEmpty()) appendLine("N/A")
     else actionTrace.forEach { event -> appendLine("${event.timestampMs} | ${event.type} | ${event.message ?: ""}".trimEnd()) }
+    appendLine()
+    appendLine("===== NATIVE DIAGNOSTICS / RAW LOG =====")
+    appendLine(nativeDiagnostics ?: "N/A")
 }
 
 internal fun RuntimeDiagnostic.errorReport(): String = buildString {
