@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.samanramezani.aichattest.ui.components.SimplePage
 import com.samanramezani.aichattest.ui.state.ExecutionState
+import com.samanramezani.aichattest.ui.errors.ErrorCenter
 import com.woogit.aicore.actions.ActionTraceStore
 import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
 import java.text.DateFormat
@@ -61,6 +62,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         append(runtime.lastNativeEvent ?: "N/A")
     }
     val hasError = !diagnostic.error.isNullOrBlank()
+    val resolvedError = diagnostic.error?.let { ErrorCenter.resolve(it) }
     val generation = runtime.generation
     val nativePerf = diagnostic.nativePerformance
     val speed = generation?.let {
@@ -142,9 +144,12 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
 
         if (hasError) {
             SectionCard("خطای ثبت‌شده", MaterialTheme.colorScheme.errorContainer) {
-                Text(diagnostic.error ?: "خطای نامشخص", color = MaterialTheme.colorScheme.onErrorContainer)
+                Text("${resolvedError?.code ?: "APP-001"} · ${resolvedError?.title ?: "خطای نامشخص"}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+                Text(resolvedError?.message ?: "جزئیات خطا در گزارش کامل ثبت شده است.", color = MaterialTheme.colorScheme.onErrorContainer)
+                Text("اقدام پیشنهادی: ${resolvedError?.action ?: "گزارش کامل را بررسی کن."}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                Text("جزئیات فنی: ${resolvedError?.technical ?: diagnostic.error}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
                 Spacer(Modifier.height(4.dp))
-                Text("گزارش بالا متن کامل قابل ارسال است؛ این بخش خودش علت را حدس نمی‌زند.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                Text("گزارش کامل، شرح فارسی، جزئیات فنی و تمام لاگ‌های در دسترس را یکجا نگه می‌دارد.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
             }
         }
 
@@ -172,7 +177,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             }
         }
 
-        Text("اول وضعیت، بعد اعداد مهم، و در انتها جزئیات خام را می‌بینی. این صفحه فقط داده را نمایش می‌دهد و علت را حدس نمی‌زند.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("گزارش کامل شامل مشخصات مدل، عملکرد، حافظه، OpenCL، تنظیمات، همه رویدادهای Runtime و Agent و لاگ خام Native است.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -208,11 +213,13 @@ private fun StatusCard(
                     Button(onClick = onCopyError, Modifier.weight(1f).height(48.dp)) {
                         Icon(Icons.Default.ContentCopy, null)
                         Spacer(Modifier.width(6.dp))
-                        Text("کپی خطا")
+                        Text("کپی شرح خطا")
                     }
                 }
                 OutlinedButton(onClick = onCopyFull, Modifier.weight(1f).height(48.dp)) {
-                    Text("کپی گزارش کامل")
+                    Icon(Icons.Default.ContentCopy, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("کپی گزارش کامل")
                 }
             }
         }
