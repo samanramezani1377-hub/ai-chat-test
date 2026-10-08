@@ -35,27 +35,47 @@ static ggml_backend_device ggml_device;
 static bool g_ready = false;
 
 static GLuint compile_compute(const char * source, const char * program_name) {
+    const char * name = program_name ? program_name : "unnamed";
+    while (glGetError() != GL_NO_ERROR) {}
     GLuint shader = glCreateShader(GL_COMPUTE_SHADER);
+    if (!shader || glGetError() != GL_NO_ERROR) {
+        std::fprintf(stderr, "OPENGL_ES_SHADER_CREATE_FAILED name=%s\\n", name);
+        return 0;
+    }
     glShaderSource(shader, 1, &source, nullptr);
     glCompileShader(shader);
     GLint ok = GL_FALSE;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
     if (!ok) {
         char log[4096] = {};
-        glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
-        std::fprintf(stderr, "ggml-opengles shader compile failed: %s\n", log);
+        GLsizei log_length = 0;
+        glGetShaderInfoLog(shader, sizeof(log), &log_length, log);
+        std::fprintf(stderr, "OPENGL_ES_SHADER_COMPILE_FAILED name=%s log=%s\\n", name, log);
         glDeleteShader(shader);
         return 0;
     }
     GLuint program = glCreateProgram();
+    if (!program || glGetError() != GL_NO_ERROR) {
+        std::fprintf(stderr, "OPENGL_ES_PROGRAM_CREATE_FAILED name=%s\\n", name);
+        glDeleteShader(shader);
+        return 0;
+    }
     glAttachShader(program, shader);
     glLinkProgram(program);
     glDeleteShader(shader);
     glGetProgramiv(program, GL_LINK_STATUS, &ok);
     if (!ok) {
         char log[4096] = {};
-        glGetProgramInfoLog(program, sizeof(log), nullptr, log);
-        std::fprintf(stderr, "ggml-opengles program link failed: %s\n", log);
+        GLsizei log_length = 0;
+        glGetProgramInfoLog(program, sizeof(log), &log_length, log);
+        std::fprintf(stderr, "OPENGL_ES_PROGRAM_LINK_FAILED name=%s log=%s\\n", name, log);
+        glDeleteProgram(program);
+        return 0;
+    }
+    const GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+        std::fprintf(stderr, "OPENGL_ES_PROGRAM_INIT_GL_ERROR name=%s gl_error=0x%04x\\n",
+            name, static_cast<unsigned>(error));
         glDeleteProgram(program);
         return 0;
     }
@@ -123,7 +143,7 @@ float half_at(uint byte_offset) {
         if (lo == 0u) return sign != 0u ? -0.0 : 0.0;
         return (sign != 0u ? -1.0 : 1.0) * exp2(-14.0) * (float(lo) / 1024.0);
     }
-    if (exp == 31u) return sign != 0u ? -1.0/0.0 : 1.0/0.0;
+    if (exp == 31u) return uintBitsToFloat(sign != 0u ? 0xff800000u : 0x7f800000u);
     return (sign != 0u ? -1.0 : 1.0) * exp2(float(exp) - 15.0) * (1.0 + float(lo) / 1024.0);
 }
 
@@ -207,7 +227,7 @@ float half_at(uint off) {
     uint ex = (bits >> 10u) & 31u;
     uint sign = bits >> 15u;
     if (ex == 0u) return sign != 0u ? -exp2(-14.0) * (float(lo)/1024.0) : exp2(-14.0) * (float(lo)/1024.0);
-    if (ex == 31u) return sign != 0u ? -1.0/0.0 : 1.0/0.0;
+    if (ex == 31u) return uintBitsToFloat(sign != 0u ? 0xff800000u : 0x7f800000u);
     return (sign != 0u ? -1.0 : 1.0) * exp2(float(ex)-15.0) * (1.0 + float(lo)/1024.0);
 }
 float q6(uint row_off, uint idx) {
