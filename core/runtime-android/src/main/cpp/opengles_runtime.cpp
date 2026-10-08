@@ -10,13 +10,39 @@
 #include <mutex>
 #include <sstream>
 #include <cstdio>
+#include <thread>
+#include <unordered_map>
 
 namespace {
 EGLDisplay g_display = EGL_NO_DISPLAY;
 EGLContext g_context = EGL_NO_CONTEXT;
 EGLSurface g_surface = EGL_NO_SURFACE;
+EGLConfig g_config = nullptr;
+std::thread::id g_root_thread;
+struct ThreadContext {
+    EGLContext context = EGL_NO_CONTEXT;
+    EGLSurface surface = EGL_NO_SURFACE;
+};
+std::unordered_map<std::thread::id, ThreadContext> g_thread_contexts;
 OpenGLESRuntimeInfo g_info;
 std::mutex g_mutex;
+
+static void shutdown_locked() {
+    if (g_display == EGL_NO_DISPLAY) return;
+    eglMakeCurrent(g_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    for (auto & entry : g_thread_contexts) {
+        if (entry.second.surface != EGL_NO_SURFACE) eglDestroySurface(g_display, entry.second.surface);
+        if (entry.second.context != EGL_NO_CONTEXT) eglDestroyContext(g_display, entry.second.context);
+    }
+    g_thread_contexts.clear();
+    if (g_surface != EGL_NO_SURFACE) eglDestroySurface(g_display, g_surface);
+    if (g_context != EGL_NO_CONTEXT) eglDestroyContext(g_display, g_context);
+    eglTerminate(g_display);
+    g_surface = EGL_NO_SURFACE;
+    g_context = EGL_NO_CONTEXT;
+    g_config = nullptr;
+    g_display = EGL_NO_DISPLAY;
+}
 
 static void fail(const char * reason) {
     g_info.available = false;
@@ -43,7 +69,53 @@ static std::string safe_string(GLenum name) {
 
 bool opengles_runtime_init() {
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (g_info.available) return true;
+    if (g_info.available) {
+        const std::thread::id tid = std::this_thread::get_id();
+        const EGLContext current = eglGetCurrentContext();
+        if (current == g_context) return true;
+        auto found = g_thread_contexts.find(tid);
+        if (found != g_thread_contexts.end()) {
+            if (current == found->second.context) return true;
+            if (eglMakeCurrent(g_display, found->second.surface, found->second.surface,
+                               found->second.context)) return true;
+            g_info.failure = "EGL_SHARED_THREAD_CONTEXT_MAKE_CURRENT_FAILED";
+            return false;
+        }
+        if (tid == g_root_thread) {
+            if (eglMakeCurrent(g_display, g_surface, g_surface, g_context)) return true;
+            g_info.failure = "EGL_ROOT_CONTEXT_MAKE_CURRENT_FAILED";
+            return false;
+        }
+
+        // EGL contexts are thread-current, not process-current. llama.cpp may
+        // load model weights and initialize the inference context on different
+        // executor threads. Give each thread a context in the same share group
+        // so shared programs/buffers remain visible without moving a live
+        // context between threads.
+        if (!eglBindAPI(EGL_OPENGL_ES_API)) {
+            g_info.failure = "EGL_BIND_SHARED_CONTEXT_API_FAILED";
+            return false;
+        }
+        const EGLint attrs[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
+        ThreadContext shared;
+        shared.context = eglCreateContext(g_display, g_config, g_context, attrs);
+        if (shared.context == EGL_NO_CONTEXT) {
+            g_info.failure = "EGL_CREATE_SHARED_THREAD_CONTEXT_FAILED";
+            return false;
+        }
+        const EGLint surface_attrs[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
+        shared.surface = eglCreatePbufferSurface(g_display, g_config, surface_attrs);
+        if (shared.surface == EGL_NO_SURFACE ||
+            !eglMakeCurrent(g_display, shared.surface, shared.surface, shared.context)) {
+            if (shared.surface != EGL_NO_SURFACE) eglDestroySurface(g_display, shared.surface);
+            eglDestroyContext(g_display, shared.context);
+            g_info.failure = "EGL_SHARED_THREAD_CONTEXT_MAKE_CURRENT_FAILED";
+            return false;
+        }
+        g_thread_contexts.emplace(tid, shared);
+        g_info.failure.clear();
+        return true;
+    }
     if (g_display != EGL_NO_DISPLAY) return false;
 
     g_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
@@ -70,9 +142,8 @@ bool opengles_runtime_init() {
         EGL_NONE
     };
 
-    EGLConfig config = nullptr;
     EGLint config_count = 0;
-    if (!eglChooseConfig(g_display, config_attribs, &config, 1, &config_count) ||
+    if (!eglChooseConfig(g_display, config_attribs, &g_config, 1, &config_count) ||
         config_count != 1) {
         fail("EGL_ES3_CONFIG_UNAVAILABLE");
         eglTerminate(g_display);
@@ -91,7 +162,7 @@ bool opengles_runtime_init() {
         EGL_CONTEXT_CLIENT_VERSION, 3,
         EGL_NONE
     };
-    g_context = eglCreateContext(g_display, config, EGL_NO_CONTEXT, context_attribs);
+    g_context = eglCreateContext(g_display, g_config, EGL_NO_CONTEXT, context_attribs);
     if (g_context == EGL_NO_CONTEXT) {
         fail("EGL_CREATE_CONTEXT_FAILED");
         eglTerminate(g_display);
@@ -104,7 +175,7 @@ bool opengles_runtime_init() {
         EGL_HEIGHT, 1,
         EGL_NONE
     };
-    g_surface = eglCreatePbufferSurface(g_display, config, surface_attribs);
+    g_surface = eglCreatePbufferSurface(g_display, g_config, surface_attribs);
     if (g_surface == EGL_NO_SURFACE ||
         !eglMakeCurrent(g_display, g_surface, g_surface, g_context)) {
         fail("EGL_MAKE_CURRENT_FAILED");
@@ -132,7 +203,7 @@ bool opengles_runtime_init() {
     glGetInteger64v(GL_MAX_SHADER_STORAGE_BLOCK_SIZE, &ssbo_block_size);
     if (glGetError() != GL_NO_ERROR || ssbo_blocks <= 0 || workgroup_x <= 0 || ssbo_block_size <= 0) {
         fail("OPENGL_ES_COMPUTE_LIMIT_QUERY_FAILED");
-        opengles_runtime_shutdown();
+        shutdown_locked();
         return false;
     }
     g_info.max_compute_ssbo_blocks = ssbo_blocks;
@@ -162,6 +233,7 @@ bool opengles_runtime_init() {
         return false;
     }
 
+    g_root_thread = std::this_thread::get_id();
     g_info.available = true;
     g_info.failure.clear();
     return true;
@@ -169,16 +241,9 @@ bool opengles_runtime_init() {
 
 void opengles_runtime_shutdown() {
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (g_display == EGL_NO_DISPLAY) return;
-
-    eglMakeCurrent(g_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    if (g_surface != EGL_NO_SURFACE) eglDestroySurface(g_display, g_surface);
-    if (g_context != EGL_NO_CONTEXT) eglDestroyContext(g_display, g_context);
-    eglTerminate(g_display);
-
-    g_surface = EGL_NO_SURFACE;
-    g_context = EGL_NO_CONTEXT;
-    g_display = EGL_NO_DISPLAY;
+    shutdown_locked();
+    g_info.available = false;
+    g_info.failure.clear();
 }
 
 bool opengles_runtime_available() {
