@@ -13,6 +13,8 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+#include <dlfcn.h>
+#include <sys/stat.h>
 #include <ucontext.h>
 #include "llama.h"
 #include "gguf.h"
@@ -157,6 +159,34 @@ static std::string opencl_platform_info(cl_platform_id platform, cl_platform_inf
     return value;
 }
 
+static void probe_android_opencl_library_visibility() {
+    append_native_trace("OPENCL_LIBRARY_VISIBILITY_PROBE_STARTED");
+    const char * candidates[] = {
+        "/vendor/lib64/libOpenCL.so",
+        "/vendor/lib64/libOpenCL_adreno.so",
+        "/system/vendor/lib64/libOpenCL.so",
+        "/system/vendor/lib/libOpenCL.so",
+        "/system_ext/lib64/libOpenCL_system.so",
+        "/system/lib64/libOpenCL.so",
+        "/vendor/lib/libOpenCL.so",
+    };
+    for (const char * path : candidates) {
+        struct stat st{};
+        const bool exists = stat(path, &st) == 0;
+        if (!exists) {
+            append_native_trace((std::string("OPENCL_LIBRARY_CANDIDATE path=") + path + " exists=0").c_str());
+            continue;
+        }
+        void * handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+        const char * err = dlerror();
+        append_native_trace((std::string("OPENCL_LIBRARY_CANDIDATE path=") + path +
+            " exists=1 dlopen=" + (handle ? "1" : "0") +
+            " error=" + (err ? err : "none")).c_str());
+        if (handle) dlclose(handle);
+    }
+    append_native_trace("OPENCL_LIBRARY_VISIBILITY_PROBE_COMPLETED");
+}
+
 static void probe_android_opencl_driver() {
     append_native_trace("OPENCL_DRIVER_PROBE_STARTED");
     cl_uint platform_count = 0;
@@ -230,6 +260,12 @@ static bool register_static_opencl_backend() {
     // GGML_BACKEND_DL is disabled on Android. Explicitly register the statically
     // linked OpenCL backend so runtime discovery never depends on APK filesystem
     // scanning or a MODULE shared library that cannot be loaded from the APK.
+    // Re-registration is avoided so retrying a failed driver probe cannot create
+    // duplicate backend registrations.
+    if (ggml_backend_reg_by_name("OPENCL") != nullptr) {
+        append_native_trace("OPENCL_STATIC_REGISTRATION_ALREADY_PRESENT");
+        return true;
+    }
     const size_t before = ggml_backend_reg_count();
     ggml_backend_register(ggml_backend_opencl_reg());
     const size_t after = ggml_backend_reg_count();
@@ -518,6 +554,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         append_native_trace("OPENCL_ICD_VENDORS_CLEARED_USE_ANDROID_DEFAULT");
         append_native_trace("OPENCL_Q6K_SPECIALIZED_KERNELS tiled=0 o4=1 o4_global=1 xmem_gemm=0");
         append_native_trace("OPENCL_STATIC_REGISTRATION_STARTED");
+        probe_android_opencl_library_visibility();
         probe_android_opencl_driver();
         const bool opencl_registered = register_static_opencl_backend();
         if (!opencl_registered) {
@@ -541,6 +578,23 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         g_backend_initialized = true;
     } else {
         append_native_trace("OPENCL_BACKEND_ALREADY_INITIALIZED");
+        if (!g_gpu_backend_loaded) {
+            // A first probe can fail because Android's vendor OpenCL namespace is
+            // not visible to the loader yet. Retry the visibility/driver probe on
+            // later initialization attempts instead of permanently latching the
+            // process into OPENCL-UNAVAILABLE.
+            append_native_trace("OPENCL_BACKEND_RETRY_STARTED");
+            probe_android_opencl_library_visibility();
+            probe_android_opencl_driver();
+            const bool opencl_registered = register_static_opencl_backend();
+            if (opencl_registered) {
+                ggml_backend_load_all();
+                g_gpu_backend_loaded = has_opencl_gpu_device();
+            }
+            append_native_trace((std::string("OPENCL_BACKEND_RETRY_RESULT loaded=") +
+                (g_gpu_backend_loaded ? "1" : "0") +
+                " deviceCount=" + std::to_string(ggml_backend_dev_count())).c_str());
+        }
     }
 }
 
@@ -668,35 +722,10 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
     mp.check_tensors = false;
     mp.no_host = true;
 
-    // llama.cpp intentionally keeps the input embedding table on CPU. For this
-    // GPU-only runtime, place token_embd on the OpenCL device too, avoiding a
-    // host-side embedding lookup/transfer on every decode step.
-    static llama_model_tensor_buft_override overrides[] = {
-        { "token_embd", nullptr },
-        { nullptr, nullptr },
-    };
-    if (gpu) {
-        ggml_backend_dev_t gpu_dev = nullptr;
-        for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
-            ggml_backend_dev_t candidate = ggml_backend_dev_get(i);
-            if (!candidate) continue;
-            const auto type = ggml_backend_dev_type(candidate);
-            if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
-                gpu_dev = candidate;
-                break;
-            }
-        }
-        if (gpu_dev) {
-            overrides[0].buft = ggml_backend_dev_buffer_type(gpu_dev);
-            mp.tensor_buft_overrides = overrides;
-            append_native_trace((std::string("OPENCL_WEIGHT_OVERRIDE token_embd buft=") +
-                ggml_backend_buft_name(overrides[0].buft) + " device=" +
-                ggml_backend_dev_name(gpu_dev)).c_str());
-        } else {
-            append_native_trace("OPENCL_WEIGHT_OVERRIDE token_embd FAILED_NO_GPU_DEVICE");
-        }
-    }
-
+    // Do not force token_embd onto OpenCL. llama.cpp's backend placement is
+    // architecture/device aware; overriding the embedding buffer here adds a
+    // large device allocation and has caused avoidable load pressure on Android.
+    // GPU-only residency is still enforced after the model is loaded.
     checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_RESIDENT" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
