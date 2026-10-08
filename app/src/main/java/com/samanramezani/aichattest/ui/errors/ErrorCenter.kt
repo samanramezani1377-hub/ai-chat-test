@@ -14,6 +14,16 @@ internal object ErrorCenter {
         val text = technical.lowercase()
 
         return when {
+            text == "input_empty" || "پیام خالی" in text ->
+                PersianError("INPUT-001", "پیام خالی است",
+                    "برای ارسال، متن پیام را وارد کن.",
+                    "یک پیام بنویس و دوباره ارسال کن.", technical)
+
+            "input_too_large" in text ->
+                PersianError("INPUT-002", "پیام بیش از حد بزرگ است",
+                    "حجم متن ورودی برای این اجرا بیش از حد مجاز است.",
+                    "متن را کوتاه‌تر کن یا آن را در چند پیام بفرست.", technical)
+
             "OPENCL_GPU_ONLY_REJECTED_NO_OPENCL_GPU_DEVICE".lowercase() in text ||
                 "platform ids not available" in text ||
                 "no opencl gpu device" in text ->
