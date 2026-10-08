@@ -207,7 +207,7 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Status: $status")
     appendLine("Execution: ${executionId ?: "N/A"}")
     if (!error.isNullOrBlank()) {
-        val resolved = ErrorCenter.resolve(error)
+        val resolved = ErrorCenter.resolve(listOf(error, nativeDiagnostics).filterNotNull().joinToString("\n"))
         appendLine("Error Code: ${resolved.code}")
         appendLine("Error Title: ${resolved.title}")
         appendLine("Error Message: ${resolved.message}")
