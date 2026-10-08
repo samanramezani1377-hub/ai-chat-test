@@ -124,7 +124,7 @@ bool opengles_runtime_init() {
     GLint workgroup_x = 0;
     GLint64 ssbo_block_size = 0;
     glGetIntegerv(GL_MAX_COMPUTE_SHADER_STORAGE_BLOCKS, &ssbo_blocks);
-    glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_SIZE, &workgroup_x);
+    glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 0, &workgroup_x);
     glGetInteger64v(GL_MAX_SHADER_STORAGE_BLOCK_SIZE, &ssbo_block_size);
     if (glGetError() != GL_NO_ERROR || ssbo_blocks <= 0 || workgroup_x <= 0 || ssbo_block_size <= 0) {
         fail("OPENGL_ES_COMPUTE_LIMIT_QUERY_FAILED");
