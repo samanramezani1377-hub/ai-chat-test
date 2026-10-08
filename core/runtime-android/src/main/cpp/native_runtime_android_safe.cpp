@@ -852,7 +852,16 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     // Hybrid/recurrent models cannot: their recurrent state is path-dependent.
     // For those models we reuse only an exact cached prompt state captured
     // immediately after prompt prefill and before generation.
-    const bool cache_supported = !llama_model_has_encoder(g_model);
+    // Hybrid/recurrent memory rollback is deliberately disabled for now.
+// A resident recurrent state cannot be reconstructed safely from seq positions,
+// and the previous exact-prefix reuse path could carry state across turns that
+// looked compatible but was not semantically identical. Attention-only KV reuse
+// remains enabled; hybrid models always rebuild from the complete bounded prompt.
+// This is a correctness/stability guard, not a CPU fallback.
+const bool cache_supported = !llama_model_has_encoder(g_model) && !hybrid_memory;
+if (hybrid_memory) {
+    append_native_trace("NATIVE_KV_CACHE_HYBRID_DISABLED reason=stability_guard");
+}
     const llama_pos resident_min = llama_memory_seq_pos_min(memory, 0);
     const llama_pos resident_max = llama_memory_seq_pos_max(memory, 0);
     // Recurrent/hybrid models expose only their latest recurrent sequence
@@ -884,25 +893,14 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         " residentMatches=" + (resident_sequence_matches_cache ? "1" : "0")).c_str());
 
     if (hybrid_memory) {
-        // For a live Android conversation the resident recurrent/KV state is
-        // already sitting in g_context after generation. If the next prompt
-        // starts with the exact cached token sequence, keep that state in place
-        // and append only the new suffix. Do NOT serialize/restore the hybrid
-        // state here: ON_DEVICE sequence-state restore has known failure modes
-        // and is unnecessary while the same runtime/context remains alive.
-        if (exact_cached_prefix) {
-            cache_reused = true;
-            reuse_prefix = g_cached_prompt_tokens.size();
-            append_native_trace((std::string("NATIVE_KV_CACHE_HIT mode=resident_hybrid reusedTokens=") +
-                std::to_string(reuse_prefix) + " promptTokens=" +
-                std::to_string(prompt_tokens.size())).c_str());
-        } else {
-            cache_reused = false;
-            g_cached_prompt_state.clear();
-            g_cached_prompt_tokens.clear();
-            llama_memory_clear(memory, true);
-            checkpoint("NATIVE_KV_CACHE_HYBRID_REBUILD");
-        }
+        // Hybrid/recurrent contexts must be rebuilt from the bounded prompt.
+        // Never append a new turn to a post-generation recurrent state.
+        cache_reused = false;
+        reuse_prefix = 0;
+        g_cached_prompt_state.clear();
+        g_cached_prompt_tokens.clear();
+        llama_memory_clear(memory, true);
+        checkpoint("NATIVE_KV_CACHE_HYBRID_REBUILD");
     } else if (!cache_reused) {
         llama_memory_clear(memory, true);
         g_cached_prompt_tokens.clear();
@@ -956,7 +954,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         " newTokens=" + std::to_string(diagnostic_new_tokens) +
         " hitRatio=" + std::to_string(diagnostic_hit_ratio)).c_str());
 
-    // The context is intentionally configured with a physical batch/ubatch of 256 on Android.
+    // The context is intentionally configured with a bounded physical batch/ubatch on Android.
     // Never pass the entire 4K context as one llama_decode() batch: llama_decode() requires
     // callers to split larger prompt batches according to llama_n_batch(). Passing a 3K-4K
     // token prompt directly here was the long-prompt crash path and could also corrupt the
@@ -1152,23 +1150,25 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     if (prefill_recorded && (result == 0 || result == 9)) {
         // Publish only the token sequence that is actually resident in the live
         // context. The next request can then reuse the largest exact prefix.
-        g_cached_prompt_tokens = prompt_tokens;
-        g_cached_prompt_tokens.insert(
-                g_cached_prompt_tokens.end(),
-                generated_decoded_tokens.begin(),
-                generated_decoded_tokens.end());
+        if (!hybrid_memory) {
+            g_cached_prompt_tokens = prompt_tokens;
+            g_cached_prompt_tokens.insert(
+                    g_cached_prompt_tokens.end(),
+                    generated_decoded_tokens.begin(),
+                    generated_decoded_tokens.end());
+        } else {
+            g_cached_prompt_tokens.clear();
+        }
         g_cached_prompt_state.clear();
         g_cached_prompt_state_on_device = false;
         g_cached_model = g_model;
         g_cached_context = g_context;
         const llama_pos published_min = llama_memory_seq_pos_min(memory, 0);
         const llama_pos published_max = llama_memory_seq_pos_max(memory, 0);
-        const bool resident_publish_valid = hybrid_memory
-                ? (published_max >= 0 &&
-                   static_cast<size_t>(published_max + 1) == g_cached_prompt_tokens.size())
-                : (published_min == 0 &&
-                   published_max >= 0 &&
-                   static_cast<size_t>(published_max + 1) == g_cached_prompt_tokens.size());
+        const bool resident_publish_valid = !hybrid_memory &&
+                published_min == 0 &&
+                published_max >= 0 &&
+                static_cast<size_t>(published_max + 1) == g_cached_prompt_tokens.size();
         if (!resident_publish_valid) {
             append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISH_INVALID residentMin=") +
                 std::to_string(published_min) + " residentMax=" +
