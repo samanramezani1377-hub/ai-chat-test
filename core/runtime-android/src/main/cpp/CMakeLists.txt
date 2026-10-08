@@ -17,7 +17,7 @@ FetchContent_Declare(
     GIT_TAG ${LLAMA_CPP_TAG}
     GIT_SHALLOW TRUE
 )
-# OpenGL ES is provided by Android's system EGL/GLES implementation. No
+# OpenGL ES is provided by Android's system EGL/GLES implementation.
 # No vendor-specific GPU SDK is bundled in the APK.
 set(GGML_BACKEND_DL OFF CACHE BOOL "Disable dynamic ggml backend loading on Android" FORCE)
 set(GGML_BACKEND_DIR "" CACHE STRING "No dynamic backend directory" FORCE)
@@ -39,10 +39,10 @@ FetchContent_MakeAvailable(llama_cpp)
 
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp opengles_runtime.cpp ggml-opengles/ggml-opengles.cpp ggml-opengles/ggml-opengles-registration.cpp)
 
-# native_runtime.cpp intentionally includes llama.cpp/ggml internal headers for
-# strict backend and tensor-residency validation. Keep both internal source
-# directories on the include path; the public ggml include directory alone is
-# insufficient for ggml-backend-impl.h and ggml-opencl.h on this pinned revision.
+# native_runtime_android_safe.cpp intentionally includes llama.cpp/ggml internal
+# headers for strict backend and tensor-residency validation. Keep both
+# internal source directories on the include path; the public ggml include
+# directory alone is insufficient for ggml-backend-impl.h on this pinned revision.
 target_include_directories(ai_chat_runtime PRIVATE
     ${llama_cpp_SOURCE_DIR}/include
     ${llama_cpp_SOURCE_DIR}/src
@@ -68,7 +68,6 @@ target_link_libraries(ai_chat_runtime PRIVATE llama llama-common android log EGL
 target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"
     AI_CHAT_GPU_BACKEND_OPENGL=1
-    AI_CHAT_GPU_BACKEND_VULKAN=0
     AI_CHAT_REQUIRE_OPENGL_GPU=1
 )
 
