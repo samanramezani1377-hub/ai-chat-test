@@ -1,6 +1,7 @@
 #include "ggml-opengles.h"
 #include "ggml-backend-impl.h"
 #include "ggml.h"
+#include "../opengles_runtime.h"
 
 #include <EGL/egl.h>
 #include <GLES3/gl31.h>
@@ -327,13 +328,14 @@ static ggml_guid_t backend_guid() {
 
 static ggml_backend_t init_backend(ggml_backend_dev_t dev, const char *) {
     if (!opengles_runtime_available() || !ensure_programs()) return nullptr;
-    return new ggml_backend{ backend_guid(), {
+    static const struct ggml_backend_i backend_i = {
         [](ggml_backend_t b){ delete static_cast<DeviceContext *>(b->context); delete b; },
         [](ggml_backend_t){ return "OpenGL ES"; },
-        nullptr,nullptr,nullptr,nullptr,
-        nullptr,nullptr,nullptr,nullptr,
-        graph_compute,nullptr,nullptr,nullptr
-    }, dev, new DeviceContext{} };
+        nullptr, nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, graph_compute,
+        nullptr, nullptr, nullptr
+    };
+    return new ggml_backend{ backend_guid(), backend_i, dev, new DeviceContext{} };
 }
 
 static const char * device_name(ggml_backend_dev_t) { return kName; }
@@ -365,6 +367,7 @@ static size_t reg_count(ggml_backend_reg_t) { return 1; }
 static ggml_backend_dev_t reg_device(ggml_backend_reg_t reg, size_t) {
     static DeviceContext ctx;
     static ggml_backend_device dev = { device_i, reg, &ctx };
+    ggml_buft.device = &dev;
     return &dev;
 }
 static const char * reg_name(ggml_backend_reg_t) { return kName; }
@@ -375,7 +378,7 @@ static void * reg_proc(ggml_backend_reg_t, const char *) { return nullptr; }
 ggml_backend_reg_t ggml_backend_opengles_reg(void) {
     if (!opengles_runtime_available()) return nullptr;
     if (!g_ready) {
-        ggml_buft = { buft_i, reg_device(nullptr, 0), nullptr };
+        ggml_buft = { buft_i, nullptr, nullptr };
         g_ready = true;
     }
     static ggml_backend_reg reg = { GGML_BACKEND_API_VERSION,
