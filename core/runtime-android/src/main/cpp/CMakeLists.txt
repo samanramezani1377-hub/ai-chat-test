@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
-set(LLAMA_CPP_TAG "9871df5911a03a813518bcd623ee2eba91bf32aa" CACHE STRING "Pinned llama.cpp revision with Qwen3.x/OpenCL/Q6_K support")
+set(LLAMA_CPP_TAG "9871df5911a03a813518bcd623ee2eba91bf32aa" CACHE STRING "Pinned llama.cpp revision for the Android OpenGL ES runtime")
 set(FETCHCONTENT_QUIET OFF)
 set(FETCHCONTENT_BASE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../.cxx/fetch-content" CACHE PATH "Stable FetchContent base directory")
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "Do not update pinned FetchContent dependencies")
@@ -87,7 +87,7 @@ if (AI_CHAT_OPENCL_PROFILING)
     include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_opencl_profiling.cmake")
 endif()
 
-add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp)
+add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp opengles_runtime.cpp)
 
 # native_runtime.cpp intentionally includes llama.cpp/ggml internal headers for
 # strict backend and tensor-residency validation. Keep both internal source
@@ -114,7 +114,7 @@ target_link_options(ai_chat_runtime PRIVATE
     -Wl,--strip-all
 )
 
-target_link_libraries(ai_chat_runtime PRIVATE llama llama-common ggml-opencl android log OpenCL)
+target_link_libraries(ai_chat_runtime PRIVATE llama llama-common ggml-opencl android log OpenCL EGL GLESv3)
 
 target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"
