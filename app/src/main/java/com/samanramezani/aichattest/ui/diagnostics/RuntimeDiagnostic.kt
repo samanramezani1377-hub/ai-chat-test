@@ -304,7 +304,7 @@ private fun RuntimeDiagnostic.importantNativeEvents(includeVerbose: Boolean): Li
         }
         .distinct()
         .toList()
-        .takeLast(if (includeVerbose) 120 else 100)
+        .let { lines -> lines.takeLast(if (includeVerbose) 120 else 100) }
 }
 private fun tokensPerSecond(result: GenerationResult?): Double? {
     val tokens = result?.outputTokens ?: return null
