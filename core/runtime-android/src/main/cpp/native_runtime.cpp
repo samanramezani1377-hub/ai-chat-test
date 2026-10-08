@@ -642,7 +642,9 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
     // GPU layers remain enabled without relying on the fragile mmap buffer import.
     mp.load_mode = LLAMA_LOAD_MODE_NONE;
     mp.check_tensors = false;
-    mp.no_host = true;
+    // Diagnostic load must allow llama.cpp to use a host-visible staging buffer.
+    // This is temporary and intentionally disabled again in the final strict GPU-only path.
+    mp.no_host = false;
 
     // GPU-only mode must place the input embedding tensor on OpenGL ES too.
     // llama.cpp may otherwise select the CPU_REPACK buffer for token_embd.weight,
@@ -674,6 +676,9 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
 
     }
     checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_RESIDENT" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
+    append_native_trace((std::string("OPENGL_ES_DIAGNOSTIC_HOST_STAGING enabled=") + (gpu ? "1" : "0") +
+        " no_host=" + (mp.no_host ? "1" : "0") +
+        " reason=diagnostic_load_failure_isolation").c_str());
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0") +
         " token_embedding_gpu_override=" + (gpu ? "1" : "0")).c_str());
@@ -721,6 +726,22 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     checkpoint("MODEL_LOAD_STARTED gpu_layers=OPENGL_ES");
     g_model = load_model_android(path, mp, true);
     checkpoint(g_model ? "MODEL_LOAD_RETURNED_SUCCESS" : "MODEL_LOAD_RETURNED_FAILED");
+    if (!g_model) {
+        append_native_trace("OPENGL_ES_MODEL_LOAD_FAILURE_STAGE=llama_model_load_from_file_returned_null");
+        append_native_trace("OPENGL_ES_MODEL_LOAD_FAILURE_NO_CPU_FALLBACK=1");
+        const std::string device_count = std::string("OPENGL_ES_MODEL_LOAD_FAILURE_DEVICE_COUNT=") + std::to_string(ggml_backend_dev_count());
+        append_native_trace(device_count.c_str());
+        for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+            ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+            if (!dev) continue;
+            const char * name = ggml_backend_dev_name(dev);
+            const char * description = ggml_backend_dev_description(dev);
+            append_native_trace((std::string("OPENGL_ES_MODEL_LOAD_FAILURE_DEVICE index=") + std::to_string(i) +
+                " name=" + (name ? name : "<null>") +
+                " description=" + (description ? description : "<null>") +
+                " type=" + std::to_string((int)ggml_backend_dev_type(dev))).c_str());
+        }
+    }
     if (g_model) {
         append_weight_residency_trace();
         append_diagnostic_tensor_residency("after_load");
