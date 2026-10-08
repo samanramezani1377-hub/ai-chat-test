@@ -151,14 +151,14 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             EmptyCard("هنوز رویداد Runtime ثبت نشده است.")
         } else {
             events.forEachIndexed { index, event ->
-                TimelineItem(index + 1, event.type.toString(), event.message, event.timestampMs)
+                TimelineItem(index + 1, localizedLogTitle(event.type.toString()), event.message, event.timestampMs)
             }
         }
 
         if (selectedActions.isNotEmpty()) {
             Text("مراحل Agent", style = MaterialTheme.typography.titleLarge)
             selectedActions.takeLast(8).reversed().forEachIndexed { index, event ->
-                TimelineItem(index + 1, event.type.toString(), event.message, event.timestampMs)
+                TimelineItem(index + 1, localizedLogTitle(event.type.toString()), event.message, event.timestampMs)
             }
         }
 
@@ -256,6 +256,19 @@ private fun EmptyCard(text: String) {
     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
         Text(text, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+private fun localizedLogTitle(raw: String): String = when {
+    raw.contains("GENERATION_STARTED") -> "شروع تولید پاسخ"
+    raw.contains("GENERATION_STOPPED") -> "توقف تولید پاسخ"
+    raw.contains("MODEL_LOAD") -> "بارگذاری مدل"
+    raw.contains("MODEL") && raw.contains("FAILED") -> "خطای مدل"
+    raw.contains("KV_CACHE") -> "وضعیت حافظه KV"
+    raw.contains("TOKEN") -> "دریافت توکن"
+    raw.contains("ACTION") -> "رویداد عامل"
+    raw.contains("ERROR") || raw.contains("FAILED") -> "خطا"
+    raw.contains("READY") -> "آماده"
+    else -> raw.replace("_", " ").lowercase().replaceFirstChar { it.titlecase() }
 }
 
 @Composable
