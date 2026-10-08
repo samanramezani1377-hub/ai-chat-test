@@ -67,7 +67,16 @@ if(NOT _llama_context_source MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH")
 }"
         _llama_context_source)
     file(WRITE "${_llama_context_cpp}" "${_llama_context_source}")
-endif()\n\n# Fail configuration if the pinned llama.cpp source could not be patched. In GPU-only\n# mode a silent miss here would re-enable the CPU scheduler and violate the runtime contract.\nfile(READ "${_llama_context_cpp}" _llama_context_verify)\nif(NOT _llama_context_verify MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH")\n    message(FATAL_ERROR "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH was not applied to pinned llama-context.cpp; refusing to build a CPU-fallback runtime")\nendif()\n\nadd_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp opengles_runtime.cpp ggml-opengles/ggml-opengles.cpp ggml-opengles/ggml-opengles-registration.cpp)
+endif()
+
+# Fail configuration if the pinned llama.cpp source could not be patched. In GPU-only
+# mode a silent miss here would re-enable the CPU scheduler and violate the runtime contract.
+file(READ "${_llama_context_cpp}" _llama_context_verify)
+if(NOT _llama_context_verify MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH")
+    message(FATAL_ERROR "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH was not applied to pinned llama-context.cpp; refusing to build a CPU-fallback runtime")
+endif()
+
+add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp opengles_runtime.cpp ggml-opengles/ggml-opengles.cpp ggml-opengles/ggml-opengles-registration.cpp)
 
 # native_runtime_android_safe.cpp intentionally includes llama.cpp/ggml internal
 # headers for strict backend and tensor-residency validation. Keep both
