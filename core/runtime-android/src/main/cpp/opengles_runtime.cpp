@@ -1,6 +1,10 @@
 #include "opengles_runtime.h"
 
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
+#ifndef EGL_OPENGL_ES3_BIT_KHR
+#define EGL_OPENGL_ES3_BIT_KHR 0x0040
+#endif
 #include <GLES3/gl31.h>
 
 #include <mutex>
