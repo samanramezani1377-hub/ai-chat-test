@@ -40,7 +40,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         loadTimeMs = runtime.loadTimeMs,
         generation = runtime.generation,
         settings = runtime.settings,
-        status = execution?.status ?: if (runtime.generation != null) "SUCCESS" else "READY",
+        status = execution?.status ?: if (!error.isNullOrBlank()) "FAILED" else if (runtime.generation != null) "SUCCESS" else "READY",
         error = error ?: execution?.error,
         rawError = execution?.error,
         executionId = execution?.id,
