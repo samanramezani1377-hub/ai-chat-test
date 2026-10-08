@@ -120,6 +120,21 @@ bool opengles_runtime_init() {
     g_info.glsl_version = safe_string(GL_SHADING_LANGUAGE_VERSION);
     g_info.extensions = safe_string(GL_EXTENSIONS);
 
+    GLint ssbo_blocks = 0;
+    GLint workgroup_x = 0;
+    GLint64 ssbo_block_size = 0;
+    glGetIntegerv(GL_MAX_COMPUTE_SHADER_STORAGE_BLOCKS, &ssbo_blocks);
+    glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_SIZE, &workgroup_x);
+    glGetInteger64v(GL_MAX_SHADER_STORAGE_BLOCK_SIZE, &ssbo_block_size);
+    if (glGetError() != GL_NO_ERROR || ssbo_blocks <= 0 || workgroup_x <= 0 || ssbo_block_size <= 0) {
+        fail("OPENGL_ES_COMPUTE_LIMIT_QUERY_FAILED");
+        opengles_runtime_shutdown();
+        return false;
+    }
+    g_info.max_compute_ssbo_blocks = ssbo_blocks;
+    g_info.max_workgroup_size_x = workgroup_x;
+    g_info.max_ssbo_block_size = ssbo_block_size;
+
     if (!parse_version(g_info.version.c_str())) {
         fail("OPENGL_ES_31_COMPUTE_UNAVAILABLE");
         opengles_runtime_shutdown();
