@@ -584,14 +584,17 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
             checkpoint("OPENGL_ES_GPU_ONLY_REJECTED_NO_DEVICE_FOR_EMBEDDING_OVERRIDE");
             return nullptr;
         }
+        // GPU-only contract: do not allow llama.cpp to choose a CPU/host buffer
+        // for any model tensor. The previous targeted overrides fixed the known
+        // embedding/output heads, but Qwen3.8 also contains classifier/MTP tensors
+        // whose names can vary with the GGUF revision. A catch-all override makes
+        // residency deterministic instead of relying on per-architecture defaults.
         const llama_model_tensor_buft_override tensor_buft_overrides[] = {
-            { "token_embd\\.weight", ggml_backend_dev_buffer_type(opengles_dev) },
-            { "output\\.weight", ggml_backend_dev_buffer_type(opengles_dev) },
-            { "cls\\.output\\.weight", ggml_backend_dev_buffer_type(opengles_dev) },
+            { ".*", ggml_backend_dev_buffer_type(opengles_dev) },
             { nullptr, nullptr }
         };
         mp.tensor_buft_overrides = tensor_buft_overrides;
-        append_native_trace("OPENGL_ES_GPU_ONLY_TENSOR_OVERRIDES enabled=1 patterns=token_embd\\.weight,output\\.weight,cls\\.output\\.weight");
+        append_native_trace("OPENGL_ES_GPU_ONLY_TENSOR_OVERRIDES enabled=1 patterns=.*");
     }
     checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_RESIDENT" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
