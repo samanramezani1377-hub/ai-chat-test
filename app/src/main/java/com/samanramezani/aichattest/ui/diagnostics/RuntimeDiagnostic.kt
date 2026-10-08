@@ -66,16 +66,19 @@ internal data class RuntimeDiagnostic(
         get() = nativeDiagnostics.orEmpty().lineSequence()
             .filter { it.contains("OPENGL_ES_TENSOR_RESIDENCY") }
             .distinct()
+            .toList()
 
     val nonGpuTensorLines: List<String>
         get() = nativeDiagnostics.orEmpty().lineSequence()
             .filter { it.contains("OPENGL_ES_NON_GPU_TENSOR") }
             .distinct()
+            .toList()
 
     val residencySummaryLines: List<String>
         get() = nativeDiagnostics.orEmpty().lineSequence()
             .filter { it.contains("OPENGL_ES_RESIDENCY_SUMMARY") }
             .distinct()
+            .toList()
     val nativePerformance: NativePerformance
         get() = NativePerformance(
             prefillMs = nativeValue("prefillMs")?.toLongOrNull(),
@@ -234,7 +237,8 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
         .filter { it.contains("OPENGL_ES_NON_GPU_TENSOR") || it.contains("OPENGL_ES_TENSOR_RESIDENCY") }
         .distinct()
         .take(200)
-    if (tensors.isEmpty()) appendLine("No per-tensor residency entries found.") else tensors.forEach(::appendLine)
+    val tensorLines = tensors.toList()
+    if (tensorLines.isEmpty()) appendLine("No per-tensor residency entries found.") else tensorLines.forEach(::appendLine)
     appendLine()
     appendLine("===== RECENT EVENTS =====")
     uniqueRuntimeEvents().forEach(::appendLine)
@@ -299,8 +303,8 @@ private fun RuntimeDiagnostic.importantNativeEvents(includeVerbose: Boolean): Li
             important && (includeVerbose || verbose.none { line.contains(it) })
         }
         .distinct()
-        .takeLast(if (includeVerbose) 120 else 100)
         .toList()
+        .takeLast(if (includeVerbose) 120 else 100)
 }
 private fun tokensPerSecond(result: GenerationResult?): Double? {
     val tokens = result?.outputTokens ?: return null
