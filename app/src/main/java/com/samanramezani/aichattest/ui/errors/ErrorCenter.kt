@@ -27,7 +27,7 @@ internal object ErrorCenter {
             "OPENGL_ES_RESIDENCY_SUMMARY", "OPENGL_ES_MODEL_RESIDENCY",
             "OPENGL_ES_GPU_ONLY_VALIDATION", "OPENGL_ES_NON_GPU_TENSOR",
             "NATIVE_WEIGHT_RESIDENCY", "NATIVE_OPENGL_DEVICE",
-            "NATIVE_CHECKPOINT", "FATAL_SIGNAL", "signal ", "SIGSEGV", "SIGABRT",
+            "NATIVE_CHECKPOINT",
             "OutOfMemoryError", "Unable to load model", "Unsupported model architecture",
         )
         val important = lines.filter { line ->
