@@ -21,9 +21,7 @@
 #include "llama-model.h"
 #include "ggml-backend.h"
 #include "ggml-backend-impl.h"
-#include "ggml-opencl.h"
-#include "ggml-opengles.h"
-#include <CL/cl.h>
+
 #include <set>
 
 #define LOG_TAG "AIChatRuntime"
@@ -557,7 +555,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
             ggml_backend_register(ggml_backend_opengles_reg());
             const size_t after = ggml_backend_reg_count();
             const bool registered = ggml_backend_reg_by_name("OpenGL ES") != nullptr;
-            g_gpu_backend_loaded = registered && has_opencl_gpu_device();
+            g_gpu_backend_loaded = registered;
             append_native_trace((std::string("OPENGL_ES_STATIC_REGISTRATION before=") +
                 std::to_string(before) + " after=" + std::to_string(after) +
                 " registered=" + (registered ? "1" : "0") +
@@ -576,7 +574,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
             append_native_trace("OPENGL_ES_BACKEND_RETRY_STARTED");
             if (opengles_runtime_init()) {
                 ggml_backend_register(ggml_backend_opengles_reg());
-                g_gpu_backend_loaded = ggml_backend_reg_by_name("OpenGL ES") != nullptr && has_opencl_gpu_device();
+                g_gpu_backend_loaded = ggml_backend_reg_by_name("OpenGL ES") != nullptr;
             }
             append_native_trace((std::string("OPENGL_ES_BACKEND_RETRY_RESULT loaded=") +
                 (g_gpu_backend_loaded ? "1" : "0") +
