@@ -56,6 +56,16 @@ if(NOT _llama_context_source MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH")
 
             if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {"
         _llama_context_source)
+    string(REPLACE
+        "    ggml_opt_free(opt_ctx);
+}"
+        "    ggml_opt_free(opt_ctx);
+    if (backend_cpu) {
+        ggml_backend_free(backend_cpu);
+        backend_cpu = nullptr;
+    }
+}"
+        _llama_context_source)
     file(WRITE "${_llama_context_cpp}" "${_llama_context_source}")
 endif()
 
