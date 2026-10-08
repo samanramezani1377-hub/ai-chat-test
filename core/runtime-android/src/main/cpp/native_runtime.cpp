@@ -665,14 +665,17 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
             checkpoint("OPENGL_ES_GPU_ONLY_REJECTED_NO_DEVICE_FOR_EMBEDDING_OVERRIDE");
             return nullptr;
         }
-        // Diagnostic mode: let llama.cpp keep its normal buffer selection so we
-        // can observe exactly which tensors/allocations it cannot place on OpenGL.
-        // This is intentionally NOT the final GPU-only policy. The native residency
-        // trace below records every non-GPU model tensor with its device/buffer type.
-        // No CPU fallback is introduced by this mode; we are only removing the
-        // artificial catch-all override while investigating backend limitations.
-        mp.tensor_buft_overrides = nullptr;
-        append_native_trace("OPENGL_ES_GPU_ONLY_DIAGNOSTIC_MODE enabled=1 tensor_overrides=disabled");
+        // The input embedding is part of the target model weights and must remain
+        // GPU-resident. llama.cpp can otherwise select a CPU_REPACK buffer for
+        // token_embd.weight even with all transformer blocks offloaded. Force only
+        // the embedding to the OpenGL ES device; all other tensors keep llama.cpp's
+        // normal GPU buffer selection.
+        static const llama_model_tensor_buft_override tensor_buft_overrides[] = {
+            { "token_embd\\.weight", ggml_backend_dev_buffer_type(opengles_dev) },
+            { nullptr, nullptr }
+        };
+        mp.tensor_buft_overrides = tensor_buft_overrides;
+        append_native_trace("OPENGL_ES_GPU_ONLY_TENSOR_OVERRIDES enabled=1 token_embedding=OpenGL_ES");
 
     }
     checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_RESIDENT" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
@@ -747,11 +750,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         append_diagnostic_tensor_residency("after_load");
         const bool residency_gpu_only = validate_gpu_model_residency();
         append_native_trace(residency_gpu_only
-            ? "OPENGL_ES_DIAGNOSTIC_RESIDENCY gpu_only=1"
-            : "OPENGL_ES_DIAGNOSTIC_RESIDENCY gpu_only=0 non_gpu_tensors_present=1");
-        // Diagnostic mode deliberately continues after a non-GPU residency finding.
-        // This lets the model execute and exposes the real backend allocation path in
-        // the trace. It must not be interpreted as the final GPU-only policy.
+            ? "OPENGL_ES_RESIDENCY_VALIDATION gpu_only=1"
+            : "OPENGL_ES_RESIDENCY_VALIDATION gpu_only=0 non_gpu_tensors_present=1");
+        if (!residency_gpu_only) {
+            checkpoint("OPENGL_ES_GPU_ONLY_RESIDENCY_REJECTED");
+            free_all();
+            return 6;
+        }
     }
     env->ReleaseStringUTFChars(jpath, path);
     if (!g_model) {
@@ -760,7 +765,6 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         return 1;
     }
     g_gpu = true;
-    if (!g_model) { checkpoint("MODEL_LOAD_FAILED"); return 1; }
     const int trained = llama_model_n_ctx_train(g_model);
     const int requested = ctx_len > 0 ? ctx_len : 4096;
     const int effective = std::max(1, std::min(requested, trained));
