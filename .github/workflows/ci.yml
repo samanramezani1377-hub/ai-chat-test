@@ -131,8 +131,8 @@ jobs:
       - name: Verify OpenGL ES static backend linkage
         run: |
           set -euo pipefail
-          source_file="$(find core/runtime-android -path '*/.cxx/*' -path '*/ggml-opengles/ggml-opengles.cpp' -print -quit)"
-          test -n "$source_file"
+          source_file="core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp"
+          test -f "$source_file"
           grep -q 'GGML_OP_GET_ROWS' "$source_file"
           grep -q 'GGML_TYPE_Q4_0' "$source_file"
           grep -q 'GGML_TYPE_Q6_K' "$source_file"
