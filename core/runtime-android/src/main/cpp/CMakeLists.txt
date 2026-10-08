@@ -87,7 +87,7 @@ if (AI_CHAT_OPENCL_PROFILING)
     include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_opencl_profiling.cmake")
 endif()
 
-add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp opengles_runtime.cpp ggml-opengles/ggml-opengles.cpp)
+add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp opengles_runtime.cpp ggml-opengles/ggml-opengles.cpp ggml-opengles/ggml-opengles-registration.cpp)
 
 # native_runtime.cpp intentionally includes llama.cpp/ggml internal headers for
 # strict backend and tensor-residency validation. Keep both internal source
