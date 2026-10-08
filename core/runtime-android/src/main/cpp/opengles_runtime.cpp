@@ -5,6 +5,7 @@
 
 #include <mutex>
 #include <sstream>
+#include <cstdio>
 
 namespace {
 EGLDisplay g_display = EGL_NO_DISPLAY;
@@ -103,7 +104,13 @@ bool opengles_runtime_init() {
     if (g_surface == EGL_NO_SURFACE ||
         !eglMakeCurrent(g_display, g_surface, g_surface, g_context)) {
         fail("EGL_MAKE_CURRENT_FAILED");
-        opengles_runtime_shutdown();
+        eglMakeCurrent(g_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        if (g_surface != EGL_NO_SURFACE) eglDestroySurface(g_display, g_surface);
+        if (g_context != EGL_NO_CONTEXT) eglDestroyContext(g_display, g_context);
+        eglTerminate(g_display);
+        g_surface = EGL_NO_SURFACE;
+        g_context = EGL_NO_CONTEXT;
+        g_display = EGL_NO_DISPLAY;
         return false;
     }
 
