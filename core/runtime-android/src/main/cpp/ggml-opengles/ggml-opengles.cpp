@@ -303,7 +303,7 @@ uniform uint k_s0, k_s1, k_s2, k_s3;
 uniform uint v_s0, v_s1, v_s2, v_s3;
 uniform uint g_s0, g_s1, g_s2, g_s3;
 uniform uint b_s0, b_s1, b_s2, b_s3;
-uniform uint S_v, H_v, H_k, n_tokens, n_seqs, K_snap;
+uniform uint S_v, H_v, H_k, n_tokens, n_seqs, K_snap, g_width;
 uniform float scale;
 
 void main() {
@@ -330,8 +330,7 @@ void main() {
 
     for (uint t = 0u; t < n_tokens; ++t) {
         float decay_log;
-        if (S_v == 0u) return;
-        if (g_s0 == 1u) {
+        if (g_width == 1u) {
             decay_log = g[gbase + seq*g_s3 + head*g_s1 + t*g_s2];
         } else {
             decay_log = g[gbase + seq*g_s3 + head*g_s1 + t*g_s2 + col*g_s0];
@@ -888,6 +887,7 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             const GLuint hk = static_cast<GLuint>(op->src[0]->ne[1]);
             const GLuint nt = static_cast<GLuint>(op->src[2]->ne[2]);
             const GLuint nsq = static_cast<GLuint>(op->src[2]->ne[3]);
+            const GLuint gwidth = static_cast<GLuint>(op->src[3]->ne[0]);
             const GLuint ksnap = static_cast<GLuint>(op->op_params[0]);
             glUniform1ui(glGetUniformLocation(g_gdn, "S_v"), sv);
             glUniform1ui(glGetUniformLocation(g_gdn, "H_v"), hv);
@@ -895,6 +895,7 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             glUniform1ui(glGetUniformLocation(g_gdn, "n_tokens"), nt);
             glUniform1ui(glGetUniformLocation(g_gdn, "n_seqs"), nsq);
             glUniform1ui(glGetUniformLocation(g_gdn, "K_snap"), ksnap);
+            glUniform1ui(glGetUniformLocation(g_gdn, "g_width"), gwidth);
             glUniform1f(glGetUniformLocation(g_gdn, "scale"), 1.0f / std::sqrt(float(op->src[0]->ne[0])));
 
             glDispatchCompute(hv, nsq, 1);
