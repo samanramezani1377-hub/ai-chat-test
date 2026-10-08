@@ -170,7 +170,7 @@ void main() {
     uint blocks = k / block_k;
     for (uint b = 0u; b < blocks; ++b) {
         for (uint j = 0u; j < block_k; ++j) {
-            uint kk = b * 256u + j;
+            uint kk = b * block_k + j;
             float xv = x[(x_off >> 2u) + col*x_s1 + (out/(rows*cols))*x_s2 + kk*x_s0];
             uint wb = b + row * blocks;
             float wv = w_type == 0u ? q6(wb, j) : (w_type == 1u ? q4_0(wb, j) : q8_0_mm(wb, j));
