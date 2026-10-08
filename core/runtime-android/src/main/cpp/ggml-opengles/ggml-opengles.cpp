@@ -740,7 +740,8 @@ static ggml_backend_buffer_type_i buft_i = {
 static bool supports_op(ggml_backend_dev_t, const ggml_tensor * op) {
     if (!op) return false;
     if (op->op == GGML_OP_NONE || op->op == GGML_OP_VIEW || op->op == GGML_OP_RESHAPE ||
-        op->op == GGML_OP_PERMUTE || op->op == GGML_OP_TRANSPOSE) return true;\n    if ((op->op == GGML_OP_CONT || op->op == GGML_OP_CPY) && op->type == GGML_TYPE_F32 && op->src[0] && op->src[0]->type == GGML_TYPE_F32) return true;
+        op->op == GGML_OP_PERMUTE || op->op == GGML_OP_TRANSPOSE) return true;
+    if ((op->op == GGML_OP_CONT || op->op == GGML_OP_CPY) && op->type == GGML_TYPE_F32 && op->src[0] && op->src[0]->type == GGML_TYPE_F32) return true;
     if (op->op == GGML_OP_L2_NORM && op->type == GGML_TYPE_F32 && op->src[0] && op->src[0]->type == GGML_TYPE_F32) return true;
     if (op->op == GGML_OP_REPEAT && op->type == GGML_TYPE_F32 && op->src[0] && op->src[0]->type == GGML_TYPE_F32) return true;
     if ((op->op == GGML_OP_ADD || op->op == GGML_OP_MUL) &&
