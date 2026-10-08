@@ -94,74 +94,83 @@ static bool init_generation_context() {
     return true;
 }
 
+static const char * diagnostic_device_type_name(ggml_backend_dev_t dev) {
+    if (!dev) return "NONE";
+    switch (ggml_backend_dev_type(dev)) {
+        case GGML_BACKEND_DEVICE_TYPE_CPU:  return "CPU";
+        case GGML_BACKEND_DEVICE_TYPE_GPU:  return "GPU";
+        case GGML_BACKEND_DEVICE_TYPE_IGPU: return "IGPU";
+        case GGML_BACKEND_DEVICE_TYPE_ACCEL:return "ACCEL";
+        default: return "UNKNOWN";
+    }
+}
+
 static void append_diagnostic_tensor_residency(const char *phase) {
     if (!g_model) return;
 
-    size_t gpu_bytes = 0, cpu_bytes = 0, host_bytes = 0, other_bytes = 0;
-    size_t gpu_tensors = 0, cpu_tensors = 0, host_tensors = 0, other_tensors = 0;
+    size_t gpu_bytes = 0, cpu_bytes = 0, host_only_bytes = 0, other_bytes = 0;
+    size_t gpu_tensors = 0, cpu_tensors = 0, host_only_tensors = 0, other_tensors = 0;
 
     for (const auto & [name, tensor] : g_model->tensors_by_name) {
         if (!tensor || !tensor->buffer) continue;
 
         const size_t bytes = ggml_nbytes(tensor);
-        ggml_backend_buffer_t buffer = tensor->buffer;
-        ggml_backend_buft_t buft = ggml_backend_buffer_get_type(buffer);
-        ggml_backend_dev_t dev = ggml_backend_buft_get_device(buft);
-
-        const char *dev_name = dev ? ggml_backend_dev_name(dev) : "unknown";
-        const char *dev_type = dev ? ggml_backend_dev_type_name(dev) : "unknown";
+        const ggml_backend_buffer_type_t buft = ggml_backend_buffer_get_type(tensor->buffer);
+        const ggml_backend_dev_t dev = ggml_backend_buft_get_device(buft);
+        const auto dev_type = dev ? ggml_backend_dev_type(dev) : GGML_BACKEND_DEVICE_TYPE_CPU;
+        const char *dev_name = dev ? ggml_backend_dev_name(dev) : "<no-device>";
         const bool is_host = ggml_backend_buft_is_host(buft);
 
-        const bool is_gpu = dev && (
-            ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_GPU ||
-            ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_IGPU
-        );
+        const bool is_gpu = dev_type == GGML_BACKEND_DEVICE_TYPE_GPU ||
+                            dev_type == GGML_BACKEND_DEVICE_TYPE_IGPU;
+        const bool is_cpu = dev_type == GGML_BACKEND_DEVICE_TYPE_CPU;
+        const bool is_host_only = !is_gpu && !is_cpu && is_host;
 
-        const bool is_cpu = dev && (
-            ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_CPU
-        );
-
-        const char *classification = is_gpu ? "GPU" : (is_cpu ? "CPU" : (is_host ? "HOST" : "OTHER"));
+        const char *classification = is_gpu ? "GPU" :
+                                     (is_cpu ? "CPU" :
+                                     (is_host_only ? "HOST_ONLY" : "OTHER"));
 
         if (is_gpu) {
             gpu_bytes += bytes;
             ++gpu_tensors;
-            if (is_host) host_bytes += bytes, ++host_tensors;
         } else if (is_cpu) {
             cpu_bytes += bytes;
             ++cpu_tensors;
-        } else if (is_host) {
-            host_bytes += bytes;
-            ++host_tensors;
+        } else if (is_host_only) {
+            host_only_bytes += bytes;
+            ++host_only_tensors;
         } else {
             other_bytes += bytes;
             ++other_tensors;
         }
 
-        append_native_trace(
-            "OPENGL_ES_TENSOR_RESIDENCY phase=%s name=%s type=%s bytes=%zu "
-            "buffer_host=%d classification=%s device=%s device_type=%s",
-            phase ? phase : "unknown",
-            name.c_str(),
-            ggml_type_name(tensor->type),
-            bytes,
-            is_host ? 1 : 0,
-            classification,
-            dev_name,
-            dev_type
-        );
+        const std::string line =
+            std::string("OPENGL_ES_TENSOR_RESIDENCY") +
+            " phase=" + (phase ? phase : "unknown") +
+            " name=" + name +
+            " type=" + ggml_type_name(tensor->type) +
+            " bytes=" + std::to_string(bytes) +
+            " buffer_host=" + (is_host ? "1" : "0") +
+            " classification=" + classification +
+            " device=" + (dev_name ? dev_name : "<null>") +
+            " device_type=" + diagnostic_device_type_name(dev) +
+            " device_type_id=" + std::to_string((int)dev_type) +
+            " device_assigned=" + (dev ? "1" : "0");
+        append_native_trace(line.c_str());
     }
 
-    append_native_trace(
-        "OPENGL_ES_RESIDENCY_SUMMARY phase=%s gpu_bytes=%zu gpu_tensors=%zu "
-        "cpu_bytes=%zu cpu_tensors=%zu host_bytes=%zu host_tensors=%zu "
-        "other_bytes=%zu other_tensors=%zu",
-        phase ? phase : "unknown",
-        gpu_bytes, gpu_tensors,
-        cpu_bytes, cpu_tensors,
-        host_bytes, host_tensors,
-        other_bytes, other_tensors
-    );
+    const std::string summary =
+        std::string("OPENGL_ES_RESIDENCY_SUMMARY") +
+        " phase=" + (phase ? phase : "unknown") +
+        " gpu_bytes=" + std::to_string(gpu_bytes) +
+        " gpu_tensors=" + std::to_string(gpu_tensors) +
+        " cpu_bytes=" + std::to_string(cpu_bytes) +
+        " cpu_tensors=" + std::to_string(cpu_tensors) +
+        " host_only_bytes=" + std::to_string(host_only_bytes) +
+        " host_only_tensors=" + std::to_string(host_only_tensors) +
+        " other_bytes=" + std::to_string(other_bytes) +
+        " other_tensors=" + std::to_string(other_tensors);
+    append_native_trace(summary.c_str());
 }
 
 static bool validate_gpu_model_residency() {
