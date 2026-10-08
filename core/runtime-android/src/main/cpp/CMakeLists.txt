@@ -21,7 +21,6 @@ FetchContent_Declare(
 # No vendor-specific GPU SDK is bundled in the APK.
 set(GGML_BACKEND_DL OFF CACHE BOOL "Disable dynamic ggml backend loading on Android" FORCE)
 set(GGML_BACKEND_DIR "" CACHE STRING "No dynamic backend directory" FORCE)
-set(GGML_VULKAN OFF CACHE BOOL "Vulkan is intentionally disabled" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
