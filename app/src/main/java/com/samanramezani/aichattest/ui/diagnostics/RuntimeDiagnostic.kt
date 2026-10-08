@@ -285,11 +285,14 @@ private fun RuntimeDiagnostic.uniqueRuntimeEvents(): List<String> {
     val actions = actionTrace.asSequence().map {
         EventLine(it.timestampMs, "${it.timestampMs} | ${it.type} | ${it.message ?: ""}".trimEnd(), "${it.type}|${it.message ?: ""}")
     }
-    return (runtime + actions)
+    val events = (runtime + actions)
         .sortedBy { it.timestamp }
         .distinctBy { it.key }
-        .takeLast(RECENT_RUNTIME_EVENTS + RECENT_ACTION_EVENTS)
-        .map { it.text }
+        .toList()
+
+    val limit = RECENT_RUNTIME_EVENTS + RECENT_ACTION_EVENTS
+    val recent = if (events.size <= limit) events else events.subList(events.size - limit, events.size)
+    return recent.map { it.text }
 }
 
 private fun RuntimeDiagnostic.importantNativeEvents(includeVerbose: Boolean): List<String> {
