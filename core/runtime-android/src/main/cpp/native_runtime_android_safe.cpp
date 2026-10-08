@@ -958,7 +958,7 @@ if (hybrid_memory) {
     // Never pass the entire 4K context as one llama_decode() batch: llama_decode() requires
     // callers to split larger prompt batches according to llama_n_batch(). Passing a 3K-4K
     // token prompt directly here was the long-prompt crash path and could also corrupt the
-    // second-turn cache state on devices with strict OpenCL memory limits.
+    // second-turn cache state on devices with strict GPU memory limits.
     const int decode_batch_size = std::max(1, (int) llama_n_batch(g_context));
     const int batch_capacity = decode_batch_size;
     llama_batch batch = llama_batch_init(batch_capacity, 0, 1);
