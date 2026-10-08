@@ -647,7 +647,7 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             U("x_off",tensor_offset(op->src[0]->buffer,op->src[0])); U("y_off",tensor_offset(op->buffer,op)); U("m_off",m?(GLuint)tensor_offset(op->src[1]->buffer,op->src[1]):0);
             U("n0",(GLuint)op->ne[0]);U("n1",(GLuint)op->ne[1]);U("n2",(GLuint)op->ne[2]);U("n3",(GLuint)op->ne[3]);
             for(int d=0;d<4;++d){U((std::string("xs")+std::to_string(d)).c_str(),(GLuint)(op->src[0]->nb[d]/4));U((std::string("ys")+std::to_string(d)).c_str(),(GLuint)(op->nb[d]/4)); if(m)U((std::string("ms")+std::to_string(d)).c_str(),(GLuint)(op->src[1]->nb[d]/4));}
-            U("has_mask",m?1u:0u); glUniform1f(glGetUniformLocation(g_softmax,"scale"),1.0f);
+            U("has_mask",m?1u:0u); glUniform1f(glGetUniformLocation(g_softmax,"scale"),*reinterpret_cast<const float *>(op->op_params));
             glDispatchCompute((GLuint)(op->ne[1]*op->ne[2]*op->ne[3]),1,1); glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT); continue;
         }
 
