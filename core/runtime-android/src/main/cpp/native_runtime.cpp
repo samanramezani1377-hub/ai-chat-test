@@ -20,6 +20,7 @@
 #include "ggml-backend.h"
 #include "ggml-backend-impl.h"
 #include "ggml-opencl.h"
+#include <CL/cl.h>
 #include <set>
 
 #define LOG_TAG "AIChatRuntime"
@@ -122,6 +123,107 @@ static bool validate_gpu_model_residency() {
     append_native_trace(ok ? "OPENCL_MODEL_RESIDENCY_GPU_ONLY_OK"
                            : "OPENCL_MODEL_RESIDENCY_GPU_ONLY_REJECTED");
     return ok;
+}
+
+
+static const char * opencl_error_name(cl_int code) {
+    switch (code) {
+        case CL_SUCCESS: return "CL_SUCCESS";
+        case CL_DEVICE_NOT_FOUND: return "CL_DEVICE_NOT_FOUND";
+        case CL_DEVICE_NOT_AVAILABLE: return "CL_DEVICE_NOT_AVAILABLE";
+        case CL_COMPILER_NOT_AVAILABLE: return "CL_COMPILER_NOT_AVAILABLE";
+        case CL_MEM_OBJECT_ALLOCATION_FAILURE: return "CL_MEM_OBJECT_ALLOCATION_FAILURE";
+        case CL_OUT_OF_RESOURCES: return "CL_OUT_OF_RESOURCES";
+        case CL_OUT_OF_HOST_MEMORY: return "CL_OUT_OF_HOST_MEMORY";
+        case CL_INVALID_VALUE: return "CL_INVALID_VALUE";
+        case CL_INVALID_PLATFORM: return "CL_INVALID_PLATFORM";
+#ifdef CL_PLATFORM_NOT_FOUND_KHR
+        case CL_PLATFORM_NOT_FOUND_KHR: return "CL_PLATFORM_NOT_FOUND_KHR";
+#endif
+        default: return "CL_UNKNOWN_ERROR";
+    }
+}
+
+static std::string opencl_platform_info(cl_platform_id platform, cl_platform_info info) {
+    size_t size = 0;
+    if (clGetPlatformInfo(platform, info, 0, nullptr, &size) != CL_SUCCESS || size == 0) {
+        return "<unavailable>";
+    }
+    std::string value(size, '\0');
+    if (clGetPlatformInfo(platform, info, size, value.data(), nullptr) != CL_SUCCESS) {
+        return "<unavailable>";
+    }
+    if (!value.empty() && value.back() == '\0') value.pop_back();
+    return value;
+}
+
+static void probe_android_opencl_driver() {
+    append_native_trace("OPENCL_DRIVER_PROBE_STARTED");
+    cl_uint platform_count = 0;
+    const cl_int platform_result = clGetPlatformIDs(0, nullptr, &platform_count);
+    append_native_trace((std::string("OPENCL_DRIVER_PROBE_PLATFORM_RESULT code=") +
+        std::to_string((int)platform_result) + " name=" + opencl_error_name(platform_result) +
+        " platformCount=" + std::to_string(platform_count)).c_str());
+
+    if (platform_result != CL_SUCCESS || platform_count == 0) {
+        append_native_trace("OPENCL_DRIVER_PROBE_NO_PLATFORM");
+        return;
+    }
+
+    std::vector<cl_platform_id> platforms(platform_count);
+    const cl_int list_result = clGetPlatformIDs(platform_count, platforms.data(), nullptr);
+    append_native_trace((std::string("OPENCL_DRIVER_PROBE_PLATFORM_LIST code=") +
+        std::to_string((int)list_result) + " name=" + opencl_error_name(list_result)).c_str());
+    if (list_result != CL_SUCCESS) return;
+
+    for (cl_uint i = 0; i < platform_count; ++i) {
+        const std::string name = opencl_platform_info(platforms[i], CL_PLATFORM_NAME);
+        const std::string vendor = opencl_platform_info(platforms[i], CL_PLATFORM_VENDOR);
+        const std::string version = opencl_platform_info(platforms[i], CL_PLATFORM_VERSION);
+        const std::string extensions = opencl_platform_info(platforms[i], CL_PLATFORM_EXTENSIONS);
+        append_native_trace((std::string("OPENCL_PLATFORM index=") + std::to_string(i) +
+            " name=" + name + " vendor=" + vendor + " version=" + version).c_str());
+        append_native_trace((std::string("OPENCL_PLATFORM_EXTENSIONS index=") +
+            std::to_string(i) + " value=" + extensions).c_str());
+
+        cl_uint device_count = 0;
+        const cl_int device_result = clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_GPU, 0, nullptr, &device_count);
+        append_native_trace((std::string("OPENCL_GPU_PROBE index=") + std::to_string(i) +
+            " code=" + std::to_string((int)device_result) + " name=" +
+            opencl_error_name(device_result) + " deviceCount=" +
+            std::to_string(device_count)).c_str());
+        if (device_result != CL_SUCCESS || device_count == 0) continue;
+
+        std::vector<cl_device_id> devices(device_count);
+        const cl_int device_list_result = clGetDeviceIDs(
+            platforms[i], CL_DEVICE_TYPE_GPU, device_count, devices.data(), nullptr);
+        append_native_trace((std::string("OPENCL_GPU_PROBE_LIST index=") +
+            std::to_string(i) + " code=" + std::to_string((int)device_list_result) +
+            " name=" + opencl_error_name(device_list_result)).c_str());
+        if (device_list_result != CL_SUCCESS) continue;
+
+        for (cl_uint d = 0; d < device_count; ++d) {
+            auto device_info = [&](cl_device_info info) -> std::string {
+                size_t size = 0;
+                if (clGetDeviceInfo(devices[d], info, 0, nullptr, &size) != CL_SUCCESS || size == 0) {
+                    return "<unavailable>";
+                }
+                std::string value(size, '\0');
+                if (clGetDeviceInfo(devices[d], info, size, value.data(), nullptr) != CL_SUCCESS) {
+                    return "<unavailable>";
+                }
+                if (!value.empty() && value.back() == '\0') value.pop_back();
+                return value;
+            };
+            append_native_trace((std::string("OPENCL_GPU_DEVICE index=") + std::to_string(i) +
+                "." + std::to_string(d) + " name=" +
+                device_info(CL_DEVICE_NAME) + " vendor=" +
+                device_info(CL_DEVICE_VENDOR) + " driver=" +
+                device_info(CL_DRIVER_VERSION) + " version=" +
+                device_info(CL_DEVICE_VERSION)).c_str());
+        }
+    }
+    append_native_trace("OPENCL_DRIVER_PROBE_COMPLETED");
 }
 
 static bool register_static_opencl_backend() {
@@ -408,13 +510,15 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         // Let the Android/Khronos loader discover the vendor ICD through its
         // registered vendor paths instead, and record the actual search paths.
         unsetenv("OCL_ICD_FILENAMES");
-        setenv("OCL_ICD_VENDORS",
-            "/system/vendor/Khronos/OpenCL/vendors:/vendor/Khronos/OpenCL/vendors:/system_ext/vendor/Khronos/OpenCL/vendors",
-            1);
+        // Do not override the Android ICD vendor directory. Khronos documents
+        // OCL_ICD_VENDORS as a replacement for the loader's default search path;
+        // hard-coding guessed directories can hide the device vendor's real ICD.
+        unsetenv("OCL_ICD_VENDORS");
         append_native_trace("OPENCL_ICD_FILENAMES_CLEARED_ANDROID_LOADER");
-        append_native_trace("OPENCL_ICD_VENDORS=/system/vendor/Khronos/OpenCL/vendors:/vendor/Khronos/OpenCL/vendors:/system_ext/vendor/Khronos/OpenCL/vendors");
+        append_native_trace("OPENCL_ICD_VENDORS_CLEARED_USE_ANDROID_DEFAULT");
         append_native_trace("OPENCL_Q6K_SPECIALIZED_KERNELS tiled=0 o4=1 o4_global=1 xmem_gemm=0");
         append_native_trace("OPENCL_STATIC_REGISTRATION_STARTED");
+        probe_android_opencl_driver();
         const bool opencl_registered = register_static_opencl_backend();
         if (!opencl_registered) {
             append_native_trace("OPENCL_STATIC_REGISTRATION_FAILED");
