@@ -125,7 +125,7 @@ float q6(uint block, uint idx) {
     uint base = block * 210u;
     float d = half_at(base);
     uint group = idx / 16u;
-    int sc = byte_i8(base + 194u + group);
+    int sc = byte_i8(base + 192u + group);
     uint n128 = idx / 128u;
     uint l = idx & 31u;
     uint qbase = base + n128 * 64u;
@@ -148,17 +148,17 @@ void main() {
     uint total = rows * cols;
     if (out >= total) return;
     uint row = out % rows;
-    uint col = out / rows;
+    uint col = (out / rows) % cols;
     float sum = 0.0;
     uint blocks = k / 256u;
     for (uint b = 0u; b < blocks; ++b) {
         for (uint j = 0u; j < 256u; ++j) {
             uint kk = b * 256u + j;
-            float xv = x[(x_off >> 2u) + col * k + kk];
+            float xv = x[(x_off >> 2u) + col*x_s1 + (out/(rows*cols))*x_s2 + kk*x_s0];
             sum += q6(b + row * blocks, j) * xv;
         }
     }
-    y[(y_off >> 2u) + col * rows + row] = sum;
+    y[(y_off >> 2u) + col*y_s1 + (out/(rows*cols))*y_s2 + row*y_s0] = sum;
 })";
 }
 
@@ -293,20 +293,159 @@ void main() {
 })";
 }
 
+
+static const char * rms_norm_shader() {
+    return R"(#version 310 es
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer X { float x[]; };
+layout(std430, binding = 1) readonly buffer W { float w[]; };
+layout(std430, binding = 2) writeonly buffer Y { float y[]; };
+uniform uint x_off, w_off, y_off;
+uniform uint n0, n1, n2, n3;
+uniform uint xs0, xs1, xs2, xs3;
+uniform uint ys0, ys1, ys2, ys3;
+uniform float eps;
+void main() {
+    uint row = gl_GlobalInvocationID.x;
+    uint rows = n1*n2*n3;
+    if (row >= rows) return;
+    uint d3 = row / (n1*n2);
+    uint rem = row - d3*n1*n2;
+    uint d2 = rem / n1;
+    uint d1 = rem - d2*n1;
+    uint xb = (x_off>>2u) + d1*xs1 + d2*xs2 + d3*xs3;
+    uint yb = (y_off>>2u) + d1*ys1 + d2*ys2 + d3*ys3;
+    uint wb = w_off>>2u;
+    float ss = 0.0;
+    for (uint i=0u;i<n0;++i) {
+        float v=x[xb+i*xs0]; ss += v*v;
+    }
+    float inv=inversesqrt(ss/float(n0)+eps);
+    for (uint i=0u;i<n0;++i) y[yb+i*ys0] = x[xb+i*xs0]*inv*w[wb+i];
+})";
+}
+
+static const char * unary_shader() {
+    return R"(#version 310 es
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer A { float a[]; };
+layout(std430, binding = 1) writeonly buffer C { float c[]; };
+uniform uint a_off, c_off, n, kind;
+void main() {
+    uint i=gl_GlobalInvocationID.x; if(i>=n)return;
+    float x=a[(a_off>>2u)+i];
+    float y = kind==0u ? 1.0/(1.0+exp(-x)) : log(1.0+exp(-abs(x))) + max(x,0.0);
+    c[(c_off>>2u)+i]=y;
+})";
+}
+
+static const char * softmax_shader() {
+    return R"(#version 310 es
+layout(local_size_x = 1) in;
+layout(std430, binding = 0) readonly buffer X { float x[]; };
+layout(std430, binding = 1) readonly buffer M { float m[]; };
+layout(std430, binding = 2) writeonly buffer Y { float y[]; };
+uniform uint x_off,m_off,y_off,n0,n1,n2,n3;
+uniform uint xs0,xs1,xs2,xs3, ms0,ms1,ms2,ms3, ys0,ys1,ys2,ys3;
+uniform uint has_mask; uniform float scale;
+void main() {
+    uint row=gl_GlobalInvocationID.x, rows=n1*n2*n3; if(row>=rows)return;
+    uint d3=row/(n1*n2), rem=row-d3*n1*n2, d2=rem/n1, d1=rem-d2*n1;
+    uint xb=(x_off>>2u)+d1*xs1+d2*xs2+d3*xs3;
+    uint yb=(y_off>>2u)+d1*ys1+d2*ys2+d3*ys3;
+    uint mb=(m_off>>2u)+d1*ms1+d2*ms2+d3*ms3;
+    float mx=-3.402823e38;
+    for(uint i=0u;i<n0;++i){float v=x[xb+i*xs0]*scale; if(has_mask!=0u)v+=m[mb+i*ms0]; mx=max(mx,v);}
+    float sum=0.0;
+    for(uint i=0u;i<n0;++i){float v=x[xb+i*xs0]*scale; if(has_mask!=0u)v+=m[mb+i*ms0]; float e=exp(v-mx); y[yb+i*ys0]=e; sum+=e;}
+    float inv=1.0/max(sum,1e-20);
+    for(uint i=0u;i<n0;++i)y[yb+i*ys0]*=inv;
+})";
+}
+
+static const char * matmul_f32_shader() {
+    return R"(#version 310 es
+layout(local_size_x = 64) in;
+layout(std430,binding=0) readonly buffer A{float a[];};
+layout(std430,binding=1) readonly buffer B{float b[];};
+layout(std430,binding=2) writeonly buffer C{float c[];};
+uniform uint K,M,N,A2,A3,B2,B3;
+uniform uint a_off,b_off,c_off,as0,as1,as2,as3,bs0,bs1,bs2,bs3,cs0,cs1,cs2,cs3;
+void main(){
+ uint idx=gl_GlobalInvocationID.x, total=M*N*B2*B3; if(idx>=total)return;
+ uint n=idx%N, t=idx/N, m=t%M, bt=t/M, d2=bt%B2, d3=bt/B2;
+ uint ad2=d2%A2, ad3=d3%A3;
+ uint ab=(a_off>>2u)+ad2*as2+ad3*as3;
+ uint bb=(b_off>>2u)+d2*bs2+d3*bs3;
+ uint cb=(c_off>>2u)+d2*cs2+d3*cs3;
+ float sum=0.0;
+ for(uint k=0u;k<K;++k) sum+=a[ab+m*as1+k*as0]*b[bb+n*bs1+k*bs0];
+ c[cb+n*cs1+m*cs0]=sum;
+})";
+}
+
+static const char * rope_shader() {
+    return R"(#version 310 es
+layout(local_size_x=64) in;
+layout(std430,binding=0) readonly buffer X{float x[];};
+layout(std430,binding=1) readonly buffer P{int p[];};
+layout(std430,binding=2) writeonly buffer Y{float y[];};
+uniform uint x_off,p_off,y_off,n0,n1,n2,n3,ps0,ps1,xs0,xs1,xs2,xs3,ys0,ys1,ys2,ys3;
+uniform int n_dims,mode,n_ctx_orig;
+uniform float freq_base,freq_scale,ext_factor,attn_factor,beta_fast,beta_slow;
+uniform int s0,s1,s2,s3;
+void main(){
+ uint idx=gl_GlobalInvocationID.x,total=n0*n1*n2*n3;if(idx>=total)return;
+ uint d0=idx%n0, r=idx/n0, d1=r%n1; r/=n1; uint d2=r%n2,d3=r/n2;
+ uint xb=(x_off>>2u)+d0*xs0+d1*xs1+d2*xs2+d3*xs3;
+ uint yb=(y_off>>2u)+d0*ys0+d1*ys1+d2*ys2+d3*ys3;
+ float v=x[xb];
+ if(d0>=uint(n_dims) || (d0&1u)!=0u){y[yb]=v;return;}
+ int axis=0; int cumulative=0;
+ if((mode & 4)!=0){
+   if(d0/2u >= uint(s0)) { cumulative=s0; axis=1; }
+   if(d0/2u >= uint(s0+s1)) { cumulative=s0+s1; axis=2; }
+   if(d0/2u >= uint(s0+s1+s2)) { cumulative=s0+s1+s2; axis=3; }
+ }
+ int pos;
+ if(axis==0) pos=p[(p_off>>2u)+d1*ps1];
+ else if(axis==1) pos=p[(p_off>>2u)+ps0+d1*ps1];
+ else if(axis==2) pos=p[(p_off>>2u)+2*ps0+d1*ps1];
+ else pos=p[(p_off>>2u)+3*ps0+d1*ps1];
+ float dim=float(d0/2u-cumulative);
+ float theta=float(pos)*pow(freq_base,-2.0*dim/float(n_dims))*freq_scale;
+ float cs=cos(theta), sn=sin(theta);
+ uint pair=d0+1u;
+ uint xp=(x_off>>2u)+pair*xs0+d1*xs1+d2*xs2+d3*xs3;
+ uint yp=(y_off>>2u)+pair*ys0+d1*ys1+d2*ys2+d3*ys3;
+ y[yb]=v*cs-x[xp]*sn;
+})";
+}
+
 static GLuint g_elementwise = 0;
 static GLuint g_q6k = 0;
 static GLuint g_gdn = 0;
 static GLuint g_silu = 0;
 static GLuint g_ssm_conv = 0;
+static GLuint g_rms_norm = 0;
+static GLuint g_unary = 0;
+static GLuint g_softmax = 0;
+static GLuint g_matmul_f32 = 0;
+static GLuint g_rope = 0;
 
 static bool ensure_programs() {
-    if (g_elementwise && g_q6k && g_gdn && g_silu && g_ssm_conv) return true;
+    if (g_elementwise && g_q6k && g_gdn && g_silu && g_ssm_conv && g_rms_norm && g_unary && g_softmax && g_matmul_f32 && g_rope) return true;
     if (!g_elementwise) g_elementwise = compile_compute(elementwise_shader());
     if (!g_q6k) g_q6k = compile_compute(q6k_matmul_shader());
     if (!g_gdn) g_gdn = compile_compute(gated_delta_net_shader());
     if (!g_silu) g_silu = compile_compute(silu_shader());
     if (!g_ssm_conv) g_ssm_conv = compile_compute(ssm_conv_shader());
-    return g_elementwise && g_q6k && g_gdn && g_silu && g_ssm_conv;
+    if (!g_rms_norm) g_rms_norm = compile_compute(rms_norm_shader());
+    if (!g_unary) g_unary = compile_compute(unary_shader());
+    if (!g_softmax) g_softmax = compile_compute(softmax_shader());
+    if (!g_matmul_f32) g_matmul_f32 = compile_compute(matmul_f32_shader());
+    if (!g_rope) g_rope = compile_compute(rope_shader());
+    return g_elementwise && g_q6k && g_gdn && g_silu && g_ssm_conv && g_rms_norm && g_unary && g_softmax && g_matmul_f32 && g_rope;
 }
 
 static size_t tensor_offset(const ggml_backend_buffer_t buffer, const ggml_tensor * tensor) {
@@ -420,6 +559,16 @@ static bool supports_op(ggml_backend_dev_t, const ggml_tensor * op) {
         op->src[0]->ne[0] <= 128 && op->src[2]->ne[0] <= 128 &&
         op->src[2]->ne[0] == op->src[2]->ne[1] &&
         op->src[5]->ne[0] == op->src[5]->ne[1]) return true;
+    if (op->type == GGML_TYPE_F32 && op->src[0]) {
+        if (op->op == GGML_OP_RMS_NORM && op->src[0]->type == GGML_TYPE_F32) return true;
+        if ((op->op == GGML_OP_SIGMOID || op->op == GGML_OP_SOFTPLUS) && op->src[0]->type == GGML_TYPE_F32) return true;
+        if (op->op == GGML_OP_SOFT_MAX && op->src[0]->type == GGML_TYPE_F32 &&
+            (!op->src[1] || op->src[1]->type == GGML_TYPE_F32)) return true;
+        if (op->op == GGML_OP_ROPE && op->src[0]->type == GGML_TYPE_F32 &&
+            op->src[1] && op->src[1]->type == GGML_TYPE_I32) return true;
+        if (op->op == GGML_OP_MUL_MAT && op->src[1]->type == GGML_TYPE_F32 &&
+            op->src[0]->type == GGML_TYPE_F32) return true;
+    }
     return false;
 }
 
@@ -463,6 +612,70 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             glDispatchCompute(static_cast<GLuint>((ggml_nelements(op) + 63) / 64), 1, 1);
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
             continue;
+        }
+
+
+        if (op->op == GGML_OP_RMS_NORM) {
+            auto * x=buffer_ctx(op->src[0]); auto * w=buffer_ctx(op->src[1]); auto * y=buffer_ctx(op);
+            if(!x||!w||!y)return GGML_STATUS_FAILED;
+            glUseProgram(g_rms_norm);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,x->buffer); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,1,w->buffer); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,2,y->buffer);
+            auto U=[&](const char*n,GLuint v){glUniform1ui(glGetUniformLocation(g_rms_norm,n),v);};
+            U("x_off",tensor_offset(op->src[0]->buffer,op->src[0])); U("w_off",tensor_offset(op->src[1]->buffer,op->src[1])); U("y_off",tensor_offset(op->buffer,op));
+            U("n0",(GLuint)op->ne[0]); U("n1",(GLuint)op->ne[1]); U("n2",(GLuint)op->ne[2]); U("n3",(GLuint)op->ne[3]);
+            for(int d=0;d<4;++d){U((std::string("xs")+std::to_string(d)).c_str(),(GLuint)(op->src[0]->nb[d]/4));U((std::string("ys")+std::to_string(d)).c_str(),(GLuint)(op->nb[d]/4));}
+            glUniform1f(glGetUniformLocation(g_rms_norm,"eps"),1e-5f);
+            glDispatchCompute((GLuint)((op->ne[1]*op->ne[2]*op->ne[3]+63)/64),1,1); glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT); continue;
+        }
+
+        if (op->op == GGML_OP_SIGMOID || op->op == GGML_OP_SOFTPLUS) {
+            auto * x=buffer_ctx(op->src[0]); auto * y=buffer_ctx(op); if(!x||!y)return GGML_STATUS_FAILED;
+            glUseProgram(g_unary); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,x->buffer); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,1,y->buffer);
+            glUniform1ui(glGetUniformLocation(g_unary,"a_off"),(GLuint)tensor_offset(op->src[0]->buffer,op->src[0]));
+            glUniform1ui(glGetUniformLocation(g_unary,"c_off"),(GLuint)tensor_offset(op->buffer,op));
+            glUniform1ui(glGetUniformLocation(g_unary,"n"),(GLuint)ggml_nelements(op));
+            glUniform1ui(glGetUniformLocation(g_unary,"kind"),op->op==GGML_OP_SIGMOID?0u:1u);
+            glDispatchCompute((GLuint)((ggml_nelements(op)+63)/64),1,1); glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT); continue;
+        }
+
+        if (op->op == GGML_OP_SOFT_MAX) {
+            auto * x=buffer_ctx(op->src[0]); auto * y=buffer_ctx(op); auto * m=op->src[1]?buffer_ctx(op->src[1]):nullptr;
+            if(!x||!y||(op->src[1]&&!m))return GGML_STATUS_FAILED;
+            glUseProgram(g_softmax); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,x->buffer); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,1,m?m->buffer:0); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,2,y->buffer);
+            auto U=[&](const char*n,GLuint v){glUniform1ui(glGetUniformLocation(g_softmax,n),v);};
+            U("x_off",tensor_offset(op->src[0]->buffer,op->src[0])); U("y_off",tensor_offset(op->buffer,op)); U("m_off",m?(GLuint)tensor_offset(op->src[1]->buffer,op->src[1]):0);
+            U("n0",(GLuint)op->ne[0]);U("n1",(GLuint)op->ne[1]);U("n2",(GLuint)op->ne[2]);U("n3",(GLuint)op->ne[3]);
+            for(int d=0;d<4;++d){U((std::string("xs")+std::to_string(d)).c_str(),(GLuint)(op->src[0]->nb[d]/4));U((std::string("ys")+std::to_string(d)).c_str(),(GLuint)(op->nb[d]/4)); if(m)U((std::string("ms")+std::to_string(d)).c_str(),(GLuint)(op->src[1]->nb[d]/4));}
+            U("has_mask",m?1u:0u); glUniform1f(glGetUniformLocation(g_softmax,"scale"),1.0f);
+            glDispatchCompute((GLuint)(op->ne[1]*op->ne[2]*op->ne[3]),1,1); glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT); continue;
+        }
+
+        if (op->op == GGML_OP_ROPE) {
+            auto * x=buffer_ctx(op->src[0]); auto * p=buffer_ctx(op->src[1]); auto * y=buffer_ctx(op);
+            if(!x||!p||!y)return GGML_STATUS_FAILED;
+            glUseProgram(g_rope); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,x->buffer);glBindBufferBase(GL_SHADER_STORAGE_BUFFER,1,p->buffer);glBindBufferBase(GL_SHADER_STORAGE_BUFFER,2,y->buffer);
+            auto U=[&](const char*n,GLuint v){glUniform1ui(glGetUniformLocation(g_rope,n),v);};
+            U("x_off",tensor_offset(op->src[0]->buffer,op->src[0]));U("p_off",tensor_offset(op->src[1]->buffer,op->src[1]));U("y_off",tensor_offset(op->buffer,op));
+            U("n0",(GLuint)op->ne[0]);U("n1",(GLuint)op->ne[1]);U("n2",(GLuint)op->ne[2]);U("n3",(GLuint)op->ne[3]); U("ps0",(GLuint)(op->src[1]->nb[0]/4));U("ps1",(GLuint)(op->src[1]->nb[1]/4));
+            for(int d=0;d<4;++d){U((std::string("xs")+std::to_string(d)).c_str(),(GLuint)(op->src[0]->nb[d]/4));U((std::string("ys")+std::to_string(d)).c_str(),(GLuint)(op->nb[d]/4));}
+            glUniform1i(glGetUniformLocation(g_rope,"n_dims"),op->op_params[1]);
+            glUniform1i(glGetUniformLocation(g_rope,"mode"),op->op_params[2]);
+            glUniform1i(glGetUniformLocation(g_rope,"n_ctx_orig"),op->op_params[4]);
+            const float *fp=reinterpret_cast<const float*>(op->op_params);
+            glUniform1f(glGetUniformLocation(g_rope,"freq_base"),fp[5]);glUniform1f(glGetUniformLocation(g_rope,"freq_scale"),fp[6]);glUniform1f(glGetUniformLocation(g_rope,"ext_factor"),fp[7]);glUniform1f(glGetUniformLocation(g_rope,"attn_factor"),fp[8]);glUniform1f(glGetUniformLocation(g_rope,"beta_fast"),fp[9]);glUniform1f(glGetUniformLocation(g_rope,"beta_slow"),fp[10]);
+            const int32_t *ip=reinterpret_cast<const int32_t*>(op->op_params); for(int i=0;i<4;++i)glUniform1i(glGetUniformLocation(g_rope,(std::string("s")+std::to_string(i)).c_str()),ip[11+i]);
+            glDispatchCompute((GLuint)((ggml_nelements(op)+63)/64),1,1); glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT); continue;
+        }
+
+        if (op->op == GGML_OP_MUL_MAT && op->src[0]->type == GGML_TYPE_F32) {
+            auto * a=buffer_ctx(op->src[0]);auto * b=buffer_ctx(op->src[1]);auto * c=buffer_ctx(op);if(!a||!b||!c)return GGML_STATUS_FAILED;
+            glUseProgram(g_matmul_f32);glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,a->buffer);glBindBufferBase(GL_SHADER_STORAGE_BUFFER,1,b->buffer);glBindBufferBase(GL_SHADER_STORAGE_BUFFER,2,c->buffer);
+            auto U=[&](const char*n,GLuint v){glUniform1ui(glGetUniformLocation(g_matmul_f32,n),v);};
+            U("K",(GLuint)op->src[0]->ne[0]);U("M",(GLuint)op->src[0]->ne[1]);U("N",(GLuint)op->src[1]->ne[1]);U("A2",(GLuint)op->src[0]->ne[2]);U("A3",(GLuint)op->src[0]->ne[3]);U("B2",(GLuint)op->src[1]->ne[2]);U("B3",(GLuint)op->src[1]->ne[3]);
+            U("a_off",tensor_offset(op->src[0]->buffer,op->src[0]));U("b_off",tensor_offset(op->src[1]->buffer,op->src[1]));U("c_off",tensor_offset(op->buffer,op));
+            const ggml_tensor * ts[3]={op->src[0],op->src[1],op}; const char *pre[3]={"a","b","c"};
+            for(int z=0;z<3;++z)for(int d=0;d<4;++d)U((std::string(pre[z])+"s"+std::to_string(d)).c_str(),(GLuint)(ts[z]->nb[d]/4));
+            uint64_t total=(uint64_t)op->ne[0]*op->ne[1]*op->ne[2]*op->ne[3]; glDispatchCompute((GLuint)((total+63)/64),1,1);glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);continue;
         }
 
         if (op->op == GGML_OP_SSM_CONV) {
@@ -561,6 +774,11 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             glUniform1ui(glGetUniformLocation(g_q6k, "k"), static_cast<GLuint>(op->src[0]->ne[0]));
             glUniform1ui(glGetUniformLocation(g_q6k, "rows"), static_cast<GLuint>(op->src[0]->ne[1]));
             glUniform1ui(glGetUniformLocation(g_q6k, "cols"), static_cast<GLuint>(op->src[1]->ne[1]));
+            const ggml_tensor * xt=op->src[1]; const ggml_tensor * yt=op;
+            glUniform1ui(glGetUniformLocation(g_q6k,"x_s0"),(GLuint)(xt->nb[0]/4)); glUniform1ui(glGetUniformLocation(g_q6k,"x_s1"),(GLuint)(xt->nb[1]/4));
+            glUniform1ui(glGetUniformLocation(g_q6k,"x_s2"),(GLuint)(xt->nb[2]/4)); glUniform1ui(glGetUniformLocation(g_q6k,"x_s3"),(GLuint)(xt->nb[3]/4));
+            glUniform1ui(glGetUniformLocation(g_q6k,"y_s0"),(GLuint)(yt->nb[0]/4)); glUniform1ui(glGetUniformLocation(g_q6k,"y_s1"),(GLuint)(yt->nb[1]/4));
+            glUniform1ui(glGetUniformLocation(g_q6k,"y_s2"),(GLuint)(yt->nb[2]/4)); glUniform1ui(glGetUniformLocation(g_q6k,"y_s3"),(GLuint)(yt->nb[3]/4));
             uint64_t total = static_cast<uint64_t>(op->src[0]->ne[1]) * static_cast<uint64_t>(op->src[1]->ne[1]);
             glDispatchCompute(static_cast<GLuint>((total + 63) / 64), 1, 1);
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
