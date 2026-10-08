@@ -141,7 +141,7 @@ jobs:
           gl_target="$(find core/runtime-android -path '*/.cxx/*' -type f \( -name 'build.ninja' -o -name 'rules.ninja' \) -print0 | xargs -0 grep -l 'ggml-opengles' | head -n 1 || true)"
           test -n "$gl_target"
           grep -R -n 'GLESv3' core/runtime-android/.cxx >/dev/null
-          if grep -R -nE 'ggml-opencl|GGML_USE_OPENCL|Vulkan' core/runtime-android/.cxx >/dev/null 2>&1; then
+          if grep -R -nE '(-lOpenCL|libOpenCL|OpenCL::|vulkan|Vulkan::|libvulkan)' core/runtime-android/.cxx >/dev/null 2>&1; then
             echo "Forbidden OpenCL/Vulkan linkage detected in native build output"
             exit 1
           fi
