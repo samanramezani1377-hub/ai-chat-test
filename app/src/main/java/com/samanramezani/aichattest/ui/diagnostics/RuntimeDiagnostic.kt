@@ -294,7 +294,8 @@ private fun RuntimeDiagnostic.uniqueRuntimeEvents(): List<String> {
 
 private fun RuntimeDiagnostic.importantNativeEvents(includeVerbose: Boolean): List<String> {
     val verbose = setOf("create_tensor: loading tensor", "unused tensor")
-    return nativeDiagnostics.orEmpty().lineSequence()
+    val limit = if (includeVerbose) 120 else 100
+    val lines = nativeDiagnostics.orEmpty().lineSequence()
         .filter { line ->
             val important = line.contains("OPENGL_ES_") || line.contains("MODEL_LOAD") ||
                 line.contains("NATIVE_WEIGHT_RESIDENCY") || line.contains("NATIVE_KV_CACHE") ||
@@ -304,8 +305,11 @@ private fun RuntimeDiagnostic.importantNativeEvents(includeVerbose: Boolean): Li
         }
         .distinct()
         .toList()
-        .let { lines -> lines.takeLast(if (includeVerbose) 120 else 100) }
+
+    if (lines.size <= limit) return lines
+    return lines.subList(lines.size - limit, lines.size)
 }
+
 private fun tokensPerSecond(result: GenerationResult?): Double? {
     val tokens = result?.outputTokens ?: return null
     val timeMs = result.generationTimeMs ?: return null
