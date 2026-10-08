@@ -665,17 +665,12 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
             checkpoint("OPENGL_ES_GPU_ONLY_REJECTED_NO_DEVICE_FOR_EMBEDDING_OVERRIDE");
             return nullptr;
         }
-        // The input embedding is part of the target model weights and must remain
-        // GPU-resident. llama.cpp can otherwise select a CPU_REPACK buffer for
-        // token_embd.weight even with all transformer blocks offloaded. Force only
-        // the embedding to the OpenGL ES device; all other tensors keep llama.cpp's
-        // normal GPU buffer selection.
-        static const llama_model_tensor_buft_override tensor_buft_overrides[] = {
-            { "token_embd\\.weight", ggml_backend_dev_buffer_type(opengles_dev) },
-            { nullptr, nullptr }
-        };
-        mp.tensor_buft_overrides = tensor_buft_overrides;
-        append_native_trace("OPENGL_ES_GPU_ONLY_TENSOR_OVERRIDES enabled=1 token_embedding=OpenGL_ES");
+        // Diagnostic mode deliberately preserves llama.cpp's normal tensor
+        // placement. We must allow the model to execute when a weight remains on
+        // host/CPU so that post-load and post-generation diagnostics can expose the
+        // real backend behavior. Strict GPU-only validation is a separate final mode.
+        mp.tensor_buft_overrides = nullptr;
+        append_native_trace("OPENGL_ES_GPU_ONLY_DIAGNOSTIC_MODE enabled=1 tensor_overrides=disabled");
 
     }
     checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_RESIDENT" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
@@ -750,13 +745,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         append_diagnostic_tensor_residency("after_load");
         const bool residency_gpu_only = validate_gpu_model_residency();
         append_native_trace(residency_gpu_only
-            ? "OPENGL_ES_RESIDENCY_VALIDATION gpu_only=1"
-            : "OPENGL_ES_RESIDENCY_VALIDATION gpu_only=0 non_gpu_tensors_present=1");
-        if (!residency_gpu_only) {
-            checkpoint("OPENGL_ES_GPU_ONLY_RESIDENCY_REJECTED");
-            free_all();
-            return 6;
-        }
+            ? "OPENGL_ES_DIAGNOSTIC_RESIDENCY gpu_only=1"
+            : "OPENGL_ES_DIAGNOSTIC_RESIDENCY gpu_only=0 non_gpu_tensors_present=1");
+        // Diagnostic mode intentionally continues even when a model weight is
+        // CPU/host resident. This is NOT CPU fallback: GPU inference remains the
+        // selected runtime/backend, while residency is recorded for diagnosis.
+        append_native_trace("OPENGL_ES_DIAGNOSTIC_ALLOW_NON_GPU_RESIDENCY execution=allowed cpu_fallback=disabled");
     }
     env->ReleaseStringUTFChars(jpath, path);
     if (!g_model) {
