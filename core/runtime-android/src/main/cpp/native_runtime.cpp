@@ -542,13 +542,36 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
     mp.check_tensors = false;
     mp.no_host = true;
 
-    // Do not force token_embd onto OpenGL ES. llama.cpp's backend placement is
-    // architecture/device aware; overriding the embedding buffer here adds a
-    // large device allocation and has caused avoidable load pressure on Android.
-    // GPU-only residency is still enforced after the model is loaded.
+    // GPU-only mode must place the input embedding tensor on OpenGL ES too.
+    // llama.cpp may otherwise select the CPU_REPACK buffer for token_embd.weight,
+    // leaving a large host-resident model tensor even when every transformer
+    // layer is reported as offloaded. Force only that tensor to the OpenGL ES
+    // device buffer; GET_ROWS(Q6_K) is implemented by this backend.
+    ggml_backend_dev_t opengles_dev = nullptr;
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        ggml_backend_dev_t candidate = ggml_backend_dev_get(i);
+        const char * name = candidate ? ggml_backend_dev_name(candidate) : nullptr;
+        if (name && std::string(name) == "OpenGL ES") {
+            opengles_dev = candidate;
+            break;
+        }
+    }
+    if (gpu) {
+        if (!opengles_dev) {
+            checkpoint("OPENGL_ES_GPU_ONLY_REJECTED_NO_DEVICE_FOR_EMBEDDING_OVERRIDE");
+            return nullptr;
+        }
+        const llama_model_tensor_buft_override tensor_buft_overrides[] = {
+            { "token_embd\\.weight", ggml_backend_dev_buffer_type(opengles_dev) },
+            { nullptr, nullptr }
+        };
+        mp.tensor_buft_overrides = tensor_buft_overrides;
+        append_native_trace("OPENGL_ES_GPU_ONLY_TOKEN_EMBEDDING_OVERRIDE enabled=1 pattern=token_embd\\.weight");
+    }
     checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_RESIDENT" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
-        " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
+        " check_tensors=" + (mp.check_tensors ? "1" : "0") +
+        " token_embedding_gpu_override=" + (gpu ? "1" : "0")).c_str());
     return llama_model_load_from_file(path, mp);
 }
 
