@@ -1,3 +1,4 @@
+#include "opengles_runtime.h"
 #include "llama.h"
 #include "common.h"
 #include "sampling.h"
