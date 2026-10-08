@@ -780,7 +780,8 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             glUniform1ui(glGetUniformLocation(g_q6k,"x_s2"),(GLuint)(xt->nb[2]/4)); glUniform1ui(glGetUniformLocation(g_q6k,"x_s3"),(GLuint)(xt->nb[3]/4));
             glUniform1ui(glGetUniformLocation(g_q6k,"y_s0"),(GLuint)(yt->nb[0]/4)); glUniform1ui(glGetUniformLocation(g_q6k,"y_s1"),(GLuint)(yt->nb[1]/4));
             glUniform1ui(glGetUniformLocation(g_q6k,"y_s2"),(GLuint)(yt->nb[2]/4)); glUniform1ui(glGetUniformLocation(g_q6k,"y_s3"),(GLuint)(yt->nb[3]/4));
-            uint64_t total = static_cast<uint64_t>(op->src[0]->ne[1]) * static_cast<uint64_t>(op->src[1]->ne[1]);
+            uint64_t total = static_cast<uint64_t>(op->src[0]->ne[1]) * static_cast<uint64_t>(op->src[1]->ne[1]) *
+                static_cast<uint64_t>(op->src[1]->ne[2]) * static_cast<uint64_t>(op->src[1]->ne[3]);
             glDispatchCompute(static_cast<GLuint>((total + 63) / 64), 1, 1);
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
         }
