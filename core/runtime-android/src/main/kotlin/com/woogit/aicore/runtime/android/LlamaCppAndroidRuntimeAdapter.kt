@@ -101,6 +101,11 @@ class LlamaCppAndroidRuntimeAdapter(
             // trained context; prompt trimming below reserves output capacity.
             val modelContext = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
             val requested = minOf(modelContext, defaultContextLength)
+            selectedBackend = "OpenGL ES"
+            selectedGpuLayers = requestedGpuLayers
+            selectedCpuThreads = 2
+            loadedContextLength = requested
+            RuntimeDiagnosticsStore.recordLoadStarted(model, runtimeInfo())
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} context=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}")
             RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} requestedContext=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}")
             val draftFile = selectedDraftPath?.let(::File)?.takeIf { it.isFile && it.canRead() }
