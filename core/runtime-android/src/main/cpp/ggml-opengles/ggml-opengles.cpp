@@ -329,10 +329,12 @@ static ggml_guid_t backend_guid() {
 static ggml_backend_t init_backend(ggml_backend_dev_t dev, const char *) {
     if (!opengles_runtime_available() || !ensure_programs()) return nullptr;
     static const struct ggml_backend_i backend_i = {
-        [](ggml_backend_t b){ delete static_cast<DeviceContext *>(b->context); delete b; },
         [](ggml_backend_t){ return "OpenGL ES"; },
+        [](ggml_backend_t b){ delete static_cast<DeviceContext *>(b->context); delete b; },
         nullptr, nullptr, nullptr, nullptr, nullptr,
-        nullptr, nullptr, nullptr, graph_compute,
+        nullptr,
+        nullptr, nullptr, nullptr, nullptr,
+        graph_compute,
         nullptr, nullptr, nullptr
     };
     return new ggml_backend{ backend_guid(), backend_i, dev, new DeviceContext{} };
