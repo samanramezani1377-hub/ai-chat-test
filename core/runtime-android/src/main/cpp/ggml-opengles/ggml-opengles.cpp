@@ -97,7 +97,7 @@ uniform uint y_off;
 uniform uint k;
 uniform uint rows;
 uniform uint cols;
-uniform uint x_s0, x_s1, x_s2, x_s3, y_s0, y_s1, y_s2, y_s3, x_n2, x_n3;
+uniform uint x_s0, x_s1, x_s2, x_s3, y_s0, y_s1, y_s2, y_s3, x_n2, x_n3, w_type;
 
 uint byte_u8(uint byte_offset) {
     uint word = w[(w_off + byte_offset) >> 2u];
@@ -122,6 +122,19 @@ float half_at(uint byte_offset) {
     }
     if (exp == 31u) return sign != 0u ? -1.0/0.0 : 1.0/0.0;
     return (sign != 0u ? -1.0 : 1.0) * exp2(float(exp) - 15.0) * (1.0 + float(lo) / 1024.0);
+}
+
+float q4_0(uint block, uint idx) {
+    uint base = block * 18u;
+    float d = half_at(base);
+    uint j = idx & 31u;
+    uint q = byte_u8(base + 2u + (j & 15u));
+    return d * float((j < 16u ? (q & 15u) : (q >> 4u)) - 8);
+}
+float q8_0_mm(uint block, uint idx) {
+    uint base = block * 34u;
+    float d = half_at(base);
+    return d * float(byte_i8(base + 2u + (idx & 31u)));
 }
 
 float q6(uint block, uint idx) {
@@ -158,7 +171,9 @@ void main() {
         for (uint j = 0u; j < 256u; ++j) {
             uint kk = b * 256u + j;
             float xv = x[(x_off >> 2u) + col*x_s1 + (out/(rows*cols))*x_s2 + kk*x_s0];
-            sum += q6(b + row * blocks, j) * xv;
+            uint wb = b + row * blocks;
+            float wv = w_type == 0u ? q6(wb, j) : (w_type == 1u ? q4_0(wb, j) : q8_0_mm(wb, j));
+            sum += wv * xv;
         }
     }
     y[(y_off >> 2u) + col*y_s1 + (out/(rows*cols))*y_s2 + row*y_s0] = sum;
@@ -633,8 +648,10 @@ static bool supports_op(ggml_backend_dev_t, const ggml_tensor * op) {
         op->type == GGML_TYPE_F32 && op->src[0] && op->src[1] &&
         op->src[0]->type == GGML_TYPE_F32 && op->src[1]->type == GGML_TYPE_F32) return true;
     if (op->op == GGML_OP_MUL_MAT && op->type == GGML_TYPE_F32 &&
-        op->src[0] && op->src[1] && op->src[0]->type == GGML_TYPE_Q6_K &&
-        op->src[1]->type == GGML_TYPE_F32 && op->src[0]->ne[0] % 256 == 0) return true;
+        op->src[0] && op->src[1] && op->src[1]->type == GGML_TYPE_F32 &&
+        ((op->src[0]->type == GGML_TYPE_Q6_K && op->src[0]->ne[0] % 256 == 0) ||
+         (op->src[0]->type == GGML_TYPE_Q4_0 && op->src[0]->ne[0] % 32 == 0) ||
+         (op->src[0]->type == GGML_TYPE_Q8_0 && op->src[0]->ne[0] % 32 == 0))) return true;
     if (op->op == GGML_OP_GET_ROWS && op->type == GGML_TYPE_F32 && op->src[0] && op->src[1] &&
         op->src[1]->type == GGML_TYPE_I32 &&
         (op->src[0]->type == GGML_TYPE_F32 || op->src[0]->type == GGML_TYPE_F16 ||
@@ -917,6 +934,9 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             glUniform1ui(glGetUniformLocation(g_q6k, "y_off"), static_cast<GLuint>(tensor_offset(op->buffer, op)));
             glUniform1ui(glGetUniformLocation(g_q6k, "k"), static_cast<GLuint>(op->src[0]->ne[0]));
             glUniform1ui(glGetUniformLocation(g_q6k, "rows"), static_cast<GLuint>(op->src[0]->ne[1]));
+            const GLuint wtype = op->src[0]->type == GGML_TYPE_Q6_K ? 0u :
+                (op->src[0]->type == GGML_TYPE_Q4_0 ? 1u : 2u);
+            glUniform1ui(glGetUniformLocation(g_q6k, "w_type"), wtype);
             glUniform1ui(glGetUniformLocation(g_q6k, "cols"), static_cast<GLuint>(op->src[1]->ne[1]));
             const ggml_tensor * xt=op->src[1]; const ggml_tensor * yt=op;
             glUniform1ui(glGetUniformLocation(g_q6k,"x_s0"),(GLuint)(xt->nb[0]/4)); glUniform1ui(glGetUniformLocation(g_q6k,"x_s1"),(GLuint)(xt->nb[1]/4));
