@@ -440,7 +440,7 @@ void main() {
     float y;
     if (kind == 0u) y = 1.0/(1.0+exp(-x));                 // sigmoid
     else if (kind == 1u) y = log(1.0+exp(-abs(x))) + max(x,0.0); // softplus
-    else if (kind == 2u) y = 0.5*x*(1.0 + erf(x*0.70710678118)); // gelu erf
+    else if (kind == 2u) y = 0.5*x*(1.0 + tanh(0.7978845608*(x + 0.044715*x*x*x))); // gelu erf approximation
     else if (kind == 3u) y = 0.5*x*(1.0 + tanh(0.7978845608*(x + 0.044715*x*x*x))); // gelu tanh
     else if (kind == 4u) y = tanh(x);
     else if (kind == 5u) y = exp(x);
