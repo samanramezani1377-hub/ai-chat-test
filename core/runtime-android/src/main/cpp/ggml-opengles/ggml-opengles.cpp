@@ -239,6 +239,7 @@ static ggml_backend_buffer_t alloc_buffer(ggml_backend_buffer_type_t, size_t siz
         },
         nullptr,
         nullptr,
+        nullptr,
         [](ggml_backend_buffer_t b, uint8_t value) {
             auto * c = static_cast<BufferContext *>(b->context);
             glBindBuffer(GL_SHADER_STORAGE_BUFFER, c->buffer);
