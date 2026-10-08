@@ -36,6 +36,29 @@ set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
 
+# Android GPU-only contract: keep llama.cpp's CPU backend available as an internal
+# helper for host-side tensor utilities, but exclude it from the graph scheduler.
+# This prevents unsupported GGML nodes from silently being reassigned to CPU.
+set(_llama_context_cpp "${llama_cpp_SOURCE_DIR}/src/llama-context.cpp")
+file(READ "${_llama_context_cpp}" _llama_context_source)
+if(NOT _llama_context_source MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH")
+    string(REPLACE
+        "            auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
+
+            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {"
+        "            auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
+
+            // AI_CHAT_GPU_ONLY_SCHEDULER_PATCH: CPU remains initialized as a host helper,
+            // but it is never inserted into the graph scheduler backend list.
+            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU) {
+                continue;
+            }
+
+            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {"
+        _llama_context_source)
+    file(WRITE "${_llama_context_cpp}" "${_llama_context_source}")
+endif()
+
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp opengles_runtime.cpp ggml-opengles/ggml-opengles.cpp ggml-opengles/ggml-opengles-registration.cpp)
 
 # native_runtime_android_safe.cpp intentionally includes llama.cpp/ggml internal
