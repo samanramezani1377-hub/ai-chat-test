@@ -17,46 +17,11 @@ FetchContent_Declare(
     GIT_TAG ${LLAMA_CPP_TAG}
     GIT_SHALLOW TRUE
 )
-FetchContent_Declare(
-    opencl_headers
-    GIT_REPOSITORY https://github.com/KhronosGroup/OpenCL-Headers.git
-    GIT_TAG v2025.07.22
-    GIT_SHALLOW TRUE
-)
-FetchContent_Declare(
-    opencl_icd_loader
-    GIT_REPOSITORY https://github.com/KhronosGroup/OpenCL-ICD-Loader.git
-    GIT_TAG v2025.07.22
-    GIT_SHALLOW TRUE
-)
-
-FetchContent_MakeAvailable(opencl_headers)
-set(OPENCL_ICD_LOADER_HEADERS_DIR "${opencl_headers_SOURCE_DIR}" CACHE PATH "OpenCL headers for the ICD loader" FORCE)
-set(OPENCL_ICD_LOADER_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(ENABLE_OPENCL_LAYER OFF CACHE BOOL "" FORCE)
-set(ENABLE_OPENCL_ICD_LOADER ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(opencl_icd_loader)
-
-list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
-
-set(GGML_OPENCL ON CACHE BOOL "Use OpenCL GPU backend" FORCE)
-# Android production runtime must link the OpenCL backend statically. Dynamic backend
-# loading is unreliable on Android because ggml_backend_load_all() cannot discover
-# MODULE libraries from the APK's native library namespace.
+# OpenGL ES is provided by Android's system EGL/GLES implementation. No
+# vendor-specific GPU SDK or OpenCL loader is bundled in the APK.
 set(GGML_BACKEND_DL OFF CACHE BOOL "Disable dynamic ggml backend loading on Android" FORCE)
 set(GGML_BACKEND_DIR "" CACHE STRING "No dynamic backend directory" FORCE)
-set(GGML_OPENCL_USE_ADRENO_KERNELS ON CACHE BOOL "Use Adreno-optimized OpenCL kernels when the runtime GPU is Adreno; automatically remains generic on other GPUs" FORCE)
-set(GGML_OPENCL_USE_ADRENO_BIN_KERNELS OFF CACHE BOOL "Do not use vendor-specific Adreno binary kernels" FORCE)
 set(GGML_VULKAN OFF CACHE BOOL "Vulkan is intentionally disabled" FORCE)
-set(GGML_OPENCL_USE_SVM OFF CACHE BOOL "Avoid vendor SVM driver instability on Android" FORCE)
-
-# Profiling is enabled by the Android release configuration so the diagnostics screen
-# can expose real OpenCL kernel timing. Compare with profiling disabled only after
-# correctness and GPU registration are verified.
-option(AI_CHAT_OPENCL_PROFILING "Enable app-visible OpenCL GPU profiling" OFF)
-if (AI_CHAT_OPENCL_PROFILING)
-    set(GGML_OPENCL_PROFILING ON CACHE BOOL "Enable OpenCL event profiling" FORCE)
-endif()
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -72,13 +37,6 @@ set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
 
-# Static backend hardening: make the OpenCL registration visible to the final
-# runtime target as a real link dependency. This prevents linker GC from
-# discarding the backend registration object and makes a missing OpenCL target
-# a build-time error instead of a silent CPU-only runtime.
-if (NOT TARGET ggml-opencl)
-    message(FATAL_ERROR "GPU-only runtime requires the statically linked ggml-opencl target")
-endif()
 if (TARGET ggml)
     target_compile_definitions(ggml PUBLIC GGML_USE_OPENCL=1)
 endif()
@@ -98,8 +56,6 @@ target_include_directories(ai_chat_runtime PRIVATE
     ${llama_cpp_SOURCE_DIR}/src
     ${llama_cpp_SOURCE_DIR}/ggml/include
     ${llama_cpp_SOURCE_DIR}/ggml/src
-    ${llama_cpp_SOURCE_DIR}/ggml/src/ggml-opencl
-    ${opencl_headers_SOURCE_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/ggml-opengles
 )
 
@@ -115,13 +71,13 @@ target_link_options(ai_chat_runtime PRIVATE
     -Wl,--strip-all
 )
 
-target_link_libraries(ai_chat_runtime PRIVATE llama llama-common ggml-opencl android log OpenCL EGL GLESv3)
+target_link_libraries(ai_chat_runtime PRIVATE llama llama-common android log EGL GLESv3)
 
 target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"
-    AI_CHAT_GPU_BACKEND_OPENCL=1
+    AI_CHAT_GPU_BACKEND_OPENGL=1
     AI_CHAT_GPU_BACKEND_VULKAN=0
-    AI_CHAT_REQUIRE_OPENCL_GPU=1
+    AI_CHAT_REQUIRE_OPENGL_GPU=1
 )
 
 if (ANDROID)
