@@ -1,5 +1,6 @@
 #include "ggml-opengles.h"
 #include "ggml-backend-impl.h"
+#include "ggml-impl.h"
 #include "ggml.h"
 #include "../opengles_runtime.h"
 
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -717,7 +719,8 @@ static ggml_backend_buffer_t alloc_buffer(ggml_backend_buffer_type_t, size_t siz
         [](ggml_backend_buffer_t b, uint8_t value) {
             auto * c = static_cast<BufferContext *>(b->context);
             glBindBuffer(GL_SHADER_STORAGE_BUFFER, c->buffer);
-            glClearBufferData(GL_SHADER_STORAGE_BUFFER, GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE, &value);
+            std::vector<uint8_t> fill(c->size, value);
+            glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, static_cast<GLsizeiptr>(fill.size()), fill.data());
         },
         nullptr
     }, ctx, size);
@@ -764,7 +767,7 @@ static bool supports_op(ggml_backend_dev_t, const ggml_tensor * op) {
         op->src[0] && op->src[1] && op->src[0]->type == GGML_TYPE_F32 &&
         op->src[1]->type == GGML_TYPE_F32 &&
         op->src[0]->ne[1] == op->src[1]->ne[1]) return true;
-    if (op->op == GGML_OP_SILU && op->type == GGML_TYPE_F32 &&
+    if ((op->op == GGML_OP_UNARY && ggml_get_unary_op(op) == GGML_UNARY_OP_SILU) && op->type == GGML_TYPE_F32 &&
         op->src[0] && op->src[0]->type == GGML_TYPE_F32) return true;
     if (op->op == GGML_OP_GATED_DELTA_NET && opengles_runtime_info().max_compute_ssbo_blocks >= 7 &&
         g_gdn != 0 && op->type == GGML_TYPE_F32 &&
@@ -780,9 +783,13 @@ static bool supports_op(ggml_backend_dev_t, const ggml_tensor * op) {
     if (op->type == GGML_TYPE_F32 && op->src[0]) {
         if (op->op == GGML_OP_RMS_NORM && op->src[0]->type == GGML_TYPE_F32 &&
             op->src[0]->ne[0] % 4 == 0) return true;
-        if ((op->op == GGML_OP_SIGMOID || op->op == GGML_OP_SOFTPLUS ||
-             op->op == GGML_OP_GELU || op->op == GGML_OP_GELU_ERF || op->op == GGML_OP_GELU_QUICK ||
-             op->op == GGML_OP_TANH || op->op == GGML_OP_EXP || op->op == GGML_OP_LOG) &&
+        if ((op->op == GGML_OP_UNARY && (ggml_get_unary_op(op) == GGML_UNARY_OP_SIGMOID ||
+             ggml_get_unary_op(op) == GGML_UNARY_OP_SOFTPLUS ||
+             ggml_get_unary_op(op) == GGML_UNARY_OP_GELU ||
+             ggml_get_unary_op(op) == GGML_UNARY_OP_GELU_ERF ||
+             ggml_get_unary_op(op) == GGML_UNARY_OP_GELU_QUICK ||
+             ggml_get_unary_op(op) == GGML_UNARY_OP_TANH ||
+             ggml_get_unary_op(op) == GGML_UNARY_OP_EXP)) &&
             op->src[0]->type == GGML_TYPE_F32) return true;
         if (op->op == GGML_OP_SOFT_MAX && op->src[0]->type == GGML_TYPE_F32 &&
             (!op->src[1] || op->src[1]->type == GGML_TYPE_F32)) return true;
@@ -796,8 +803,8 @@ static bool supports_op(ggml_backend_dev_t, const ggml_tensor * op) {
 
 static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
     if (!ensure_programs()) return GGML_STATUS_FAILED;
-    for (int i = 0; i < graph->n_nodes; ++i) {
-        ggml_tensor * op = graph->nodes[i];
+    for (int i = 0; i < ggml_graph_n_nodes(graph); ++i) {
+        ggml_tensor * op = ggml_graph_node(graph, i);
         if (!supports_op(nullptr, op)) {
             std::fprintf(stderr, "OpenGL ES GPU-only graph rejected unsupported op=%s type=%d ne=[%lld,%lld,%lld,%lld]\\n",
                 ggml_op_name(op->op), (int) op->type,
@@ -894,7 +901,7 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             continue;
         }
 
-        if (op->op == GGML_OP_SILU) {
+        if (op->op == GGML_OP_UNARY && ggml_get_unary_op(op) == GGML_UNARY_OP_SILU) {
             auto * a = buffer_ctx(op->src[0]);
             auto * out = buffer_ctx(op);
             if (!a || !out) return GGML_STATUS_FAILED;
@@ -923,21 +930,25 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             glDispatchCompute((GLuint)((op->ne[1]*op->ne[2]*op->ne[3]+63)/64),1,1); glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT); continue;
         }
 
-        if (op->op == GGML_OP_SIGMOID || op->op == GGML_OP_SOFTPLUS ||
-            op->op == GGML_OP_GELU || op->op == GGML_OP_GELU_ERF || op->op == GGML_OP_GELU_QUICK ||
-            op->op == GGML_OP_TANH || op->op == GGML_OP_EXP || op->op == GGML_OP_LOG) {
+        if (op->op == GGML_OP_UNARY &&
+            (ggml_get_unary_op(op) == GGML_UNARY_OP_SIGMOID ||
+             ggml_get_unary_op(op) == GGML_UNARY_OP_SOFTPLUS ||
+             ggml_get_unary_op(op) == GGML_UNARY_OP_GELU ||
+             ggml_get_unary_op(op) == GGML_UNARY_OP_GELU_ERF ||
+             ggml_get_unary_op(op) == GGML_UNARY_OP_GELU_QUICK ||
+             ggml_get_unary_op(op) == GGML_UNARY_OP_TANH ||
+             ggml_get_unary_op(op) == GGML_UNARY_OP_EXP)) {
             auto * x=buffer_ctx(op->src[0]); auto * y=buffer_ctx(op); if(!x||!y)return GGML_STATUS_FAILED;
             glUseProgram(g_unary); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,x->buffer); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,1,y->buffer);
             glUniform1ui(glGetUniformLocation(g_unary,"a_off"),(GLuint)tensor_offset(op->src[0]->buffer,op->src[0]));
             glUniform1ui(glGetUniformLocation(g_unary,"c_off"),(GLuint)tensor_offset(op->buffer,op));
             glUniform1ui(glGetUniformLocation(g_unary,"n"),(GLuint)ggml_nelements(op));
-            GLuint kind = op->op == GGML_OP_SIGMOID ? 0u :
-                op->op == GGML_OP_SOFTPLUS ? 1u :
-                op->op == GGML_OP_GELU_ERF ? 2u :
-                op->op == GGML_OP_GELU ? 3u :
-                op->op == GGML_OP_GELU_QUICK ? 3u :
-                op->op == GGML_OP_TANH ? 4u :
-                op->op == GGML_OP_EXP ? 5u : 6u;
+            const auto unary = ggml_get_unary_op(op);
+            GLuint kind = unary == GGML_UNARY_OP_SIGMOID ? 0u :
+                unary == GGML_UNARY_OP_SOFTPLUS ? 1u :
+                unary == GGML_UNARY_OP_GELU_ERF ? 2u :
+                unary == GGML_UNARY_OP_GELU || unary == GGML_UNARY_OP_GELU_QUICK ? 3u :
+                unary == GGML_UNARY_OP_TANH ? 4u : 5u;
             glUniform1ui(glGetUniformLocation(g_unary,"kind"),kind);
             glDispatchCompute((GLuint)((ggml_nelements(op)+63)/64),1,1); glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT); continue;
         }
