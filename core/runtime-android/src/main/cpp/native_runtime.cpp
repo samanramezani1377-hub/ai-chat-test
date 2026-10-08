@@ -22,6 +22,7 @@
 #include "ggml-backend.h"
 #include "ggml-backend-impl.h"
 #include "ggml-opencl.h"
+#include "ggml-opengles.h"
 #include <CL/cl.h>
 #include <set>
 
@@ -540,36 +541,29 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         unsetenv("GGML_DISABLE_OPENCL");
 
         // Do not point OCL_ICD_FILENAMES at /vendor/lib*/libOpenCL.so here.
-        // On Android that path is commonly the system Khronos ICD loader itself,
-        // not the vendor GPU implementation. Feeding the loader its own library
-        // can recurse and make clGetPlatformIDs appear to hang with no platform.
-        // Let the Android/Khronos loader discover the vendor ICD through its
-        // registered vendor paths instead, and record the actual search paths.
-        unsetenv("OCL_ICD_FILENAMES");
-        // Do not override the Android ICD vendor directory. Khronos documents
-        // OCL_ICD_VENDORS as a replacement for the loader's default search path;
-        // hard-coding guessed directories can hide the device vendor's real ICD.
-        unsetenv("OCL_ICD_VENDORS");
-        append_native_trace("OPENCL_ICD_FILENAMES_CLEARED_ANDROID_LOADER");
-        append_native_trace("OPENCL_ICD_VENDORS_CLEARED_USE_ANDROID_DEFAULT");
-        append_native_trace("OPENCL_Q6K_SPECIALIZED_KERNELS tiled=0 o4=1 o4_global=1 xmem_gemm=0");
-        append_native_trace("OPENCL_STATIC_REGISTRATION_STARTED");
-        probe_android_opencl_library_visibility();
-        probe_android_opencl_driver();
-        const bool opencl_registered = register_static_opencl_backend();
-        if (!opencl_registered) {
-            append_native_trace("OPENCL_STATIC_REGISTRATION_FAILED");
+        // OpenGL ES is the production Android GPU path. The EGL probe is capability-based
+        // (ES 3.1 compute) and does not assume Qualcomm/Adreno or any other vendor.
+        append_native_trace("OPENGL_ES_BACKEND_INITIALIZATION_STARTED");
+        if (!opengles_runtime_init()) {
+            const auto & info = opengles_runtime_info();
+            append_native_trace((std::string("OPENGL_ES_INIT_FAILED reason=") + info.failure).c_str());
             g_gpu_backend_loaded = false;
         } else {
-            append_native_trace("OPENCL_BACKEND_LOAD_ALL_STARTED");
-            // Keep this call for any auxiliary dynamically discoverable backends,
-            // but OpenCL itself is already registered statically above.
-            ggml_backend_load_all();
-            append_native_trace("OPENCL_BACKEND_LOAD_ALL_RETURNED");
-            g_gpu_backend_loaded = has_opencl_gpu_device();
+            const auto & info = opengles_runtime_info();
+            append_native_trace((std::string("OPENGL_ES_DEVICE vendor=") + info.vendor +
+                " renderer=" + info.renderer + " version=" + info.version +
+                " glsl=" + info.glsl_version).c_str());
+            const size_t before = ggml_backend_reg_count();
+            ggml_backend_register(ggml_backend_opengles_reg());
+            const size_t after = ggml_backend_reg_count();
+            const bool registered = ggml_backend_reg_by_name("OpenGL ES") != nullptr;
+            g_gpu_backend_loaded = registered && has_opencl_gpu_device();
+            append_native_trace((std::string("OPENGL_ES_STATIC_REGISTRATION before=") +
+                std::to_string(before) + " after=" + std::to_string(after) +
+                " registered=" + (registered ? "1" : "0") +
+                " gpuDevice=" + (g_gpu_backend_loaded ? "1" : "0")).c_str());
         }
-        if (opencl_registered) g_gpu_backend_loaded = has_opencl_gpu_device();
-        append_native_trace((std::string("OPENCL_BACKEND_DEVICE_STATE loaded=") +
+        append_native_trace((std::string("OPENGL_ES_BACKEND_DEVICE_STATE loaded=") +
             (g_gpu_backend_loaded ? "1" : "0") +
             " deviceCount=" + std::to_string(ggml_backend_dev_count())).c_str());
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
@@ -579,19 +573,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
     } else {
         append_native_trace("OPENCL_BACKEND_ALREADY_INITIALIZED");
         if (!g_gpu_backend_loaded) {
-            // A first probe can fail because Android's vendor OpenCL namespace is
-            // not visible to the loader yet. Retry the visibility/driver probe on
-            // later initialization attempts instead of permanently latching the
-            // process into OPENCL-UNAVAILABLE.
-            append_native_trace("OPENCL_BACKEND_RETRY_STARTED");
-            probe_android_opencl_library_visibility();
-            probe_android_opencl_driver();
-            const bool opencl_registered = register_static_opencl_backend();
-            if (opencl_registered) {
-                ggml_backend_load_all();
-                g_gpu_backend_loaded = has_opencl_gpu_device();
+            append_native_trace("OPENGL_ES_BACKEND_RETRY_STARTED");
+            if (opengles_runtime_init()) {
+                ggml_backend_register(ggml_backend_opengles_reg());
+                g_gpu_backend_loaded = ggml_backend_reg_by_name("OpenGL ES") != nullptr && has_opencl_gpu_device();
             }
-            append_native_trace((std::string("OPENCL_BACKEND_RETRY_RESULT loaded=") +
+            append_native_trace((std::string("OPENGL_ES_BACKEND_RETRY_RESULT loaded=") +
                 (g_gpu_backend_loaded ? "1" : "0") +
                 " deviceCount=" + std::to_string(ggml_backend_dev_count())).c_str());
         }
