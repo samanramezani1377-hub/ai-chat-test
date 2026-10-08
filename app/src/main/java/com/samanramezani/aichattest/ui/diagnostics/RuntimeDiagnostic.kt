@@ -62,19 +62,20 @@ internal data class RuntimeDiagnostic(
     val gpuDevice: com.woogit.aicore.runtime.GpuDeviceProfile? = null,
     val weightResidency: com.woogit.aicore.runtime.GpuWeightResidency? = null,
 ) {
+    val tensorResidencyLines: List<String>
+        get() = nativeDiagnostics.orEmpty().lineSequence()
+            .filter { it.contains("OPENGL_ES_TENSOR_RESIDENCY") }
+            .distinct()
+
     val nonGpuTensorLines: List<String>
         get() = nativeDiagnostics.orEmpty().lineSequence()
-            .filter {
-                it.contains("OPENGL_ES_NON_GPU_TENSOR") ||
-                    it.contains("OPENGL_ES_TENSOR_RESIDENCY")
-            }
-            .toList()
+            .filter { it.contains("OPENGL_ES_NON_GPU_TENSOR") }
+            .distinct()
 
     val residencySummaryLines: List<String>
         get() = nativeDiagnostics.orEmpty().lineSequence()
             .filter { it.contains("OPENGL_ES_RESIDENCY_SUMMARY") }
-            .toList()
-
+            .distinct()
     val nativePerformance: NativePerformance
         get() = NativePerformance(
             prefillMs = nativeValue("prefillMs")?.toLongOrNull(),
