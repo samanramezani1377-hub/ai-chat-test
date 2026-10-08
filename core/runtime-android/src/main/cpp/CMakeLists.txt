@@ -18,7 +18,7 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 # OpenGL ES is provided by Android's system EGL/GLES implementation. No
-# vendor-specific GPU SDK or OpenCL loader is bundled in the APK.
+# No vendor-specific GPU SDK is bundled in the APK.
 set(GGML_BACKEND_DL OFF CACHE BOOL "Disable dynamic ggml backend loading on Android" FORCE)
 set(GGML_BACKEND_DIR "" CACHE STRING "No dynamic backend directory" FORCE)
 set(GGML_VULKAN OFF CACHE BOOL "Vulkan is intentionally disabled" FORCE)
@@ -36,14 +36,6 @@ set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
-
-if (TARGET ggml)
-    target_compile_definitions(ggml PUBLIC GGML_USE_OPENCL=1)
-endif()
-
-if (AI_CHAT_OPENCL_PROFILING)
-    include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_opencl_profiling.cmake")
-endif()
 
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp opengles_runtime.cpp ggml-opengles/ggml-opengles.cpp ggml-opengles/ggml-opengles-registration.cpp)
 
