@@ -298,6 +298,45 @@ void main() {
 })";
 }
 
+static const char * l2_norm_shader() {
+    return R"(#version 310 es
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer X { float x[]; };
+layout(std430, binding = 1) writeonly buffer Y { float y[]; };
+uniform uint x_off, y_off, n0, n1, n2, n3;
+uniform uint xs0, xs1, xs2, xs3, ys0, ys1, ys2, ys3;
+uniform float eps;
+void main() {
+    uint row = gl_GlobalInvocationID.x;
+    uint rows = n1*n2*n3;
+    if (row >= rows) return;
+    uint d3=row/(n1*n2), rem=row-d3*n1*n2, d2=rem/n1, d1=rem-d2*n1;
+    uint xb=(x_off>>2u)+d1*xs1+d2*xs2+d3*xs3;
+    uint yb=(y_off>>2u)+d1*ys1+d2*ys2+d3*ys3;
+    float ss=0.0;
+    for(uint i=0u;i<n0;++i){ float v=x[xb+i*xs0]; ss+=v*v; }
+    float inv=inversesqrt(max(ss,eps));
+    for(uint i=0u;i<n0;++i)y[yb+i*ys0]=x[xb+i*xs0]*inv;
+})";
+}
+
+static const char * repeat_shader() {
+    return R"(#version 310 es
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer X { float x[]; };
+layout(std430, binding = 1) writeonly buffer Y { float y[]; };
+uniform uint x_off,y_off;
+uniform uint n0,n1,n2,n3,sn0,sn1,sn2,sn3;
+uniform uint xs0,xs1,xs2,xs3,ys0,ys1,ys2,ys3;
+void main(){
+    uint idx=gl_GlobalInvocationID.x,total=n0*n1*n2*n3;if(idx>=total)return;
+    uint d0=idx%n0,r=idx/n0,d1=r%n1;r/=n1;uint d2=r%n2,d3=r/n2;
+    uint xi=(x_off>>2u)+(d0%sn0)*xs0+(d1%sn1)*xs1+(d2%sn2)*xs2+(d3%sn3)*xs3;
+    uint yi=(y_off>>2u)+d0*ys0+d1*ys1+d2*ys2+d3*ys3;
+    y[yi]=x[xi];
+})";
+}
+
 static const char * silu_shader() {
     return R"(#version 310 es
 layout(local_size_x = 64) in;
@@ -580,10 +619,12 @@ static GLuint g_softmax = 0;
 static GLuint g_matmul_f32 = 0;
 static GLuint g_rope = 0;
 static GLuint g_copy = 0;
+static GLuint g_l2_norm = 0;
+static GLuint g_repeat = 0;
 
 static bool ensure_programs() {
     const auto & caps = opengles_runtime_info();
-    if (g_get_rows && g_elementwise && g_q6k && g_silu && g_ssm_conv && g_rms_norm && g_unary && g_softmax && g_matmul_f32 && g_rope && g_copy &&
+    if (g_get_rows && g_elementwise && g_q6k && g_silu && g_ssm_conv && g_rms_norm && g_unary && g_softmax && g_matmul_f32 && g_rope && g_copy && g_l2_norm && g_repeat &&
         (caps.max_compute_ssbo_blocks < 7 || g_gdn != 0)) return true;
     if (!g_get_rows) g_get_rows = compile_compute(get_rows_shader());
     if (!g_gdn && caps.max_compute_ssbo_blocks >= 7) g_gdn = compile_compute(gated_delta_net_shader());
@@ -597,7 +638,9 @@ static bool ensure_programs() {
     if (!g_matmul_f32) g_matmul_f32 = compile_compute(matmul_f32_shader());
     if (!g_rope) g_rope = compile_compute(rope_shader());
     if (!g_copy) g_copy = compile_compute(copy_shader());
-    return g_get_rows && g_elementwise && g_q6k && g_silu && g_ssm_conv && g_rms_norm && g_unary && g_softmax && g_matmul_f32 && g_rope && g_copy;
+    if (!g_l2_norm) g_l2_norm = compile_compute(l2_norm_shader());
+    if (!g_repeat) g_repeat = compile_compute(repeat_shader());
+    return g_get_rows && g_elementwise && g_q6k && g_silu && g_ssm_conv && g_rms_norm && g_unary && g_softmax && g_matmul_f32 && g_rope && g_copy && g_l2_norm && g_repeat;
 }
 
 static size_t tensor_offset(const ggml_backend_buffer_t buffer, const ggml_tensor * tensor) {
@@ -697,7 +740,9 @@ static ggml_backend_buffer_type_i buft_i = {
 static bool supports_op(ggml_backend_dev_t, const ggml_tensor * op) {
     if (!op) return false;
     if (op->op == GGML_OP_NONE || op->op == GGML_OP_VIEW || op->op == GGML_OP_RESHAPE ||
-        op->op == GGML_OP_PERMUTE || op->op == GGML_OP_TRANSPOSE) return true;\n    if (op->op == GGML_OP_CONT && op->type == GGML_TYPE_F32 && op->src[0] && op->src[0]->type == GGML_TYPE_F32) return true;
+        op->op == GGML_OP_PERMUTE || op->op == GGML_OP_TRANSPOSE) return true;\n    if ((op->op == GGML_OP_CONT || op->op == GGML_OP_CPY) && op->type == GGML_TYPE_F32 && op->src[0] && op->src[0]->type == GGML_TYPE_F32) return true;
+    if (op->op == GGML_OP_L2_NORM && op->type == GGML_TYPE_F32 && op->src[0] && op->src[0]->type == GGML_TYPE_F32) return true;
+    if (op->op == GGML_OP_REPEAT && op->type == GGML_TYPE_F32 && op->src[0] && op->src[0]->type == GGML_TYPE_F32) return true;
     if ((op->op == GGML_OP_ADD || op->op == GGML_OP_MUL) &&
         op->type == GGML_TYPE_F32 && op->src[0] && op->src[1] &&
         op->src[0]->type == GGML_TYPE_F32 && op->src[1]->type == GGML_TYPE_F32) return true;
@@ -756,7 +801,7 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
         if (op->op == GGML_OP_NONE || op->op == GGML_OP_VIEW || op->op == GGML_OP_RESHAPE ||
             op->op == GGML_OP_PERMUTE || op->op == GGML_OP_TRANSPOSE) continue;
 
-        if (op->op == GGML_OP_CONT) {
+        if (op->op == GGML_OP_CONT || op->op == GGML_OP_CPY) {
             auto * x = buffer_ctx(op->src[0]);
             auto * y = buffer_ctx(op);
             if (!x || !y) return GGML_STATUS_FAILED;
@@ -774,6 +819,28 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             glDispatchCompute((GLuint)((ggml_nelements(op)+63)/64),1,1);
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
             continue;
+        }
+
+        if (op->op == GGML_OP_L2_NORM) {
+            auto * x=buffer_ctx(op->src[0]); auto * y=buffer_ctx(op); if(!x||!y)return GGML_STATUS_FAILED;
+            glUseProgram(g_l2_norm); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,x->buffer); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,1,y->buffer);
+            auto U=[&](const char*n,GLuint v){glUniform1ui(glGetUniformLocation(g_l2_norm,n),v);};
+            U("x_off",tensor_offset(op->src[0]->buffer,op->src[0])); U("y_off",tensor_offset(op->buffer,op));
+            U("n0",(GLuint)op->ne[0]);U("n1",(GLuint)op->ne[1]);U("n2",(GLuint)op->ne[2]);U("n3",(GLuint)op->ne[3]);
+            for(int d=0;d<4;++d){U((std::string("xs")+std::to_string(d)).c_str(),(GLuint)(op->src[0]->nb[d]/4));U((std::string("ys")+std::to_string(d)).c_str(),(GLuint)(op->nb[d]/4));}
+            glUniform1f(glGetUniformLocation(g_l2_norm,"eps"),*reinterpret_cast<const float*>(op->op_params));
+            glDispatchCompute((GLuint)((op->ne[1]*op->ne[2]*op->ne[3]+63)/64),1,1); glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT); continue;
+        }
+
+        if (op->op == GGML_OP_REPEAT) {
+            auto * x=buffer_ctx(op->src[0]); auto * y=buffer_ctx(op); if(!x||!y)return GGML_STATUS_FAILED;
+            glUseProgram(g_repeat); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,x->buffer); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,1,y->buffer);
+            auto U=[&](const char*n,GLuint v){glUniform1ui(glGetUniformLocation(g_repeat,n),v);};
+            U("x_off",tensor_offset(op->src[0]->buffer,op->src[0]));U("y_off",tensor_offset(op->buffer,op));
+            U("n0",(GLuint)op->ne[0]);U("n1",(GLuint)op->ne[1]);U("n2",(GLuint)op->ne[2]);U("n3",(GLuint)op->ne[3]);
+            U("sn0",(GLuint)op->src[0]->ne[0]);U("sn1",(GLuint)op->src[0]->ne[1]);U("sn2",(GLuint)op->src[0]->ne[2]);U("sn3",(GLuint)op->src[0]->ne[3]);
+            for(int d=0;d<4;++d){U((std::string("xs")+std::to_string(d)).c_str(),(GLuint)(op->src[0]->nb[d]/4));U((std::string("ys")+std::to_string(d)).c_str(),(GLuint)(op->nb[d]/4));}
+            glDispatchCompute((GLuint)((ggml_nelements(op)+63)/64),1,1); glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT); continue;
         }
 
         if (op->op == GGML_OP_ADD || op->op == GGML_OP_MUL) {
@@ -1002,7 +1069,7 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             glUniform1ui(glGetUniformLocation(g_gdn, "n_seqs"), nsq);
             glUniform1ui(glGetUniformLocation(g_gdn, "K_snap"), ksnap);
             glUniform1ui(glGetUniformLocation(g_gdn, "g_width"), gwidth);
-            glUniform1f(glGetUniformLocation(g_gdn, "scale"), 1.0f / std::sqrt(float(op->src[0]->ne[0])));
+            glUniform1f(glGetUniformLocation(g_gdn, "scale"), 1.0f);
 
             glDispatchCompute(hv, nsq, 1);
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
