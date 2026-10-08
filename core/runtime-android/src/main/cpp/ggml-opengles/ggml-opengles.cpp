@@ -232,6 +232,14 @@ float q6(uint row_off, uint idx) {
     int sc = byte_i8(scbase + si);
     return d * float(sc) * (float(q) - 32.0);
 }
+float q4_0_rows(uint row_off, uint idx) {
+    uint block = idx / 32u;
+    uint j = idx & 31u;
+    uint base = row_off + block * 18u;
+    float d = half_at(base);
+    uint q = byte_u8(base + 2u + (j & 15u));
+    return d * float(int(j < 16u ? (q & 15u) : (q >> 4u)) - 8);
+}
 float q8_0(uint row_off, uint idx) {
     uint block = idx / 32u;
     uint j = idx & 31u;
@@ -255,6 +263,8 @@ void main() {
     } else if (w_type == 1u) {
         v = half_at(row_off + col * 2u);
     } else if (w_type == 2u) {
+        v = q4_0_rows(row_off, col);
+    } else if (w_type == 3u) {
         v = q6(row_off, col);
     } else {
         v = q8_0(row_off, col);
@@ -672,7 +682,8 @@ static bool supports_op(ggml_backend_dev_t, const ggml_tensor * op) {
     if (op->op == GGML_OP_GET_ROWS && op->type == GGML_TYPE_F32 && op->src[0] && op->src[1] &&
         op->src[1]->type == GGML_TYPE_I32 &&
         (op->src[0]->type == GGML_TYPE_F32 || op->src[0]->type == GGML_TYPE_F16 ||
-         op->src[0]->type == GGML_TYPE_Q6_K || op->src[0]->type == GGML_TYPE_Q8_0) &&
+         op->src[0]->type == GGML_TYPE_Q4_0 || op->src[0]->type == GGML_TYPE_Q6_K ||
+         op->src[0]->type == GGML_TYPE_Q8_0) &&
         op->src[0]->ne[0] > 0 && op->src[0]->ne[0] % (op->src[0]->type == GGML_TYPE_Q8_0 ? 32 : 1) == 0) return true;
     if (op->op == GGML_OP_SCALE && op->type == GGML_TYPE_F32 && op->src[0] &&
         op->src[0]->type == GGML_TYPE_F32 && ggml_is_contiguous(op->src[0])) return true;
@@ -753,8 +764,9 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             U("n_rows",(GLuint)ggml_nelements(op->src[1]));
             uint type = 0u;
             if (op->src[0]->type == GGML_TYPE_F16) type = 1u;
-            else if (op->src[0]->type == GGML_TYPE_Q6_K) type = 2u;
-            else if (op->src[0]->type == GGML_TYPE_Q8_0) type = 3u;
+            else if (op->src[0]->type == GGML_TYPE_Q4_0) type = 2u;
+            else if (op->src[0]->type == GGML_TYPE_Q6_K) type = 3u;
+            else if (op->src[0]->type == GGML_TYPE_Q8_0) type = 4u;
             U("w_type",type);
             glDispatchCompute((GLuint)((ggml_nelements(op)+63)/64),1,1);
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
