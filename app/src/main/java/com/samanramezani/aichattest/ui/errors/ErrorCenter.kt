@@ -9,8 +9,38 @@ internal data class PersianError(
 )
 
 internal object ErrorCenter {
+    private const val MAX_RECENT_TECHNICAL_LINES = 100
+
+    /**
+     * Keep the latest 100 lines, plus a small set of high-value markers that
+     * may appear earlier (for example the GGUF preflight and first failure).
+     * Per-tensor load spam is intentionally excluded from the preserved markers.
+     */
+    private fun compactTechnicalLog(raw: String): String {
+        val lines = raw.lineSequence().toList()
+        if (lines.size <= MAX_RECENT_TECHNICAL_LINES) return raw
+        val importantPrefixes = listOf(
+            "MODEL_LOAD_PREFLIGHT", "GGUF_PREFLIGHT", "GGUF_PREFLIGHT_FAILED",
+            "MODEL_LOAD_FAILED", "MODEL_LOAD_RETURNED_FAILED", "MODEL_LOAD_EXCEPTION",
+            "NATIVE_LOAD_STARTED", "NATIVE_LOAD_RETURNED", "NATIVE_LOAD_EXCEPTION",
+            "OPENGL_ES_MODEL_LOAD_FAILURE", "OPENGL_ES_GPU_ONLY",
+            "OPENGL_ES_RESIDENCY_SUMMARY", "OPENGL_ES_MODEL_RESIDENCY",
+            "OPENGL_ES_GPU_ONLY_VALIDATION", "OPENGL_ES_NON_GPU_TENSOR",
+            "NATIVE_WEIGHT_RESIDENCY", "NATIVE_OPENGL_DEVICE",
+            "NATIVE_CHECKPOINT", "FATAL_SIGNAL", "signal ", "SIGSEGV", "SIGABRT",
+            "OutOfMemoryError", "Unable to load model", "Unsupported model architecture",
+        )
+        val important = lines.filter { line ->
+            importantPrefixes.any { prefix -> line.contains(prefix, ignoreCase = true) } ||
+                (line.contains("error", ignoreCase = true) && !line.contains("create_tensor: loading tensor", ignoreCase = true)) ||
+                line.contains("failed", ignoreCase = true)
+        }.distinct()
+        val recent = lines.takeLast(MAX_RECENT_TECHNICAL_LINES)
+        val merged = (important + recent).distinct()
+        return merged.joinToString("\\n")
+    }
     fun resolve(raw: String?, operation: String? = null): PersianError {
-        val technical = raw?.trim().takeUnless { it.isNullOrBlank() } ?: "بدون جزئیات فنی"
+        val technical = compactTechnicalLog(raw?.trim().takeUnless { it.isNullOrBlank() } ?: "بدون جزئیات فنی")
         val text = technical.lowercase()
 
         return when {
