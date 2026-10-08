@@ -140,8 +140,11 @@ jobs:
 
           gl_target="$(find core/runtime-android -path '*/.cxx/*' -type f \( -name 'build.ninja' -o -name 'rules.ninja' \) -print0 | xargs -0 grep -l 'ggml-opengles' | head -n 1 || true)"
           test -n "$gl_target"
-          grep -R 'GLESv3' core/runtime-android/.cxx core/runtime-android/src/.cxx >/dev/null
-          ! grep -R -nE 'ggml-opencl|GGML_USE_OPENCL|Vulkan' core/runtime-android/.cxx core/runtime-android/src/.cxx >/dev/null
+          grep -R -n 'GLESv3' core/runtime-android/.cxx >/dev/null
+          if grep -R -nE 'ggml-opencl|GGML_USE_OPENCL|Vulkan' core/runtime-android/.cxx >/dev/null 2>&1; then
+            echo "Forbidden OpenCL/Vulkan linkage detected in native build output"
+            exit 1
+          fi
           echo "Static OpenGL ES backend linkage verified: $gl_target"
 
       - name: Upload debug APK
