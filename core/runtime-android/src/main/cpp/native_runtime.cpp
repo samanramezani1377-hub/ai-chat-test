@@ -105,12 +105,27 @@ static bool validate_gpu_model_residency() {
         const ggml_backend_dev_t dev = ggml_backend_buft_get_device(buft);
         const auto type = dev ? ggml_backend_dev_type(dev) : GGML_BACKEND_DEVICE_TYPE_CPU;
         const size_t bytes = ggml_nbytes(tensor);
-        if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+        const bool is_host = ggml_backend_buft_is_host(buft);
+        const bool is_gpu = type == GGML_BACKEND_DEVICE_TYPE_GPU ||
+                            type == GGML_BACKEND_DEVICE_TYPE_IGPU;
+        if (is_gpu) {
             gpu_bytes += bytes; ++gpu_tensors;
-        } else if (type == GGML_BACKEND_DEVICE_TYPE_CPU) {
-            cpu_bytes += bytes; ++cpu_tensors;
         } else {
-            other_bytes += bytes; ++other_tensors;
+            // Report the exact tensor responsible for rejecting GPU-only activation.
+            // A missing device is deliberately treated as non-GPU; never silently
+            // accept an unclassified/host buffer as GPU-resident.
+            const char *dev_name = dev ? ggml_backend_dev_name(dev) : "<no-device>";
+            append_native_trace((std::string("OPENGL_ES_NON_GPU_TENSOR name=") +
+                entry.first + " bytes=" + std::to_string(bytes) +
+                " bufferHost=" + (is_host ? "1" : "0") +
+                " device=" + (dev_name ? dev_name : "<null>") +
+                " deviceType=" + std::to_string((int)type) +
+                " deviceAssigned=" + (dev ? "1" : "0")).c_str());
+            if (type == GGML_BACKEND_DEVICE_TYPE_CPU) {
+                cpu_bytes += bytes; ++cpu_tensors;
+            } else {
+                other_bytes += bytes; ++other_tensors;
+            }
         }
     }
     append_native_trace((std::string("OPENGL_ES_MODEL_RESIDENCY gpuBytes=") +
@@ -122,7 +137,15 @@ static bool validate_gpu_model_residency() {
     // A tiny CPU-side tensor is not useful for inference, but a substantial CPU
     // weight allocation means the GPU-only contract has been violated.
     constexpr size_t kCpuWeightToleranceBytes = 64 * 1024;
-    const bool ok = gpu_bytes > 0 && cpu_bytes <= kCpuWeightToleranceBytes && other_bytes == 0;
+    const bool has_gpu_weights = gpu_bytes > 0;
+    const bool cpu_within_tolerance = cpu_bytes <= kCpuWeightToleranceBytes;
+    const bool no_other_weights = other_bytes == 0;
+    const bool ok = has_gpu_weights && cpu_within_tolerance && no_other_weights;
+    append_native_trace((std::string("OPENGL_ES_GPU_ONLY_VALIDATION hasGpuWeights=") +
+        (has_gpu_weights ? "1" : "0") +
+        " cpuWithinTolerance=" + (cpu_within_tolerance ? "1" : "0") +
+        " noOtherWeights=" + (no_other_weights ? "1" : "0") +
+        " cpuToleranceBytes=" + std::to_string(kCpuWeightToleranceBytes)).c_str());
     append_native_trace(ok ? "OPENGL_ES_MODEL_RESIDENCY_GPU_ONLY_OK"
                            : "OPENGL_ES_MODEL_RESIDENCY_GPU_ONLY_REJECTED");
     return ok;
