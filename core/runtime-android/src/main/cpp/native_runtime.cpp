@@ -94,6 +94,76 @@ static bool init_generation_context() {
     return true;
 }
 
+static void append_diagnostic_tensor_residency(const char *phase) {
+    if (!g_model) return;
+
+    size_t gpu_bytes = 0, cpu_bytes = 0, host_bytes = 0, other_bytes = 0;
+    size_t gpu_tensors = 0, cpu_tensors = 0, host_tensors = 0, other_tensors = 0;
+
+    for (const auto & [name, tensor] : g_model->tensors_by_name) {
+        if (!tensor || !tensor->buffer) continue;
+
+        const size_t bytes = ggml_nbytes(tensor);
+        ggml_backend_buffer_t buffer = tensor->buffer;
+        ggml_backend_buft_t buft = ggml_backend_buffer_get_type(buffer);
+        ggml_backend_dev_t dev = ggml_backend_buft_get_device(buft);
+
+        const char *dev_name = dev ? ggml_backend_dev_name(dev) : "unknown";
+        const char *dev_type = dev ? ggml_backend_dev_type_name(dev) : "unknown";
+        const bool is_host = ggml_backend_buft_is_host(buft);
+
+        const bool is_gpu = dev && (
+            ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_GPU ||
+            ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_IGPU
+        );
+
+        const bool is_cpu = dev && (
+            ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_CPU
+        );
+
+        const char *classification = is_gpu ? "GPU" : (is_cpu ? "CPU" : (is_host ? "HOST" : "OTHER"));
+
+        if (is_gpu) {
+            gpu_bytes += bytes;
+            ++gpu_tensors;
+            if (is_host) host_bytes += bytes, ++host_tensors;
+        } else if (is_cpu) {
+            cpu_bytes += bytes;
+            ++cpu_tensors;
+        } else if (is_host) {
+            host_bytes += bytes;
+            ++host_tensors;
+        } else {
+            other_bytes += bytes;
+            ++other_tensors;
+        }
+
+        append_native_trace(
+            "OPENGL_ES_TENSOR_RESIDENCY phase=%s name=%s type=%s bytes=%zu "
+            "buffer_host=%d classification=%s device=%s device_type=%s",
+            phase ? phase : "unknown",
+            name.c_str(),
+            ggml_type_name(tensor->type),
+            bytes,
+            is_host ? 1 : 0,
+            classification,
+            dev_name,
+            dev_type
+        );
+    }
+
+    append_native_trace(
+        "OPENGL_ES_RESIDENCY_SUMMARY phase=%s gpu_bytes=%zu gpu_tensors=%zu "
+        "cpu_bytes=%zu cpu_tensors=%zu host_bytes=%zu host_tensors=%zu "
+        "other_bytes=%zu other_tensors=%zu",
+        phase ? phase : "unknown",
+        gpu_bytes, gpu_tensors,
+        cpu_bytes, cpu_tensors,
+        host_bytes, host_tensors,
+        other_bytes, other_tensors
+    );
+}
+
 static bool validate_gpu_model_residency() {
     if (!g_model) return false;
     size_t gpu_bytes = 0, cpu_bytes = 0, other_bytes = 0;
@@ -644,6 +714,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     checkpoint(g_model ? "MODEL_LOAD_RETURNED_SUCCESS" : "MODEL_LOAD_RETURNED_FAILED");
     if (g_model) {
         append_weight_residency_trace();
+        append_diagnostic_tensor_residency("after_load");
         const bool residency_gpu_only = validate_gpu_model_residency();
         append_native_trace(residency_gpu_only
             ? "OPENGL_ES_DIAGNOSTIC_RESIDENCY gpu_only=1"
