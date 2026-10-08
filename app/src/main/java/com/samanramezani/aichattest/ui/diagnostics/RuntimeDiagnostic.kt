@@ -274,9 +274,18 @@ internal fun RuntimeDiagnostic.errorReport(): String = buildString {
 }
 
 private fun RuntimeDiagnostic.uniqueRuntimeEvents(): List<String> {
-    val runtime = runtimeTrace.asSequence().map { "${it.timestampMs} | ${it.type} | ${it.message ?: ""}".trimEnd() }
-    val actions = actionTrace.asSequence().map { "${it.timestampMs} | ${it.type} | ${it.message ?: ""}".trimEnd() }
-    return (runtime + actions).distinct().takeLast(RECENT_RUNTIME_EVENTS + RECENT_ACTION_EVENTS)
+    data class EventLine(val timestamp: Long, val text: String, val key: String)
+    val runtime = runtimeTrace.asSequence().map {
+        EventLine(it.timestampMs, "${it.timestampMs} | ${it.type} | ${it.message ?: ""}".trimEnd(), "${it.type}|${it.message ?: ""}")
+    }
+    val actions = actionTrace.asSequence().map {
+        EventLine(it.timestampMs, "${it.timestampMs} | ${it.type} | ${it.message ?: ""}".trimEnd(), "${it.type}|${it.message ?: ""}")
+    }
+    return (runtime + actions)
+        .sortedBy { it.timestamp }
+        .distinctBy { it.key }
+        .takeLast(RECENT_RUNTIME_EVENTS + RECENT_ACTION_EVENTS)
+        .map { it.text }
 }
 
 private fun RuntimeDiagnostic.importantNativeEvents(includeVerbose: Boolean): List<String> {
