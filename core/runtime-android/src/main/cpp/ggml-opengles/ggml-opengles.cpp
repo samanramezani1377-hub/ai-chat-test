@@ -162,6 +162,45 @@ void main() {
 })";
 }
 
+static const char * silu_shader() {
+    return R"(#version 310 es
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer A { float a[]; };
+layout(std430, binding = 1) writeonly buffer C { float c[]; };
+uniform uint a_off, c_off, n;
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= n) return;
+    float x = a[(a_off >> 2u) + i];
+    c[(c_off >> 2u) + i] = x / (1.0 + exp(-x));
+})";
+}
+
+static const char * ssm_conv_shader() {
+    return R"(#version 310 es
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer X { float x[]; };
+layout(std430, binding = 1) readonly buffer C { float c[]; };
+layout(std430, binding = 2) writeonly buffer Y { float y[]; };
+uniform uint x_off, c_off, y_off;
+uniform uint d_conv, d_inner, n_tokens, n_seqs;
+void main() {
+    uint out_i = gl_GlobalInvocationID.x;
+    uint total = d_inner * n_tokens * n_seqs;
+    if (out_i >= total) return;
+    uint ch = out_i % d_inner;
+    uint tok = (out_i / d_inner) % n_tokens;
+    uint seq = out_i / (d_inner * n_tokens);
+    float sum = 0.0;
+    for (uint j = 0u; j < d_conv; ++j) {
+        uint xi = (x_off >> 2u) + ((seq * d_inner + ch) * (n_tokens + d_conv - 1u) + tok + j);
+        uint ci = (c_off >> 2u) + ch * d_conv + j;
+        sum += x[xi] * c[ci];
+    }
+    y[(y_off >> 2u) + (seq * n_tokens + tok) * d_inner + ch] = sum;
+})";
+}
+
 static const char * gated_delta_net_shader() {
     return R"(#version 310 es
 layout(local_size_x = 128) in;
@@ -257,13 +296,17 @@ void main() {
 static GLuint g_elementwise = 0;
 static GLuint g_q6k = 0;
 static GLuint g_gdn = 0;
+static GLuint g_silu = 0;
+static GLuint g_ssm_conv = 0;
 
 static bool ensure_programs() {
-    if (g_elementwise && g_q6k && g_gdn) return true;
+    if (g_elementwise && g_q6k && g_gdn && g_silu && g_ssm_conv) return true;
     if (!g_elementwise) g_elementwise = compile_compute(elementwise_shader());
     if (!g_q6k) g_q6k = compile_compute(q6k_matmul_shader());
     if (!g_gdn) g_gdn = compile_compute(gated_delta_net_shader());
-    return g_elementwise && g_q6k && g_gdn;
+    if (!g_silu) g_silu = compile_compute(silu_shader());
+    if (!g_ssm_conv) g_ssm_conv = compile_compute(ssm_conv_shader());
+    return g_elementwise && g_q6k && g_gdn && g_silu && g_ssm_conv;
 }
 
 static size_t tensor_offset(const ggml_backend_buffer_t buffer, const ggml_tensor * tensor) {
@@ -363,6 +406,12 @@ static bool supports_op(ggml_backend_dev_t, const ggml_tensor * op) {
     if (op->op == GGML_OP_MUL_MAT && op->type == GGML_TYPE_F32 &&
         op->src[0] && op->src[1] && op->src[0]->type == GGML_TYPE_Q6_K &&
         op->src[1]->type == GGML_TYPE_F32 && op->src[0]->ne[0] % 256 == 0) return true;
+    if (op->op == GGML_OP_SSM_CONV && op->type == GGML_TYPE_F32 &&
+        op->src[0] && op->src[1] && op->src[0]->type == GGML_TYPE_F32 &&
+        (op->src[1]->type == GGML_TYPE_F32 || op->src[1]->type == GGML_TYPE_F16) &&
+        op->src[0]->ne[1] == op->src[1]->ne[1]) return true;
+    if (op->op == GGML_OP_SILU && op->type == GGML_TYPE_F32 &&
+        op->src[0] && op->src[0]->type == GGML_TYPE_F32) return true;
     if (op->op == GGML_OP_GATED_DELTA_NET && op->type == GGML_TYPE_F32 &&
         op->src[0] && op->src[1] && op->src[2] && op->src[3] && op->src[4] && op->src[5] &&
         op->src[0]->type == GGML_TYPE_F32 && op->src[1]->type == GGML_TYPE_F32 &&
@@ -396,6 +445,42 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             glUniform1ui(glGetUniformLocation(g_elementwise, "c_off"), static_cast<GLuint>(tensor_offset(op->buffer, op)));
             glUniform1ui(glGetUniformLocation(g_elementwise, "n"), static_cast<GLuint>(ggml_nelements(op)));
             glUniform1ui(glGetUniformLocation(g_elementwise, "op"), op->op == GGML_OP_ADD ? 0u : 1u);
+            glDispatchCompute(static_cast<GLuint>((ggml_nelements(op) + 63) / 64), 1, 1);
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+            continue;
+        }
+
+        if (op->op == GGML_OP_SILU) {
+            auto * a = buffer_ctx(op->src[0]);
+            auto * out = buffer_ctx(op);
+            if (!a || !out) return GGML_STATUS_FAILED;
+            glUseProgram(g_silu);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, a->buffer);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, out->buffer);
+            glUniform1ui(glGetUniformLocation(g_silu, "a_off"), static_cast<GLuint>(tensor_offset(op->src[0]->buffer, op->src[0])));
+            glUniform1ui(glGetUniformLocation(g_silu, "c_off"), static_cast<GLuint>(tensor_offset(op->buffer, op)));
+            glUniform1ui(glGetUniformLocation(g_silu, "n"), static_cast<GLuint>(ggml_nelements(op)));
+            glDispatchCompute(static_cast<GLuint>((ggml_nelements(op) + 63) / 64), 1, 1);
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+            continue;
+        }
+
+        if (op->op == GGML_OP_SSM_CONV) {
+            auto * x = buffer_ctx(op->src[0]);
+            auto * cbuf = buffer_ctx(op->src[1]);
+            auto * out = buffer_ctx(op);
+            if (!x || !cbuf || !out) return GGML_STATUS_FAILED;
+            glUseProgram(g_ssm_conv);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, x->buffer);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, cbuf->buffer);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, out->buffer);
+            glUniform1ui(glGetUniformLocation(g_ssm_conv, "x_off"), static_cast<GLuint>(tensor_offset(op->src[0]->buffer, op->src[0])));
+            glUniform1ui(glGetUniformLocation(g_ssm_conv, "c_off"), static_cast<GLuint>(tensor_offset(op->src[1]->buffer, op->src[1])));
+            glUniform1ui(glGetUniformLocation(g_ssm_conv, "y_off"), static_cast<GLuint>(tensor_offset(op->buffer, op)));
+            glUniform1ui(glGetUniformLocation(g_ssm_conv, "d_conv"), static_cast<GLuint>(op->src[1]->ne[0]));
+            glUniform1ui(glGetUniformLocation(g_ssm_conv, "d_inner"), static_cast<GLuint>(op->src[1]->ne[1]));
+            glUniform1ui(glGetUniformLocation(g_ssm_conv, "n_tokens"), static_cast<GLuint>(op->ne[1]));
+            glUniform1ui(glGetUniformLocation(g_ssm_conv, "n_seqs"), static_cast<GLuint>(op->ne[2]));
             glDispatchCompute(static_cast<GLuint>((ggml_nelements(op) + 63) / 64), 1, 1);
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
             continue;
