@@ -110,6 +110,7 @@ jobs:
           ! grep -R -nE 'GGML_USE_OPENCL|ggml-opencl|OpenCL|Vulkan' core/runtime-android/src/main/cpp core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_GPU_BACKEND_OPENGL=1' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_REQUIRE_OPENGL_GPU=1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_GPU_ONLY_SCHEDULER_PATCH' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'OpenGL ES' core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
           grep -q 'GGML_OP_GET_ROWS' core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
           grep -q 'GGML_TYPE_Q4_0' core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
