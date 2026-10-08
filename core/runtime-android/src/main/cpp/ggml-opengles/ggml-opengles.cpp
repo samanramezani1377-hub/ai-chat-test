@@ -437,7 +437,14 @@ uniform uint a_off, c_off, n, kind;
 void main() {
     uint i=gl_GlobalInvocationID.x; if(i>=n)return;
     float x=a[(a_off>>2u)+i];
-    float y = kind==0u ? 1.0/(1.0+exp(-x)) : log(1.0+exp(-abs(x))) + max(x,0.0);
+    float y;
+    if (kind == 0u) y = 1.0/(1.0+exp(-x));                 // sigmoid
+    else if (kind == 1u) y = log(1.0+exp(-abs(x))) + max(x,0.0); // softplus
+    else if (kind == 2u) y = 0.5*x*(1.0 + erf(x*0.70710678118)); // gelu erf
+    else if (kind == 3u) y = 0.5*x*(1.0 + tanh(0.7978845608*(x + 0.044715*x*x*x))); // gelu tanh
+    else if (kind == 4u) y = tanh(x);
+    else if (kind == 5u) y = exp(x);
+    else y = log(max(x, 1e-20));
     c[(c_off>>2u)+i]=y;
 })";
 }
@@ -678,7 +685,10 @@ static bool supports_op(ggml_backend_dev_t, const ggml_tensor * op) {
     if (op->type == GGML_TYPE_F32 && op->src[0]) {
         if (op->op == GGML_OP_RMS_NORM && op->src[0]->type == GGML_TYPE_F32 &&
             op->src[0]->ne[0] % 4 == 0) return true;
-        if ((op->op == GGML_OP_SIGMOID || op->op == GGML_OP_SOFTPLUS) && op->src[0]->type == GGML_TYPE_F32) return true;
+        if ((op->op == GGML_OP_SIGMOID || op->op == GGML_OP_SOFTPLUS ||
+             op->op == GGML_OP_GELU || op->op == GGML_OP_GELU_ERF || op->op == GGML_OP_GELU_QUICK ||
+             op->op == GGML_OP_TANH || op->op == GGML_OP_EXP || op->op == GGML_OP_LOG) &&
+            op->src[0]->type == GGML_TYPE_F32) return true;
         if (op->op == GGML_OP_SOFT_MAX && op->src[0]->type == GGML_TYPE_F32 &&
             (!op->src[1] || op->src[1]->type == GGML_TYPE_F32)) return true;
         if (op->op == GGML_OP_ROPE && op->src[0]->type == GGML_TYPE_F32 &&
@@ -769,13 +779,22 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             glDispatchCompute((GLuint)((op->ne[1]*op->ne[2]*op->ne[3]+63)/64),1,1); glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT); continue;
         }
 
-        if (op->op == GGML_OP_SIGMOID || op->op == GGML_OP_SOFTPLUS) {
+        if (op->op == GGML_OP_SIGMOID || op->op == GGML_OP_SOFTPLUS ||
+            op->op == GGML_OP_GELU || op->op == GGML_OP_GELU_ERF || op->op == GGML_OP_GELU_QUICK ||
+            op->op == GGML_OP_TANH || op->op == GGML_OP_EXP || op->op == GGML_OP_LOG) {
             auto * x=buffer_ctx(op->src[0]); auto * y=buffer_ctx(op); if(!x||!y)return GGML_STATUS_FAILED;
             glUseProgram(g_unary); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,x->buffer); glBindBufferBase(GL_SHADER_STORAGE_BUFFER,1,y->buffer);
             glUniform1ui(glGetUniformLocation(g_unary,"a_off"),(GLuint)tensor_offset(op->src[0]->buffer,op->src[0]));
             glUniform1ui(glGetUniformLocation(g_unary,"c_off"),(GLuint)tensor_offset(op->buffer,op));
             glUniform1ui(glGetUniformLocation(g_unary,"n"),(GLuint)ggml_nelements(op));
-            glUniform1ui(glGetUniformLocation(g_unary,"kind"),op->op==GGML_OP_SIGMOID?0u:1u);
+            GLuint kind = op->op == GGML_OP_SIGMOID ? 0u :
+                op->op == GGML_OP_SOFTPLUS ? 1u :
+                op->op == GGML_OP_GELU_ERF ? 2u :
+                op->op == GGML_OP_GELU ? 3u :
+                op->op == GGML_OP_GELU_QUICK ? 3u :
+                op->op == GGML_OP_TANH ? 4u :
+                op->op == GGML_OP_EXP ? 5u : 6u;
+            glUniform1ui(glGetUniformLocation(g_unary,"kind"),kind);
             glDispatchCompute((GLuint)((ggml_nelements(op)+63)/64),1,1); glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT); continue;
         }
 
