@@ -135,6 +135,21 @@ object RuntimeDiagnosticsStore {
         }
     }
 
+    fun recordLoadStarted(model: ModelDescriptor, runtime: RuntimeInfo) {
+        state.value = state.value.copy(
+            model = model,
+            runtime = runtime,
+            loadTimeMs = null,
+            generation = null,
+            settings = null,
+            generationStartedAtMs = null,
+            openClProfile = readOpenClProfile(),
+            gpuDevice = readGpuDevice(),
+            weightResidency = readWeightResidency(),
+        )
+        recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "MODEL_LOAD_ATTEMPT backend=${runtime.backend ?: "unknown"} context=${runtime.contextLength ?: "unknown"}")
+    }
+
     fun recordLoaded(model: ModelDescriptor, loadTimeMs: Long?, runtime: RuntimeInfo) {
         state.value = state.value.copy(model = model, runtime = runtime, loadTimeMs = loadTimeMs, generation = null, settings = null, openClProfile = readOpenClProfile(), gpuDevice = readGpuDevice(), weightResidency = readWeightResidency())
         recordTrace(RuntimeTraceEvent.Type.MODEL_LOAD_COMPLETED, loadTimeMs?.let { "loadMs=$it" })
