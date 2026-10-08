@@ -234,7 +234,6 @@ void main() {
     uint row_off = uint(id) * row_bytes;
     float v;
     if (w_type == 0u) {
-        v = uint(w_off + row_off + col * 4u) == 0u ? 0.0 : 0.0;
         uint word = w[(w_off + row_off + col * 4u) >> 2u];
         v = uintBitsToFloat(word);
     } else if (w_type == 1u) {
