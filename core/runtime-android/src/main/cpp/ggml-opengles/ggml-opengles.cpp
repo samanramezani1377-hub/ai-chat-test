@@ -798,7 +798,13 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
     if (!ensure_programs()) return GGML_STATUS_FAILED;
     for (int i = 0; i < graph->n_nodes; ++i) {
         ggml_tensor * op = graph->nodes[i];
-        if (!supports_op(nullptr, op)) {\n            LOGE("OpenGL ES GPU-only graph rejected unsupported op=%s type=%d ne=[%lld,%lld,%lld,%lld]",\n                ggml_op_name(op->op), (int) op->type,\n                (long long) op->ne[0], (long long) op->ne[1],\n                (long long) op->ne[2], (long long) op->ne[3]);\n            return GGML_STATUS_FAILED;\n        }
+        if (!supports_op(nullptr, op)) {
+            std::fprintf(stderr, "OpenGL ES GPU-only graph rejected unsupported op=%s type=%d ne=[%lld,%lld,%lld,%lld]\\n",
+                ggml_op_name(op->op), (int) op->type,
+                (long long) op->ne[0], (long long) op->ne[1],
+                (long long) op->ne[2], (long long) op->ne[3]);
+            return GGML_STATUS_FAILED;
+        }
         if (op->op == GGML_OP_NONE || op->op == GGML_OP_VIEW || op->op == GGML_OP_RESHAPE ||
             op->op == GGML_OP_PERMUTE || op->op == GGML_OP_TRANSPOSE) continue;
 
