@@ -162,14 +162,108 @@ void main() {
 })";
 }
 
+static const char * gated_delta_net_shader() {
+    return R"(#version 310 es
+layout(local_size_x = 128) in;
+layout(std430, binding = 0) readonly buffer Q { float q[]; };
+layout(std430, binding = 1) readonly buffer K { float k[]; };
+layout(std430, binding = 2) readonly buffer V { float v[]; };
+layout(std430, binding = 3) readonly buffer G { float g[]; };
+layout(std430, binding = 4) readonly buffer B { float beta[]; };
+layout(std430, binding = 5) readonly buffer S { float state[]; };
+layout(std430, binding = 6) writeonly buffer O { float outv[]; };
+
+uniform uint q_off, k_off, v_off, g_off, beta_off, state_off, out_off;
+uniform uint q_s0, q_s1, q_s2, q_s3;
+uniform uint k_s0, k_s1, k_s2, k_s3;
+uniform uint v_s0, v_s1, v_s2, v_s3;
+uniform uint g_s0, g_s1, g_s2, g_s3;
+uniform uint b_s0, b_s1, b_s2, b_s3;
+uniform uint S_v, H_v, H_k, n_tokens, n_seqs, K_snap;
+uniform float scale;
+
+void main() {
+    uint col = gl_LocalInvocationID.x;
+    uint head = gl_WorkGroupID.x;
+    uint seq = gl_WorkGroupID.y;
+    if (col >= S_v || head >= H_v || seq >= n_seqs) return;
+
+    uint qhead = head % H_k;
+    uint qbase = q_off >> 2u;
+    uint kbase = k_off >> 2u;
+    uint vbase = v_off >> 2u;
+    uint gbase = g_off >> 2u;
+    uint bbase = beta_off >> 2u;
+    uint sbase = state_off >> 2u;
+    uint obase = out_off >> 2u;
+
+    float s[128];
+    for (uint r = 0u; r < S_v; ++r) {
+        uint si = sbase + seq * (S_v * S_v * H_v) +
+                  head * (S_v * S_v) + col * S_v + r;
+        s[r] = state[si];
+    }
+
+    for (uint t = 0u; t < n_tokens; ++t) {
+        float decay_log = g[gbase + seq*g_s3 + head*g_s1 + t*g_s2];
+        float decay = exp(decay_log);
+        float bv = beta[bbase + seq*b_s3 + head*b_s1 + t*b_s2];
+
+        float pred = 0.0;
+        for (uint r = 0u; r < S_v; ++r) {
+            uint qi = qbase + seq*q_s3 + qhead*q_s1 + t*q_s2 + r*q_s0;
+            uint ki = kbase + seq*k_s3 + qhead*k_s1 + t*k_s2 + r*k_s0;
+            s[r] *= decay;
+            pred += s[r] * k[ki];
+        }
+
+        uint vi = vbase + seq*v_s3 + head*v_s1 + t*v_s2 + col*v_s0;
+        float delta = (v[vi] - pred) * bv;
+
+        float result = 0.0;
+        for (uint r = 0u; r < S_v; ++r) {
+            uint ki = kbase + seq*k_s3 + qhead*k_s1 + t*k_s2 + r*k_s0;
+            s[r] += k[ki] * delta;
+            uint qi = qbase + seq*q_s3 + qhead*q_s1 + t*q_s2 + r*q_s0;
+            result += s[r] * q[qi];
+        }
+
+        uint oi = obase + (seq*n_tokens*H_v + t*H_v + head)*S_v + col;
+        outv[oi] = result * scale;
+
+        if (K_snap > 1u) {
+            int slot = int(n_tokens) - 1 - int(t);
+            if (slot >= 0 && slot < int(K_snap)) {
+                uint snap_base = obase + n_tokens*n_seqs*H_v*S_v +
+                    uint(slot) * S_v*S_v*H_v*n_seqs +
+                    seq*S_v*S_v*H_v + head*S_v*S_v;
+                for (uint r = 0u; r < S_v; ++r) {
+                    outv[snap_base + col*S_v + r] = s[r];
+                }
+            }
+        }
+    }
+
+    if (K_snap == 1u) {
+        uint final_base = obase + n_tokens*n_seqs*H_v*S_v +
+            seq*S_v*S_v*H_v + head*S_v*S_v;
+        for (uint r = 0u; r < S_v; ++r) {
+            outv[final_base + col*S_v + r] = s[r];
+        }
+    }
+})";
+}
+
 static GLuint g_elementwise = 0;
 static GLuint g_q6k = 0;
+static GLuint g_gdn = 0;
 
 static bool ensure_programs() {
-    if (g_elementwise && g_q6k) return true;
+    if (g_elementwise && g_q6k && g_gdn) return true;
     if (!g_elementwise) g_elementwise = compile_compute(elementwise_shader());
     if (!g_q6k) g_q6k = compile_compute(q6k_matmul_shader());
-    return g_elementwise && g_q6k;
+    if (!g_gdn) g_gdn = compile_compute(gated_delta_net_shader());
+    return g_elementwise && g_q6k && g_gdn;
 }
 
 static size_t tensor_offset(const ggml_backend_buffer_t buffer, const ggml_tensor * tensor) {
@@ -269,6 +363,14 @@ static bool supports_op(ggml_backend_dev_t, const ggml_tensor * op) {
     if (op->op == GGML_OP_MUL_MAT && op->type == GGML_TYPE_F32 &&
         op->src[0] && op->src[1] && op->src[0]->type == GGML_TYPE_Q6_K &&
         op->src[1]->type == GGML_TYPE_F32 && op->src[0]->ne[0] % 256 == 0) return true;
+    if (op->op == GGML_OP_GATED_DELTA_NET && op->type == GGML_TYPE_F32 &&
+        op->src[0] && op->src[1] && op->src[2] && op->src[3] && op->src[4] && op->src[5] &&
+        op->src[0]->type == GGML_TYPE_F32 && op->src[1]->type == GGML_TYPE_F32 &&
+        op->src[2]->type == GGML_TYPE_F32 && op->src[3]->type == GGML_TYPE_F32 &&
+        op->src[4]->type == GGML_TYPE_F32 && op->src[5]->type == GGML_TYPE_F32 &&
+        op->src[0]->ne[0] <= 128 && op->src[2]->ne[0] <= 128 &&
+        op->src[2]->ne[0] == op->src[2]->ne[1] &&
+        op->src[5]->ne[0] == op->src[5]->ne[1]) return true;
     return false;
 }
 
@@ -295,6 +397,66 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
             glUniform1ui(glGetUniformLocation(g_elementwise, "n"), static_cast<GLuint>(ggml_nelements(op)));
             glUniform1ui(glGetUniformLocation(g_elementwise, "op"), op->op == GGML_OP_ADD ? 0u : 1u);
             glDispatchCompute(static_cast<GLuint>((ggml_nelements(op) + 63) / 64), 1, 1);
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+            continue;
+        }
+
+        if (op->op == GGML_OP_GATED_DELTA_NET) {
+            auto * q = buffer_ctx(op->src[0]);
+            auto * k = buffer_ctx(op->src[1]);
+            auto * v = buffer_ctx(op->src[2]);
+            auto * g = buffer_ctx(op->src[3]);
+            auto * b = buffer_ctx(op->src[4]);
+            auto * s = buffer_ctx(op->src[5]);
+            auto * out = buffer_ctx(op);
+            if (!q || !k || !v || !g || !b || !s || !out) return GGML_STATUS_FAILED;
+
+            glUseProgram(g_gdn);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, q->buffer);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, k->buffer);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, v->buffer);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g->buffer);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, b->buffer);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, s->buffer);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, out->buffer);
+
+            auto setoff = [&](const char * name, const ggml_tensor * t) {
+                glUniform1ui(glGetUniformLocation(g_gdn, name),
+                    static_cast<GLuint>(tensor_offset(t->buffer, t)));
+            };
+            setoff("q_off", op->src[0]); setoff("k_off", op->src[1]);
+            setoff("v_off", op->src[2]); setoff("g_off", op->src[3]);
+            setoff("beta_off", op->src[4]); setoff("state_off", op->src[5]);
+            setoff("out_off", op);
+
+            auto stride = [&](const ggml_tensor * t, int d) -> GLuint {
+                return static_cast<GLuint>(t->nb[d] / sizeof(float));
+            };
+            const char * qn[] = {"q_s0","q_s1","q_s2","q_s3"};
+            const char * kn[] = {"k_s0","k_s1","k_s2","k_s3"};
+            const char * vn[] = {"v_s0","v_s1","v_s2","v_s3"};
+            const char * gn[] = {"g_s0","g_s1","g_s2","g_s3"};
+            const char * bn[] = {"b_s0","b_s1","b_s2","b_s3"};
+            const ggml_tensor * ts[] = {op->src[0],op->src[1],op->src[2],op->src[3],op->src[4]};
+            const char ** ns[] = {qn,kn,vn,gn,bn};
+            for (int ti=0; ti<5; ++ti) for (int d=0; d<4; ++d)
+                glUniform1ui(glGetUniformLocation(g_gdn, ns[ti][d]), stride(ts[ti], d));
+
+            const GLuint sv = static_cast<GLuint>(op->src[2]->ne[0]);
+            const GLuint hv = static_cast<GLuint>(op->src[2]->ne[1]);
+            const GLuint hk = static_cast<GLuint>(op->src[0]->ne[1]);
+            const GLuint nt = static_cast<GLuint>(op->src[2]->ne[2]);
+            const GLuint nsq = static_cast<GLuint>(op->src[2]->ne[3]);
+            const GLuint ksnap = static_cast<GLuint>(op->op_params[0]);
+            glUniform1ui(glGetUniformLocation(g_gdn, "S_v"), sv);
+            glUniform1ui(glGetUniformLocation(g_gdn, "H_v"), hv);
+            glUniform1ui(glGetUniformLocation(g_gdn, "H_k"), hk);
+            glUniform1ui(glGetUniformLocation(g_gdn, "n_tokens"), nt);
+            glUniform1ui(glGetUniformLocation(g_gdn, "n_seqs"), nsq);
+            glUniform1ui(glGetUniformLocation(g_gdn, "K_snap"), ksnap);
+            glUniform1f(glGetUniformLocation(g_gdn, "scale"), 1.0f / std::sqrt(float(op->src[0]->ne[0])));
+
+            glDispatchCompute(hv, nsq, 1);
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
             continue;
         }
