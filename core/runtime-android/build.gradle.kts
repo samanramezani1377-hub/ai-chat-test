@@ -50,7 +50,11 @@ android {
         debug {
             externalNativeBuild {
                 cmake {
-                    arguments += "-DAI_CHAT_OPENGL_DIAGNOSTICS=ON"
+                    arguments += listOf(
+                        "-DAI_CHAT_OPENGL_DIAGNOSTICS=ON",
+                        "-DCMAKE_C_FLAGS_DEBUG=-O0 -g",
+                        "-DCMAKE_CXX_FLAGS_DEBUG=-O0 -g",
+                    )
                 }
             }
         }
