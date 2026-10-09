@@ -12,7 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 BRIDGE = ROOT / "core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/NativeLlamaCpp.kt"
 ADAPTER = ROOT / "core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/LlamaCppAndroidRuntimeAdapter.kt"
-NATIVE = ROOT / "core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp"
+NATIVE = ROOT / "core/runtime-android/src/main/cpp/native_runtime.cpp"
 
 
 def main() -> int:
