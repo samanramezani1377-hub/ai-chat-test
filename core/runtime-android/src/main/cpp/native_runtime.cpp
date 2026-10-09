@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <vector>
 #include <dlfcn.h>
+#include <execinfo.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <ucontext.h>
@@ -281,6 +282,16 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
         native_write_hex(g_native_fatal_fd, pc_prefix, pc);
         native_write_hex(g_native_fatal_fd, lr_prefix, lr);
         native_write_hex(g_native_fatal_fd, addr_prefix, info ? (uintptr_t)info->si_addr : 0);
+        // Best-effort in-process stack frames go into the same raw trace that the
+        // diagnostics screen exports. Preserve the Android tombstone below as the
+        // authoritative source/line symbolization when matching symbols are present.
+        const char frame_header[] = "NATIVE_FATAL_BACKTRACE_BEGIN\\n";
+        native_write_text(g_native_fatal_fd, frame_header, sizeof(frame_header) - 1);
+        void *frames[32];
+        const int frame_count = backtrace(frames, (int)(sizeof(frames) / sizeof(frames[0])));
+        if (frame_count > 0) backtrace_symbols_fd(frames, frame_count, g_native_fatal_fd);
+        const char frame_footer[] = "NATIVE_FATAL_BACKTRACE_END\\n";
+        native_write_text(g_native_fatal_fd, frame_footer, sizeof(frame_footer) - 1);
         // Keep the fatal marker durable, but do not swallow the signal. The previous
         // Android debuggerd handler is what produces the backtrace we need to identify
         // the exact native function/offset (and source line when matching symbols exist).
