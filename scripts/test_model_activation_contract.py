@@ -5,6 +5,7 @@ These are source-level checks. They catch activation-order regressions in CI,
 but only a real Android device can prove that its driver can create the context.
 """
 from pathlib import Path
+import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
