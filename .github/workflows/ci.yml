@@ -104,6 +104,9 @@ jobs:
           set -euo pipefail
           ! grep -R "GGML_OPENCL_ADRENO_XMEM_GEMM.*1" -n core/runtime-android/src/main/cpp
           grep -q 'OPENCL_KERNEL_POLICY=UPSTREAM_DEVICE_CAPABILITY_SELECTION' core/runtime-android/src/main/cpp/native_runtime.cpp
+          # Never bypass llama.cpp's GPU-family capability gate: doing so lets
+          # unsupported devices reach kernels with incompatible subgroup macros.
+          grep -q 'Do not bypass upstream GPU-family validation' core/runtime-android/src/main/cpp/CMakeLists.txt
           ! grep -q 'setenv("GGML_OPENCL_Q6K_GEMV_TILED"' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'GGML_OPENCL_USE_ADRENO_KERNELS OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_OPENCL_PROFILING=ON' core/runtime-android/build.gradle.kts
