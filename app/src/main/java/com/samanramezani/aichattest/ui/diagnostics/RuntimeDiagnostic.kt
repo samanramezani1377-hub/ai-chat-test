@@ -245,6 +245,11 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine()
     appendLine("===== NATIVE DIAGNOSTIC EVENTS =====")
     importantNativeEvents(includeVerbose = false).forEach(::appendLine)
+    appendLine()
+    appendLine("===== LAST 200 RAW NATIVE LOG LINES =====")
+    val lastNativeLogLines = nativeDiagnostics.orEmpty().lineSequence().toList().takeLast(200)
+    if (lastNativeLogLines.isEmpty()) appendLine("No native log lines available.")
+    else lastNativeLogLines.forEach(::appendLine)
 }
 
 internal fun RuntimeDiagnostic.errorReport(): String = buildString {
@@ -301,6 +306,15 @@ internal fun RuntimeDiagnostic.errorReport(): String = buildString {
     if (events.isNotEmpty()) {
         appendLine("Recent events:")
         events.forEach { appendLine(it.take(180)) }
+    }
+
+    appendLine()
+    appendLine("===== LAST 200 RAW NATIVE LOG LINES =====")
+    val lastNativeLogLines = nativeDiagnostics.orEmpty().lineSequence().toList().takeLast(200)
+    if (lastNativeLogLines.isEmpty()) {
+        appendLine("No native log lines available.")
+    } else {
+        lastNativeLogLines.forEach(::appendLine)
     }
 }
 
