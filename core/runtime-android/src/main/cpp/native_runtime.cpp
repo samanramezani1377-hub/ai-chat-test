@@ -547,24 +547,54 @@ static void append_weight_residency_trace() {
 static llama_model *load_model_android(const char *path, llama_model_params mp, bool gpu) {
     // Avoid the mmap -> Vulkan host-pointer import path on Android. Mobile UMA Vulkan
     // drivers can fail inside buffer_from_host_ptr while the model is being initialized.
-    // LLAMA_LOAD_MODE_NONE keeps bounded file reads and normal backend allocations, so
-    // GPU layers remain enabled without relying on the fragile mmap buffer import.
+    // LLAMA_LOAD_MODE_NONE keeps bounded file reads and normal backend allocations.
     mp.load_mode = LLAMA_LOAD_MODE_NONE;
     mp.check_tensors = false;
     mp.no_host = true;
-    // Do not allow llama.cpp's optional CPU_REPACK buffers to retain model weights
-    // on the CPU. GPU-only activation must either place weights on Vulkan or fail
-    // the explicit residency validation after load.
     mp.use_extra_bufts = false;
-    checkpoint("VULKAN_LOAD_POLICY no_host=1 use_extra_bufts=0 async_uploads=disabled");
 
-    // Do not force token_embd onto Vulkan. llama.cpp's backend placement is
-    // architecture/device aware; overriding the embedding buffer here adds a
-    // large device allocation and has caused avoidable load pressure on Android.
-    // GPU-only residency is still enforced after the model is loaded.
+    // n_gpu_layers controls transformer blocks, but llama.cpp may still choose a
+    // host buffer for large non-block tensors (notably token embeddings / output
+    // weights). That leaves hundreds of MiB off Vulkan even when all layers are
+    // requested. Explicitly route every model tensor through the Vulkan device's
+    // buffer type. The post-load residency check remains strict; there is no CPU
+    // fallback. If Vulkan cannot allocate a tensor, loading fails instead.
+    llama_model_tensor_buft_override gpu_tensor_overrides[] = {
+        { ".*", nullptr },
+        { nullptr, nullptr },
+    };
+    if (gpu) {
+        ggml_backend_reg_t reg = ggml_backend_reg_by_name(GGML_VK_NAME);
+        ggml_backend_dev_t gpu_device = nullptr;
+        if (reg) {
+            for (size_t i = 0; i < ggml_backend_reg_dev_count(reg); ++i) {
+                ggml_backend_dev_t candidate = ggml_backend_reg_dev_get(reg, i);
+                if (!candidate) continue;
+                const auto type = ggml_backend_dev_type(candidate);
+                if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+                    gpu_device = candidate;
+                    break;
+                }
+            }
+        }
+        if (!gpu_device) {
+            checkpoint("VULKAN_GPU_ONLY_TENSOR_OVERRIDE_FAILED_NO_DEVICE");
+            return nullptr;
+        }
+        gpu_tensor_overrides[0].buft = ggml_backend_dev_buffer_type(gpu_device);
+        if (!gpu_tensor_overrides[0].buft) {
+            checkpoint("VULKAN_GPU_ONLY_TENSOR_OVERRIDE_FAILED_NO_BUFFER_TYPE");
+            return nullptr;
+        }
+        mp.tensor_buft_overrides = gpu_tensor_overrides;
+        checkpoint("VULKAN_GPU_ONLY_ALL_TENSORS_FORCED_TO_DEVICE_BUFFER");
+    }
+
+    checkpoint("VULKAN_LOAD_POLICY no_host=1 use_extra_bufts=0 async_uploads=disabled");
     checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_RESIDENT" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
-        " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
+        " check_tensors=" + (mp.check_tensors ? "1" : "0") +
+        " tensor_buft_overrides=" + (gpu ? "vulkan-all" : "default")).c_str());
     return llama_model_load_from_file(path, mp);
 }
 
