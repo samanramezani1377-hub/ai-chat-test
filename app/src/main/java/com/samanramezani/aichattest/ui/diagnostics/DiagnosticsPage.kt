@@ -199,28 +199,9 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
                     InfoLine("توکن‌های جدید", perf.newTokens?.toString() ?: "—")
                     InfoLine("نسبت Cache Hit", perf.cacheHitRatio?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—")
                 }
-                SectionCard("پروفایل GPU / OpenCL") {
-                    val gpu = runtime.openClProfile
-                    if (gpu == null) {
-                        EmptyCard("دادهٔ پروفایل OpenCL موجود نیست؛ ممکن است Runtime آن را ثبت نکرده باشد.")
-                    } else {
-                        InfoLine("تعداد Kernel", gpu.kernelCount.toString())
-                        InfoLine("اجرای Kernelها", gpu.totalKernelMs?.let { "%.3f ms".format(Locale.US, it) } ?: "—")
-                        InfoLine("MUL_MAT Q6_K", gpu.q6KMulMatMs?.let { "%.3f ms".format(Locale.US, it) } ?: "—")
-                        InfoLine("Attention", gpu.attentionMs?.let { "%.3f ms".format(Locale.US, it) } ?: "—")
-                        InfoLine("RoPE", gpu.ropeMs?.let { "%.3f ms".format(Locale.US, it) } ?: "—")
-                        InfoLine("RMSNorm", gpu.rmsNormMs?.let { "%.3f ms".format(Locale.US, it) } ?: "—")
-                        InfoLine("FFN", gpu.ffnMs?.let { "%.3f ms".format(Locale.US, it) } ?: "—")
-                        InfoLine("Softmax", gpu.softmaxMs?.let { "%.3f ms".format(Locale.US, it) } ?: "—")
-                        InfoLine("ارسال Kernel", gpu.kernelSubmitMs?.let { "%.3f ms".format(Locale.US, it) } ?: "—")
-                        InfoLine("همگام‌سازی", gpu.syncMs?.let { "%.3f ms".format(Locale.US, it) } ?: "—")
-                        InfoLine("انتقال حافظه", gpu.memoryTransferMs?.let { "%.3f ms".format(Locale.US, it) } ?: "اندازه‌گیری نشده")
-                        gpu.topKernels.forEachIndexed { i, kernel ->
-                            InfoLine("Kernel برتر ${i + 1}", "${kernel.kernelName} · %.3f ms".format(Locale.US, kernel.executionMs))
-                        }
-                    }
-                }
-            }
+                SectionCard("پروفایل کرنل GPU") {
+                    EmptyCard("Runtime فعلی زمان‌بندی جداگانهٔ هر Kernel را ثبت نمی‌کند. برای اندازه‌گیری‌های موجود، بخش عملکرد و لاگ خام Native را بررسی کن.")
+                }            }
 
             DiagnosticsSection.LOGS -> {
                 SectionCard("لاگ خام Native") {
