@@ -422,7 +422,10 @@ private fun RuntimeDiagnostic.importantNativeEvents(includeVerbose: Boolean): Li
             val important = line.contains("OPENGL_ES_") || line.contains("MODEL_LOAD") ||
                 line.contains("NATIVE_WEIGHT_RESIDENCY") || line.contains("NATIVE_KV_CACHE") ||
                 line.contains("NATIVE_PERF") || line.contains("SPECULATIVE_") ||
-                line.contains("ERROR") || line.contains("error") || line.contains("failed") || line.contains("FAILED")
+                line.contains("NATIVE_FATAL_") || line.contains("NATIVE_CHECKPOINT") ||
+                line.contains("llama_graph_n_input_tensors") || line.contains(" is used by node ") ||
+                line.contains("SIGABRT") || line.contains("ERROR") || line.contains("error") ||
+                line.contains("failed") || line.contains("FAILED")
             important && (includeVerbose || verbose.none { line.contains(it) })
         }
         .distinct()
