@@ -150,6 +150,8 @@ jobs:
           grep -q 'VULKAN_GPU_ONLY_NO_CPU_FALLBACK' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'LLAMA_FLASH_ATTN_TYPE_DISABLED' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 32)' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'NATIVE_FATAL_PHASE=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'hybrid_recurrent_vulkan_stability' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'AI_CHAT_GPU_BACKEND_VULKAN=1' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_VULKAN_ANDROID_BDA_GUARD_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
           ! grep -R 'OPENCL_GPU_ONLY\|NATIVE_OPENCL_DEVICE\|cl_profiling.csv\|OpenClGpuProfile' -n app core/runtime core/runtime-android
