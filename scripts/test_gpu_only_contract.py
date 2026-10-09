@@ -43,9 +43,8 @@ def main() -> int:
         ("Dynamic backend loading remains disabled", "set(GGML_BACKEND_DL OFF" in src["cmake"] and
          "GGML_BACKEND_DL=OFF" in src["gradle"],
          "GPU backend must be statically registered"),
-        ("CPU repacking remains disabled", "set(GGML_CPU_REPACK OFF" in src["cmake"] and
-         "GGML_CPU_REPACK" not in src["gradle"] or
-         ("set(GGML_CPU_REPACK OFF" in src["cmake"] and "GGML_CPU_REPACK" in src["cmake"]),
+        ("CPU repacking remains disabled", "set(GGML_CPU_REPACK OFF CACHE BOOL" in src["cmake"] and
+         "set(GGML_CPU_REPACK ON" not in src["cmake"] and "GGML_CPU_REPACK=ON" not in src["gradle"],
          "CPU weight repacking must not be enabled"),
         ("GPU-only scheduler patch excludes CPU backend", "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH" in src["cmake"] and
          "if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU) {\n                continue;" in src["cmake"],
