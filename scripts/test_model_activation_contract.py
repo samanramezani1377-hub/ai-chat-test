@@ -69,6 +69,12 @@ def main() -> int:
         ("GDN scheduler support is not gated by a shader handle compiled later",
          "GGML_OP_GATED_DELTA_NET" in support and
          re.search(r"if\s*\(op->op == GGML_OP_GATED_DELTA_NET.*?g_gdn\s*!=\s*0", support, re.S) is None),
+        ("graph-result allocation stages are traced inside llama_graph_result::reset",
+         all(marker in cmake for marker in (
+             "AI_CHAT_GRAPH_RESULT_STAGE=before_compute_meta_resize",
+             "AI_CHAT_GRAPH_RESULT_STAGE=before_ggml_init",
+             "AI_CHAT_GRAPH_RESULT_STAGE=before_new_graph_custom",
+             "AI_CHAT_GRAPH_RESULT_STAGE=after_new_graph_custom"))),
         ("required GDN shader compilation failure is detected before dispatch",
          'compile_compute(gated_delta_net_shader(), "gated_delta_net")' in ensure and
          "(caps.max_compute_ssbo_blocks < 7 || g_gdn != 0)" in ensure),
