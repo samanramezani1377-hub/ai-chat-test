@@ -260,7 +260,7 @@ static void configure_android_icd_search_path() {
 // A candidate is eligible for OCL_ICD_FILENAMES only if it exports the ICD entry point
 // and that entry point returns at least one platform. This avoids feeding the loader
 // its own libOpenCL.so and creating recursive dispatch.
-using cl_icd_get_platform_ids_khr_fn = cl_int (CL_API_CALL *)(cl_uint, cl_platform_id *, cl_uint *);
+using cl_get_platform_ids_fn = cl_int (CL_API_CALL *)(cl_uint, cl_platform_id *, cl_uint *);\nusing cl_icd_get_platform_ids_khr_fn = cl_int (CL_API_CALL *)(cl_uint, cl_platform_id *, cl_uint *);
 
 static bool probe_android_vendor_icd_candidates() {
     append_native_trace("OPENCL_VENDOR_ICD_DIRECT_PROBE_STARTED");
@@ -287,7 +287,7 @@ static bool probe_android_vendor_icd_candidates() {
         }
 
         (void) dlerror();
-        auto get_platforms = reinterpret_cast<clGetPlatformIDs_fn>(dlsym(handle, "clGetPlatformIDs"));
+        auto get_platforms = reinterpret_cast<cl_get_platform_ids_fn>(dlsym(handle, "clGetPlatformIDs"));
         const char *get_platforms_error = dlerror();
         (void) dlerror();
         auto get_icd_platforms = reinterpret_cast<cl_icd_get_platform_ids_khr_fn>(
