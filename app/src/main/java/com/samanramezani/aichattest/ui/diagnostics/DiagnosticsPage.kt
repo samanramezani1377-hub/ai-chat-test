@@ -42,7 +42,6 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
     val actionTraces by ActionTraceStore.events.collectAsState()
     var selectedSection by remember { mutableStateOf(DiagnosticsSection.SUMMARY) }
     var logQuery by remember { mutableStateOf("") }
-    var showAllLogs by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { RuntimeDiagnosticsStore.refreshNativeEvent() }
 
@@ -73,9 +72,8 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
     val nativeLines = remember(runtime.lastNativeEvent) {
         runtime.lastNativeEvent.orEmpty().lineSequence().toList().takeLast(200)
     }
-    val filteredLines = remember(nativeLines, logQuery, showAllLogs) {
-        val source = if (showAllLogs) nativeLines else nativeLines.takeLast(200)
-        if (logQuery.isBlank()) source else source.filter { it.contains(logQuery, ignoreCase = true) }
+    val filteredLines = remember(nativeLines, logQuery) {
+        if (logQuery.isBlank()) nativeLines else nativeLines.filter { it.contains(logQuery, ignoreCase = true) }
     }
     val speed = generation?.let {
         val ms = it.generationTimeMs
@@ -131,8 +129,8 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             }
         }
 
-        TabRow(selectedTabIndex = DiagnosticsSection.entries.indexOf(selectedSection)) {
-            DiagnosticsSection.entries.forEachIndexed { index, section ->
+        TabRow(selectedTabIndex = DiagnosticsSection.values().indexOf(selectedSection)) {
+            DiagnosticsSection.values().forEachIndexed { index, section ->
                 Tab(
                     selected = selectedSection == section,
                     onClick = { selectedSection = section },
