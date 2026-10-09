@@ -97,7 +97,8 @@ if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK
     string(REPLACE "${_ai_chat_cpu_assign_needle}" "${_ai_chat_cpu_assign_replacement}" _ai_chat_backend_source "${_ai_chat_backend_source}")
 
     set(_ai_chat_cpu_pass3_needle [=[if (ggml_backend_supports_op(sched->backends[b], node)) {]=])
-    set(_ai_chat_cpu_pass3_replacement [=[if (ggml_backend_supports_op(sched->backends[b], node) &&
+    set(_ai_chat_cpu_pass3_replacement [=[// AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK_PASS3: do not assign compute ops to CPU.
+                if (ggml_backend_supports_op(sched->backends[b], node) &&
                     !(b == sched->n_backends - 1 && node->op != GGML_OP_NONE)) {]=])
     string(FIND "${_ai_chat_backend_source}" "${_ai_chat_cpu_pass3_needle}" _ai_chat_cpu_pass3_location)
     if(_ai_chat_cpu_pass3_location EQUAL -1)
@@ -107,8 +108,9 @@ if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK
     file(WRITE "${_ai_chat_backend_cpp}" "${_ai_chat_backend_source}")
 endif()
 file(READ "${_ai_chat_backend_cpp}" _ai_chat_backend_verify)
-if(NOT _ai_chat_backend_verify MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK")
-    message(FATAL_ERROR "CPU compute fallback guard missing; refusing a CPU-fallback runtime")
+if(NOT _ai_chat_backend_verify MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK" OR
+   NOT _ai_chat_backend_verify MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK_PASS3")
+    message(FATAL_ERROR "Both CPU compute fallback guards must be applied; refusing a CPU-fallback runtime")
 endif()
 
 
