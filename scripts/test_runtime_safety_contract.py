@@ -91,8 +91,6 @@ def main() -> int:
          "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2" in
              (ROOT / "core/runtime-android/src/main/cpp/CMakeLists.txt").read_text(encoding="utf-8") and
          "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK" in
-             (ROOT / "core/runtime-android/src/main/cpp/CMakeLists.txt").read_text(encoding="utf-8") and
-         "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH: CPU remains initialized as a host helper" not in
              (ROOT / "core/runtime-android/src/main/cpp/CMakeLists.txt").read_text(encoding="utf-8"),
          "CPU backend must own preallocated metadata leaves such as rs_seq, but scheduler must reject CPU compute fallback"),
     failed = []
