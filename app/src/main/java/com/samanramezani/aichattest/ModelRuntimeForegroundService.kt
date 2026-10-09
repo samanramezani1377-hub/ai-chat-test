@@ -9,7 +9,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 
 /**
- * Keeps the native llama.cpp/OpenCL runtime process important while a model is active.
+ * Keeps the native llama.cpp/OpenGL ES runtime process important while a model is active.
  * The service does not create another runtime or duplicate model memory.
  */
 class ModelRuntimeForegroundService : Service() {
@@ -64,7 +64,7 @@ class ModelRuntimeForegroundService : Service() {
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.stat_sys_warning)
             .setContentTitle("مدل محلی فعال است")
-            .setContentText("اجرای llama.cpp/OpenCL در پس‌زمینه حفظ می‌شود")
+            .setContentText("اجرای llama.cpp/OpenGL ES در پس‌زمینه حفظ می‌شود")
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
