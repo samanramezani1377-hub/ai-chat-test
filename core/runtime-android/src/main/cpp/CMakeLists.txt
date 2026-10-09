@@ -170,8 +170,8 @@ if(_llama_backend_verify MATCHES "GGML_ASSERT\\(ggml_backend_dev_type\\(ggml_bac
     message(FATAL_ERROR "Upstream CPU-tail assertion remains active; refusing to build an unusable GPU-only scheduler")
 endif()
 
-# Trace allocations inside llm_graph_result::reset(). The latest device log
-# stops while constructing this object, before the scheduler itself is created.
+# Trace allocations inside llm_graph_result::reset(). Keep these markers for
+# separating graph-result allocation failures from scheduler-constructor failures.
 set(_llama_graph_cpp "${llama_cpp_SOURCE_DIR}/src/llama-graph.cpp")
 file(READ "${_llama_graph_cpp}" _llama_graph_source)
 if(NOT _llama_graph_source MATCHES "AI_CHAT_GRAPH_RESULT_TRACE_PATCH")
