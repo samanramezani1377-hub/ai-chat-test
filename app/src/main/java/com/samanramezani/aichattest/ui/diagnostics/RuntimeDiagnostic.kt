@@ -189,7 +189,7 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
         appendLine("Meaning: ${resolved.message}")
         appendLine("Suggested action: ${resolved.action}")
     } else appendLine("Error: N/A")
-    val cleanError = (rawError ?: error)?.replace(Regex("\s+"), " ")?.take(220)
+    val cleanError = (rawError ?: error)?.replace(Regex("\\s+"), " ")?.take(220)
     if (!cleanError.isNullOrBlank()) appendLine("Raw error: $cleanError")
     appendLine("----- Key native diagnostics -----")
     if (keyLines.isEmpty()) appendLine("No specific native failure marker captured.")
@@ -345,7 +345,7 @@ private fun compactCompletedPhases(lines: List<String>): List<String> {
                         line.contains("tokens=", true) || line.contains("MiB", true) ||
                         line.contains("ms", true)
                 }
-                .distinct().takeLast(3).toList()
+                .distinct().toList().takeLast(3)
             output += "✓ مرحله «${phase.name}» تکمیل شد${duration?.let { "؛ زمان: $it" } ?: ""}."
             detail.forEach { output += "  • ${it.take(240)}" }
         }
