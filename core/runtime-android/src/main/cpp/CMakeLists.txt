@@ -116,14 +116,14 @@ endforeach()
 set(AI_CHAT_OPENCL_SOURCE "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-opencl/ggml-opencl.cpp")
 file(READ "${AI_CHAT_OPENCL_SOURCE}" AI_CHAT_OPENCL_SOURCE_TEXT)
 set(AI_CHAT_UNKNOWN_GPU_REJECTION [=[
-GGML_LOG_WARN("ggml_opencl: unsupported GPU '%s'.\\n", dev_ctx->device_name.c_str());
+GGML_LOG_WARN("ggml_opencl: unsupported GPU '%s'.\n", dev_ctx->device_name.c_str());
         dev_ctx->gpu_family = GPU_FAMILY::UNKNOWN;
         return false;
 ]=])
 string(FIND "${AI_CHAT_OPENCL_SOURCE_TEXT}" "${AI_CHAT_UNKNOWN_GPU_REJECTION}" AI_CHAT_UNKNOWN_GPU_REJECTION_POS)
 if (NOT AI_CHAT_UNKNOWN_GPU_REJECTION_POS EQUAL -1)
     set(AI_CHAT_UNKNOWN_GPU_ACCEPTANCE [=[
-GGML_LOG_WARN("ggml_opencl: unknown GPU family '%s'; attempting portable OpenCL kernels after feature checks.\\n", dev_ctx->device_name.c_str());
+GGML_LOG_WARN("ggml_opencl: unknown GPU family '%s'; attempting portable OpenCL kernels after feature checks.\n", dev_ctx->device_name.c_str());
         dev_ctx->gpu_family = GPU_FAMILY::UNKNOWN;
 ]=])
     string(REPLACE "${AI_CHAT_UNKNOWN_GPU_REJECTION}" "${AI_CHAT_UNKNOWN_GPU_ACCEPTANCE}"
