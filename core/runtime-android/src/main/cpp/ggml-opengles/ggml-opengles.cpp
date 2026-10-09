@@ -809,8 +809,11 @@ static bool supports_op(ggml_backend_dev_t, const ggml_tensor * op) {
         op->src[0]->ne[1] == op->src[1]->ne[1]) return true;
     if ((op->op == GGML_OP_UNARY && ggml_get_unary_op(op) == GGML_UNARY_OP_SILU) && op->type == GGML_TYPE_F32 &&
         op->src[0] && op->src[0]->type == GGML_TYPE_F32) return true;
+    // Scheduler support checks happen before graph_compute() lazily compiles shader programs.
+    // Do not require g_gdn != 0 here: doing so makes GATED_DELTA_NET appear unsupported
+    // during sched_reserve and can abort GPU-only context initialization.
     if (op->op == GGML_OP_GATED_DELTA_NET && opengles_runtime_info().max_compute_ssbo_blocks >= 7 &&
-        g_gdn != 0 && op->type == GGML_TYPE_F32 &&
+        op->type == GGML_TYPE_F32 &&
         op->src[0] && op->src[1] && op->src[2] && op->src[3] && op->src[4] && op->src[5] &&
         op->src[0]->type == GGML_TYPE_F32 && op->src[1]->type == GGML_TYPE_F32 &&
         op->src[2]->type == GGML_TYPE_F32 && op->src[3]->type == GGML_TYPE_F32 &&
