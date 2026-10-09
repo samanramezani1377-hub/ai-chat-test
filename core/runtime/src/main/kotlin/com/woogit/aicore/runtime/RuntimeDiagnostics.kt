@@ -173,8 +173,8 @@ object RuntimeDiagnosticsStore {
         GpuDeviceProfile(
             name = nativeField(line, "name")?.replace('_', ' ') ?: "unknown",
             description = nativeField(line, "description")?.replace('_', ' ') ?: "unknown",
-            memoryFreeMiB = nativeField(line, "memoryFreeMiB")?.toDoubleOrNull(),
-            memoryTotalMiB = nativeField(line, "memoryTotalMiB")?.toDoubleOrNull(),
+            memoryFreeMiB = if (nativeField(line, "memoryKnown") == "1") nativeField(line, "memoryFreeMiB")?.toDoubleOrNull() else null,
+            memoryTotalMiB = if (nativeField(line, "memoryKnown") == "1") nativeField(line, "memoryTotalMiB")?.toDoubleOrNull() else null,
             memoryKnown = nativeField(line, "memoryKnown") == "1",
         )
     }.getOrNull()
