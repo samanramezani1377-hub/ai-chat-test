@@ -18,9 +18,9 @@
 #include <vector>
 #include <limits>
 
-namespace {
-
 extern "C" void ai_chat_native_trace(const char *text);
+
+namespace {
 
 // Keep backend failures in the app's exported diagnostic report, not only stderr.
 static void backend_diagnostic(const char *format, ...) {
