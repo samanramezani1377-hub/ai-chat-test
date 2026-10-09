@@ -31,7 +31,7 @@ def main() -> int:
 
     native, gpu, adapter, bridge = [p.read_text(encoding="utf-8") for p in paths]
     load = section(native, "Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad", "Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeStop")
-    context = section(native, "static bool init_generation_context", "static bool init_speculative_runtime")
+    context = section(native, "static bool init_generation_context() {", "static bool init_speculative_runtime() {")
     support = section(gpu, "static bool supports_op", "static enum ggml_status graph_compute")
     ensure = section(gpu, "static bool ensure_programs", "static size_t tensor_offset")
     graph = section(gpu, "static enum ggml_status graph_compute", "static ggml_backend_i ggml_backend_opengles")
