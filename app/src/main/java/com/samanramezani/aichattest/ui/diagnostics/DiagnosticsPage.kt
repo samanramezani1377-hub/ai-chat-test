@@ -119,12 +119,12 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
                         Text(if (hasError) "کپی گزارش + لاگ کامل خطا" else "کپی خلاصهٔ گزارش")
                     }
                     OutlinedButton(
-                        onClick = { copyToClipboard(context, if (hasError) "لاگ کامل مرحله ناموفق" else "خلاصه مراحل تکمیل‌شده", nativeLines.joinToString("\n")) },
+                        onClick = { copyToClipboard(context, if (hasError) "لاگ کامل Native" else "لاگ Native", diagnostic.fullNativeLogLines().joinToString("\n")) },
                         modifier = Modifier.weight(1f),
                     ) {
                         Icon(Icons.Default.Terminal, null)
                         Spacer(Modifier.width(6.dp))
-                        Text(if (hasError) "کپی لاگ کامل مرحله" else "کپی خلاصه مراحل تکمیل‌شده")
+                        Text(if (hasError) "کپی لاگ خام کامل" else "کپی لاگ خام")
                     }
                 }
             }
@@ -206,7 +206,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
 
             DiagnosticsSection.LOGS -> {
                 SectionCard("لاگ خام Native") {
-                    Text(if (hasError) "مرحلهٔ ناموفق است؛ لاگ‌های کامل همان مرحله نمایش داده می‌شوند." else "برای هر مرحلهٔ تکمیل‌شده خلاصه نمایش داده می‌شود؛ مرحلهٔ ناتمام با لاگ کامل می‌آید.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (hasError) "نمایش خلاصهٔ خطا (حداکثر ۳۰ خط)؛ برای بررسی عمیق از دکمهٔ کپی لاگ خام کامل استفاده کن." else "خلاصهٔ مراحل نمایش داده می‌شود؛ لاگ خام فقط با دکمهٔ کپی دریافت می‌شود."), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(
                         value = logQuery,
                         onValueChange = { logQuery = it },
@@ -221,7 +221,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
                         },
                     )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(if (hasError) "${filteredLines.size} خط کامل از مرحلهٔ ناموفق" else "${filteredLines.size} خط نمونه (حداکثر ۵۰)", style = MaterialTheme.typography.labelMedium)
+                        Text(if (hasError) "${filteredLines.size} خط خلاصهٔ خطا (حداکثر ۳۰)" else "${filteredLines.size} خط خلاصه (حداکثر ۳۰)", style = MaterialTheme.typography.labelMedium)
                         TextButton(onClick = { copyToClipboard(context, "لاگ فیلترشده", filteredLines.joinToString("\n")) }) {
                             Icon(Icons.Default.ContentCopy, null)
                             Spacer(Modifier.width(4.dp))
