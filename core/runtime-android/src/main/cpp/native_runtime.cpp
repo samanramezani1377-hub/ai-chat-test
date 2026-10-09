@@ -401,12 +401,11 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         append_native_trace("VULKAN_BACKEND_INITIALIZATION_STARTED");
         const bool registered = register_static_vulkan_backend();
         if (registered) {
+            // The backend registry must be populated before llama's backend init.
+            ggml_backend_load_all();
             append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
             llama_backend_init();
             append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_RETURNED");
-            // Vulkan's registration owns its physical-device enumeration; load any
-            // other statically linked registrations without enabling CPU fallback.
-            ggml_backend_load_all();
             g_gpu_backend_loaded = has_vulkan_gpu_device();
         } else {
             g_gpu_backend_loaded = false;
