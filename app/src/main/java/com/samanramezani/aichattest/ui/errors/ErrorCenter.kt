@@ -29,9 +29,8 @@ internal object ErrorCenter {
                     "حجم متن ورودی برای این اجرا بیش از حد مجاز است.",
                     "متن را کوتاه‌تر کن یا آن را در چند پیام بفرست.", technical)
 
-            // The driver probe can successfully enumerate a real GPU while the
-            // pinned ggml-vulkan backend rejects its GPU family. Report that distinctly:
-            // asking the user to reinstall/check a working driver is misleading here.
+            // Distinguish an explicit Vulkan physical-device/feature rejection from a
+            // generic model load failure; CPU fallback remains deliberately disabled.
             "unsupported gpu" in text || "drop unsupported device" in text ->
                 PersianError("VULKAN-003", "GPU شناسایی شد اما پشتیبانی نمی‌شود",
                     "درایور Vulkan سالم است و دستگاه GPU شناسایی شده، اما backend Vulkan نتوانسته دستگاه قابل استفاده‌ای ثبت کند. مدل فعال نشده است.",
@@ -39,7 +38,8 @@ internal object ErrorCenter {
                     technical)
 
             "VULKAN_GPU_ONLY_REJECTED_NO_VULKAN_GPU_DEVICE".lowercase() in text ||
-                "platform ids not available" in text ||
+                "failed to enumerate physical devices" in text ||
+                "no compatible physical device" in text ||
                 "no vulkan gpu device" in text ->
                 PersianError("VULKAN-001", "GPU ‏Vulkan پیدا نشد",
                     "برنامه نتوانست یک دستگاه GPU قابل استفاده از درایور Vulkan پیدا کند.",
