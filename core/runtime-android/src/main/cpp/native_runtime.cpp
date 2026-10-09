@@ -263,6 +263,25 @@ static void configure_android_icd_search_path() {
 using cl_get_platform_ids_fn = cl_int (CL_API_CALL *)(cl_uint, cl_platform_id *, cl_uint *);
 using cl_icd_get_platform_ids_khr_fn = cl_int (CL_API_CALL *)(cl_uint, cl_platform_id *, cl_uint *);
 
+static std::string take_dlerror() {
+    const char *error = dlerror();
+    return error ? std::string(error) : std::string("none");
+}
+
+static std::string direct_platform_string(
+    cl_int (CL_API_CALL *get_platform_info)(cl_platform_id, cl_platform_info, size_t, void *, size_t *),
+    cl_platform_id platform,
+    cl_platform_info field) {
+    size_t size = 0;
+    if (!get_platform_info || get_platform_info(platform, field, 0, nullptr, &size) != CL_SUCCESS || size == 0) {
+        return "<unavailable>";
+    }
+    std::string value(size, '\0');
+    if (get_platform_info(platform, field, size, value.data(), nullptr) != CL_SUCCESS) return "<unavailable>";
+    if (!value.empty() && value.back() == '\0') value.pop_back();
+    return value;
+}
+
 static bool probe_android_vendor_icd_candidates() {
     append_native_trace("OPENCL_VENDOR_ICD_DIRECT_PROBE_STARTED");
     const char * candidates[] = {
@@ -280,63 +299,139 @@ static bool probe_android_vendor_icd_candidates() {
     for (const char *path : candidates) {
         (void) dlerror();
         void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-        const char *load_error = handle ? nullptr : dlerror();
+        const std::string load_error = handle ? "none" : take_dlerror();
         if (!handle) {
-            append_native_trace((std::string("OPENCL_VENDOR_ICD_CANDIDATE path=") + path +
-                " dlopen=0 error=" + (load_error ? load_error : "none")).c_str());
+            append_native_trace((std::string("OPENCL_VENDOR_LIBRARY_CANDIDATE path=") + path +
+                " dlopen=0 error=" + load_error).c_str());
             continue;
         }
 
         (void) dlerror();
         auto get_platforms = reinterpret_cast<cl_get_platform_ids_fn>(dlsym(handle, "clGetPlatformIDs"));
-        const char *get_platforms_error = dlerror();
+        const std::string get_platforms_error = take_dlerror();
         (void) dlerror();
         auto get_icd_platforms = reinterpret_cast<cl_icd_get_platform_ids_khr_fn>(
             dlsym(handle, "clIcdGetPlatformIDsKHR"));
-        const char *icd_error = dlerror();
+        const std::string icd_symbol_error = take_dlerror();
         (void) dlerror();
-        void *get_platform_info = dlsym(handle, "clGetPlatformInfo");
-        const char *info_error = dlerror();
+        auto get_platform_info = reinterpret_cast<
+            cl_int (CL_API_CALL *)(cl_platform_id, cl_platform_info, size_t, void *, size_t *)>(
+                dlsym(handle, "clGetPlatformInfo"));
+        const std::string platform_info_error = take_dlerror();
+        (void) dlerror();
+        auto get_devices = reinterpret_cast<
+            cl_int (CL_API_CALL *)(cl_platform_id, cl_device_type, cl_uint, cl_device_id *, cl_uint *)>(
+                dlsym(handle, "clGetDeviceIDs"));
+        const std::string get_devices_error = take_dlerror();
+        (void) dlerror();
+        auto get_device_info = reinterpret_cast<
+            cl_int (CL_API_CALL *)(cl_device_id, cl_device_info, size_t, void *, size_t *)>(
+                dlsym(handle, "clGetDeviceInfo"));
+        const std::string device_info_error = take_dlerror();
         (void) dlerror();
         void *get_extension_function_address = dlsym(handle, "clGetExtensionFunctionAddress");
-        const char *extension_error = dlerror();
+        const std::string extension_error = take_dlerror();
 
         cl_uint direct_count = 0;
         cl_int direct_result = (cl_int)-9999;
         if (get_platforms) direct_result = get_platforms(0, nullptr, &direct_count);
 
-        cl_uint icd_count = 0;
-        cl_int icd_result = (cl_int)-9999;
-        if (get_icd_platforms) icd_result = get_icd_platforms(0, nullptr, &icd_count);
-
-        append_native_trace((std::string("OPENCL_VENDOR_ICD_CANDIDATE path=") + path +
+        append_native_trace((std::string("OPENCL_VENDOR_LIBRARY_CANDIDATE path=") + path +
             " dlopen=1 clGetPlatformIDs=" + (get_platforms ? "1" : "0") +
-            " getPlatformIDsError=" + (get_platforms_error ? get_platforms_error : "none") +
+            " getPlatformIDsError=" + get_platforms_error +
             " directResult=" + std::to_string((int)direct_result) +
             " directName=" + opencl_error_name(direct_result) +
             " directPlatformCount=" + std::to_string(direct_count) +
             " clIcdGetPlatformIDsKHR=" + (get_icd_platforms ? "1" : "0") +
-            " icdError=" + (icd_error ? icd_error : "none") +
-            " icdResult=" + std::to_string((int)icd_result) +
-            " icdName=" + opencl_error_name(icd_result) +
-            " icdPlatformCount=" + std::to_string(icd_count) +
+            " icdSymbolError=" + icd_symbol_error +
             " clGetPlatformInfo=" + (get_platform_info ? "1" : "0") +
-            " platformInfoError=" + (info_error ? info_error : "none") +
+            " platformInfoError=" + platform_info_error +
+            " clGetDeviceIDs=" + (get_devices ? "1" : "0") +
+            " getDeviceIDsError=" + get_devices_error +
+            " clGetDeviceInfo=" + (get_device_info ? "1" : "0") +
+            " deviceInfoError=" + device_info_error +
             " clGetExtensionFunctionAddress=" + (get_extension_function_address ? "1" : "0") +
-            " extensionAddressError=" + (extension_error ? extension_error : "none")).c_str());
+            " extensionAddressError=" + extension_error).c_str());
 
-        // Khronos requires these entry points for an ICD candidate. A plain
-        // loader or a library exposing only the core API is not injected.
-        if (get_icd_platforms && get_platform_info && get_extension_function_address &&
-            icd_result == CL_SUCCESS && icd_count > 0) {
-            if (setenv("OCL_ICD_FILENAMES", path, 1) == 0) {
-                append_native_trace((std::string("OPENCL_VENDOR_ICD_SELECTED path=") +
-                    path + " reason=icd_entrypoint_and_platform_verified").c_str());
-                dlclose(handle);
-                append_native_trace("OPENCL_VENDOR_ICD_DIRECT_PROBE_COMPLETED selected=1");
-                return true;
+        // Collect identity information through the exact library that returned the
+        // direct platform count. Do not assume that a successful dlopen means this
+        // is an ICD, or inject a non-ICD loader into OCL_ICD_FILENAMES.
+        if (get_platforms && direct_result == CL_SUCCESS && direct_count > 0) {
+            std::vector<cl_platform_id> platforms(direct_count);
+            const cl_int platforms_result = get_platforms(direct_count, platforms.data(), nullptr);
+            append_native_trace((std::string("OPENCL_DIRECT_PLATFORM_LIST path=") + path +
+                " result=" + std::to_string((int)platforms_result) +
+                " count=" + std::to_string(platforms_result == CL_SUCCESS ? direct_count : 0)).c_str());
+            if (platforms_result == CL_SUCCESS) {
+                for (cl_uint i = 0; i < direct_count; ++i) {
+                    const std::string name = direct_platform_string(get_platform_info, platforms[i], CL_PLATFORM_NAME);
+                    const std::string vendor = direct_platform_string(get_platform_info, platforms[i], CL_PLATFORM_VENDOR);
+                    const std::string version = direct_platform_string(get_platform_info, platforms[i], CL_PLATFORM_VERSION);
+                    cl_uint gpu_count = 0;
+                    const cl_int gpu_result = get_devices
+                        ? get_devices(platforms[i], CL_DEVICE_TYPE_GPU, 0, nullptr, &gpu_count)
+                        : (cl_int)-9999;
+                    append_native_trace((std::string("OPENCL_DIRECT_PLATFORM path=") + path +
+                        " index=" + std::to_string(i) + " name=" + name +
+                        " vendor=" + vendor + " version=" + version +
+                        " gpuQueryResult=" + std::to_string((int)gpu_result) +
+                        " gpuQueryName=" + opencl_error_name(gpu_result) +
+                        " gpuCount=" + std::to_string(gpu_count)).c_str());
+                    if (gpu_result == CL_SUCCESS && gpu_count > 0 && get_device_info) {
+                        std::vector<cl_device_id> devices(gpu_count);
+                        const cl_int device_list_result = get_devices(
+                            platforms[i], CL_DEVICE_TYPE_GPU, gpu_count, devices.data(), nullptr);
+                        if (device_list_result == CL_SUCCESS) {
+                            for (cl_uint d = 0; d < gpu_count; ++d) {
+                                const std::string device_name = direct_platform_string(
+                                    reinterpret_cast<cl_int (CL_API_CALL *)(cl_platform_id, cl_platform_info, size_t, void *, size_t *)>(nullptr),
+                                    nullptr, 0);
+                                (void)device_name;
+                                auto read_device_string = [&](cl_device_info field) -> std::string {
+                                    size_t size = 0;
+                                    if (get_device_info(devices[d], field, 0, nullptr, &size) != CL_SUCCESS || size == 0)
+                                        return "<unavailable>";
+                                    std::string value(size, '\0');
+                                    if (get_device_info(devices[d], field, size, value.data(), nullptr) != CL_SUCCESS)
+                                        return "<unavailable>";
+                                    if (!value.empty() && value.back() == '\0') value.pop_back();
+                                    return value;
+                                };
+                                append_native_trace((std::string("OPENCL_DIRECT_GPU path=") + path +
+                                    " platform=" + std::to_string(i) + "." + std::to_string(d) +
+                                    " name=" + read_device_string(CL_DEVICE_NAME) +
+                                    " vendor=" + read_device_string(CL_DEVICE_VENDOR) +
+                                    " driver=" + read_device_string(CL_DRIVER_VERSION) +
+                                    " version=" + read_device_string(CL_DEVICE_VERSION)).c_str());
+                            }
+                        }
+                    }
+                }
             }
-            append_native_trace((std::string("OPENCL_VENDOR_ICD_SELECT_FAILED path=") + path).c_str());
+        }
+
+        // Only a genuine ICD implementation with its ICD entry point and a
+        // non-empty platform list can be passed to the bundled Khronos loader.
+        if (get_icd_platforms && get_platform_info && get_extension_function_address) {
+            cl_uint icd_count = 0;
+            const cl_int icd_result = get_icd_platforms(0, nullptr, &icd_count);
+            append_native_trace((std::string("OPENCL_VENDOR_ICD_VALIDATION path=") + path +
+                " result=" + std::to_string((int)icd_result) +
+                " name=" + opencl_error_name(icd_result) +
+                " platformCount=" + std::to_string(icd_count)).c_str());
+            if (icd_result == CL_SUCCESS && icd_count > 0) {
+                if (setenv("OCL_ICD_FILENAMES", path, 1) == 0) {
+                    append_native_trace((std::string("OPENCL_VENDOR_ICD_SELECTED path=") + path +
+                        " reason=icd_entrypoint_and_platform_verified").c_str());
+                    dlclose(handle);
+                    append_native_trace("OPENCL_VENDOR_ICD_DIRECT_PROBE_COMPLETED selected=1");
+                    return true;
+                }
+                append_native_trace((std::string("OPENCL_VENDOR_ICD_SELECT_FAILED path=") + path).c_str());
+            }
+        } else if (get_platforms && direct_result == CL_SUCCESS && direct_count > 0) {
+            append_native_trace((std::string("OPENCL_DIRECT_API_AVAILABLE_BUT_NOT_ICD path=") + path +
+                " reason=core_platforms_found_without_required_icd_entrypoints").c_str());
         }
         dlclose(handle);
     }
