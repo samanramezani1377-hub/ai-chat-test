@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <vector>
 #include <dlfcn.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <ucontext.h>
 #include "llama.h"
@@ -185,6 +186,74 @@ static void probe_android_opencl_library_visibility() {
         if (handle) dlclose(handle);
     }
     append_native_trace("OPENCL_LIBRARY_VISIBILITY_PROBE_COMPLETED");
+}
+
+static bool has_icd_vendor_file(const char *directory) {
+    if (!directory || !*directory) return false;
+    DIR *dir = opendir(directory);
+    if (!dir) {
+        append_native_trace((std::string("OPENCL_ICD_DIRECTORY path=") + directory +
+            " readable=0 reason=opendir_failed").c_str());
+        return false;
+    }
+
+    bool found = false;
+    struct dirent *entry = nullptr;
+    while ((entry = readdir(dir)) != nullptr) {
+        const std::string name(entry->d_name);
+        if (name == "." || name == "..") continue;
+        const bool icd_file = name.size() >= 4 &&
+            (name.compare(name.size() - 4, 4, ".icd") == 0 ||
+             (name.size() >= 6 && name.compare(name.size() - 6, 6, ".icd64") == 0));
+        if (!icd_file) continue;
+
+        const std::string full_path = std::string(directory) + "/" + name;
+        std::ifstream input(full_path);
+        std::string library;
+        std::getline(input, library);
+        while (!library.empty() && (library.back() == '\\r' || library.back() == ' ' || library.back() == '\\t')) {
+            library.pop_back();
+        }
+        size_t first = library.find_first_not_of(" \\t");
+        if (first != std::string::npos) library.erase(0, first);
+        append_native_trace((std::string("OPENCL_ICD_FILE path=") + full_path +
+            " readable=" + (input.good() || !library.empty() ? "1" : "0") +
+            " library=" + (library.empty() ? "<empty>" : library)).c_str());
+        if (!library.empty()) found = true;
+    }
+    closedir(dir);
+    append_native_trace((std::string("OPENCL_ICD_DIRECTORY path=") + directory +
+        " readable=1 hasUsableIcd=" + (found ? "1" : "0")).c_str());
+    return found;
+}
+
+static void configure_android_icd_search_path() {
+    append_native_trace("OPENCL_ICD_DIRECTORY_DISCOVERY_STARTED");
+    // The Khronos loader's Android default is /system/vendor/Khronos/OpenCL/vendors,
+    // but some vendor images put ICD manifests under /vendor/etc/OpenCL/vendors.
+    // Only override the loader path when a real manifest is present; never point it
+    // at a guessed directory or at libOpenCL.so (which can be the loader itself).
+    const char * candidates[] = {
+        "/system/vendor/Khronos/OpenCL/vendors",
+        "/vendor/etc/OpenCL/vendors",
+        "/odm/etc/OpenCL/vendors",
+        "/vendor/Khronos/OpenCL/vendors",
+        "/system_ext/vendor/Khronos/OpenCL/vendors",
+    };
+    for (const char *directory : candidates) {
+        if (!has_icd_vendor_file(directory)) continue;
+        if (setenv("OCL_ICD_VENDORS", directory, 1) == 0) {
+            append_native_trace((std::string("OPENCL_ICD_SEARCH_PATH_SELECTED path=") +
+                directory + " source=discovered_manifest").c_str());
+        } else {
+            append_native_trace((std::string("OPENCL_ICD_SEARCH_PATH_SET_FAILED path=") +
+                directory).c_str());
+        }
+        append_native_trace("OPENCL_ICD_DIRECTORY_DISCOVERY_COMPLETED");
+        return;
+    }
+    append_native_trace("OPENCL_ICD_SEARCH_PATH_SELECTED path=<loader_default> source=no_manifest_found");
+    append_native_trace("OPENCL_ICD_DIRECTORY_DISCOVERY_COMPLETED");
 }
 
 static void probe_android_opencl_driver() {
@@ -550,7 +619,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         // hard-coding guessed directories can hide the device vendor's real ICD.
         unsetenv("OCL_ICD_VENDORS");
         append_native_trace("OPENCL_ICD_FILENAMES_CLEARED_ANDROID_LOADER");
-        append_native_trace("OPENCL_ICD_VENDORS_CLEARED_USE_ANDROID_DEFAULT");
+        append_native_trace("OPENCL_ICD_VENDORS_CLEARED_BEFORE_DISCOVERY");
+        configure_android_icd_search_path();
         append_native_trace("OPENCL_Q6K_KERNEL_OVERRIDES=NONE");
         append_native_trace("OPENCL_STATIC_REGISTRATION_STARTED");
         probe_android_opencl_library_visibility();
