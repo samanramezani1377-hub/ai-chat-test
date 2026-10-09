@@ -642,42 +642,17 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
     // GPU layers remain enabled without relying on the fragile mmap buffer import.
     mp.load_mode = LLAMA_LOAD_MODE_NONE;
     mp.check_tensors = false;
-    // GPU-only loading must not advertise GPU host buffers as CPU-side placement options.
-    // Keep host staging disabled for GPU activation; never silently fall back to host weights.
-    mp.no_host = gpu;
-
-    // GPU-only mode must place the input embedding tensor on OpenGL ES too.
-    // llama.cpp may otherwise select the CPU_REPACK buffer for token_embd.weight,
-    // leaving a large host-resident model tensor even when every transformer
-    // layer is reported as offloaded. Force only that tensor to the OpenGL ES
-    // device buffer; GET_ROWS(Q6_K) is implemented by this backend.
-    ggml_backend_dev_t opengles_dev = nullptr;
-    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
-        ggml_backend_dev_t candidate = ggml_backend_dev_get(i);
-        const char * name = candidate ? ggml_backend_dev_name(candidate) : nullptr;
-        if (name && std::string(name) == "OpenGL ES") {
-            opengles_dev = candidate;
-            break;
-        }
-    }
-    if (gpu) {
-        if (!opengles_dev) {
-            checkpoint("OPENGL_ES_GPU_ONLY_REJECTED_NO_DEVICE_FOR_EMBEDDING_OVERRIDE");
-            return nullptr;
-        }
-        // llama.cpp normally keeps token_embd.weight in a host buffer on some
-        // architectures even when every transformer block is offloaded. In this
-        // runtime GET_ROWS(Q6_K) is implemented by OpenGL ES, so explicitly select
-        // the OpenGL ES buffer type for the input embedding tensor as well.
-        // The regex is anchored to avoid overriding similarly named tensors.
-        const llama_model_tensor_buft_override gpu_tensor_overrides[] = {
-            { "token_embd\\.weight", ggml_backend_dev_buffer_type(opengles_dev) },
-            { nullptr, nullptr },
-        };
-        mp.tensor_buft_overrides = gpu_tensor_overrides;
-        append_native_trace("OPENGL_ES_GPU_ONLY_STRICT_PLACEMENT enabled=1 no_host=1 token_embedding_override=OpenGL_ES");
-
-    }
+    // Allow llama.cpp to keep token_embd.weight in its supported host/CPU buffer
+    // while offloading the transformer weights to OpenGL ES. This is intentional:
+    // mixed embedding residency is permitted, and CPU fallback for the whole model
+    // remains disabled because n_gpu_layers is set to 999 by the caller.
+    // Forcing the large Q6_K embedding tensor onto OpenGL ES can make context
+    // initialization fail on mobile drivers, so do not override its buffer type.
+    mp.no_host = false;
+    mp.tensor_buft_overrides = nullptr;
+    append_native_trace((std::string("OPENGL_ES_MIXED_RESIDENCY_POLICY enabled=") +
+        (gpu ? "1" : "0") +
+        " no_host=0 token_embedding_override=disabled cpu_full_model_fallback=disabled").c_str());
     checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_RESIDENT" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
     append_native_trace((std::string("OPENGL_ES_GPU_ONLY_PLACEMENT_POLICY enabled=") + (gpu ? "1" : "0") +
         " no_host=" + (mp.no_host ? "1" : "0") +
