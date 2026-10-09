@@ -140,9 +140,7 @@ static const char * opencl_error_name(cl_int code) {
         case CL_OUT_OF_HOST_MEMORY: return "CL_OUT_OF_HOST_MEMORY";
         case CL_INVALID_VALUE: return "CL_INVALID_VALUE";
         case CL_INVALID_PLATFORM: return "CL_INVALID_PLATFORM";
-#ifdef CL_PLATFORM_NOT_FOUND_KHR
-        case CL_PLATFORM_NOT_FOUND_KHR: return "CL_PLATFORM_NOT_FOUND_KHR";
-#endif
+        case -1001: return "CL_PLATFORM_NOT_FOUND_KHR";
         default: return "CL_UNKNOWN_ERROR";
     }
 }
