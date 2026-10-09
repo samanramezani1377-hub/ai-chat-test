@@ -56,6 +56,62 @@ set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
 
+# GPU-only scheduler contract for recurrent/hybrid models.
+# Keep llama.cpp's CPU backend registered for CPU-resident metadata/control
+# tensors (e.g. rs_seq, GGML_OP_NONE), but forbid CPU execution of computation
+# nodes. Removing CPU from the scheduler entirely makes recurrent graph
+# reservation abort when it encounters preallocated host-side control tensors.
+set(_ai_chat_context_cpp "${llama_cpp_SOURCE_DIR}/src/llama-context.cpp")
+file(READ "${_ai_chat_context_cpp}" _ai_chat_context_source)
+if(NOT _ai_chat_context_source MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2")
+    set(_ai_chat_context_needle [=[            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {]=])
+    set(_ai_chat_context_replacement [=[            // AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2: CPU remains a host helper.
+            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {]=])
+    string(FIND "${_ai_chat_context_source}" "${_ai_chat_context_needle}" _ai_chat_context_location)
+    if(_ai_chat_context_location EQUAL -1)
+        message(FATAL_ERROR "Could not locate pinned llama.cpp CPU host-buffer scheduler block")
+    endif()
+    string(REPLACE "${_ai_chat_context_needle}" "${_ai_chat_context_replacement}" _ai_chat_context_source "${_ai_chat_context_source}")
+    file(WRITE "${_ai_chat_context_cpp}" "${_ai_chat_context_source}")
+endif()
+file(READ "${_ai_chat_context_cpp}" _ai_chat_context_verify)
+if(NOT _ai_chat_context_verify MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2")
+    message(FATAL_ERROR "CPU host-helper scheduler invariant missing; refusing an unsafe build")
+endif()
+
+set(_ai_chat_backend_cpp "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-backend.cpp")
+file(READ "${_ai_chat_backend_cpp}" _ai_chat_backend_source)
+if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK")
+    set(_ai_chat_cpu_assign_needle [=[static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, struct ggml_tensor * node, int cur_backend_id, int * node_backend_id) {
+    if (ggml_backend_supports_op(sched->backends[cur_backend_id], node)) {]=])
+    set(_ai_chat_cpu_assign_replacement [=[static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, struct ggml_tensor * node, int cur_backend_id, int * node_backend_id) {
+    // AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK: CPU is host/metadata-only.
+    if (cur_backend_id == sched->n_backends - 1 && node->op != GGML_OP_NONE) {
+        return;
+    }
+    if (ggml_backend_supports_op(sched->backends[cur_backend_id], node)) {]=])
+    string(FIND "${_ai_chat_backend_source}" "${_ai_chat_cpu_assign_needle}" _ai_chat_cpu_assign_location)
+    if(_ai_chat_cpu_assign_location EQUAL -1)
+        message(FATAL_ERROR "Could not locate pinned ggml scheduler assignment helper")
+    endif()
+    string(REPLACE "${_ai_chat_cpu_assign_needle}" "${_ai_chat_cpu_assign_replacement}" _ai_chat_backend_source "${_ai_chat_backend_source}")
+
+    set(_ai_chat_cpu_pass3_needle [=[if (ggml_backend_supports_op(sched->backends[b], node)) {]=])
+    set(_ai_chat_cpu_pass3_replacement [=[if (ggml_backend_supports_op(sched->backends[b], node) &&
+                    !(b == sched->n_backends - 1 && node->op != GGML_OP_NONE)) {]=])
+    string(FIND "${_ai_chat_backend_source}" "${_ai_chat_cpu_pass3_needle}" _ai_chat_cpu_pass3_location)
+    if(_ai_chat_cpu_pass3_location EQUAL -1)
+        message(FATAL_ERROR "Could not locate pinned ggml scheduler fallback assignment path")
+    endif()
+    string(REPLACE "${_ai_chat_cpu_pass3_needle}" "${_ai_chat_cpu_pass3_replacement}" _ai_chat_backend_source "${_ai_chat_backend_source}")
+    file(WRITE "${_ai_chat_backend_cpp}" "${_ai_chat_backend_source}")
+endif()
+file(READ "${_ai_chat_backend_cpp}" _ai_chat_backend_verify)
+if(NOT _ai_chat_backend_verify MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK")
+    message(FATAL_ERROR "CPU compute fallback guard missing; refusing a CPU-fallback runtime")
+endif()
+
+
 # Android Vulkan drivers are not uniformly reliable with llama.cpp's pinned-memory
 # asynchronous model-upload path. The app has already observed a SIGSEGV at a null
 # address while loading Qwen3.5 immediately after "using async uploads". Disable only
