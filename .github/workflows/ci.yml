@@ -233,6 +233,36 @@ jobs:
           fi
           echo "Static OpenGL ES backend linkage verified: $gl_target -> $native_so"
 
+      - name: Collect unstripped native symbols for crash line resolution
+        run: |
+          set -euo pipefail
+          mkdir -p native-symbols
+          mapfile -t symbol_candidates < <(find core/runtime-android/.cxx -type f -name 'libai_chat_runtime.so' -print)
+          test "${#symbol_candidates[@]}" -gt 0
+          selected=""
+          for candidate in "${symbol_candidates[@]}"; do
+            if readelf -S "$candidate" | grep -q '\\.debug_line'; then
+              selected="$candidate"
+              break
+            fi
+          done
+          if [ -z "$selected" ]; then
+            echo "No unstripped libai_chat_runtime.so with .debug_line found"
+            printf '%s\\n' "${symbol_candidates[@]}"
+            exit 1
+          fi
+          cp "$selected" native-symbols/libai_chat_runtime.so
+          readelf -n "$selected" | grep -A1 'Build ID' > native-symbols/build-id.txt
+          echo "Collected source-line symbols from $selected"
+
+      - name: Upload unstripped native symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-chat-test-native-symbols
+          path: native-symbols/*
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
