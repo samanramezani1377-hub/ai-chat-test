@@ -248,33 +248,60 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
 }
 
 internal fun RuntimeDiagnostic.errorReport(): String = buildString {
-    appendLine("AI Chat Test — Error Report")
-    appendLine()
-    appendLine("===== ERROR =====")
-    appendLine("Status: $status")
-    appendLine("Execution: ${executionId ?: "N/A"}")
-    if (!error.isNullOrBlank()) {
-        val resolved = ErrorCenter.resolve(listOf(error, nativeDiagnostics).filterNotNull().joinToString("\n"))
-        appendLine("Code: ${resolved.code}")
-        appendLine("Title: ${resolved.title}")
-        appendLine("Message: ${resolved.message}")
-        appendLine("Recommended Action: ${resolved.action}")
-        appendLine("Technical: ${resolved.technical}")
-    } else appendLine("Error: N/A")
-    if (!rawError.isNullOrBlank() && rawError != error) appendLine("Raw: $rawError")
-    appendLine()
-    appendLine("===== FAILURE CONTEXT =====")
+    appendLine("AI Chat Test — مختصر خطا")
+    appendLine("Status: $status | Execution: ${executionId ?: "N/A"}")
     appendLine("Model: ${model?.displayName ?: "N/A"}")
-    appendLine("Runtime: ${runtime.name} ${runtime.version}")
-    appendLine("Backend: ${runtime.backend ?: "N/A"}")
-    appendLine("GPU Layers: ${runtime.gpuLayers ?: "N/A"}")
-    appendLine("Context: ${runtime.contextLength ?: "N/A"}")
-    appendLine()
-    appendLine("===== RECENT EVENTS =====")
-    uniqueRuntimeEvents().forEach(::appendLine)
-    appendLine()
-    appendLine("===== NATIVE FAILURE EVENTS =====")
-    importantNativeEvents(includeVerbose = true).forEach(::appendLine)
+    appendLine("Runtime: ${runtime.name} ${runtime.version} | Backend: ${runtime.backend ?: "N/A"}")
+    appendLine("GPU Layers: ${runtime.gpuLayers ?: "N/A"} | Context: ${runtime.contextLength ?: "N/A"}")
+
+    if (!error.isNullOrBlank()) {
+        val resolved = ErrorCenter.resolve(error)
+        appendLine("Code: ${resolved.code} — ${resolved.title}")
+        appendLine("Message: ${resolved.message}")
+        appendLine("Action: ${resolved.action}")
+    } else {
+        appendLine("Error: N/A")
+    }
+
+    // Keep copied error reports small: tensor-by-tensor residency belongs in the full report.
+    val rawLines = sequenceOf(error, rawError, nativeDiagnostics)
+        .filterNotNull()
+        .flatMap { it.lineSequence() }
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .filterNot {
+            it.contains("OPENGL_ES_TENSOR_RESIDENCY") ||
+                it.contains("create_tensor: loading tensor") ||
+                it.contains("unused tensor")
+        }
+        .toList()
+    val priorityMarkers = listOf(
+        "OPENGL_ES_BACKEND_INIT_FAILED", "shader compile failed", "shader link failed",
+        "glError", "EGL", "CONTEXT_INIT_FAILED", "CONTEXT_INIT_RETURNED_FAILED",
+        "MODEL_LOAD_FAILED", "OPENGL_ES_MODEL_LOAD_FAILURE",
+        "OPENGL_ES_GPU_ONLY_VALIDATION", "OPENGL_ES_MODEL_RESIDENCY_GPU_ONLY_REJECTED",
+        "OPENGL_ES_NON_GPU_TENSOR", "OPENGL_ES_RESIDENCY_SUMMARY",
+        "OutOfMemory", "failed to initialize", "allocation failed"
+    )
+    val keyLines = priorityMarkers.flatMap { marker ->
+        rawLines.filter { it.contains(marker, ignoreCase = true) }.takeLast(2)
+    }.distinct().takeLast(8)
+    val fallback = rawLines.filter {
+        it.contains("error", ignoreCase = true) ||
+            it.contains("failed", ignoreCase = true) ||
+            it.contains("exception", ignoreCase = true)
+    }.distinct().takeLast(5)
+    val technical = (keyLines.ifEmpty { fallback }).takeLast(8)
+    if (technical.isNotEmpty()) {
+        appendLine("Technical:")
+        technical.forEach { appendLine(it.take(280)) }
+    }
+
+    val events = uniqueRuntimeEvents().takeLast(4)
+    if (events.isNotEmpty()) {
+        appendLine("Recent events:")
+        events.forEach { appendLine(it.take(180)) }
+    }
 }
 
 private fun RuntimeDiagnostic.uniqueRuntimeEvents(): List<String> {
