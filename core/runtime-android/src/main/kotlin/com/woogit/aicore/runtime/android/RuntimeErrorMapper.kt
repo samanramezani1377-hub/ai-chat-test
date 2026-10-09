@@ -13,22 +13,22 @@ internal object RuntimeErrorMapper {
 
     /**
      * Maps the native GPU-only activation result without misreporting unsupported
-     * OpenCL devices as generic model or inference failures.
+     * Vulkan devices as generic model or inference failures.
      *
      * Native codes are intentionally stable at this boundary:
      * 1 = model load failed, 4 = invalid GPU-layer request,
-     * 5 = no usable OpenCL GPU backend, 6 = GPU-only residency validation failed.
+     * 5 = no usable Vulkan GPU backend, 6 = GPU-only residency validation failed.
      */
     fun nativeLoadFailure(code: Int): ModelError = when (code) {
         4 -> ModelError.RuntimeUnavailable(
-            "Invalid GPU-only configuration. Activate the model with full OpenCL GPU offload."
+            "Invalid GPU-only configuration. Activate the model with full Vulkan GPU offload."
         )
         5 -> ModelError.RuntimeUnavailable(
-            "No supported OpenCL GPU was registered. The GPU family may be unsupported or " +
-                "the vendor OpenCL driver may be unavailable. CPU fallback is disabled; no model was activated."
+            "No supported Vulkan GPU was registered. Vulkan may not expose a usable physical device or " +
+                "the Vulkan loader or vendor driver may be unavailable. CPU fallback is disabled; no model was activated."
         )
         6 -> ModelError.RuntimeUnavailable(
-            "The model could not remain fully resident on the OpenCL GPU. " +
+            "The model could not remain fully resident on the Vulkan GPU. " +
                 "CPU weight fallback is disabled; no model was activated."
         )
         else -> ModelError.LoadFailed("llama.cpp failed to load the model (code=$code)")
