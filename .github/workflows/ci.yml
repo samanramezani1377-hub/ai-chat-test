@@ -123,6 +123,9 @@ jobs:
       - name: Check GGUF loader input and failure contracts
         run: python3 scripts/test_gguf_loader_contract.py
 
+      - name: Check model activation and native context readiness contract
+        run: python3 scripts/test_model_activation_contract.py
+
       - name: Check runtime diagnostics accuracy contract
         run: python3 scripts/test_diagnostics_contract.py
 
