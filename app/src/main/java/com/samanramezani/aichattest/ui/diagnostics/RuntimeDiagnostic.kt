@@ -255,7 +255,7 @@ internal fun RuntimeDiagnostic.errorReport(): String = buildString {
     appendLine("GPU Layers: ${runtime.gpuLayers ?: "N/A"} | Context: ${runtime.contextLength ?: "N/A"}")
 
     if (!error.isNullOrBlank()) {
-        val resolved = ErrorCenter.resolve(error)
+        val resolved = ErrorCenter.resolve(listOf(error, nativeDiagnostics).filterNotNull().joinToString("\\n"))
         appendLine("Code: ${resolved.code} — ${resolved.title}")
         appendLine("Message: ${resolved.message}")
         appendLine("Action: ${resolved.action}")
