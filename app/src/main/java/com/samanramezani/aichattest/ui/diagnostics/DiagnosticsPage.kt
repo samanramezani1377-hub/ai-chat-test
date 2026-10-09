@@ -206,7 +206,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
 
             DiagnosticsSection.LOGS -> {
                 SectionCard("لاگ خام Native") {
-                    Text(if (hasError) "نمایش خلاصهٔ خطا (حداکثر ۳۰ خط)؛ برای بررسی عمیق از دکمهٔ کپی لاگ خام کامل استفاده کن." else "خلاصهٔ مراحل نمایش داده می‌شود؛ لاگ خام فقط با دکمهٔ کپی دریافت می‌شود."), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (hasError) "نمایش خلاصهٔ خطا (حداکثر ۳۰ خط)؛ برای بررسی عمیق از دکمهٔ کپی لاگ خام کامل استفاده کن." else "خلاصهٔ مراحل نمایش داده می‌شود؛ لاگ خام فقط با دکمهٔ کپی دریافت می‌شود.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(
                         value = logQuery,
                         onValueChange = { logQuery = it },
