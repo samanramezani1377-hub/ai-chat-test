@@ -26,6 +26,13 @@
 #include <CL/cl.h>
 #include <set>
 
+// CL_PLATFORM_ICD_SUFFIX_KHR belongs to cl_khr_icd and is not declared by every
+// vendor-neutral OpenCL header package. Keep the standard extension value available
+// for diagnostics without requiring a particular vendor SDK.
+#ifndef CL_PLATFORM_ICD_SUFFIX_KHR
+#define CL_PLATFORM_ICD_SUFFIX_KHR 0x0920
+#endif
+
 #define LOG_TAG "AIChatRuntime"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
