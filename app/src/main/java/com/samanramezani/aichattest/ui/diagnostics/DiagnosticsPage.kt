@@ -69,32 +69,9 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
     ) else null
     val generation = runtime.generation
     val perf = diagnostic.nativePerformance
-    // Show only actionable diagnostics. Tensor-by-tensor residency and model-load
-    // chatter belong in neither the default screen nor the copyable quick report.
-    val nativeLines = remember(runtime.lastNativeEvent) {
-        val lines = runtime.lastNativeEvent.orEmpty().lineSequence()
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .filterNot {
-                it.contains("OPENGL_ES_TENSOR_RESIDENCY") ||
-                    it.contains("create_tensor: loading tensor") ||
-                    it.contains("unused tensor") ||
-                    it.contains("OPENGL_ES_NON_GPU_TENSOR")
-            }
-            .toList()
-        val markers = listOf(
-            "OPENGL_ES_BACKEND_INIT_FAILED", "OPENGL_ES_SHADER_COMPILE_FAILED",
-            "OPENGL_ES_PROGRAM_LINK_FAILED", "OPENGL_ES_PROGRAM_INIT_GL_ERROR",
-            "OPENGL_ES_BUFFER_ALLOCATION_FAILED", "OPENGL_ES_GPU_ONLY_UNSUPPORTED_OP",
-            "OPENGL_ES_INIT_FAILED", "OPENGL_ES_RESIDENCY_SUMMARY",
-            "NATIVE_WEIGHT_RESIDENCY", "CONTEXT_INIT_STARTED", "CONTEXT_INIT_RETURNED_FAILED",
-            "CONTEXT_INIT_FAILED", "llama_init_from_model", "MODEL_LOAD_FAILURE",
-            "failed", "error", "exception", "OutOfMemory"
-        )
-        val important = markers.flatMap { marker ->
-            lines.filter { it.contains(marker, ignoreCase = true) }.takeLast(3)
-        }.distinct()
-        (important.ifEmpty { lines.takeLast(12) }).takeLast(50)
+    // Successful load: concise lifecycle sample. Failed step: retain its full logs.
+    val nativeLines = remember(runtime.lastNativeEvent, hasError, diagnostic.status) {
+        diagnostic.logLines()
     }
     val filteredLines = remember(nativeLines, logQuery) {
         if (logQuery.isBlank()) nativeLines else nativeLines.filter { it.contains(logQuery, ignoreCase = true) }
@@ -134,20 +111,20 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton(
-                        onClick = { copyToClipboard(context, "گزارش عیب‌یابی ۵۰ خطی", diagnostic.report()) },
+                        onClick = { copyToClipboard(context, "گزارش خلاصه عیب‌یابی", if (hasError) diagnostic.errorReport() else diagnostic.report()) },
                         modifier = Modifier.weight(1f),
                     ) {
                         Icon(Icons.Default.ContentCopy, null)
                         Spacer(Modifier.width(6.dp))
-                        Text("کپی گزارش ۵۰ خطی")
+                        Text(if (hasError) "کپی گزارش + لاگ کامل خطا" else "کپی خلاصهٔ گزارش")
                     }
                     OutlinedButton(
-                        onClick = { copyToClipboard(context, "خطاهای مهم Runtime", nativeLines.takeLast(20).joinToString("\n")) },
+                        onClick = { copyToClipboard(context, if (hasError) "لاگ کامل مرحله ناموفق" else "نمونه لاگ بارگذاری", nativeLines.joinToString("\n")) },
                         modifier = Modifier.weight(1f),
                     ) {
                         Icon(Icons.Default.Terminal, null)
                         Spacer(Modifier.width(6.dp))
-                        Text("کپی خطاهای مهم")
+                        Text(if (hasError) "کپی لاگ کامل مرحله" else "کپی نمونه لاگ بارگذاری")
                     }
                 }
             }
@@ -247,7 +224,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
 
             DiagnosticsSection.LOGS -> {
                 SectionCard("لاگ خام Native") {
-                    Text("فقط خطاها و رویدادهای مهم Runtime نمایش داده می‌شوند؛ جزئیات تکراری Tensorها حذف شده‌اند."), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (hasError) "مرحلهٔ ناموفق است؛ لاگ‌های کامل همان مرحله نمایش داده می‌شوند." else "بارگذاری موفق است؛ خلاصه و حداکثر ۵۰ خط نمونه از لاگ بارگذاری نمایش داده می‌شود.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(
                         value = logQuery,
                         onValueChange = { logQuery = it },
@@ -262,7 +239,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
                         },
                     )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("${filteredLines.size} خط مهم (حداکثر ۵۰)", style = MaterialTheme.typography.labelMedium)
+                        Text(if (hasError) "${filteredLines.size} خط کامل از مرحلهٔ ناموفق" else "${filteredLines.size} خط نمونه (حداکثر ۵۰)", style = MaterialTheme.typography.labelMedium)
                         TextButton(onClick = { copyToClipboard(context, "لاگ فیلترشده", filteredLines.joinToString("\n")) }) {
                             Icon(Icons.Default.ContentCopy, null)
                             Spacer(Modifier.width(4.dp))
