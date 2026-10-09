@@ -41,7 +41,7 @@ FetchContent_MakeAvailable(llama_cpp)
 
 # Android GPU-only contract: keep the CPU backend registered for host-side metadata
 # and preallocated GGML_OP_NONE tensors, but never let it execute inference ops.
-# The previous patch removed CPU from the scheduler entirely; recurrent models keep
+# An earlier scheduler variant removed CPU from the scheduler entirely; recurrent models keep
 # rs_seq and related control tensors in CPU buffers, so llama.cpp aborts on those
 # preallocated GGML_OP_NONE leaves during sched_reserve().
 set(_llama_context_cpp "${llama_cpp_SOURCE_DIR}/src/llama-context.cpp")
