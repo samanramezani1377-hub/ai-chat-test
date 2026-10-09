@@ -126,6 +126,9 @@ jobs:
       - name: Check runtime diagnostics accuracy contract
         run: python3 scripts/test_diagnostics_contract.py
 
+      - name: Verify device benchmark regression comparator
+        run: python3 scripts/compare_device_benchmark.py --self-test
+
   android-build:
     name: Android debug build
     runs-on: ubuntu-22.04
