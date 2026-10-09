@@ -75,6 +75,17 @@ jobs:
       - name: Compile every embedded OpenGL ES compute shader
         run: python3 scripts/test_opengles_shaders.py
 
+  gpu-only-contract-tests:
+    name: GPU-only runtime contract tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Verify GPU-only runtime invariants
+        run: python3 scripts/test_gpu_only_contract.py
+
   android-build:
     name: Android debug build
     runs-on: ubuntu-22.04
