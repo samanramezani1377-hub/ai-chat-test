@@ -227,9 +227,26 @@ private fun RuntimeDiagnostic.failedPhaseLog(): List<String> {
     val startIndex = (0..failureIndex).lastOrNull { index ->
         phaseStartMarkers.any { lines[index].contains(it, ignoreCase = true) }
     } ?: maxOf(0, failureIndex - 49)
-    // Preserve every line for the failing phase. Successful earlier phases are
-    // intentionally excluded to keep the failure report actionable.
-    return lines.subList(startIndex, lines.size)
+    // The UI must never dump a 999-line native trace by default. Keep the phase
+    // boundary, failure markers and the most recent distinct diagnostic evidence.
+    val phaseLines = lines.subList(startIndex, lines.size)
+    val keyLines = phaseLines.filter { line ->
+        line.contains("NATIVE_FATAL_", true) ||
+            line.contains("CONTEXT_INIT", true) ||
+            line.contains("MODEL_LOAD_FAILURE", true) ||
+            line.contains("OPENGL_ES_") && (
+                line.contains("FAILED", true) || line.contains("ERROR", true) ||
+                    line.contains("UNSUPPORTED", true)
+            ) ||
+            line.contains("SIGABRT", true) ||
+            line.contains("OutOfMemory", true) ||
+            line.contains("failed to initialize", true) ||
+            line.contains("llama_graph_n_input_tensors", true) ||
+            line.contains(" is used by node ", true) ||
+            line.contains("NATIVE_CHECKPOINT", true)
+    }.distinct()
+    val tail = phaseLines.asReversed().distinct().take(12).asReversed()
+    return (keyLines + tail).distinct().takeLast(30)
 }
 
 internal fun RuntimeDiagnostic.logLines(): List<String> {
@@ -237,15 +254,16 @@ internal fun RuntimeDiagnostic.logLines(): List<String> {
         .map(String::trim).filter(String::isNotBlank).toList()
     if (all.isEmpty()) return emptyList()
 
-    val failure = failedPhaseLog()
-    if (error != null || status.equals("FAILED", true) || status.equals("ERROR", true)) {
-        // An incomplete operation must keep every native line from its phase.
-        return failure.ifEmpty { all }
+    val failed = error != null || status.equals("FAILED", true) || status.equals("ERROR", true)
+    if (failed) {
+        val concise = failedPhaseLog()
+        if (concise.isNotEmpty()) return concise
+        return importantNativeEvents(includeVerbose = false).takeLast(30)
     }
 
-    // Compress each completed phase independently. If a phase has no clear
-    // success marker, keep its detailed lines rather than falsely calling it done.
-    return compactCompletedPhases(all)
+    // Completed phases are summarized. A hard cap also protects against malformed
+    // traces that lack phase markers or contain repetitive backend output.
+    return compactCompletedPhases(all).distinct().takeLast(30)
 }
 
 private data class NativePhase(
@@ -368,17 +386,15 @@ private fun summarizeLooseLines(lines: List<String>, excludedVerbose: List<Strin
         .distinct()
         .toList()
 
-internal fun RuntimeDiagnostic.errorReport(): String {
-    val phaseLog = failedPhaseLog()
-    val completeLog = phaseLog.ifEmpty {
-        if (error != null || status.equals("FAILED", true) || status.equals("ERROR", true))
-            nativeDiagnostics.orEmpty().lineSequence().map(String::trim).filter(String::isNotBlank).toList()
-        else emptyList()
-    }
-    return if (completeLog.isEmpty()) report()
-    else report() + "\n\n===== FULL LOGS FOR FAILED PHASE (${completeLog.size} lines) =====\n" +
-        completeLog.joinToString("\n")
-}
+internal fun RuntimeDiagnostic.errorReport(): String = report()
+
+/** Full raw trace is intentionally available only through the explicit raw-log copy action. */
+internal fun RuntimeDiagnostic.fullNativeLogLines(): List<String> =
+    nativeDiagnostics.orEmpty().lineSequence()
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .takeLast(1000)
+        .toList()
 
 private fun RuntimeDiagnostic.uniqueRuntimeEvents(): List<String> {
     data class EventLine(val timestamp: Long, val text: String, val key: String)
