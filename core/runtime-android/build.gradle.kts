@@ -52,8 +52,11 @@ android {
                 cmake {
                     arguments += listOf(
                         "-DAI_CHAT_OPENGL_DIAGNOSTICS=ON",
-                        "-DCMAKE_C_FLAGS_DEBUG=-O0 -g",
-                        "-DCMAKE_CXX_FLAGS_DEBUG=-O0 -g",
+                        // Apply DWARF flags to llama.cpp/ggml dependencies too, not only our target.
+                        "-DCMAKE_C_FLAGS=-g3",
+                        "-DCMAKE_CXX_FLAGS=-g3",
+                        "-DCMAKE_C_FLAGS_DEBUG=-O0 -g3",
+                        "-DCMAKE_CXX_FLAGS_DEBUG=-O0 -g3",
                     )
                 }
             }
