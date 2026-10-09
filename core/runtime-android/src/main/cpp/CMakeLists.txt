@@ -50,7 +50,7 @@ if (EXISTS "${_ai_chat_icd_source}")
     p_clIcdGetPlatformIDs = (pfn_clIcdGetPlatformIDs)(size_t)p_clGetExtensionFunctionAddress("clIcdGetPlatformIDsKHR");
     if (!p_clIcdGetPlatformIDs)
     {
-        KHR_ICD_TRACE("failed to get extension function address clIcdGetPlatformIDsKHR\\n");
+        KHR_ICD_TRACE("failed to get extension function address clIcdGetPlatformIDsKHR\n");
         goto Done;
     }
 ]=])
@@ -64,12 +64,12 @@ if (EXISTS "${_ai_chat_icd_source}")
             p_clIcdGetPlatformIDs = (pfn_clIcdGetPlatformIDs)(size_t)khrIcdOsLibraryGetFunctionAddress(library, "clGetPlatformIDs");
             if (p_clIcdGetPlatformIDs)
             {
-                KHR_ICD_TRACE("using explicitly verified Android direct OpenCL provider\\n");
+                KHR_ICD_TRACE("using explicitly verified Android direct OpenCL provider\n");
             }
         }
         if (!p_clIcdGetPlatformIDs)
         {
-            KHR_ICD_TRACE("failed to get extension function address clIcdGetPlatformIDsKHR\\n");
+            KHR_ICD_TRACE("failed to get extension function address clIcdGetPlatformIDsKHR\n");
             goto Done;
         }
     }
