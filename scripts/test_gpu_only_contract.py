@@ -46,11 +46,12 @@ def main() -> int:
         ("CPU repacking remains disabled", "set(GGML_CPU_REPACK OFF CACHE BOOL" in src["cmake"] and
          "set(GGML_CPU_REPACK ON" not in src["cmake"] and "GGML_CPU_REPACK=ON" not in src["gradle"],
          "CPU weight repacking must not be enabled"),
-        ("GPU-only scheduler patch excludes CPU backend", "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH" in src["cmake"] and
-         "if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU) {\n                continue;" in src["cmake"],
-         "the CPU backend must not be inserted into the graph scheduler"),
+        ("GPU-only scheduler retains host metadata but forbids CPU inference", "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2" in src["cmake"] and
+         "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK" in src["cmake"] and
+         "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH: CPU remains initialized as a host helper" not in src["cmake"],
+         "CPU may resolve preallocated metadata leaves but must never execute inference ops"),
         ("Build fails if GPU-only scheduler patch is missing", "message(FATAL_ERROR" in src["cmake"] and
-         "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH was not applied" in src["cmake"],
+         "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2 was not applied" in src["cmake"],
          "CMake must fail closed if the upstream patch stops applying"),
         ("OpenGL ES compute capability is validated", "OPENGL_ES_31_COMPUTE_UNAVAILABLE" in src["runtime"] and
          "GL_COMPUTE_SHADER" in src["runtime"],
