@@ -201,7 +201,8 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
                 }
                 SectionCard("پروفایل کرنل GPU") {
                     EmptyCard("Runtime فعلی زمان‌بندی جداگانهٔ هر Kernel را ثبت نمی‌کند. برای اندازه‌گیری‌های موجود، بخش عملکرد و لاگ خام Native را بررسی کن.")
-                }            }
+                }
+            }
 
             DiagnosticsSection.LOGS -> {
                 SectionCard("لاگ خام Native") {
