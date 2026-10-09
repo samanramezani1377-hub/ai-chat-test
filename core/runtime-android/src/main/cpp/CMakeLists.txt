@@ -56,6 +56,33 @@ set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
 
+# Android Vulkan drivers are not uniformly reliable with llama.cpp's pinned-memory
+# asynchronous model-upload path. The app has already observed a SIGSEGV at a null
+# address while loading Qwen3.5 immediately after "using async uploads". Disable only
+# this *load-time transfer optimization* on Android; tensors still upload to Vulkan
+# buffers synchronously, so this does not enable CPU inference or alter model quality.
+# Keep the patch narrow, source-verified, and idempotent.
+if (ANDROID)
+    set(AI_CHAT_LOADER_SOURCE "${llama_cpp_SOURCE_DIR}/src/llama-model-loader.cpp")
+    if (NOT EXISTS "${AI_CHAT_LOADER_SOURCE}")
+        message(FATAL_ERROR "Pinned llama.cpp model loader source is missing")
+    endif()
+    file(READ "${AI_CHAT_LOADER_SOURCE}" AI_CHAT_LOADER_TEXT)
+    string(FIND "${AI_CHAT_LOADER_TEXT}" "AI_CHAT_ANDROID_DISABLE_ASYNC_UPLOADS_V1" AI_CHAT_ASYNC_UPLOAD_PATCHED)
+    if (AI_CHAT_ASYNC_UPLOAD_PATCHED EQUAL -1)
+        set(AI_CHAT_ASYNC_UPLOAD_ORIGINAL "        if (use_mmap || check_tensors) {")
+        string(FIND "${AI_CHAT_LOADER_TEXT}" "${AI_CHAT_ASYNC_UPLOAD_ORIGINAL}" AI_CHAT_ASYNC_UPLOAD_LOCATION)
+        if (AI_CHAT_ASYNC_UPLOAD_LOCATION EQUAL -1)
+            message(FATAL_ERROR "Could not locate pinned llama.cpp async upload gate; refusing an unsafe patch")
+        endif()
+        string(REPLACE
+            "${AI_CHAT_ASYNC_UPLOAD_ORIGINAL}"
+            "        // AI_CHAT_ANDROID_DISABLE_ASYNC_UPLOADS_V1: synchronous staging is safer on Android Vulkan drivers.\n#if defined(__ANDROID__)\n        return nullptr;\n#endif\n        if (use_mmap || check_tensors) {"
+            AI_CHAT_LOADER_TEXT "${AI_CHAT_LOADER_TEXT}")
+        file(WRITE "${AI_CHAT_LOADER_SOURCE}" "${AI_CHAT_LOADER_TEXT}")
+    endif()
+endif()
+
 # Android devices may expose Vulkan 1.1 without core Vulkan 1.2 buffer-device-address
 # support. Keep the optional BDA optimization disabled on those devices rather than
 # letting the backend use an unavailable core entry point. This does not disable Vulkan.
