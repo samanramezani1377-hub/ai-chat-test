@@ -79,6 +79,67 @@ if(NOT _llama_context_verify MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH")
     message(FATAL_ERROR "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH was not applied to pinned llama-context.cpp; refusing to build a CPU-fallback runtime")
 endif()
 
+# Add traceable scheduler reservation stages to the pinned llama.cpp source.
+# llama_log_set() forwards these markers to the app-private native trace, so
+# an abort inside scheduler reservation is distinguishable from later context work.
+file(READ "${_llama_context_cpp}" _llama_context_source)
+if(NOT _llama_context_source MATCHES "AI_CHAT_SCHEDULER_TRACE_PATCH")
+    set(_trace_reserve_needle [=[    LLAMA_LOG_INFO("%s: reserving ...\\n", __func__);]=])
+    set(_trace_reserve_replacement [=[    // AI_CHAT_SCHEDULER_TRACE_PATCH
+    LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=reserve_enter\\n");
+    LLAMA_LOG_INFO("%s: reserving ...\\n", __func__);]=])
+    set(_trace_graph_needle [=[    gf_res_reserve.reset(new llm_graph_result(max_nodes));]=])
+    set(_trace_graph_replacement [=[    LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=before_graph_result_reserve\\n");
+    gf_res_reserve.reset(new llm_graph_result(max_nodes));
+    LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=after_graph_result_reserve\\n");]=])
+    set(_trace_sched_needle [=[    sched.reset(ggml_backend_sched_new(backend_ptrs.data(), backend_buft.data(), backend_ptrs.size(), max_nodes, cparams.pipeline_parallel, cparams.op_offload));]=])
+    set(_trace_sched_replacement [=[    LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=before_backend_scheduler_create\\n");
+    sched.reset(ggml_backend_sched_new(backend_ptrs.data(), backend_buft.data(), backend_ptrs.size(), max_nodes, cparams.pipeline_parallel, cparams.op_offload));
+    LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=after_backend_scheduler_create\\n");]=])
+    set(_trace_memory_needle [=[        mctx = memory->init_full();]=])
+    set(_trace_memory_replacement [=[        LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=before_memory_init_full\\n");
+        mctx = memory->init_full();
+        LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=after_memory_init_full\\n");]=])
+    set(_trace_fused_needle [=[    resolve_fused_ops(mctx.get(), n_seqs);]=])
+    set(_trace_fused_replacement [=[    LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=before_resolve_fused_ops\\n");
+    resolve_fused_ops(mctx.get(), n_seqs);
+    LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=after_resolve_fused_ops\\n");]=])
+    set(_trace_pp_needle [=[    // reserve worst-case graph
+    int n_splits_pp        = -1;]=])
+    set(_trace_pp_replacement [=[    // reserve worst-case graph
+    LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=before_prompt_graph_reserve\\n");
+    int n_splits_pp        = -1;]=])
+    set(_trace_tg_needle [=[        auto * gf = graph_reserve(n_seqs, n_seqs, n_seqs, mctx.get(), model.hparams.no_alloc);]=])
+    set(_trace_tg_replacement [=[        LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=before_token_graph_reserve\\n");
+        auto * gf = graph_reserve(n_seqs, n_seqs, n_seqs, mctx.get(), model.hparams.no_alloc);
+        LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=after_token_graph_reserve\\n");]=])
+    set(_trace_done_needle [=[    const int64_t t_end_us = ggml_time_us();]=])
+    set(_trace_done_replacement [=[    LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=reserve_graphs_completed\\n");
+    const int64_t t_end_us = ggml_time_us();]=])
+    string(REPLACE "${_trace_reserve_needle}" "${_trace_reserve_replacement}" _llama_context_source "${_llama_context_source}")
+    string(REPLACE "${_trace_graph_needle}" "${_trace_graph_replacement}" _llama_context_source "${_llama_context_source}")
+    string(REPLACE "${_trace_sched_needle}" "${_trace_sched_replacement}" _llama_context_source "${_llama_context_source}")
+    string(REPLACE "${_trace_memory_needle}" "${_trace_memory_replacement}" _llama_context_source "${_llama_context_source}")
+    string(REPLACE "${_trace_fused_needle}" "${_trace_fused_replacement}" _llama_context_source "${_llama_context_source}")
+    string(REPLACE "${_trace_pp_needle}" "${_trace_pp_replacement}" _llama_context_source "${_llama_context_source}")
+    string(REPLACE "${_trace_tg_needle}" "${_trace_tg_replacement}" _llama_context_source "${_llama_context_source}")
+    string(REPLACE "${_trace_done_needle}" "${_trace_done_replacement}" _llama_context_source "${_llama_context_source}")
+    file(WRITE "${_llama_context_cpp}" "${_llama_context_source}")
+endif()
+file(READ "${_llama_context_cpp}" _llama_context_trace_verify)
+foreach(_trace_marker
+        "AI_CHAT_SCHEDULER_TRACE_PATCH"
+        "AI_CHAT_SCHED_STAGE=before_backend_scheduler_create"
+        "AI_CHAT_SCHED_STAGE=before_memory_init_full"
+        "AI_CHAT_SCHED_STAGE=before_resolve_fused_ops"
+        "AI_CHAT_SCHED_STAGE=before_prompt_graph_reserve"
+        "AI_CHAT_SCHED_STAGE=before_token_graph_reserve"
+        "AI_CHAT_SCHED_STAGE=reserve_graphs_completed")
+    if(NOT _llama_context_trace_verify MATCHES "${_trace_marker}")
+        message(FATAL_ERROR "Required native scheduler diagnostic marker missing: ${_trace_marker}")
+    endif()
+endforeach()
+
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp opengles_runtime.cpp ggml-opengles/ggml-opengles.cpp ggml-opengles/ggml-opengles-registration.cpp)
 
 # native_runtime_android_safe.cpp intentionally includes llama.cpp/ggml internal
