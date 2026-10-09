@@ -296,6 +296,9 @@ static bool probe_android_vendor_icd_candidates() {
         (void) dlerror();
         void *get_platform_info = dlsym(handle, "clGetPlatformInfo");
         const char *info_error = dlerror();
+        (void) dlerror();
+        void *get_extension_function_address = dlsym(handle, "clGetExtensionFunctionAddress");
+        const char *extension_error = dlerror();
 
         cl_uint direct_count = 0;
         cl_int direct_result = (cl_int)-9999;
@@ -317,12 +320,13 @@ static bool probe_android_vendor_icd_candidates() {
             " icdName=" + opencl_error_name(icd_result) +
             " icdPlatformCount=" + std::to_string(icd_count) +
             " clGetPlatformInfo=" + (get_platform_info ? "1" : "0") +
-            " platformInfoError=" + (info_error ? info_error : "none")).c_str());
+            " platformInfoError=" + (info_error ? info_error : "none") +
+            " clGetExtensionFunctionAddress=" + (get_extension_function_address ? "1" : "0") +
+            " extensionAddressError=" + (extension_error ? extension_error : "none")).c_str());
 
-        // Only an ICD-compatible library with a real platform may be supplied to
-        // the linked Khronos loader. A plain OpenCL loader or a library exposing
-        // only the core API is deliberately not injected into the ICD list.
-        if (get_icd_platforms && get_platform_info &&
+        // Khronos requires these entry points for an ICD candidate. A plain
+        // loader or a library exposing only the core API is not injected.
+        if (get_icd_platforms && get_platform_info && get_extension_function_address &&
             icd_result == CL_SUCCESS && icd_count > 0) {
             if (setenv("OCL_ICD_FILENAMES", path, 1) == 0) {
                 append_native_trace((std::string("OPENCL_VENDOR_ICD_SELECTED path=") +
