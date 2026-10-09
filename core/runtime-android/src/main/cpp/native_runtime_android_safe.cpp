@@ -571,6 +571,14 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
         }
         native_write_text(g_native_fatal_fd, value, (size_t) n);
         native_write_text(g_native_fatal_fd, "\n", 1);
+        // This is the active Android fatal handler. The legacy handler in
+        // native_runtime.cpp is renamed by this wrapper, so log the phase here
+        // or an activation abort loses its native location.
+        const char phase_prefix[] = "NATIVE_FATAL_PHASE=";
+        const char * native_phase = g_native_phase ? g_native_phase : "UNKNOWN";
+        native_write_text(g_native_fatal_fd, phase_prefix, sizeof(phase_prefix) - 1);
+        native_write_text(g_native_fatal_fd, native_phase, std::strlen(native_phase));
+        native_write_text(g_native_fatal_fd, "\n", 1);
         uintptr_t pc = 0;
         uintptr_t lr = 0;
 #if defined(__aarch64__)
