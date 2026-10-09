@@ -671,15 +671,15 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
         // the OpenGL ES buffer type for the input embedding tensor as well.
         // The regex is anchored to avoid overriding similarly named tensors.
         const llama_model_tensor_buft_override gpu_tensor_overrides[] = {
-            { "^token_embd\\.weight$", ggml_backend_dev_buffer_type(opengles_dev) },
+            { "token_embd\\.weight", ggml_backend_dev_buffer_type(opengles_dev) },
             { nullptr, nullptr },
         };
         mp.tensor_buft_overrides = gpu_tensor_overrides;
-        append_native_trace("OPENGL_ES_GPU_ONLY_DIAGNOSTIC_MODE enabled=1 token_embedding_override=OpenGL_ES");
+        append_native_trace("OPENGL_ES_GPU_ONLY_STRICT_PLACEMENT enabled=1 no_host=1 token_embedding_override=OpenGL_ES");
 
     }
     checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_RESIDENT" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
-    append_native_trace((std::string("OPENGL_ES_DIAGNOSTIC_HOST_STAGING enabled=") + (gpu ? "1" : "0") +
+    append_native_trace((std::string("OPENGL_ES_GPU_ONLY_PLACEMENT_POLICY enabled=") + (gpu ? "1" : "0") +
         " no_host=" + (mp.no_host ? "1" : "0") +
         " reason=diagnostic_load_failure_isolation").c_str());
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
