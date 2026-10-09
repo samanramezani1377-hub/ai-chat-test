@@ -109,6 +109,11 @@ if(NOT _llama_context_source MATCHES "AI_CHAT_SCHEDULER_TRACE_PATCH")
     set(_trace_pp_replacement [=[    // reserve worst-case graph
     LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=before_prompt_graph_reserve\n");
     int n_splits_pp        = -1;]=])
+    set(_trace_pp_done_needle [=[                model.hparams.no_alloc, model.hparams.no_alloc ? backend_buf_exp_size.data() : nullptr);
+        if (!gf) {]=])
+    set(_trace_pp_done_replacement [=[                model.hparams.no_alloc, model.hparams.no_alloc ? backend_buf_exp_size.data() : nullptr);
+        LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=after_prompt_graph_reserve\n");
+        if (!gf) {]=])
     set(_trace_tg_needle [=[        auto * gf = graph_reserve(n_seqs, n_seqs, n_seqs, mctx.get(), model.hparams.no_alloc);]=])
     set(_trace_tg_replacement [=[        LLAMA_LOG_INFO("AI_CHAT_SCHED_STAGE=before_token_graph_reserve\n");
         auto * gf = graph_reserve(n_seqs, n_seqs, n_seqs, mctx.get(), model.hparams.no_alloc);
@@ -122,6 +127,7 @@ if(NOT _llama_context_source MATCHES "AI_CHAT_SCHEDULER_TRACE_PATCH")
     string(REPLACE "${_trace_memory_needle}" "${_trace_memory_replacement}" _llama_context_source "${_llama_context_source}")
     string(REPLACE "${_trace_fused_needle}" "${_trace_fused_replacement}" _llama_context_source "${_llama_context_source}")
     string(REPLACE "${_trace_pp_needle}" "${_trace_pp_replacement}" _llama_context_source "${_llama_context_source}")
+    string(REPLACE "${_trace_pp_done_needle}" "${_trace_pp_done_replacement}" _llama_context_source "${_llama_context_source}")
     string(REPLACE "${_trace_tg_needle}" "${_trace_tg_replacement}" _llama_context_source "${_llama_context_source}")
     string(REPLACE "${_trace_done_needle}" "${_trace_done_replacement}" _llama_context_source "${_llama_context_source}")
     file(WRITE "${_llama_context_cpp}" "${_llama_context_source}")
@@ -133,6 +139,7 @@ foreach(_trace_marker
         "AI_CHAT_SCHED_STAGE=before_memory_init_full"
         "AI_CHAT_SCHED_STAGE=before_resolve_fused_ops"
         "AI_CHAT_SCHED_STAGE=before_prompt_graph_reserve"
+        "AI_CHAT_SCHED_STAGE=after_prompt_graph_reserve"
         "AI_CHAT_SCHED_STAGE=before_token_graph_reserve"
         "AI_CHAT_SCHED_STAGE=reserve_graphs_completed")
     if(NOT _llama_context_trace_verify MATCHES "${_trace_marker}")
