@@ -50,6 +50,14 @@ def main() -> int:
          load.find('checkpoint("NATIVE_LOAD_COMPLETED")') > load.find("init_generation_context()")),
         ("context setup requires a loaded model and nonzero context",
          "if (!g_model || g_context_length == 0) return false;" in context),
+        ("native fatal handler records broad runtime phase separately from speculative phase",
+         "NATIVE_FATAL_PHASE=" in native and 'g_native_phase = "LLAMA_CONTEXT_INIT"' in load),
+        ("context-init trace brackets llama_init_from_model for crash localization",
+         "CONTEXT_INIT_ENTER_LLAMA_INIT_FROM_MODEL" in load and
+         "CONTEXT_INIT_RETURNED_FROM_LLAMA_INIT" in load),
+        ("GPU memory marked unknown is not reported as a measured zero",
+         'if (nativeField(line, "memoryKnown") == "1")' in
+         (ROOT / "core/runtime/src/main/kotlin/com/woogit/aicore/runtime/RuntimeDiagnostics.kt").read_text(encoding="utf-8")),
         ("GDN scheduler support is not gated by a shader handle compiled later",
          "GGML_OP_GATED_DELTA_NET" in support and
          re.search(r"if\s*\(op->op == GGML_OP_GATED_DELTA_NET.*?g_gdn\s*!=\s*0", support, re.S) is None),
