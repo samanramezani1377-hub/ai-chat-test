@@ -66,6 +66,15 @@ def main() -> int:
          "SPECULATIVE_DOUBLE_INIT_GUARD" in native and
          "if (g_spec || g_spec_init)" in native,
          "draft runtime must not initialize twice"),
+        ("fatal signal handler preserves Android debuggerd backtraces",
+         "g_previous_fatal_actions" in native and
+         "handler(signal_number, info, raw_context)" in native and
+         "NATIVE_FATAL_PC=" in native and "NATIVE_FATAL_LR=" in native,
+         "fatal diagnostics must preserve signal context and chain to the previous handler"),
+        ("native library keeps symbols needed to resolve crash addresses",
+         "-g" in (ROOT / "core/runtime-android/src/main/cpp/CMakeLists.txt").read_text(encoding="utf-8") and
+         "-Wl,--strip-all" not in (ROOT / "core/runtime-android/src/main/cpp/CMakeLists.txt").read_text(encoding="utf-8"),
+         "do not strip the only symbols that can map a native PC to a function/source line"),
     ]
     failed = []
     for label, ok, detail in checks:
