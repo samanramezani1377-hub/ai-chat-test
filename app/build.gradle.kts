@@ -12,6 +12,11 @@ android {
         applicationId = "com.samanramezani.aichattest"
         minSdk = 29
         targetSdk = 35
+        // This app ships only the native runtime's supported production ABI.
+        // Keep transitive AndroidX native libraries aligned with the runtime ABI.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
         versionCode = 1
         versionName = "0.1.0"
     }
