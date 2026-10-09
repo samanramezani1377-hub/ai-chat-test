@@ -169,7 +169,7 @@ object RuntimeDiagnosticsStore {
         Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
 
     private fun readGpuDevice(): GpuDeviceProfile? = runCatching {
-        val line = nativeLine("NATIVE_OPENCL_DEVICE") ?: return@runCatching null
+        val line = nativeLine("NATIVE_OPENGL_ES_DEVICE") ?: return@runCatching null
         GpuDeviceProfile(
             name = nativeField(line, "name")?.replace('_', ' ') ?: "unknown",
             description = nativeField(line, "description")?.replace('_', ' ') ?: "unknown",
