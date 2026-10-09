@@ -111,7 +111,7 @@ class LlamaCppAndroidRuntimeAdapter(
             }
             val result = NativeLlamaCpp.load(file.absolutePath, requested, requestedGpuLayers, draftFile?.absolutePath)
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_RETURNED code=$result gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers")
-            if (result != 0) return ModelResult.Failure(ModelError.Inference("llama.cpp failed to load the model (code=$result)"))
+            if (result != 0) return ModelResult.Failure(RuntimeErrorMapper.nativeLoadFailure(result))
             val info = NativeLlamaCpp.runtimeInfo()
             selectedBackend = info.substringBefore(';').ifBlank { "OpenCL" }
             selectedGpuLayers = if (selectedBackend.contains("OpenCL", ignoreCase = true)) requestedGpuLayers else 0
