@@ -16,6 +16,7 @@
 #include <vector>
 #include <dlfcn.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <ucontext.h>
 #include "llama.h"
 #include "gguf.h"
@@ -227,6 +228,10 @@ static void native_write_hex(int fd, const char *label, uintptr_t value) {
     native_write_text(fd, buffer, pos);
 }
 
+// Preserve Android's debuggerd handler. If we consume SIGABRT/SIGSEGV and _exit,
+// Android never gets a chance to write the tombstone containing the native stack.
+static struct sigaction g_previous_fatal_actions[NSIG]{};
+
 static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void *raw_context) {
     if (g_native_fatal_fd >= 0) {
         const char prefix[] = "NATIVE_FATAL_SIGNAL=";
@@ -276,7 +281,24 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
         native_write_hex(g_native_fatal_fd, pc_prefix, pc);
         native_write_hex(g_native_fatal_fd, lr_prefix, lr);
         native_write_hex(g_native_fatal_fd, addr_prefix, info ? (uintptr_t)info->si_addr : 0);
+        // Keep the fatal marker durable, but do not swallow the signal. The previous
+        // Android debuggerd handler is what produces the backtrace we need to identify
+        // the exact native function/offset (and source line when matching symbols exist).
         fsync(g_native_fatal_fd);
+    }
+
+    if (signal_number > 0 && signal_number < NSIG) {
+        const struct sigaction previous = g_previous_fatal_actions[signal_number];
+        if (previous.sa_flags & SA_SIGINFO) {
+            auto handler = previous.sa_sigaction;
+            if (handler && handler != reinterpret_cast<void (*)(int, siginfo_t *, void *)>(SIG_DFL) &&
+                handler != reinterpret_cast<void (*)(int, siginfo_t *, void *)>(SIG_IGN)) {
+                handler(signal_number, info, raw_context);
+            }
+        } else if (previous.sa_handler && previous.sa_handler != SIG_DFL &&
+                   previous.sa_handler != SIG_IGN) {
+            previous.sa_handler(signal_number);
+        }
     }
     _exit(128 + signal_number);
 }
@@ -286,12 +308,11 @@ static void install_native_fatal_handlers() {
     sigemptyset(&action.sa_mask);
     action.sa_sigaction = native_fatal_signal_handler;
     action.sa_flags = SA_SIGINFO;
-    sigaction(SIGSEGV, &action, nullptr);
-    sigaction(SIGBUS, &action, nullptr);
-    sigaction(SIGABRT, &action, nullptr);
-    sigaction(SIGILL, &action, nullptr);
-    sigaction(SIGFPE, &action, nullptr);
+    const int signals[] = {SIGSEGV, SIGBUS, SIGABRT, SIGILL, SIGFPE};
+    for (int signal_number : signals) {
+        sigaction(signal_number, &action, &g_previous_fatal_actions[signal_number]);
     }
+}
 
 static void checkpoint(const char *event) {
     LOGI("NATIVE_CHECKPOINT %s", event);
