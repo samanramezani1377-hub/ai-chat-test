@@ -211,10 +211,10 @@ static bool has_icd_vendor_file(const char *directory) {
         std::ifstream input(full_path);
         std::string library;
         std::getline(input, library);
-        while (!library.empty() && (library.back() == '\\r' || library.back() == ' ' || library.back() == '\\t')) {
+        while (!library.empty() && (library.back() == '\r' || library.back() == ' ' || library.back() == '\t')) {
             library.pop_back();
         }
-        size_t first = library.find_first_not_of(" \\t");
+        size_t first = library.find_first_not_of(" \t");
         if (first != std::string::npos) library.erase(0, first);
         append_native_trace((std::string("OPENCL_ICD_FILE path=") + full_path +
             " readable=" + (input.good() || !library.empty() ? "1" : "0") +
