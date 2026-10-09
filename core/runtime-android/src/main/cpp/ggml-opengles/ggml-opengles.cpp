@@ -631,8 +631,8 @@ void main(){
  int pos;
  if(axis==0) pos=p[(p_off>>2u)+d1*ps1];
  else if(axis==1) pos=p[(p_off>>2u)+ps0+d1*ps1];
- else if(axis==2) pos=p[(p_off>>2u)+2*ps0+d1*ps1];
- else pos=p[(p_off>>2u)+3*ps0+d1*ps1];
+ else if(axis==2) pos=p[(p_off>>2u)+2u*ps0+d1*ps1];
+ else pos=p[(p_off>>2u)+3u*ps0+d1*ps1];
  float dim=float(int(d0/2u)-cumulative);
  float theta=float(pos)*pow(freq_base,-2.0*dim/float(n_dims))*freq_scale;
  float cs=cos(theta), sn=sin(theta);
