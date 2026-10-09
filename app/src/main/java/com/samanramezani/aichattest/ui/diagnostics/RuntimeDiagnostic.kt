@@ -189,7 +189,7 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
         appendLine("Meaning: ${resolved.message}")
         appendLine("Suggested action: ${resolved.action}")
     } else appendLine("Error: N/A")
-    val cleanError = (rawError ?: error)?.replace(Regex("\\s+"), " ")?.take(220)
+    val cleanError = (rawError ?: error)?.replace(Regex("\s+"), " ")?.take(220)
     if (!cleanError.isNullOrBlank()) appendLine("Raw error: $cleanError")
     appendLine("----- Key native diagnostics -----")
     if (keyLines.isEmpty()) appendLine("No specific native failure marker captured.")
@@ -332,7 +332,7 @@ private fun compactCompletedPhases(lines: List<String>): List<String> {
             output += chunk
         } else {
             val duration = chunk.firstNotNullOfOrNull { line ->
-                Regex("""(?:duration|elapsed|time|took)=([0-9]+(?:\\.[0-9]+)?\\s*(?:ms|s))""", RegexOption.IGNORE_CASE)
+                Regex("""(?:duration|elapsed|time|took)=([0-9]+(?:\.[0-9]+)?\s*(?:ms|s))""", RegexOption.IGNORE_CASE)
                     .find(line)?.groupValues?.get(1)
             }
             val detail = chunk.asSequence()
