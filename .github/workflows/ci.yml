@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - vulkan
   pull_request:
     branches:
       - main
@@ -80,6 +81,26 @@ jobs:
           test -n "${ANDROID_HOME:-}"
           test -d "$ANDROID_HOME/platforms/android-36"
 
+      - name: Restore Vulkan SDK cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
+            $HOME/vulkan-sdk
+          key: ci-vulkan-${{ runner.os }}-1.4.321.1
+
+      - name: Prepare Vulkan SDK and shader compiler
+        run: bash ci/prepare-vulkan.sh
+
+      - name: Save Vulkan SDK cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
+            $HOME/vulkan-sdk
+          key: ci-vulkan-${{ runner.os }}-1.4.321.1
+
       - name: Cache exact native build state
         uses: actions/cache@v4
         with:
@@ -99,19 +120,16 @@ jobs:
               '.github/workflows/ci.yml'
             ) }}
 
-      - name: Verify GPU-only runtime invariants
+      - name: Verify Vulkan GPU-only runtime invariants
         run: |
           set -euo pipefail
-          ! grep -R "GGML_OPENCL_ADRENO_XMEM_GEMM.*1" -n core/runtime-android/src/main/cpp
-          grep -q 'OPENCL_KERNEL_POLICY=UPSTREAM_DEVICE_CAPABILITY_SELECTION' core/runtime-android/src/main/cpp/native_runtime.cpp
-          # Never bypass llama.cpp's GPU-family capability gate: doing so lets
-          # unsupported devices reach kernels with incompatible subgroup macros.
-          grep -q 'Do not bypass upstream GPU-family validation' core/runtime-android/src/main/cpp/CMakeLists.txt
-          ! grep -q 'setenv("GGML_OPENCL_Q6K_GEMV_TILED"' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'GGML_OPENCL_USE_ADRENO_KERNELS OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
-          grep -q 'AI_CHAT_OPENCL_PROFILING=ON' core/runtime-android/build.gradle.kts
-          grep -q 'resident_max + 1' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          echo "GPU-only/KV-cache diagnostics invariants verified"
+          grep -q 'GGML_VULKAN ON' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'GGML_OPENCL OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'ggml-vulkan' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'VULKAN_GPU_ONLY_NO_CPU_FALLBACK' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'AI_CHAT_GPU_BACKEND_VULKAN=1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          ! grep -R 'GGML_OPENCL=ON\|GGML_OPENCL ON\|AI_CHAT_OPENCL_PROFILING\|ggml-opencl.h\|android_opencl_dispatch' -n core/runtime-android/src/main/cpp core/runtime-android/build.gradle.kts
+          echo "Vulkan GPU-only/no-OpenCL invariants verified"
 
       - name: Assemble debug APK
         run: >-
@@ -122,32 +140,19 @@ jobs:
           --console=plain
           --parallel
 
-      - name: Verify OpenCL profiling and static backend linkage
+      - name: Verify Vulkan shader generation and static backend linkage
         run: |
           set -euo pipefail
-          source_file="$(find core/runtime-android -path '*/.cxx/*' -path '*/llama_cpp-src/ggml/src/ggml-opencl/ggml-opencl.cpp' -print -quit)"
-          test -n "$source_file"
-          grep -q 'AI_CHAT_OPENCL_PROFILE_PATCH_V4' "$source_file"
-          grep -q 'fperf_live' "$source_file"
-          grep -q 'cmd_queued_duration_ns' "$source_file"
-          grep -q 'cmd_submit_duration_ns' "$source_file"
-          grep -q 'cmd_complete_duration_ns' "$source_file"
-          grep -q 'cl_profiling.csv' "$source_file"
-
-          # The production runtime is intentionally static. Fail CI if the
-          # OpenCL backend target disappeared or the ggml registry was built
-          # without GGML_USE_OPENCL.
-          opencl_target="$(find core/runtime-android -path '*/.cxx/*' -type f \( -name 'build.ninja' -o -name 'rules.ninja' \) -print0 | xargs -0 grep -l 'ggml-opencl' | head -n 1 || true)"
-          test -n "$opencl_target"
+          test -f "$VULKAN_SDK/bin/glslc"
           native_dirs=()
           for dir in core/runtime-android/.cxx core/runtime-android/src/.cxx; do
             if [ -d "$dir" ]; then native_dirs+=( "$dir" ); fi
           done
           test "${#native_dirs[@]}" -gt 0
-          grep -R 'GGML_USE_OPENCL' "${native_dirs[@]}" >/dev/null
-          grep -R 'ggml-opencl' "${native_dirs[@]}" >/dev/null
-          echo "Static OpenCL backend linkage verified: $opencl_target"
-          echo "OpenCL profiling instrumentation is present in the compiled llama.cpp source: $source_file"
+          grep -R 'GGML_VULKAN' "${native_dirs[@]}" >/dev/null
+          grep -R 'ggml-vulkan' "${native_dirs[@]}" >/dev/null
+          grep -R 'vulkan-shaders-gen' "${native_dirs[@]}" >/dev/null
+          echo "Vulkan backend target and shader generation verified"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
