@@ -176,7 +176,7 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     val contextStart = nativeLinesForState.indexOfLast { it.contains("CONTEXT_INIT_STARTED") }
     val contextSuccess = nativeLinesForState.indexOfLast { it.contains("CONTEXT_INIT_RETURNED_SUCCESS") || it.contains("NATIVE_LOAD_COMPLETED") }
     val nativeContextInterrupted = contextStart >= 0 && contextSuccess < contextStart
-    val displayStatus = if (nativeContextInterrupted && status.equals("READY", true)) "FAILED — native context initialization interrupted" else status
+    val displayStatus = if (nativeContextInterrupted && (status.equals("READY", true) || status.equals("FAILED", true))) "FAILED — native context initialization interrupted" else status
     appendLine("Status: $displayStatus | Execution: ${executionId ?: "N/A"}")
     appendLine("Model: ${model?.displayName ?: "N/A"} | Format: ${model?.format ?: "N/A"} | Quantization: ${model?.quantization ?: "N/A"}")
     appendLine("Runtime: ${runtime.name} ${runtime.version} | Backend: ${runtime.backend ?: "N/A"}")
