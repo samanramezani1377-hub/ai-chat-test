@@ -642,9 +642,9 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
     // GPU layers remain enabled without relying on the fragile mmap buffer import.
     mp.load_mode = LLAMA_LOAD_MODE_NONE;
     mp.check_tensors = false;
-    // Diagnostic load must allow llama.cpp to use a host-visible staging buffer.
-    // This is temporary and intentionally disabled again in the final strict GPU-only path.
-    mp.no_host = false;
+    // GPU-only loading must not advertise GPU host buffers as CPU-side placement options.
+    // Keep host staging disabled for GPU activation; never silently fall back to host weights.
+    mp.no_host = gpu;
 
     // GPU-only mode must place the input embedding tensor on OpenGL ES too.
     // llama.cpp may otherwise select the CPU_REPACK buffer for token_embd.weight,
