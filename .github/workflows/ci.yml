@@ -86,6 +86,28 @@ jobs:
       - name: Verify GPU-only runtime invariants
         run: python3 scripts/test_gpu_only_contract.py
 
+  runtime-safety-contract-tests:
+    name: Runtime lifecycle and prompt safety regression tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Check cancellation, model lifecycle, cache and context guards
+        run: python3 scripts/test_runtime_safety_contract.py
+
+  shader-math-reference-tests:
+    name: Shader math reference invariants
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Check deterministic Softmax and RoPE reference invariants
+        run: python3 scripts/test_opengles_shader_math.py
+
   android-build:
     name: Android debug build
     runs-on: ubuntu-22.04
@@ -155,6 +177,15 @@ jobs:
           --stacktrace
           --console=plain
           --parallel
+
+      - name: Verify final APK packaging
+        run: |
+          set -euo pipefail
+          apk="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -n "$apk"
+          python3 scripts/verify_android_apk.py "$apk"
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/aapt" dump badging "$apk" | grep -q "package: name='com.samanramezani.aichattest'"
+          echo "Verified APK package id and native ABI packaging"
 
       - name: Verify OpenGL ES static backend linkage
         run: |
