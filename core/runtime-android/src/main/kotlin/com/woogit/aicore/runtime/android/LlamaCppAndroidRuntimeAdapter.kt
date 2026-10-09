@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.io.File
 import kotlin.math.roundToInt
 
-/** Direct llama.cpp Android runtime. OpenCL is the only supported inference backend. */
+/** Direct llama.cpp Android runtime. Vulkan is the only supported inference backend. */
 class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 8192,
     gpuLayers: Int = GPU_LAYERS_MAX,
@@ -35,7 +35,7 @@ class LlamaCppAndroidRuntimeAdapter(
     @Volatile private var gpuLayersMode = gpuLayers
     @Volatile private var selectedGpuLayers = 0
     @Volatile private var selectedCpuThreads = 2
-    @Volatile private var selectedBackend = "OpenCL"
+    @Volatile private var selectedBackend = "Vulkan"
     @Volatile private var loadedContextLength: Int? = null
     @Volatile private var loadedArchitecture: String = "unknown"
     @Volatile private var loadedModelPath: String? = null
@@ -49,8 +49,8 @@ class LlamaCppAndroidRuntimeAdapter(
     fun setGpuLayers(value: Int) {
         require(value == GPU_LAYERS_MAX) { "Unsupported diagnostic GPU layer mode: $value" }
         gpuLayersMode = value
-        RuntimeDiagnosticsStore.recordNativeEvent("OPENCL_GPU_ONLY_SELECTED")
-        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "OPENCL_GPU_ONLY_SELECTED (applies on next activation)")
+        RuntimeDiagnosticsStore.recordNativeEvent("VULKAN_GPU_ONLY_SELECTED")
+        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "VULKAN_GPU_ONLY_SELECTED (applies on next activation)")
     }
 
     fun gpuLayers(): Int = gpuLayersMode
@@ -81,7 +81,7 @@ class LlamaCppAndroidRuntimeAdapter(
         NativeLlamaCpp.unload()
         stopRequested.set(false)
         selectedGpuLayers = 0
-        selectedBackend = "OpenCL"
+        selectedBackend = "Vulkan"
         loadedContextLength = null
         loadedArchitecture = "unknown"
         loadedModelPath = null
@@ -113,8 +113,8 @@ class LlamaCppAndroidRuntimeAdapter(
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_RETURNED code=$result gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers")
             if (result != 0) return ModelResult.Failure(RuntimeErrorMapper.nativeLoadFailure(result))
             val info = NativeLlamaCpp.runtimeInfo()
-            selectedBackend = info.substringBefore(';').ifBlank { "OpenCL" }
-            selectedGpuLayers = if (selectedBackend.contains("OpenCL", ignoreCase = true)) requestedGpuLayers else 0
+            selectedBackend = info.substringBefore(';').ifBlank { "Vulkan" }
+            selectedGpuLayers = if (selectedBackend.contains("Vulkan", ignoreCase = true)) requestedGpuLayers else 0
             selectedCpuThreads = 2
             loadedContextLength = NativeLlamaCpp.contextLength().takeIf { it > 0 } ?: requested
             loadedArchitecture = model.metadata.architecture?.lowercase() ?: "unknown"
@@ -129,7 +129,7 @@ class LlamaCppAndroidRuntimeAdapter(
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_EXCEPTION ${t::class.java.name}: ${t.message}")
             NativeLlamaCpp.unload()
             selectedGpuLayers = 0
-            selectedBackend = "OpenCL"
+            selectedBackend = "Vulkan"
             loadedContextLength = null
             loadedArchitecture = "unknown"
             loadedModelPath = null
@@ -149,7 +149,7 @@ class LlamaCppAndroidRuntimeAdapter(
         NativeLlamaCpp.unload()
         stopRequested.set(false)
         selectedGpuLayers = 0
-        selectedBackend = "OpenCL"
+        selectedBackend = "Vulkan"
         loadedContextLength = null
         loadedArchitecture = "unknown"
         loadedModelPath = null
