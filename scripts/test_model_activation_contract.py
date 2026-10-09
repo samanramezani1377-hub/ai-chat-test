@@ -75,6 +75,13 @@ def main() -> int:
              "AI_CHAT_GRAPH_RESULT_STAGE=before_ggml_init",
              "AI_CHAT_GRAPH_RESULT_STAGE=before_new_graph_custom",
              "AI_CHAT_GRAPH_RESULT_STAGE=after_new_graph_custom"))),
+        ("GPU-only scheduler no longer trips llama.cpp's CPU-last assertion",
+         "AI_CHAT_GPU_ONLY_SCHEDULER_TAIL_PATCH" in cmake and
+         "CPU backend is intentionally absent" in cmake and
+         "GGML_BACKEND_DEVICE_TYPE_CPU" in cmake),
+        ("scheduler remains GPU-only rather than restoring a CPU fallback",
+         "if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU) {" in cmake and
+         "continue;" in cmake and "OPENGL_ES_GPU_ONLY_NO_CPU_FALLBACK" in load),
         ("required GDN shader compilation failure is detected before dispatch",
          'compile_compute(gated_delta_net_shader(), "gated_delta_net")' in ensure and
          "(caps.max_compute_ssbo_blocks < 7 || g_gdn != 0)" in ensure),
