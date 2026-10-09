@@ -665,12 +665,17 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
             checkpoint("OPENGL_ES_GPU_ONLY_REJECTED_NO_DEVICE_FOR_EMBEDDING_OVERRIDE");
             return nullptr;
         }
-        // Diagnostic mode deliberately preserves llama.cpp's normal tensor
-        // placement. We must allow the model to execute when a weight remains on
-        // host/CPU so that post-load and post-generation diagnostics can expose the
-        // real backend behavior. Strict GPU-only validation is a separate final mode.
-        mp.tensor_buft_overrides = nullptr;
-        append_native_trace("OPENGL_ES_GPU_ONLY_DIAGNOSTIC_MODE enabled=1 tensor_overrides=disabled");
+        // llama.cpp normally keeps token_embd.weight in a host buffer on some
+        // architectures even when every transformer block is offloaded. In this
+        // runtime GET_ROWS(Q6_K) is implemented by OpenGL ES, so explicitly select
+        // the OpenGL ES buffer type for the input embedding tensor as well.
+        // The regex is anchored to avoid overriding similarly named tensors.
+        const llama_model_tensor_buft_override gpu_tensor_overrides[] = {
+            { "^token_embd\\.weight$", ggml_backend_dev_buffer_type(opengles_dev) },
+            { nullptr, nullptr },
+        };
+        mp.tensor_buft_overrides = gpu_tensor_overrides;
+        append_native_trace("OPENGL_ES_GPU_ONLY_DIAGNOSTIC_MODE enabled=1 token_embedding_override=OpenGL_ES");
 
     }
     checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_RESIDENT" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
@@ -679,7 +684,7 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
         " reason=diagnostic_load_failure_isolation").c_str());
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0") +
-        " token_embedding_gpu_override=" + (gpu ? "1" : "0")).c_str());
+        " token_embedding_gpu_override=" + (gpu ? "OpenGL_ES" : "disabled")).c_str());
     return llama_model_load_from_file(path, mp);
 }
 
