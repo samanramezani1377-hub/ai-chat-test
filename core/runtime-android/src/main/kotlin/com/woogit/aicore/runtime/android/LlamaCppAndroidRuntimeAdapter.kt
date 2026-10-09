@@ -280,9 +280,14 @@ class LlamaCppAndroidRuntimeAdapter(
         maxNewTokens: Int,
     ): List<com.woogit.aicore.domain.ChatMessage> {
         val context = loadedContextLength ?: return messages
-        val reserve = maxNewTokens + 32
-        val budget = context - reserve
-        if (messages.isEmpty() || budget <= 0) return messages.takeLast(1)
+        // Cap the requested output reserve to leave room for at least a small
+        // serialized prompt. If maxNewTokens >= context, the old budget became
+        // non-positive and returned the newest message untrimmed, allowing an
+        // oversized prompt to reach native tokenization.
+        val outputReserve = maxNewTokens.coerceAtLeast(1).coerceAtMost((context - 64).coerceAtLeast(1))
+        val reserve = outputReserve + 32
+        val budget = (context - reserve).coerceAtLeast(1)
+        if (messages.isEmpty()) return messages
 
         val selected = ArrayDeque<com.woogit.aicore.domain.ChatMessage>()
         var truncatedLatest = false
