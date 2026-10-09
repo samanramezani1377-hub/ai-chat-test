@@ -69,7 +69,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
     ) else null
     val generation = runtime.generation
     val perf = diagnostic.nativePerformance
-    // Successful load: concise lifecycle sample. Failed step: retain its full logs.
+    // Completed phases: concise per-phase summaries. Incomplete phases: preserve their full logs.
     val nativeLines = remember(runtime.lastNativeEvent, hasError, diagnostic.status) {
         diagnostic.logLines()
     }
@@ -119,12 +119,12 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
                         Text(if (hasError) "کپی گزارش + لاگ کامل خطا" else "کپی خلاصهٔ گزارش")
                     }
                     OutlinedButton(
-                        onClick = { copyToClipboard(context, if (hasError) "لاگ کامل مرحله ناموفق" else "نمونه لاگ بارگذاری", nativeLines.joinToString("\n")) },
+                        onClick = { copyToClipboard(context, if (hasError) "لاگ کامل مرحله ناموفق" else "خلاصه مراحل تکمیل‌شده", nativeLines.joinToString("\n")) },
                         modifier = Modifier.weight(1f),
                     ) {
                         Icon(Icons.Default.Terminal, null)
                         Spacer(Modifier.width(6.dp))
-                        Text(if (hasError) "کپی لاگ کامل مرحله" else "کپی نمونه لاگ بارگذاری")
+                        Text(if (hasError) "کپی لاگ کامل مرحله" else "کپی خلاصه مراحل تکمیل‌شده")
                     }
                 }
             }
@@ -224,7 +224,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
 
             DiagnosticsSection.LOGS -> {
                 SectionCard("لاگ خام Native") {
-                    Text(if (hasError) "مرحلهٔ ناموفق است؛ لاگ‌های کامل همان مرحله نمایش داده می‌شوند." else "بارگذاری موفق است؛ خلاصه و حداکثر ۵۰ خط نمونه از لاگ بارگذاری نمایش داده می‌شود.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (hasError) "مرحلهٔ ناموفق است؛ لاگ‌های کامل همان مرحله نمایش داده می‌شوند." else "برای هر مرحلهٔ تکمیل‌شده خلاصه نمایش داده می‌شود؛ مرحلهٔ ناتمام با لاگ کامل می‌آید.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(
                         value = logQuery,
                         onValueChange = { logQuery = it },
