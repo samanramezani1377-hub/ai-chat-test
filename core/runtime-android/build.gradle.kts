@@ -32,7 +32,10 @@ android {
                     "-DGGML_CPU_ARM_ARCH=armv8-a",
                     "-DGGML_OPENMP=OFF",
                     "-DGGML_LLAMAFILE=OFF",
-                    "-DGGML_OPENCL=ON",
+                    "-DGGML_OPENCL=OFF",
+                    "-DGGML_VULKAN=ON",
+                    "-DGGML_VULKAN_RUN_TESTS=OFF",
+                    "-DGGML_VULKAN_VALIDATE=OFF",
                     "-DGGML_VULKAN=OFF",
                     "-DCMAKE_BUILD_TYPE=Release",
                 )
@@ -50,7 +53,7 @@ android {
         debug {
             externalNativeBuild {
                 cmake {
-                    arguments += "-DAI_CHAT_OPENCL_PROFILING=ON"
+                    arguments += "-DGGML_VULKAN=ON"
                 }
             }
         }
@@ -59,7 +62,7 @@ android {
                 cmake {
                     // Keep the real OpenCL kernel profile available in the shipped
                     // diagnostic build; the profiler writes asynchronously to app cache.
-                    arguments += "-DAI_CHAT_OPENCL_PROFILING=ON"
+                    arguments += "-DGGML_VULKAN=ON"
                 }
             }
         }
