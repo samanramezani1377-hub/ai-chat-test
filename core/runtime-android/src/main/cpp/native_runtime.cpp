@@ -385,21 +385,6 @@ static bool probe_android_vendor_icd_candidates() {
                         const cl_int device_list_result = get_devices(
                             platforms[i], CL_DEVICE_TYPE_GPU, gpu_count, devices.data(), nullptr);
                         if (device_list_result == CL_SUCCESS) {
-                            // This Android ARM/Mali driver exports the core OpenCL
-                            // API directly but not clIcdGetPlatformIDsKHR. The patched
-                            // Khronos loader can use it only when the platform reports
-                            // a valid ICD suffix and a real GPU was enumerated.
-                            if (path[0] == '/' && !icd_suffix.empty() &&
-                                icd_suffix != "<unavailable>" && gpu_count > 0 &&
-                                setenv("OCL_ICD_FILENAMES", path, 1) == 0 &&
-                                setenv("AI_CHAT_OPENCL_ALLOW_DIRECT_PROVIDER", "1", 1) == 0) {
-                                append_native_trace((std::string("OPENCL_DIRECT_PROVIDER_SELECTED path=") + path +
-                                    " platform=" + name + " gpuCount=" + std::to_string(gpu_count) +
-                                    " icdSuffix=" + icd_suffix).c_str());
-                                dlclose(handle);
-                                append_native_trace("OPENCL_VENDOR_ICD_DIRECT_PROBE_COMPLETED selected=1 mode=verified_direct_provider");
-                                return true;
-                            }
                             for (cl_uint d = 0; d < gpu_count; ++d) {
                                 auto read_device_string = [&](cl_device_info field) -> std::string {
                                     size_t size = 0;
@@ -417,6 +402,21 @@ static bool probe_android_vendor_icd_candidates() {
                                     " vendor=" + read_device_string(CL_DEVICE_VENDOR) +
                                     " driver=" + read_device_string(CL_DRIVER_VERSION) +
                                     " version=" + read_device_string(CL_DEVICE_VERSION)).c_str());
+                            }
+                            // This Android ARM/Mali driver exports the core OpenCL
+                            // API directly but not clIcdGetPlatformIDsKHR. The patched
+                            // Khronos loader can use it only when the platform reports
+                            // a valid ICD suffix and a real GPU was enumerated.
+                            if (path[0] == '/' && !icd_suffix.empty() &&
+                                icd_suffix != "<unavailable>" && gpu_count > 0 &&
+                                setenv("OCL_ICD_FILENAMES", path, 1) == 0 &&
+                                setenv("AI_CHAT_OPENCL_ALLOW_DIRECT_PROVIDER", "1", 1) == 0) {
+                                append_native_trace((std::string("OPENCL_DIRECT_PROVIDER_SELECTED path=") + path +
+                                    " platform=" + name + " gpuCount=" + std::to_string(gpu_count) +
+                                    " icdSuffix=" + icd_suffix).c_str());
+                                dlclose(handle);
+                                append_native_trace("OPENCL_VENDOR_ICD_DIRECT_PROBE_COMPLETED selected=1 mode=verified_direct_provider");
+                                return true;
                             }
                         }
                     }
