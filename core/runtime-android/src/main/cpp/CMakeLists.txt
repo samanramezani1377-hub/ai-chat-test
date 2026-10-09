@@ -45,7 +45,9 @@ set(GGML_OPENCL ON CACHE BOOL "Use OpenCL GPU backend" FORCE)
 # MODULE libraries from the APK's native library namespace.
 set(GGML_BACKEND_DL OFF CACHE BOOL "Disable dynamic ggml backend loading on Android" FORCE)
 set(GGML_BACKEND_DIR "" CACHE STRING "No dynamic backend directory" FORCE)
-set(GGML_OPENCL_USE_ADRENO_KERNELS ON CACHE BOOL "Use Adreno-optimized OpenCL kernels when the runtime GPU is Adreno; automatically remains generic on other GPUs" FORCE)
+# Use portable OpenCL kernels across GPU vendors instead of compiling a
+# vendor-specific Adreno implementation into the Android runtime.
+set(GGML_OPENCL_USE_ADRENO_KERNELS OFF CACHE BOOL "Use portable device-neutral OpenCL kernels" FORCE)
 set(GGML_OPENCL_USE_ADRENO_BIN_KERNELS OFF CACHE BOOL "Do not use vendor-specific Adreno binary kernels" FORCE)
 set(GGML_VULKAN OFF CACHE BOOL "Vulkan is intentionally disabled" FORCE)
 set(GGML_OPENCL_USE_SVM OFF CACHE BOOL "Avoid vendor SVM driver instability on Android" FORCE)
