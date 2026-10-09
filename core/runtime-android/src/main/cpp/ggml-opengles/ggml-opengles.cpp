@@ -13,11 +13,25 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
+#include <cstdarg>
 #include <string>
 #include <vector>
 #include <limits>
 
 namespace {
+
+extern "C" void ai_chat_native_trace(const char *text);
+
+// Keep backend failures in the app's exported diagnostic report, not only stderr.
+static void backend_diagnostic(const char *format, ...) {
+    char message[4096] = {};
+    va_list args;
+    va_start(args, format);
+    std::vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    ai_chat_native_trace(message);
+}
+
 
 static const char * kName = "OpenGL ES";
 static const char * kDescription = "Generic Android OpenGL ES 3.1 GGML GPU backend";
@@ -39,7 +53,7 @@ static GLuint compile_compute(const char * source, const char * program_name) {
     while (glGetError() != GL_NO_ERROR) {}
     GLuint shader = glCreateShader(GL_COMPUTE_SHADER);
     if (!shader || glGetError() != GL_NO_ERROR) {
-        std::fprintf(stderr, "OPENGL_ES_SHADER_CREATE_FAILED name=%s\n", name);
+        backend_diagnostic("OPENGL_ES_SHADER_CREATE_FAILED name=%s\n", name);
         return 0;
     }
     glShaderSource(shader, 1, &source, nullptr);
@@ -50,13 +64,13 @@ static GLuint compile_compute(const char * source, const char * program_name) {
         char log[4096] = {};
         GLsizei log_length = 0;
         glGetShaderInfoLog(shader, sizeof(log), &log_length, log);
-        std::fprintf(stderr, "OPENGL_ES_SHADER_COMPILE_FAILED name=%s log=%s\n", name, log);
+        backend_diagnostic("OPENGL_ES_SHADER_COMPILE_FAILED name=%s log=%s\n", name, log);
         glDeleteShader(shader);
         return 0;
     }
     GLuint program = glCreateProgram();
     if (!program || glGetError() != GL_NO_ERROR) {
-        std::fprintf(stderr, "OPENGL_ES_PROGRAM_CREATE_FAILED name=%s\n", name);
+        backend_diagnostic("OPENGL_ES_PROGRAM_CREATE_FAILED name=%s\n", name);
         glDeleteShader(shader);
         return 0;
     }
@@ -68,13 +82,13 @@ static GLuint compile_compute(const char * source, const char * program_name) {
         char log[4096] = {};
         GLsizei log_length = 0;
         glGetProgramInfoLog(program, sizeof(log), &log_length, log);
-        std::fprintf(stderr, "OPENGL_ES_PROGRAM_LINK_FAILED name=%s log=%s\n", name, log);
+        backend_diagnostic("OPENGL_ES_PROGRAM_LINK_FAILED name=%s log=%s\n", name, log);
         glDeleteProgram(program);
         return 0;
     }
     const GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
-        std::fprintf(stderr, "OPENGL_ES_PROGRAM_INIT_GL_ERROR name=%s gl_error=0x%04x\n",
+        backend_diagnostic("OPENGL_ES_PROGRAM_INIT_GL_ERROR name=%s gl_error=0x%04x\n",
             name, static_cast<unsigned>(error));
         glDeleteProgram(program);
         return 0;
@@ -690,8 +704,7 @@ static ggml_backend_buffer_t alloc_buffer(ggml_backend_buffer_type_t, size_t siz
     glBufferData(GL_SHADER_STORAGE_BUFFER, static_cast<GLsizeiptr>(size), nullptr, GL_DYNAMIC_DRAW);
     const GLenum allocation_error = glGetError();
     if (allocation_error != GL_NO_ERROR) {
-        std::fprintf(stderr,
-            "ggml-opengles buffer allocation failed size=%zu maxSsbo=%lld glError=0x%04x\n",
+        backend_diagnostic("ggml-opengles buffer allocation failed size=%zu maxSsbo=%lld glError=0x%04x\n",
             size,
             static_cast<long long>(caps.max_ssbo_block_size),
             static_cast<unsigned>(allocation_error));
@@ -833,7 +846,7 @@ static enum ggml_status graph_compute(ggml_backend_t, ggml_cgraph * graph) {
     for (int i = 0; i < ggml_graph_n_nodes(graph); ++i) {
         ggml_tensor * op = ggml_graph_node(graph, i);
         if (!supports_op(nullptr, op)) {
-            std::fprintf(stderr, "OpenGL ES GPU-only graph rejected unsupported op=%s type=%d ne=[%lld,%lld,%lld,%lld]\n",
+            backend_diagnostic("OpenGL ES GPU-only graph rejected unsupported op=%s type=%d ne=[%lld,%lld,%lld,%lld]\n",
                 ggml_op_name(op->op), (int) op->type,
                 (long long) op->ne[0], (long long) op->ne[1],
                 (long long) op->ne[2], (long long) op->ne[3]);
@@ -1163,13 +1176,12 @@ static ggml_guid_t backend_guid() {
 static ggml_backend_t init_backend(ggml_backend_dev_t dev, const char *) {
     if (!opengles_runtime_available()) {
         const auto & caps = opengles_runtime_info();
-        std::fprintf(stderr, "OPENGL_ES_BACKEND_INIT_FAILED stage=runtime reason=%s\n",
+        backend_diagnostic("OPENGL_ES_BACKEND_INIT_FAILED stage=runtime reason=%s\n",
             caps.failure.empty() ? "unknown" : caps.failure.c_str());
         return nullptr;
     }
     if (!ensure_programs()) {
-        std::fprintf(stderr,
-            "OPENGL_ES_BACKEND_INIT_FAILED stage=shader_programs ssbo_blocks=%d max_ssbo=%lld\n",
+        backend_diagnostic("OPENGL_ES_BACKEND_INIT_FAILED stage=shader_programs ssbo_blocks=%d max_ssbo=%lld\n",
             opengles_runtime_info().max_compute_ssbo_blocks,
             static_cast<long long>(opengles_runtime_info().max_ssbo_block_size));
         return nullptr;
