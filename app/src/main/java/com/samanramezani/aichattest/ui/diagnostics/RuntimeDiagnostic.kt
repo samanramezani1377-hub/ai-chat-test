@@ -284,7 +284,7 @@ private fun compactCompletedPhases(lines: List<String>): List<String> {
     val starts = lines.mapIndexedNotNull { index, line ->
         startTokens.firstOrNull { line.contains(it.first, ignoreCase = true) }
             ?.let { NativePhase(it.second, index, line) }
-            ?: Regex("""\\b([A-Z][A-Z0-9_]*(?:STARTED|BEGIN))\\b""")
+            ?: Regex("""\b([A-Z][A-Z0-9_]*(?:STARTED|BEGIN))\b""")
                 .find(line)?.groupValues?.get(1)
                 ?.takeIf { token ->
                     listOf("MODEL", "CONTEXT", "BACKEND", "GENERATION", "TOKEN", "PREFILL",
