@@ -35,7 +35,7 @@ internal object ErrorCenter {
             "unsupported gpu" in text || "drop unsupported device" in text ->
                 PersianError("VULKAN-003", "GPU شناسایی شد اما پشتیبانی نمی‌شود",
                     "درایور Vulkan سالم است و دستگاه GPU شناسایی شده، اما backend Vulkan نتوانسته دستگاه قابل استفاده‌ای ثبت کند. مدل فعال نشده است.",
-                    "این مشکل با نصب دوباره درایور یا تغییر فایل مدل حل نمی‌شود. باید مسیر کرنل‌ها و dispatch برای Mali به‌صورت واقعی پیاده‌سازی و روی دستگاه آزمایش شود. حالت CPU fallback همچنان غیرفعال است.",
+                    "این خطا نشان می‌دهد backend نتوانسته GPU قابل استفاده‌ای ثبت کند. گزارش خام Vulkan را برای تشخیص خطای درایور، ساخت یا شناسایی دستگاه بررسی کن؛ حالت CPU fallback غیرفعال است.",
                     technical)
 
             "VULKAN_GPU_ONLY_REJECTED_NO_VULKAN_GPU_DEVICE".lowercase() in text ||
