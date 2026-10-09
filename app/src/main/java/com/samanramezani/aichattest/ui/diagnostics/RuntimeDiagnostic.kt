@@ -284,7 +284,19 @@ private fun compactCompletedPhases(lines: List<String>): List<String> {
     val starts = lines.mapIndexedNotNull { index, line ->
         startTokens.firstOrNull { line.contains(it.first, ignoreCase = true) }
             ?.let { NativePhase(it.second, index, line) }
-    }
+            ?: Regex("""\\b([A-Z][A-Z0-9_]*(?:STARTED|BEGIN))\\b""")
+                .find(line)?.groupValues?.get(1)
+                ?.takeIf { token ->
+                    listOf("MODEL", "CONTEXT", "BACKEND", "GENERATION", "TOKEN", "PREFILL",
+                        "DECODE", "CACHE", "RUNTIME", "LOAD", "INITIALIZATION", "ACTIVATION")
+                        .any { token.contains(it) }
+                }
+                ?.let { token ->
+                    val label = token.removeSuffix("_STARTED").removeSuffix("_BEGIN")
+                        .lowercase(java.util.Locale.ROOT).replace("_", " ")
+                    NativePhase(label, index, line)
+                }
+    }.distinctBy { it.startIndex }
     if (starts.isEmpty()) {
         // No phase boundaries were recorded. Keep useful milestone/error lines,
         // while dropping repetitive per-tensor chatter.
@@ -313,7 +325,7 @@ private fun compactCompletedPhases(lines: List<String>): List<String> {
         }
         val completed = chunk.any { line ->
             successTokens.any { token -> line.contains(token, ignoreCase = true) }
-        }
+        } || phaseIndex < starts.lastIndex // the next phase starting implies this phase returned control
         if (failureIndex >= 0 || !completed) {
             // An unfinished phase is the evidence: never truncate or summarize it.
             output += "⛔ مرحله «${phase.name}» تکمیل نشد؛ لاگ کامل مرحله:"
