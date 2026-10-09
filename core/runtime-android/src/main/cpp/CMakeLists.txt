@@ -37,6 +37,53 @@ set(ENABLE_OPENCL_LAYER OFF CACHE BOOL "" FORCE)
 set(ENABLE_OPENCL_ICD_LOADER ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(opencl_icd_loader)
 
+# Some Android vendor OpenCL implementations expose a complete core API and
+# valid platform dispatch tables but do not export clIcdGetPlatformIDsKHR.
+# Keep Khronos' loader as the dispatch layer, but permit a narrowly opt-in
+# direct-provider entry point when native_runtime has verified the platform.
+# The runtime sets AI_CHAT_OPENCL_ALLOW_DIRECT_PROVIDER=1 only after checking
+# a real platform and its ICD suffix; ordinary ICD discovery is unchanged.
+set(_ai_chat_icd_source "${opencl_icd_loader_SOURCE_DIR}/loader/icd.c")
+if (EXISTS "${_ai_chat_icd_source}")
+    file(READ "${_ai_chat_icd_source}" _ai_chat_icd_contents)
+    set(_ai_chat_icd_needle [=[
+    p_clIcdGetPlatformIDs = (pfn_clIcdGetPlatformIDs)(size_t)p_clGetExtensionFunctionAddress("clIcdGetPlatformIDsKHR");
+    if (!p_clIcdGetPlatformIDs)
+    {
+        KHR_ICD_TRACE("failed to get extension function address clIcdGetPlatformIDsKHR\\n");
+        goto Done;
+    }
+]=])
+    set(_ai_chat_icd_replacement [=[
+    p_clIcdGetPlatformIDs = (pfn_clIcdGetPlatformIDs)(size_t)p_clGetExtensionFunctionAddress("clIcdGetPlatformIDsKHR");
+    if (!p_clIcdGetPlatformIDs)
+    {
+        const char * allow_direct_provider = getenv("AI_CHAT_OPENCL_ALLOW_DIRECT_PROVIDER");
+        if (allow_direct_provider && strcmp(allow_direct_provider, "1") == 0)
+        {
+            p_clIcdGetPlatformIDs = (pfn_clIcdGetPlatformIDs)(size_t)khrIcdOsLibraryGetFunctionAddress(library, "clGetPlatformIDs");
+            if (p_clIcdGetPlatformIDs)
+            {
+                KHR_ICD_TRACE("using explicitly verified Android direct OpenCL provider\\n");
+            }
+        }
+        if (!p_clIcdGetPlatformIDs)
+        {
+            KHR_ICD_TRACE("failed to get extension function address clIcdGetPlatformIDsKHR\\n");
+            goto Done;
+        }
+    }
+]=])
+    string(FIND "${_ai_chat_icd_contents}" "${_ai_chat_icd_needle}" _ai_chat_icd_needle_pos)
+    if (_ai_chat_icd_needle_pos EQUAL -1)
+        message(FATAL_ERROR "Unable to apply Android direct-provider compatibility patch to OpenCL-ICD-Loader")
+    endif()
+    string(REPLACE "${_ai_chat_icd_needle}" "${_ai_chat_icd_replacement}" _ai_chat_icd_contents "${_ai_chat_icd_contents}")
+    file(WRITE "${_ai_chat_icd_source}" "${_ai_chat_icd_contents}")
+else()
+    message(FATAL_ERROR "OpenCL-ICD-Loader source not found at expected path: ${_ai_chat_icd_source}")
+endif()
+
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 set(GGML_OPENCL ON CACHE BOOL "Use OpenCL GPU backend" FORCE)
