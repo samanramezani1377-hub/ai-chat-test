@@ -524,13 +524,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
 
     std::lock_guard<std::mutex> lock(g_backend_init_mutex);
     if (!g_backend_initialized) {
-        // Keep OpenCL device selection capability-driven: never force an Adreno-only
-        // backend policy. The Q6_K decode path, however, has upstream shape-gated
-        // specializations for the long-vocabulary lm_head. Enable those explicitly
-        // so the Android process does not depend on an external shell environment.
-        // Do not force a kernel tuned for one GPU generation on every Android device.
-        // Let the pinned upstream OpenCL backend select kernels using runtime device
-        // capabilities; the application remains vendor-neutral.
+        // Use the same portable OpenCL policy on every Android GPU vendor.
+        // Do not force Q6_K kernel variants globally: let upstream choose the
+        // supported implementation for the active OpenCL device.
         unsetenv("GGML_OPENCL_Q6K_GEMV_TILED");
         unsetenv("GGML_OPENCL_Q6K_GEMV_O4");
         unsetenv("GGML_OPENCL_Q6K_GEMV_O4_GLOBAL");
@@ -555,7 +551,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         unsetenv("OCL_ICD_VENDORS");
         append_native_trace("OPENCL_ICD_FILENAMES_CLEARED_ANDROID_LOADER");
         append_native_trace("OPENCL_ICD_VENDORS_CLEARED_USE_ANDROID_DEFAULT");
-        append_native_trace("OPENCL_Q6K_SPECIALIZED_KERNELS tiled=0 o4=1 o4_global=1 xmem_gemm=0");
+        append_native_trace("OPENCL_Q6K_KERNEL_OVERRIDES=NONE");
         append_native_trace("OPENCL_STATIC_REGISTRATION_STARTED");
         probe_android_opencl_library_visibility();
         probe_android_opencl_driver();
