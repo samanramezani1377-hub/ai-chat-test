@@ -33,6 +33,10 @@ def main() -> int:
         return 2
 
     src = {name: path.read_text(encoding="utf-8") for name, path in FILES.items()}
+    # CMake intentionally contains the old patch text so it can undo that patch
+    # in an already-populated FetchContent checkout. Inspect only the active
+    # replacement block when asserting that the old scheduler behavior is absent.
+    cmake_active_scheduler = src["cmake"].split("set(_scheduler_replacement [=[", 1)[1].split("]=])", 1)[0]
     checks = [
         ("GPU backend is statically linked", "add_library(ai_chat_runtime SHARED" in src["cmake"] and
          "ggml-opengles/ggml-opengles.cpp" in src["cmake"] and
@@ -48,7 +52,7 @@ def main() -> int:
          "CPU weight repacking must not be enabled"),
         ("GPU-only scheduler retains host metadata but forbids CPU inference", "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2" in src["cmake"] and
          "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK" in src["cmake"] and
-         "if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU) {\n                continue;" not in src["cmake"],
+         "if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU) {\n                continue;" not in cmake_active_scheduler,
          "CPU may resolve preallocated metadata leaves but must never execute inference ops"),
         ("Build fails if GPU-only scheduler patch is missing", "message(FATAL_ERROR" in src["cmake"] and
          "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2 was not applied" in src["cmake"],
