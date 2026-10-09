@@ -15,8 +15,9 @@ permissions:
   contents: read
 
 concurrency:
-  # Normalize push and pull_request refs so the same branch cannot run duplicate CI.
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  # Keep push and PR runs separate; otherwise they cancel each other when both
+  # events fire for the same branch/commit. Duplicates within one event still cancel.
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
