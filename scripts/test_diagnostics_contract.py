@@ -34,6 +34,8 @@ def main() -> int:
          all(token in diagnostics for token in ("prefillMs", "decodeMs", "decodeTokensPerSec"))),
         ("diagnostics parse KV-cache measurements",
          all(token in diagnostics for token in ("cachedTokens", "reusedTokens", "cacheHitRatio"))),
+        ("diagnostics surface native fatal signal, runtime phase, and instruction pointers",
+         all(token in diagnostics for token in ("NATIVE_FATAL_SIGNAL", "NATIVE_FATAL_PHASE", "NATIVE_FATAL_PC", "NATIVE_FATAL_LR"))),
         ("native trace emits prefill and generation measurements",
          "prefillMs=" in native and "generationMs=" in native),
         ("native trace emits decode profile measurements",
