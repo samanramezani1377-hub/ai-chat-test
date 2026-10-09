@@ -142,7 +142,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
                         Text("کپی گزارش ۵۰ خطی")
                     }
                     OutlinedButton(
-                        onClick = { copyToClipboard(context, "۲۰۰ خط آخر لاگ", nativeLines.joinToString("\n")) },
+                        onClick = { copyToClipboard(context, "خطاهای مهم Runtime", nativeLines.takeLast(20).joinToString("\n")) },
                         modifier = Modifier.weight(1f),
                     ) {
                         Icon(Icons.Default.Terminal, null)
