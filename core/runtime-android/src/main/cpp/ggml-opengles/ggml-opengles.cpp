@@ -676,7 +676,10 @@ static bool ensure_programs() {
     if (!g_copy) g_copy = compile_compute(copy_shader(), "copy");
     if (!g_l2_norm) g_l2_norm = compile_compute(l2_norm_shader(), "l2_norm");
     if (!g_repeat) g_repeat = compile_compute(repeat_shader(), "repeat");
-    return g_get_rows && g_elementwise && g_q6k && g_silu && g_ssm_conv && g_rms_norm && g_unary && g_softmax && g_matmul_f32 && g_rope && g_copy && g_l2_norm && g_repeat;
+    // A device that supports GATED_DELTA_NET must have its program compiled before dispatch.
+    return g_get_rows && g_elementwise && g_q6k && g_silu && g_ssm_conv && g_rms_norm &&
+        g_unary && g_softmax && g_matmul_f32 && g_rope && g_copy && g_l2_norm && g_repeat &&
+        (caps.max_compute_ssbo_blocks < 7 || g_gdn != 0);
 }
 
 static size_t tensor_offset(const ggml_backend_buffer_t buffer, const ggml_tensor * tensor) {
