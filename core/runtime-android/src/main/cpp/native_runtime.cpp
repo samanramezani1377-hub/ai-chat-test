@@ -43,6 +43,10 @@ static std::mutex g_backend_init_mutex;
 static bool g_backend_initialized = false;
 static bool g_gpu_backend_loaded = false;
 static uint32_t g_context_length = 0;
+// Stable literal-only phase label so the fatal handler can report where SIGABRT
+// occurred even if the app's separate trace file was not flushed before process death.
+static const char * volatile g_native_phase = "BOOT";
+static void set_native_phase(const char *phase) { g_native_phase = phase ? phase : "UNKNOWN"; }
 
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
 static void append_native_trace(const char *text);
@@ -64,6 +68,7 @@ static int batch_threads() {
 
 static bool init_generation_context() {
     if (!g_model || g_context_length == 0) return false;
+    set_native_phase("CONTEXT_INIT");
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx = g_context_length;
     // Bound the scheduler's worst-case graph reservation on mobile GPUs. A 128-token
@@ -91,6 +96,8 @@ static bool init_generation_context() {
         std::to_string(cp.n_threads_batch) + " nBatch=" +
         std::to_string(cp.n_batch) + " nUbatch=" +
         std::to_string(cp.n_ubatch) + " flashAttn=disabled").c_str());
+    LOGI("NATIVE_CONTEXT_CONFIG ctx=%u batch=%u ubatch=%u recurrent_seq=%u flash_attn=disabled",
+        cp.n_ctx, cp.n_batch, cp.n_ubatch, cp.n_rs_seq);
     append_native_trace("NATIVE_CONTEXT_INIT_BEGIN");
     g_context = llama_init_from_model(g_model, cp);
     if (!g_context) {
@@ -98,6 +105,7 @@ static bool init_generation_context() {
         return false;
     }
     append_native_trace("NATIVE_CONTEXT_INIT_READY");
+    set_native_phase("CONTEXT_READY");
     llama_set_abort_callback(g_context, abort_callback, nullptr);
     return true;
 }
@@ -263,6 +271,11 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
             lr = (uintptr_t)context->uc_mcontext.regs[30];
         }
 #endif
+        const char native_phase_prefix[] = "NATIVE_FATAL_PHASE=";
+        const char *native_phase = g_native_phase ? g_native_phase : "UNKNOWN";
+        native_write_text(g_native_fatal_fd, native_phase_prefix, sizeof(native_phase_prefix) - 1);
+        native_write_text(g_native_fatal_fd, native_phase, std::strlen(native_phase));
+        native_write_text(g_native_fatal_fd, "\n", 1);
         const char phase_prefix[] = "NATIVE_FATAL_SPEC_PHASE=";
         native_write_text(g_native_fatal_fd, phase_prefix, sizeof(phase_prefix) - 1);
         char phase[96];
@@ -623,7 +636,20 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     g_spec_accept_ema = 1.0;
     append_native_trace("DRAFT_FEATURE_REMOVED");
     g_target_model_path = path;
-    const std::string preflight = gguf_preflight(path); checkpoint(preflight.c_str());
+    set_native_phase("GGUF_PREFLIGHT");
+    const std::string preflight = gguf_preflight(path);
+    const std::string arch_key = "architecture=";
+    const size_t arch_pos = preflight.find(arch_key);
+    if (arch_pos != std::string::npos) {
+        const size_t value_start = arch_pos + arch_key.size();
+        const size_t value_end = preflight.find('\n', value_start);
+        const std::string arch = preflight.substr(value_start,
+            value_end == std::string::npos ? std::string::npos : value_end - value_start);
+        LOGI("NATIVE_GGUF_ARCH architecture=%s", arch.c_str());
+    } else {
+        LOGI("NATIVE_GGUF_ARCH unavailable_in_preflight");
+    }
+    checkpoint(preflight.c_str());
     // Target activation must never implicitly enable speculative/MTP.
     // A target GGUF may contain MTP metadata, but that is not a request to
     // allocate a second context during activation. Draft/speculative setup
@@ -652,9 +678,11 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         " load_mode=" + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
     checkpoint("MODEL_LOAD_STARTED gpu_layers=VULKAN");
+    set_native_phase("MODEL_LOAD");
     g_model = load_model_android(path, mp, true);
     checkpoint(g_model ? "MODEL_LOAD_RETURNED_SUCCESS" : "MODEL_LOAD_RETURNED_FAILED");
     if (g_model) {
+        set_native_phase("MODEL_RESIDENCY_CHECK");
         append_weight_residency_trace();
         if (!validate_gpu_model_residency()) {
             checkpoint("VULKAN_GPU_ONLY_MODEL_RESIDENCY_REJECTED");
@@ -674,8 +702,30 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     if (!g_model) { checkpoint("MODEL_LOAD_FAILED"); return 1; }
     const int trained = llama_model_n_ctx_train(g_model);
     const int requested = ctx_len > 0 ? ctx_len : 4096;
-    const int effective = std::max(1, std::min(requested, trained));
-    checkpoint((std::string("MODEL_READY trained_ctx=") + std::to_string(trained) + " effective_ctx=" + std::to_string(effective)).c_str());
+    int effective = std::max(1, std::min(requested, trained));
+    // Hybrid/recurrent models build a larger mixed-attention/state graph. On
+    // constrained mobile Vulkan GPUs, keep their first stable activation at 4K;
+    // this limits KV/graph reservation without changing model weights or quantization.
+    const std::string preflight_arch_key = "architecture=";
+    const size_t preflight_arch_pos = preflight.find(preflight_arch_key);
+    if (preflight_arch_pos != std::string::npos) {
+        const size_t value_start = preflight_arch_pos + preflight_arch_key.size();
+        const size_t value_end = preflight.find('\n', value_start);
+        const std::string arch = preflight.substr(value_start,
+            value_end == std::string::npos ? std::string::npos : value_end - value_start);
+        const bool hybrid_recurrent =
+            arch.find("qwen3.5") != std::string::npos ||
+            arch.find("qwen3_5") != std::string::npos ||
+            arch.find("qwen3next") != std::string::npos ||
+            arch.find("deepseek4") != std::string::npos;
+        if (hybrid_recurrent && effective > 4096) {
+            LOGI("NATIVE_CONTEXT_CAP architecture=%s requested=%d effective=4096 reason=hybrid_recurrent_vulkan_stability",
+                arch.c_str(), effective);
+            effective = 4096;
+        }
+    }
+    checkpoint((std::string("MODEL_READY trained_ctx=") + std::to_string(trained) + " requested_ctx=" +
+        std::to_string(requested) + " effective_ctx=" + std::to_string(effective)).c_str());
     g_context_length = (uint32_t)effective;
     checkpoint("CONTEXT_INIT_STARTED");
     const bool context_ready = init_generation_context();
