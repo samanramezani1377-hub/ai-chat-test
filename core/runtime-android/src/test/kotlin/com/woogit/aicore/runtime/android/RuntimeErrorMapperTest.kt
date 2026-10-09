@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
 
 class RuntimeErrorMapperTest {
     @Test
-    fun unsupportedOpenClGpuIsReportedWithoutSuggestingCpuFallback() {
+    fun unavailableVulkanGpuIsReportedWithoutSuggestingCpuFallback() {
         val error = RuntimeErrorMapper.nativeLoadFailure(5)
 
         assertIs<ModelError.RuntimeUnavailable>(error)
