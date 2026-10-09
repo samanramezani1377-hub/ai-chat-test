@@ -47,7 +47,6 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         actionTrace = selectedActions,
         runtimeTrace = runtime.trace,
         nativeDiagnostics = runtime.lastNativeEvent,
-        openClProfile = runtime.openClProfile,
         gpuDevice = runtime.gpuDevice,
         weightResidency = runtime.weightResidency,
     )
@@ -85,7 +84,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             InfoLine("Quantization", runtime.model?.quantization?.toString() ?: "—")
             InfoLine("Runtime", runtime.runtime.name)
             InfoLine("نسخه", runtime.runtime.version)
-            InfoLine("Backend", runtime.runtime.backend ?: "OpenCL")
+            InfoLine("Backend", runtime.runtime.backend ?: "Vulkan")
             InfoLine("GPU Layers", runtime.runtime.gpuLayers?.toString() ?: "—")
             InfoLine("Threads", runtime.runtime.threads?.toString() ?: "—")
             InfoLine("Context", runtime.runtime.contextLength?.toString() ?: "—")
@@ -104,25 +103,6 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             InfoLine("تعداد Buffer روی GPU", residency?.gpuBuffers?.toString() ?: "—")
             InfoLine("وزن‌های Host", residency?.hostTensorMiB?.let { "%.1f MiB".format(it) } ?: "—")
             InfoLine("وزن‌های CPU", residency?.cpuTensorMiB?.let { "%.1f MiB".format(it) } ?: "—")
-        }
-
-        SectionCard("پروفایل واقعی GPU / OpenCL") {
-            val gpu = runtime.openClProfile
-            InfoLine("تعداد Kernel", gpu?.kernelCount?.toString() ?: "—")
-            InfoLine("MUL_MAT Q6_K", gpu?.q6KMulMatMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("Attention", gpu?.attentionMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("RoPE", gpu?.ropeMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("RMSNorm", gpu?.rmsNormMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("FFN", gpu?.ffnMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("Softmax", gpu?.softmaxMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("Kernel launch", gpu?.kernelLaunchMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("Kernel submit", gpu?.kernelSubmitMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("Kernel execution", gpu?.totalKernelMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("Sync / completion", gpu?.syncMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("Memory transfer", gpu?.memoryTransferMs?.let { "%.3f ms".format(it) } ?: "اندازه‌گیری نشده")
-            gpu?.topKernels?.forEachIndexed { index, kernel ->
-                InfoLine("Kernel ${index + 1}", "${kernel.kernelName} — %.3f ms".format(kernel.executionMs))
-            }
         }
 
         SectionCard("ورودی و خروجی") {
