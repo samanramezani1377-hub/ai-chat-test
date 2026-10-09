@@ -91,8 +91,13 @@ static bool init_generation_context() {
         std::to_string(cp.n_threads_batch) + " nBatch=" +
         std::to_string(cp.n_batch) + " nUbatch=" +
         std::to_string(cp.n_ubatch) + " flashAttn=disabled").c_str());
+    append_native_trace("NATIVE_CONTEXT_INIT_BEGIN");
     g_context = llama_init_from_model(g_model, cp);
-    if (!g_context) return false;
+    if (!g_context) {
+        append_native_trace("NATIVE_CONTEXT_INIT_FAILED_NULL_CONTEXT");
+        return false;
+    }
+    append_native_trace("NATIVE_CONTEXT_INIT_READY");
     llama_set_abort_callback(g_context, abort_callback, nullptr);
     return true;
 }
