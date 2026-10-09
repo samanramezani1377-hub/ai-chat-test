@@ -14,6 +14,7 @@ GPU = ROOT / "core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp"
 ADAPTER = ROOT / "core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/LlamaCppAndroidRuntimeAdapter.kt"
 BRIDGE = ROOT / "core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/NativeLlamaCpp.kt"
 ACTIVE_NATIVE = ROOT / "core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp"
+CMAKE = ROOT / "core/runtime-android/src/main/cpp/CMakeLists.txt"
 
 
 def section(text: str, start: str, end: str) -> str:
@@ -25,13 +26,13 @@ def section(text: str, start: str, end: str) -> str:
 
 
 def main() -> int:
-    paths = [NATIVE, GPU, ADAPTER, BRIDGE, ACTIVE_NATIVE]
+    paths = [NATIVE, GPU, ADAPTER, BRIDGE, ACTIVE_NATIVE, CMAKE]
     missing = [str(p.relative_to(ROOT)) for p in paths if not p.is_file()]
     if missing:
         print("FAIL: missing source(s): " + ", ".join(missing), file=sys.stderr)
         return 2
 
-    native, gpu, adapter, bridge, active_native = [p.read_text(encoding="utf-8") for p in paths]
+    native, gpu, adapter, bridge, active_native, cmake = [p.read_text(encoding="utf-8") for p in paths]
     load = section(native, "Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad", "Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeStop")
     context = section(native, "static bool init_generation_context() {", "static bool init_speculative_runtime() {")
     support = section(gpu, "static bool supports_op", "static enum ggml_status graph_compute")
@@ -60,6 +61,8 @@ def main() -> int:
          all(token in native for token in ("NATIVE_FATAL_PC=", "NATIVE_FATAL_LR=", "NATIVE_FATAL_FAULT_ADDR="))),
         ("installed Android fatal handler reports signal name and runtime phase",
          all(token in active_native for token in ("NATIVE_FATAL_SIGNAL_NAME=", "NATIVE_FATAL_PHASE=", "g_native_phase"))),
+        ("pinned llama.cpp scheduler exposes internal reservation stage markers",
+         all(token in cmake for token in ("AI_CHAT_SCHEDULER_TRACE_PATCH", "AI_CHAT_SCHED_STAGE=before_backend_scheduler_create", "AI_CHAT_SCHED_STAGE=before_memory_init_full", "AI_CHAT_SCHED_STAGE=before_resolve_fused_ops", "AI_CHAT_SCHED_STAGE=before_prompt_graph_reserve", "AI_CHAT_SCHED_STAGE=before_token_graph_reserve", "AI_CHAT_SCHED_STAGE=reserve_graphs_completed"))),
         ("GPU memory marked unknown is not reported as a measured zero",
          'if (nativeField(line, "memoryKnown") == "1")' in
          (ROOT / "core/runtime/src/main/kotlin/com/woogit/aicore/runtime/RuntimeDiagnostics.kt").read_text(encoding="utf-8")),
