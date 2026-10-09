@@ -58,7 +58,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         loadTimeMs = runtime.loadTimeMs,
         generation = runtime.generation,
         settings = runtime.settings,
-        status = execution?.status ?: if (!error.isNullOrBlank() || nativeActivationIncomplete) "FAILED" else if (runtime.generation != null) "SUCCESS" else "READY",
+        status = execution?.status ?: if (!error.isNullOrBlank() || nativeActivationIncomplete) "FAILED — context initialization interrupted".takeIf { nativeActivationIncomplete && error.isNullOrBlank() } ?: "FAILED" else if (runtime.generation != null) "SUCCESS" else "READY",
         error = error ?: execution?.error ?: if (nativeActivationIncomplete) "Native context initialization was interrupted before readiness" else null,
         rawError = execution?.error,
         executionId = execution?.id,
