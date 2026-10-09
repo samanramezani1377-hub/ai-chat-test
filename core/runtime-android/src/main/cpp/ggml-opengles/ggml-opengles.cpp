@@ -197,17 +197,17 @@ float q6(uint block, uint idx) {
 }
 
 void main() {
-    uint out = gl_GlobalInvocationID.x;
+    uint output_idx = gl_GlobalInvocationID.x;
     uint total = rows * cols * x_n2 * x_n3;
-    if (out >= total) return;
-    uint row = out % rows;
-    uint col = (out / rows) % cols;
+    if (output_idx >= total) return;
+    uint row = output_idx % rows;
+    uint col = (output_idx / rows) % cols;
     float sum = 0.0;
     uint blocks = k / block_k;
     for (uint b = 0u; b < blocks; ++b) {
         for (uint j = 0u; j < block_k; ++j) {
             uint kk = b * block_k + j;
-            float xv = x[(x_off >> 2u) + col*x_s1 + (out/(rows*cols))*x_s2 + kk*x_s0];
+            float xv = x[(x_off >> 2u) + col*x_s1 + (output_idx/(rows*cols))*x_s2 + kk*x_s0];
             uint wb = b + row * blocks;
             float wv = w_type == 0u ? q6(wb, j) : (w_type == 1u ? q4_0(wb, j) : q8_0_mm(wb, j));
             sum += wv * xv;
@@ -565,7 +565,7 @@ static const char * softmax_shader() {
 layout(local_size_x = 1) in;
 layout(std430, binding = 0) readonly buffer X { float x[]; };
 layout(std430, binding = 1) readonly buffer M { float m[]; };
-layout(std430, binding = 2) writeonly buffer Y { float y[]; };
+layout(std430, binding = 2) buffer Y { float y[]; };
 uniform uint x_off,m_off,y_off,n0,n1,n2,n3;
 uniform uint xs0,xs1,xs2,xs3, ms0,ms1,ms2,ms3, ys0,ys1,ys2,ys3;
 uniform uint has_mask; uniform float scale;
@@ -633,7 +633,7 @@ void main(){
  else if(axis==1) pos=p[(p_off>>2u)+ps0+d1*ps1];
  else if(axis==2) pos=p[(p_off>>2u)+2*ps0+d1*ps1];
  else pos=p[(p_off>>2u)+3*ps0+d1*ps1];
- float dim=float(d0/2u-cumulative);
+ float dim=float(int(d0/2u)-cumulative);
  float theta=float(pos)*pow(freq_base,-2.0*dim/float(n_dims))*freq_scale;
  float cs=cos(theta), sn=sin(theta);
  uint pair=d0+1u;
