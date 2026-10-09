@@ -9,10 +9,10 @@ internal data class PersianError(
 )
 
 internal object ErrorCenter {
-    private const val MAX_RECENT_TECHNICAL_LINES = 100
+    private const val MAX_RECENT_TECHNICAL_LINES = 200
 
     /**
-     * Keep the latest 100 lines, plus a small set of high-value markers that
+     * Keep the latest 200 lines, plus a small set of high-value markers that
      * may appear earlier (for example the GGUF preflight and first failure).
      * Per-tensor load spam is intentionally excluded from the preserved markers.
      */
