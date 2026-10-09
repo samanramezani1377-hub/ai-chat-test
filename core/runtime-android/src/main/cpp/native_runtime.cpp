@@ -66,14 +66,18 @@ static bool init_generation_context() {
     if (!g_model || g_context_length == 0) return false;
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx = g_context_length;
-    cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
-    cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 128);
+    // Bound the scheduler's worst-case graph reservation on mobile GPUs. A 128-token
+    // ubatch can reserve a much larger Vulkan graph than is useful for interactive
+    // chat, especially at 8K context. This affects prompt prefill chunk size, not
+    // the decode token loop.
+    cp.n_batch = std::min<uint32_t>(cp.n_ctx, 32);
+    cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 32);
     cp.n_rs_seq = 0;
-    // Let llama.cpp select the backend-safe attention implementation. The previous
-    // forced-disabled path expanded attention work and was a major mobile decode
-    // cost at 8K context. AUTO preserves the normal attention math while allowing
-    // Vulkan to use its optimized path when supported.
-    cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
+    // The device trace showed FLASH_ATTN_EXT nodes immediately before SIGABRT
+    // during context graph reservation on the affected Vulkan/Mali path. Keep the
+    // portable attention graph for Vulkan until this optimized path is verified
+    // against the device; GPU-only model placement remains enforced separately.
+    cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
     cp.type_k = GGML_TYPE_F16;
     cp.type_v = GGML_TYPE_F16;
     cp.offload_kqv = true;
@@ -86,7 +90,7 @@ static bool init_generation_context() {
         std::to_string(cp.n_threads) + " batch=" +
         std::to_string(cp.n_threads_batch) + " nBatch=" +
         std::to_string(cp.n_batch) + " nUbatch=" +
-        std::to_string(cp.n_ubatch) + " flashAttn=auto").c_str());
+        std::to_string(cp.n_ubatch) + " flashAttn=disabled").c_str());
     g_context = llama_init_from_model(g_model, cp);
     if (!g_context) return false;
     llama_set_abort_callback(g_context, abort_callback, nullptr);
