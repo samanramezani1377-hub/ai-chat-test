@@ -13,6 +13,7 @@ NATIVE = ROOT / "core/runtime-android/src/main/cpp/native_runtime.cpp"
 GPU = ROOT / "core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp"
 ADAPTER = ROOT / "core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/LlamaCppAndroidRuntimeAdapter.kt"
 BRIDGE = ROOT / "core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/NativeLlamaCpp.kt"
+ACTIVE_NATIVE = ROOT / "core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp"
 
 
 def section(text: str, start: str, end: str) -> str:
@@ -24,13 +25,13 @@ def section(text: str, start: str, end: str) -> str:
 
 
 def main() -> int:
-    paths = [NATIVE, GPU, ADAPTER, BRIDGE]
+    paths = [NATIVE, GPU, ADAPTER, BRIDGE, ACTIVE_NATIVE]
     missing = [str(p.relative_to(ROOT)) for p in paths if not p.is_file()]
     if missing:
         print("FAIL: missing source(s): " + ", ".join(missing), file=sys.stderr)
         return 2
 
-    native, gpu, adapter, bridge = [p.read_text(encoding="utf-8") for p in paths]
+    native, gpu, adapter, bridge, active_native = [p.read_text(encoding="utf-8") for p in paths]
     load = section(native, "Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad", "Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeStop")
     context = section(native, "static bool init_generation_context() {", "static bool init_speculative_runtime() {")
     support = section(gpu, "static bool supports_op", "static enum ggml_status graph_compute")
@@ -57,6 +58,8 @@ def main() -> int:
          "CONTEXT_INIT_RETURNED_FROM_LLAMA_INIT" in load),
         ("native fatal report retains PC/LR/fault address markers",
          all(token in native for token in ("NATIVE_FATAL_PC=", "NATIVE_FATAL_LR=", "NATIVE_FATAL_FAULT_ADDR="))),
+        ("installed Android fatal handler reports signal name and runtime phase",
+         all(token in active_native for token in ("NATIVE_FATAL_SIGNAL_NAME=", "NATIVE_FATAL_PHASE=", "g_native_phase"))),
         ("GPU memory marked unknown is not reported as a measured zero",
          'if (nativeField(line, "memoryKnown") == "1")' in
          (ROOT / "core/runtime/src/main/kotlin/com/woogit/aicore/runtime/RuntimeDiagnostics.kt").read_text(encoding="utf-8")),
