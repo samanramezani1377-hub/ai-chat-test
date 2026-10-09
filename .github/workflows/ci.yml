@@ -15,7 +15,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Normalize push and pull_request refs so the same branch cannot run duplicate CI.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -177,25 +178,6 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
-      - name: Cache exact native build state
-        uses: actions/cache@v4
-        with:
-          path: |
-            core/runtime-android/.cxx
-            core/runtime-android/src/.cxx
-          key: >-
-            native-lint-${{ runner.os }}-
-            ${{ hashFiles(
-              'gradle.properties',
-              'settings.gradle.kts',
-              'build.gradle.kts',
-              'gradle/libs.versions.toml',
-              'core/runtime-android/build.gradle.kts',
-              'core/runtime-android/src/main/cpp/**',
-              'core/runtime-android/src/main/cpp/cmake/**',
-              '.github/workflows/ci.yml'
-            ) }}
-
       - name: Run Android lint
         run: >-
           gradle
@@ -203,6 +185,8 @@ jobs:
           --stacktrace
           --console=plain
           --configuration-cache
+          --parallel
+          --build-cache
 
       - name: Upload lint report
         if: always()
