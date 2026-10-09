@@ -84,7 +84,7 @@ buffer-lifetime errors.
 
 ## Performance baseline format
 
-When a repeatable device benchmark harness is available, save JSON records with:
+Once a repeatable device benchmark produces a JSON record, compare it with a baseline using `python3 scripts/compare_device_benchmark.py --baseline baseline.json --current current.json --max-regression-percent 15`. The comparator rejects mismatched device/model/context identities and checks timing/memory regressions plus throughput regressions. Its synthetic self-test runs in CI; the project still needs a physical-device producer and a recorded baseline before real performance gates can run. Save JSON records with:
 `device`, `gpu_renderer`, `model_sha256`, `quantization`, `context`,
 `prompt_tokens`, `output_tokens`, `load_ms`, `ttft_ms`, `prefill_tokens_per_sec`,
 `decode_tokens_per_sec`, and `peak_pss_kib`. Establish a per-device baseline before
