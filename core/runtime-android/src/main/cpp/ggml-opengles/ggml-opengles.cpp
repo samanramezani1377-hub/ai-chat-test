@@ -213,7 +213,7 @@ void main() {
             sum += wv * xv;
         }
     }
-    y[(y_off >> 2u) + col*y_s1 + (out/(rows*cols))*y_s2 + row*y_s0] = sum;
+    y[(y_off >> 2u) + col*y_s1 + (output_idx/(rows*cols))*y_s2 + row*y_s0] = sum;
 })";
 }
 
