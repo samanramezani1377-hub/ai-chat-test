@@ -90,7 +90,6 @@ target_link_libraries(ai_chat_runtime PRIVATE
 
 target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"
-    AI_CHAT_GPU_BACKEND_OPENCL=0
     AI_CHAT_GPU_BACKEND_VULKAN=1
     AI_CHAT_REQUIRE_VULKAN_GPU=1
 )
