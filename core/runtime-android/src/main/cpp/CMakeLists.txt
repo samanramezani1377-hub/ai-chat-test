@@ -84,13 +84,23 @@ set(AI_CHAT_OPENCL_SOURCE_FILES
 )
 foreach(AI_CHAT_OPENCL_SOURCE IN LISTS AI_CHAT_OPENCL_SOURCE_FILES)
     file(READ "${AI_CHAT_OPENCL_SOURCE}" AI_CHAT_OPENCL_SOURCE_TEXT)
-    string(FIND "${AI_CHAT_OPENCL_SOURCE_TEXT}" "#include <CL/cl.h>" AI_CHAT_OPENCL_INCLUDE_POS)
-    if (AI_CHAT_OPENCL_INCLUDE_POS EQUAL -1)
-        message(FATAL_ERROR "Could not patch direct Android OpenCL dispatch in ${AI_CHAT_OPENCL_SOURCE}")
+    if (AI_CHAT_OPENCL_SOURCE MATCHES "ggml-opencl\\.cpp$")
+        string(FIND "${AI_CHAT_OPENCL_SOURCE_TEXT}" "#include <CL/cl.h>" AI_CHAT_OPENCL_INCLUDE_POS)
+        if (AI_CHAT_OPENCL_INCLUDE_POS EQUAL -1)
+            message(FATAL_ERROR "Could not patch direct Android OpenCL dispatch in ${AI_CHAT_OPENCL_SOURCE}")
+        endif()
+        string(REPLACE "#include <CL/cl.h>"
+            "#include <CL/cl.h>\n#include \"android_opencl_dispatch.h\""
+            AI_CHAT_OPENCL_SOURCE_TEXT "${AI_CHAT_OPENCL_SOURCE_TEXT}")
+    else()
+        string(FIND "${AI_CHAT_OPENCL_SOURCE_TEXT}" "#include \"cl-program-cache.h\"" AI_CHAT_OPENCL_INCLUDE_POS)
+        if (AI_CHAT_OPENCL_INCLUDE_POS EQUAL -1)
+            message(FATAL_ERROR "Could not patch direct Android OpenCL dispatch in ${AI_CHAT_OPENCL_SOURCE}")
+        endif()
+        string(REPLACE "#include \"cl-program-cache.h\""
+            "#include \"cl-program-cache.h\"\n#include \"android_opencl_dispatch.h\""
+            AI_CHAT_OPENCL_SOURCE_TEXT "${AI_CHAT_OPENCL_SOURCE_TEXT}")
     endif()
-    string(REPLACE "#include <CL/cl.h>"
-        "#include <CL/cl.h>\n#include \"android_opencl_dispatch.h\""
-        AI_CHAT_OPENCL_SOURCE_TEXT "${AI_CHAT_OPENCL_SOURCE_TEXT}")
     file(WRITE "${AI_CHAT_OPENCL_SOURCE}" "${AI_CHAT_OPENCL_SOURCE_TEXT}")
 endforeach()
 if (NOT TARGET ggml-opencl)
