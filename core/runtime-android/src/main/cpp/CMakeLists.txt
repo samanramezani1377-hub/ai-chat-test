@@ -97,12 +97,14 @@ target_include_directories(ai_chat_runtime PRIVATE
 # and symbols at link time to reduce the installed footprint without changing inference.
 target_compile_options(ai_chat_runtime PRIVATE
     -Os
+    -g
     -ffunction-sections
     -fdata-sections
 )
 target_link_options(ai_chat_runtime PRIVATE
     -Wl,--gc-sections
-    -Wl,--strip-all
+    # Keep native symbols/debug line tables so Android tombstones can identify the
+    # crashing function and resolve source lines with the matching unstripped build.
 )
 
 target_link_libraries(ai_chat_runtime PRIVATE llama llama-common android log EGL GLESv3)
