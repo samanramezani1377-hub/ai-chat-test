@@ -55,6 +55,8 @@ def main() -> int:
         ("context-init trace brackets llama_init_from_model for crash localization",
          "CONTEXT_INIT_ENTER_LLAMA_INIT_FROM_MODEL" in load and
          "CONTEXT_INIT_RETURNED_FROM_LLAMA_INIT" in load),
+        ("native fatal report retains PC/LR/fault address markers",
+         all(token in native for token in ("NATIVE_FATAL_PC=", "NATIVE_FATAL_LR=", "NATIVE_FATAL_FAULT_ADDR="))),
         ("GPU memory marked unknown is not reported as a measured zero",
          'if (nativeField(line, "memoryKnown") == "1")' in
          (ROOT / "core/runtime/src/main/kotlin/com/woogit/aicore/runtime/RuntimeDiagnostics.kt").read_text(encoding="utf-8")),
