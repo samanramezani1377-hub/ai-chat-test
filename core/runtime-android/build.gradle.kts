@@ -35,7 +35,6 @@ android {
                     "-DGGML_OPENCL=OFF",
                     "-DGGML_VULKAN=OFF",
                     "-DGGML_BACKEND_DL=OFF",
-                    "-DCMAKE_BUILD_TYPE=Release",
                 )
             }
         }
