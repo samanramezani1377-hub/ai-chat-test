@@ -63,7 +63,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         gpuDevice = runtime.gpuDevice,
         weightResidency = runtime.weightResidency,
     )
-    val hasError = !diagnostic.error.isNullOrBlank()
+    val hasError = !diagnostic.error.isNullOrBlank() || diagnostic.status.equals("FAILED", true) || diagnostic.status.equals("ERROR", true)
     val resolvedError = if (hasError) ErrorCenter.resolve(
         listOf(diagnostic.error, runtime.lastNativeEvent).filterNotNull().joinToString("\n")
     ) else null
