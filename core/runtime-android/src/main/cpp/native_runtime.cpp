@@ -528,10 +528,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         // backend policy. The Q6_K decode path, however, has upstream shape-gated
         // specializations for the long-vocabulary lm_head. Enable those explicitly
         // so the Android process does not depend on an external shell environment.
-        // The dispatcher still decides whether a given tensor shape can use them.
-        setenv("GGML_OPENCL_Q6K_GEMV_TILED", "0", 1);
-        setenv("GGML_OPENCL_Q6K_GEMV_O4", "1", 1);
-        setenv("GGML_OPENCL_Q6K_GEMV_O4_GLOBAL", "1", 1);
+        // Do not force a kernel tuned for one GPU generation on every Android device.
+        // Let the pinned upstream OpenCL backend select kernels using runtime device
+        // capabilities; the application remains vendor-neutral.
+        unsetenv("GGML_OPENCL_Q6K_GEMV_TILED");
+        unsetenv("GGML_OPENCL_Q6K_GEMV_O4");
+        unsetenv("GGML_OPENCL_Q6K_GEMV_O4_GLOBAL");
+        append_native_trace("OPENCL_KERNEL_POLICY=UPSTREAM_DEVICE_CAPABILITY_SELECTION");
         // Allow upstream to select the Adreno xmem F16xF32 GEMM path where its
         // shape/device gates say it is beneficial. This does not affect the
         // one-token Q6_K GEMV path used for decode, but can reduce prompt-time
