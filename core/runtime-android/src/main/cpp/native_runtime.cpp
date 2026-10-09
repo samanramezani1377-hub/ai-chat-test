@@ -396,7 +396,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
     LOGI("ACTIVATION_NATIVE_INIT_STARTED gpu=%d", enable_gpu ? 1 : 0);
     if (!g_native_marker_file.empty()) {
         append_native_trace(enable_gpu ? "===== NATIVE INIT GPU REQUESTED =====" : "===== NATIVE INIT CPU ONLY =====");
+#ifndef AI_CHAT_EXTERNAL_FATAL_HANDLER
         install_native_fatal_handlers();
+#endif
     }
     if (g_native_marker_file.empty()) {
         jclass system_class = env->FindClass("java/lang/System");
@@ -428,7 +430,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         }
         if (!g_native_marker_file.empty()) {
             append_native_trace(enable_gpu ? "===== NATIVE INIT GPU REQUESTED =====" : "===== NATIVE INIT CPU ONLY =====");
-            install_native_fatal_handlers();
+    #ifndef AI_CHAT_EXTERNAL_FATAL_HANDLER
+        install_native_fatal_handlers();
+#endif
         }
     }
     llama_log_set([](enum ggml_log_level level, const char *text, void *) {
