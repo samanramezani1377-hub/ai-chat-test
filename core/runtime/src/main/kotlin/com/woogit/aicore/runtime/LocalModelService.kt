@@ -158,8 +158,13 @@ class LocalModelService(
         }
     }
 
-    suspend fun stopGeneration() = generationMutex.withLock {
-        stopGenerationUnsafe()
+    suspend fun stopGeneration() {
+        // Generation holds generationMutex for its entire lifetime. Waiting for that
+        // mutex here prevents the stop signal from ever reaching a running decode.
+        // The runtime stop API is specifically designed to interrupt inference safely.
+        if (generationJob != null) {
+            runCatching { runtime.stopGeneration() }
+        }
     }
 
     private suspend fun stopGenerationUnsafe() {
