@@ -38,6 +38,16 @@ def main() -> int:
          "prefillMs=" in native and "generationMs=" in native),
         ("native trace emits decode profile measurements",
          "NATIVE_PERF_PROFILE" in native and "decodeMs=" in native),
+        ("failed diagnostics are capped instead of exposing a 999-line phase",
+         "return (keyLines + tail).distinct().takeLast(30)" in diagnostics and
+         "return importantNativeEvents(includeVerbose = false).takeLast(30)" in diagnostics),
+        ("full raw native trace is only available through explicit copy action",
+         "fullNativeLogLines()" in diagnostics and
+         'diagnostic.fullNativeLogLines().joinToString("\\n")' in
+         (ROOT / "app/src/main/java/com/samanramezani/aichattest/ui/diagnostics/DiagnosticsPage.kt").read_text(encoding="utf-8")),
+        ("error report does not append the full failed-phase trace",
+         "internal fun RuntimeDiagnostic.errorReport(): String = report()" in diagnostics and
+         "FULL LOGS FOR FAILED PHASE" not in diagnostics),
     ]
     failures = []
     for label, ok in checks:
