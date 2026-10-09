@@ -154,6 +154,8 @@ jobs:
           grep -q 'hybrid_recurrent_vulkan_stability' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'AI_CHAT_GPU_BACKEND_VULKAN=1' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_VULKAN_ANDROID_BDA_GUARD_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK' core/runtime-android/src/main/cpp/CMakeLists.txt
           ! grep -R 'OPENCL_GPU_ONLY\|NATIVE_OPENCL_DEVICE\|cl_profiling.csv\|OpenClGpuProfile' -n app core/runtime core/runtime-android
           ! grep -R 'GGML_OPENCL=ON\|GGML_OPENCL ON\|AI_CHAT_OPENCL_PROFILING\|ggml-opencl.h\|android_opencl_dispatch' -n core/runtime-android/src/main/cpp core/runtime-android/build.gradle.kts
           echo "Vulkan GPU-only/no-OpenCL invariants verified"
