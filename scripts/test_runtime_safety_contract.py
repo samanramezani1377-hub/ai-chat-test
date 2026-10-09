@@ -86,13 +86,13 @@ def main() -> int:
          "-g" in (ROOT / "core/runtime-android/src/main/cpp/CMakeLists.txt").read_text(encoding="utf-8") and
          "-Wl,--strip-all" not in (ROOT / "core/runtime-android/src/main/cpp/CMakeLists.txt").read_text(encoding="utf-8"),
          "do not strip the only symbols that can map a native PC to a function/source line"),
-    ]
         ("recurrent host metadata remains schedulable without CPU inference fallback",
          "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2" in
              (ROOT / "core/runtime-android/src/main/cpp/CMakeLists.txt").read_text(encoding="utf-8") and
          "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK" in
              (ROOT / "core/runtime-android/src/main/cpp/CMakeLists.txt").read_text(encoding="utf-8"),
          "CPU backend must own preallocated metadata leaves such as rs_seq, but scheduler must reject CPU compute fallback"),
+    ]
     failed = []
     for label, ok, detail in checks:
         print(("PASS: " if ok else "FAIL: ") + label)
