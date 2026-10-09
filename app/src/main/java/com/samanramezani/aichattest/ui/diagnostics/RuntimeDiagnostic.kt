@@ -143,7 +143,7 @@ internal data class RuntimeDiagnostic(
 internal fun RuntimeDiagnostic.report(): String = buildString {
     val perf = nativePerformance
     val resolved = error?.takeIf { it.isNotBlank() }?.let {
-        ErrorCenter.resolve(listOf(it, nativeDiagnostics).filterNotNull().joinToString("\\n"))
+        ErrorCenter.resolve(listOf(it, nativeDiagnostics).filterNotNull().joinToString("\n"))
     }
     val nativeLines = nativeDiagnostics.orEmpty().lineSequence()
         .map(String::trim)
@@ -198,7 +198,7 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     val events = uniqueRuntimeEvents().takeLast(4)
     if (events.isEmpty()) appendLine("No runtime events captured.")
     else events.forEach { appendLine(it.take(180)) }
-}.lineSequence().take(50).joinToString("\\n")
+}.lineSequence().take(50).joinToString("\n")
 
 internal fun RuntimeDiagnostic.errorReport(): String = buildString {
     appendLine("AI Chat Test — مختصر خطا")
@@ -208,7 +208,7 @@ internal fun RuntimeDiagnostic.errorReport(): String = buildString {
     appendLine("GPU Layers: ${runtime.gpuLayers ?: "N/A"} | Context: ${runtime.contextLength ?: "N/A"}")
 
     if (!error.isNullOrBlank()) {
-        val resolved = ErrorCenter.resolve(listOf(error, nativeDiagnostics).filterNotNull().joinToString("\\n"))
+        val resolved = ErrorCenter.resolve(listOf(error, nativeDiagnostics).filterNotNull().joinToString("\n"))
         appendLine("Code: ${resolved.code} — ${resolved.title}")
         appendLine("Message: ${resolved.message}")
         appendLine("Action: ${resolved.action}")
