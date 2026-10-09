@@ -36,7 +36,6 @@ android {
                     "-DGGML_VULKAN=ON",
                     "-DGGML_VULKAN_RUN_TESTS=OFF",
                     "-DGGML_VULKAN_VALIDATE=OFF",
-                    "-DGGML_VULKAN=OFF",
                     "-DCMAKE_BUILD_TYPE=Release",
                 )
             }
@@ -60,8 +59,7 @@ android {
         release {
             externalNativeBuild {
                 cmake {
-                    // Keep the real OpenCL kernel profile available in the shipped
-                    // diagnostic build; the profiler writes asynchronously to app cache.
+                    // Keep Vulkan backend/device diagnostics available in the shipped build.
                     arguments += "-DGGML_VULKAN=ON"
                 }
             }
