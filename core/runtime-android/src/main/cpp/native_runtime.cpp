@@ -176,8 +176,10 @@ static void probe_android_opencl_library_visibility() {
             append_native_trace((std::string("OPENCL_LIBRARY_CANDIDATE path=") + path + " exists=0").c_str());
             continue;
         }
+        // Clear any previous dynamic-loader error before this independent attempt.
+        (void) dlerror();
         void * handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-        const char * err = dlerror();
+        const char * err = handle ? nullptr : dlerror();
         append_native_trace((std::string("OPENCL_LIBRARY_CANDIDATE path=") + path +
             " exists=1 dlopen=" + (handle ? "1" : "0") +
             " error=" + (err ? err : "none")).c_str());
@@ -252,6 +254,90 @@ static void configure_android_icd_search_path() {
     }
     append_native_trace("OPENCL_ICD_SEARCH_PATH_SELECTED path=<loader_default> source=no_manifest_found");
     append_native_trace("OPENCL_ICD_DIRECTORY_DISCOVERY_COMPLETED");
+}
+
+// Probe vendor libraries independently of the statically linked Khronos ICD loader.
+// A candidate is eligible for OCL_ICD_FILENAMES only if it exports the ICD entry point
+// and that entry point returns at least one platform. This avoids feeding the loader
+// its own libOpenCL.so and creating recursive dispatch.
+using cl_icd_get_platform_ids_khr_fn = cl_int (CL_API_CALL *)(cl_uint, cl_platform_id *, cl_uint *);
+
+static bool probe_android_vendor_icd_candidates() {
+    append_native_trace("OPENCL_VENDOR_ICD_DIRECT_PROBE_STARTED");
+    const char * candidates[] = {
+        "libOpenCL.so",
+        "/vendor/lib64/libOpenCL.so",
+        "/system/vendor/lib64/libOpenCL.so",
+        "/vendor/lib64/libOpenCL_adreno.so",
+        "/system/vendor/lib64/libOpenCL_adreno.so",
+        "/vendor/lib64/libGLES_mali.so",
+        "/system/vendor/lib64/egl/libGLES_mali.so",
+        "/vendor/lib64/libmali.so",
+        "/system/vendor/lib64/libmali.so",
+    };
+
+    for (const char *path : candidates) {
+        (void) dlerror();
+        void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+        const char *load_error = handle ? nullptr : dlerror();
+        if (!handle) {
+            append_native_trace((std::string("OPENCL_VENDOR_ICD_CANDIDATE path=") + path +
+                " dlopen=0 error=" + (load_error ? load_error : "none")).c_str());
+            continue;
+        }
+
+        (void) dlerror();
+        auto get_platforms = reinterpret_cast<clGetPlatformIDs_fn>(dlsym(handle, "clGetPlatformIDs"));
+        const char *get_platforms_error = dlerror();
+        (void) dlerror();
+        auto get_icd_platforms = reinterpret_cast<cl_icd_get_platform_ids_khr_fn>(
+            dlsym(handle, "clIcdGetPlatformIDsKHR"));
+        const char *icd_error = dlerror();
+        (void) dlerror();
+        void *get_platform_info = dlsym(handle, "clGetPlatformInfo");
+        const char *info_error = dlerror();
+
+        cl_uint direct_count = 0;
+        cl_int direct_result = (cl_int)-9999;
+        if (get_platforms) direct_result = get_platforms(0, nullptr, &direct_count);
+
+        cl_uint icd_count = 0;
+        cl_int icd_result = (cl_int)-9999;
+        if (get_icd_platforms) icd_result = get_icd_platforms(0, nullptr, &icd_count);
+
+        append_native_trace((std::string("OPENCL_VENDOR_ICD_CANDIDATE path=") + path +
+            " dlopen=1 clGetPlatformIDs=" + (get_platforms ? "1" : "0") +
+            " getPlatformIDsError=" + (get_platforms_error ? get_platforms_error : "none") +
+            " directResult=" + std::to_string((int)direct_result) +
+            " directName=" + opencl_error_name(direct_result) +
+            " directPlatformCount=" + std::to_string(direct_count) +
+            " clIcdGetPlatformIDsKHR=" + (get_icd_platforms ? "1" : "0") +
+            " icdError=" + (icd_error ? icd_error : "none") +
+            " icdResult=" + std::to_string((int)icd_result) +
+            " icdName=" + opencl_error_name(icd_result) +
+            " icdPlatformCount=" + std::to_string(icd_count) +
+            " clGetPlatformInfo=" + (get_platform_info ? "1" : "0") +
+            " platformInfoError=" + (info_error ? info_error : "none")).c_str());
+
+        // Only an ICD-compatible library with a real platform may be supplied to
+        // the linked Khronos loader. A plain OpenCL loader or a library exposing
+        // only the core API is deliberately not injected into the ICD list.
+        if (get_icd_platforms && get_platform_info &&
+            icd_result == CL_SUCCESS && icd_count > 0) {
+            if (setenv("OCL_ICD_FILENAMES", path, 1) == 0) {
+                append_native_trace((std::string("OPENCL_VENDOR_ICD_SELECTED path=") +
+                    path + " reason=icd_entrypoint_and_platform_verified").c_str());
+                dlclose(handle);
+                append_native_trace("OPENCL_VENDOR_ICD_DIRECT_PROBE_COMPLETED selected=1");
+                return true;
+            }
+            append_native_trace((std::string("OPENCL_VENDOR_ICD_SELECT_FAILED path=") + path).c_str());
+        }
+        dlclose(handle);
+    }
+
+    append_native_trace("OPENCL_VENDOR_ICD_DIRECT_PROBE_COMPLETED selected=0");
+    return false;
 }
 
 static void probe_android_opencl_driver() {
@@ -622,6 +708,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         append_native_trace("OPENCL_Q6K_KERNEL_OVERRIDES=NONE");
         append_native_trace("OPENCL_STATIC_REGISTRATION_STARTED");
         probe_android_opencl_library_visibility();
+        // Try a direct, verified ICD probe before the linked loader performs its
+        // first enumeration. OCL_ICD_FILENAMES is set only for an ICD-compatible
+        // library that reports a non-zero platform count; no guessed path is used.
+        const bool direct_icd_selected = probe_android_vendor_icd_candidates();
+        append_native_trace((std::string("OPENCL_VENDOR_ICD_SELECTION_RESULT selected=") +
+            (direct_icd_selected ? "1" : "0")).c_str());
         probe_android_opencl_driver();
         const bool opencl_registered = register_static_opencl_backend();
         if (!opencl_registered) {
