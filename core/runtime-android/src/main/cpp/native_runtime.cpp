@@ -173,64 +173,6 @@ static void append_diagnostic_tensor_residency(const char *phase) {
     append_native_trace(summary.c_str());
 }
 
-static bool validate_gpu_model_residency() {
-    if (!g_model) return false;
-    size_t gpu_bytes = 0, cpu_bytes = 0, other_bytes = 0;
-    size_t gpu_tensors = 0, cpu_tensors = 0, other_tensors = 0;
-    for (const auto & entry : g_model->tensors_by_name) {
-        const ggml_tensor * tensor = entry.second;
-        if (!tensor || !tensor->buffer) continue;
-        const ggml_backend_buffer_type_t buft = ggml_backend_buffer_get_type(tensor->buffer);
-        const ggml_backend_dev_t dev = ggml_backend_buft_get_device(buft);
-        const auto type = dev ? ggml_backend_dev_type(dev) : GGML_BACKEND_DEVICE_TYPE_CPU;
-        const size_t bytes = ggml_nbytes(tensor);
-        const bool is_host = ggml_backend_buft_is_host(buft);
-        const bool is_gpu = type == GGML_BACKEND_DEVICE_TYPE_GPU ||
-                            type == GGML_BACKEND_DEVICE_TYPE_IGPU;
-        if (is_gpu) {
-            gpu_bytes += bytes; ++gpu_tensors;
-        } else {
-            // Report the exact tensor responsible for rejecting GPU-only activation.
-            // A missing device is deliberately treated as non-GPU; never silently
-            // accept an unclassified/host buffer as GPU-resident.
-            const char *dev_name = dev ? ggml_backend_dev_name(dev) : "<no-device>";
-            append_native_trace((std::string("OPENGL_ES_NON_GPU_TENSOR name=") +
-                entry.first + " bytes=" + std::to_string(bytes) +
-                " bufferHost=" + (is_host ? "1" : "0") +
-                " device=" + (dev_name ? dev_name : "<null>") +
-                " deviceType=" + std::to_string((int)type) +
-                " deviceAssigned=" + (dev ? "1" : "0")).c_str());
-            if (type == GGML_BACKEND_DEVICE_TYPE_CPU) {
-                cpu_bytes += bytes; ++cpu_tensors;
-            } else {
-                other_bytes += bytes; ++other_tensors;
-            }
-        }
-    }
-    append_native_trace((std::string("OPENGL_ES_MODEL_RESIDENCY gpuBytes=") +
-        std::to_string(gpu_bytes) + " gpuTensors=" + std::to_string(gpu_tensors) +
-        " cpuBytes=" + std::to_string(cpu_bytes) + " cpuTensors=" +
-        std::to_string(cpu_tensors) + " otherBytes=" + std::to_string(other_bytes) +
-        " otherTensors=" + std::to_string(other_tensors)).c_str());
-
-    // A tiny CPU-side tensor is not useful for inference, but a substantial CPU
-    // weight allocation means the GPU-only contract has been violated.
-    constexpr size_t kCpuWeightToleranceBytes = 64 * 1024;
-    const bool has_gpu_weights = gpu_bytes > 0;
-    const bool cpu_within_tolerance = cpu_bytes <= kCpuWeightToleranceBytes;
-    const bool no_other_weights = other_bytes == 0;
-    const bool ok = has_gpu_weights && cpu_within_tolerance && no_other_weights;
-    append_native_trace((std::string("OPENGL_ES_GPU_ONLY_VALIDATION hasGpuWeights=") +
-        (has_gpu_weights ? "1" : "0") +
-        " cpuWithinTolerance=" + (cpu_within_tolerance ? "1" : "0") +
-        " noOtherWeights=" + (no_other_weights ? "1" : "0") +
-        " cpuToleranceBytes=" + std::to_string(kCpuWeightToleranceBytes)).c_str());
-    append_native_trace(ok ? "OPENGL_ES_MODEL_RESIDENCY_GPU_ONLY_OK"
-                           : "OPENGL_ES_MODEL_RESIDENCY_GPU_ONLY_REJECTED");
-    return ok;
-}
-
-
 static void append_native_trace(const char *text) {
     if (!text || !*text || g_native_trace_file.empty()) return;
     std::lock_guard<std::mutex> lock(g_native_marker_mutex);
@@ -723,14 +665,11 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     if (g_model) {
         append_weight_residency_trace();
         append_diagnostic_tensor_residency("after_load");
-        const bool residency_gpu_only = validate_gpu_model_residency();
-        append_native_trace(residency_gpu_only
-            ? "OPENGL_ES_DIAGNOSTIC_RESIDENCY gpu_only=1"
-            : "OPENGL_ES_DIAGNOSTIC_RESIDENCY gpu_only=0 non_gpu_tensors_present=1");
-        // Diagnostic mode intentionally continues even when a model weight is
-        // CPU/host resident. This is NOT CPU fallback: GPU inference remains the
-        // selected runtime/backend, while residency is recorded for diagnosis.
-        append_native_trace("OPENGL_ES_DIAGNOSTIC_ALLOW_NON_GPU_RESIDENCY execution=allowed cpu_fallback=disabled");
+        // Residency is diagnostic-only. Host-resident tensors (including
+        // token_embd.weight) must never veto model/context initialization.
+        // GPU execution policy remains controlled by the selected OpenGL ES
+        // backend and GPU-layer configuration; no CPU-only fallback is enabled.
+        append_native_trace("OPENGL_ES_RESIDENCY_DIAGNOSTIC_ONLY activation_gate=disabled cpu_fallback=disabled");
     }
     env->ReleaseStringUTFChars(jpath, path);
     if (!g_model) {
