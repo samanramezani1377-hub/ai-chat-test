@@ -367,6 +367,8 @@ static bool probe_android_vendor_icd_candidates() {
                     const std::string name = direct_platform_string(get_platform_info, platforms[i], CL_PLATFORM_NAME);
                     const std::string vendor = direct_platform_string(get_platform_info, platforms[i], CL_PLATFORM_VENDOR);
                     const std::string version = direct_platform_string(get_platform_info, platforms[i], CL_PLATFORM_VERSION);
+                    const std::string icd_suffix = direct_platform_string(
+                        get_platform_info, platforms[i], CL_PLATFORM_ICD_SUFFIX_KHR);
                     cl_uint gpu_count = 0;
                     const cl_int gpu_result = get_devices
                         ? get_devices(platforms[i], CL_DEVICE_TYPE_GPU, 0, nullptr, &gpu_count)
@@ -374,6 +376,7 @@ static bool probe_android_vendor_icd_candidates() {
                     append_native_trace((std::string("OPENCL_DIRECT_PLATFORM path=") + path +
                         " index=" + std::to_string(i) + " name=" + name +
                         " vendor=" + vendor + " version=" + version +
+                        " icdSuffix=" + icd_suffix +
                         " gpuQueryResult=" + std::to_string((int)gpu_result) +
                         " gpuQueryName=" + opencl_error_name(gpu_result) +
                         " gpuCount=" + std::to_string(gpu_count)).c_str());
@@ -382,6 +385,21 @@ static bool probe_android_vendor_icd_candidates() {
                         const cl_int device_list_result = get_devices(
                             platforms[i], CL_DEVICE_TYPE_GPU, gpu_count, devices.data(), nullptr);
                         if (device_list_result == CL_SUCCESS) {
+                            // This Android ARM/Mali driver exports the core OpenCL
+                            // API directly but not clIcdGetPlatformIDsKHR. The patched
+                            // Khronos loader can use it only when the platform reports
+                            // a valid ICD suffix and a real GPU was enumerated.
+                            if (path[0] == '/' && !icd_suffix.empty() &&
+                                icd_suffix != "<unavailable>" && gpu_count > 0 &&
+                                setenv("OCL_ICD_FILENAMES", path, 1) == 0 &&
+                                setenv("AI_CHAT_OPENCL_ALLOW_DIRECT_PROVIDER", "1", 1) == 0) {
+                                append_native_trace((std::string("OPENCL_DIRECT_PROVIDER_SELECTED path=") + path +
+                                    " platform=" + name + " gpuCount=" + std::to_string(gpu_count) +
+                                    " icdSuffix=" + icd_suffix).c_str());
+                                dlclose(handle);
+                                append_native_trace("OPENCL_VENDOR_ICD_DIRECT_PROBE_COMPLETED selected=1 mode=verified_direct_provider");
+                                return true;
+                            }
                             for (cl_uint d = 0; d < gpu_count; ++d) {
                                 auto read_device_string = [&](cl_device_info field) -> std::string {
                                     size_t size = 0;
