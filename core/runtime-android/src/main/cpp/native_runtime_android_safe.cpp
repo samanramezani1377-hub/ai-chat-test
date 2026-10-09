@@ -552,6 +552,12 @@ static bool model_uses_recurrent_memory() {
     return g_model && (llama_model_is_recurrent(g_model) || llama_model_is_hybrid(g_model));
 }
 
+// Keep the process' original Android debuggerd handlers. Replacing them with
+// SIG_DFL and raising again suppresses the tombstone that contains the abort
+// message and symbolized native stack needed to identify the real failure.
+static struct sigaction g_android_previous_fatal_actions[NSIG]{};
+static std::atomic_bool g_android_fatal_handlers_installed{false};
+
 static void android_fatal_signal_handler(int signal_number, siginfo_t * info, void * raw_context) {
     if (g_native_fatal_fd >= 0) {
         const char signal_prefix[] = "NATIVE_FATAL_SIGNAL=";
@@ -584,26 +590,39 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
         native_write_hex(g_native_fatal_fd, "NATIVE_FATAL_PC=", pc);
         native_write_hex(g_native_fatal_fd, "NATIVE_FATAL_LR=", lr);
         native_write_hex(g_native_fatal_fd, "NATIVE_FATAL_FAULT_ADDR=", info ? (uintptr_t) info->si_addr : 0);
-        fsync(g_native_fatal_fd);
+        // The signal handler must not allocate, unwind the stack or call into
+        // llama/OpenGL. Leave source-line backtraces to debuggerd and matching symbols.
+        (void) fsync(g_native_fatal_fd);
     }
-    struct sigaction default_action{};
-    sigemptyset(&default_action.sa_mask);
-    default_action.sa_handler = SIG_DFL;
-    sigaction(signal_number, &default_action, nullptr);
-    raise(signal_number);
+
+    if (signal_number > 0 && signal_number < NSIG) {
+        const struct sigaction previous = g_android_previous_fatal_actions[signal_number];
+        // Restore Android's handler and re-deliver the signal to this thread.
+        // Directly calling sa_sigaction is not equivalent to kernel signal delivery.
+        (void) sigaction(signal_number, &previous, nullptr);
+        sigset_t unblocked;
+        sigemptyset(&unblocked);
+        sigaddset(&unblocked, signal_number);
+        (void) sigprocmask(SIG_UNBLOCK, &unblocked, nullptr);
+        (void) syscall(SYS_tgkill, getpid(), syscall(SYS_gettid), signal_number);
+    }
     _exit(128 + signal_number);
 }
 
 static void install_native_fatal_handlers() {
+    bool expected = false;
+    if (!g_android_fatal_handlers_installed.compare_exchange_strong(expected, true)) return;
+
     struct sigaction action{};
     sigemptyset(&action.sa_mask);
     action.sa_sigaction = android_fatal_signal_handler;
     action.sa_flags = SA_SIGINFO;
-    sigaction(SIGSEGV, &action, nullptr);
-    sigaction(SIGBUS, &action, nullptr);
-    sigaction(SIGABRT, &action, nullptr);
-    sigaction(SIGILL, &action, nullptr);
-    sigaction(SIGFPE, &action, nullptr);
+    const int signals[] = {SIGSEGV, SIGBUS, SIGABRT, SIGILL, SIGFPE};
+    for (int signal_number : signals) {
+        if (sigaction(signal_number, &action, &g_android_previous_fatal_actions[signal_number]) != 0) {
+            LOGE("Failed to install native fatal handler for signal=%d", signal_number);
+        }
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
