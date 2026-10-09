@@ -267,9 +267,14 @@ internal fun RuntimeDiagnostic.logLines(): List<String> {
 
 internal fun RuntimeDiagnostic.errorReport(): String {
     val phaseLog = failedPhaseLog()
-    return if (phaseLog.isEmpty()) report()
-    else report() + "\n\n===== FULL LOGS FOR FAILED PHASE (${phaseLog.size} lines) =====\n" +
-        phaseLog.joinToString("\n")
+    val completeLog = phaseLog.ifEmpty {
+        if (error != null || status.equals("FAILED", true) || status.equals("ERROR", true))
+            nativeDiagnostics.orEmpty().lineSequence().map(String::trim).filter(String::isNotBlank).toList()
+        else emptyList()
+    }
+    return if (completeLog.isEmpty()) report()
+    else report() + "\n\n===== FULL LOGS FOR FAILED PHASE (${completeLog.size} lines) =====\n" +
+        completeLog.joinToString("\n")
 }
 
 private fun RuntimeDiagnostic.uniqueRuntimeEvents(): List<String> {
