@@ -91,9 +91,11 @@ static void append_speculative_stats_trace(int draft_tokens, int accepted_tokens
 // Keep the JNI implementation in native_runtime.cpp. Its own fatal handler is
 // retained under a private name; the Android-specific handler below is installed
 // explicitly after nativeInit() returns, so it cannot be accidentally shadowed.
+#define AI_CHAT_EXTERNAL_FATAL_HANDLER 1
 #define install_native_fatal_handlers install_native_fatal_handlers_legacy
 #include "native_runtime.cpp"
 #undef install_native_fatal_handlers
+#undef AI_CHAT_EXTERNAL_FATAL_HANDLER
 
 static void disable_speculative_runtime(const char * reason) {
     set_spec_phase("DISABLE_BEGIN");
