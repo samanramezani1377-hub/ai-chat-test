@@ -69,7 +69,8 @@ def main() -> int:
         ("fatal signal handler preserves Android debuggerd backtraces",
          "g_previous_fatal_actions" in native and
          "handler(signal_number, info, raw_context)" in native and
-         "NATIVE_FATAL_PC=" in native and "NATIVE_FATAL_LR=" in native,
+         "NATIVE_FATAL_PC=" in native and "NATIVE_FATAL_LR=" in native and
+         "NATIVE_FATAL_BACKTRACE_BEGIN" in native and "backtrace_symbols_fd" in native,
          "fatal diagnostics must preserve signal context and chain to the previous handler"),
         ("native library keeps symbols needed to resolve crash addresses",
          "-g" in (ROOT / "core/runtime-android/src/main/cpp/CMakeLists.txt").read_text(encoding="utf-8") and
