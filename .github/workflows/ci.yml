@@ -41,6 +41,26 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
+      - name: Restore Vulkan SDK cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
+            $HOME/vulkan-sdk
+          key: ci-vulkan-${{ runner.os }}-1.4.321.1
+
+      - name: Prepare Vulkan SDK and shader compiler
+        run: bash ci/prepare-vulkan.sh
+
+      - name: Save Vulkan SDK cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
+            $HOME/vulkan-sdk
+          key: ci-vulkan-${{ runner.os }}-1.4.321.1
+
       - name: Run JVM and Android unit tests
         run: >-
           gradle
@@ -185,6 +205,26 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Restore Vulkan SDK cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
+            $HOME/vulkan-sdk
+          key: ci-vulkan-${{ runner.os }}-1.4.321.1
+
+      - name: Prepare Vulkan SDK and shader compiler
+        run: bash ci/prepare-vulkan.sh
+
+      - name: Save Vulkan SDK cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /tmp/vulkansdk-linux-x86_64-1.4.321.1.tar.xz
+            $HOME/vulkan-sdk
+          key: ci-vulkan-${{ runner.os }}-1.4.321.1
 
       - name: Cache exact native build state
         uses: actions/cache@v4
