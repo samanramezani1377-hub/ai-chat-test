@@ -1,1 +1,1 @@
-{{cmake_content}}
+cmake content truncated
