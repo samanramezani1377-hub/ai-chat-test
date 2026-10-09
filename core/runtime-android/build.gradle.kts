@@ -48,25 +48,6 @@ android {
         }
     }
 
-    buildTypes {
-        debug {
-            externalNativeBuild {
-                cmake {
-                    arguments += "-DGGML_VULKAN=ON"
-                }
-            }
-        }
-        release {
-            externalNativeBuild {
-                cmake {
-                    // Keep Vulkan backend/device diagnostics available in the shipped build.
-                    arguments += "-DGGML_VULKAN=ON"
-                }
-            }
-        }
-    }
-
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
