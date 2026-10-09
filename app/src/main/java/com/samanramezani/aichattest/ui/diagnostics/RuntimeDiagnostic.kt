@@ -239,31 +239,122 @@ internal fun RuntimeDiagnostic.logLines(): List<String> {
 
     val failure = failedPhaseLog()
     if (error != null || status.equals("FAILED", true) || status.equals("ERROR", true)) {
-        // On an incomplete/failed operation, show the complete failing phase.
-        // If no phase marker exists, retain all logs rather than hide evidence.
+        // An incomplete operation must keep every native line from its phase.
         return failure.ifEmpty { all }
     }
 
-    // A successful load should be readable: show only load lifecycle milestones
-    // and a bounded 50-line sample, never the per-tensor dump.
-    val loadMarkers = listOf(
-        "NATIVE_LOAD_STARTED", "MODEL_LOAD_PARAMS", "MODEL_LOAD_STARTED",
-        "MODEL_LOAD_RETURNED_SUCCESS", "MODEL_READY", "CONTEXT_INIT_STARTED",
-        "CONTEXT_INIT_RETURNED_SUCCESS", "TARGET_RUNTIME_READY_BEFORE_SPECULATIVE",
-        "OPENGL_ES_DEVICE", "OPENGL_ES_BACKEND_DEVICE_STATE",
-        "OPENGL_ES_RESIDENCY_SUMMARY", "NATIVE_WEIGHT_RESIDENCY"
-    )
-    val sample = all.filter { line ->
-        loadMarkers.any { line.contains(it, ignoreCase = true) } &&
-            !line.contains("OPENGL_ES_TENSOR_RESIDENCY", true) &&
-            !line.contains("create_tensor: loading tensor", true)
-    }.distinct()
-    return (sample.ifEmpty { all.filterNot {
-        it.contains("OPENGL_ES_TENSOR_RESIDENCY", true) ||
-            it.contains("create_tensor: loading tensor", true) ||
-            it.contains("unused tensor", true)
-    }.takeLast(50) }).takeLast(50)
+    // Compress each completed phase independently. If a phase has no clear
+    // success marker, keep its detailed lines rather than falsely calling it done.
+    return compactCompletedPhases(all)
 }
+
+private data class NativePhase(
+    val name: String,
+    val startIndex: Int,
+    val startLine: String,
+)
+
+private fun compactCompletedPhases(lines: List<String>): List<String> {
+    val startTokens = listOf(
+        "NATIVE_LOAD_STARTED" to "بارگذاری Native",
+        "MODEL_LOAD_STARTED" to "بارگذاری وزن‌های مدل",
+        "CONTEXT_INIT_STARTED" to "ساخت Context",
+        "OPENGL_ES_BACKEND_INITIALIZATION_STARTED" to "راه‌اندازی Backend گرافیکی",
+        "ACTIVATION_LLAMA_BACKEND_INIT_STARTED" to "راه‌اندازی Backend مدل",
+        "GENERATION_STARTED" to "تولید پاسخ",
+        "NATIVE_KV_CACHE_STARTED" to "آماده‌سازی KV Cache",
+        "TOKENIZATION_STARTED" to "توکن‌سازی ورودی",
+        "PREFILL_STARTED" to "پردازش ورودی (Prefill)",
+        "DECODE_STARTED" to "تولید توکن (Decode)",
+    )
+    val failureTokens = listOf(
+        "FAILED", "ERROR", "EXCEPTION", "OUTOFMEMORY", "ALLOCATION_FAILED",
+        "UNSUPPORTED_OP", "CONTEXT_INIT_RETURNED_FAILED", "MODEL_LOAD_FAILURE",
+        "failed to initialize", "allocation failed"
+    )
+    val successTokens = listOf(
+        "RETURNED_SUCCESS", "COMPLETED", "SUCCESS", "MODEL_READY",
+        "TARGET_RUNTIME_READY", "BACKEND_INITIALIZED", "INITIALIZATION_SUCCEEDED",
+        "GENERATION_FINISHED", "GENERATION_COMPLETED", "PREFILL_COMPLETED",
+        "DECODE_COMPLETED", "KV_CACHE_READY", "TOKENIZATION_COMPLETED"
+    )
+    val excludedVerbose = listOf(
+        "OPENGL_ES_TENSOR_RESIDENCY", "create_tensor: loading tensor", "unused tensor"
+    )
+    val starts = lines.mapIndexedNotNull { index, line ->
+        startTokens.firstOrNull { line.contains(it.first, ignoreCase = true) }
+            ?.let { NativePhase(it.second, index, line) }
+    }
+    if (starts.isEmpty()) {
+        // No phase boundaries were recorded. Keep useful milestone/error lines,
+        // while dropping repetitive per-tensor chatter.
+        return lines.filterNot { line -> excludedVerbose.any { line.contains(it, true) } }
+            .filter { line ->
+                listOf("READY", "SUCCESS", "COMPLETED", "FAILED", "ERROR", "MODEL_LOAD",
+                    "CONTEXT_INIT", "OPENGL_ES_BACKEND", "OPENGL_ES_DEVICE",
+                    "RESIDENCY_SUMMARY", "NATIVE_WEIGHT_RESIDENCY", "GENERATION",
+                    "KV_CACHE", "PREFILL", "DECODE", "TOKENIZATION")
+                    .any { line.contains(it, true) }
+            }.distinct().takeLast(50)
+    }
+
+    val output = mutableListOf<String>()
+    var cursor = 0
+    for (phaseIndex in starts.indices) {
+        val phase = starts[phaseIndex]
+        val nextStart = starts.getOrNull(phaseIndex + 1)?.startIndex ?: lines.size
+        if (cursor < phase.startIndex) {
+            output += summarizeLooseLines(lines.subList(cursor, phase.startIndex), excludedVerbose)
+        }
+        val endIndex = nextStart
+        val chunk = lines.subList(phase.startIndex, endIndex)
+        val failureIndex = chunk.indexOfFirst { line ->
+            failureTokens.any { token -> line.contains(token, ignoreCase = true) }
+        }
+        val completed = chunk.any { line ->
+            successTokens.any { token -> line.contains(token, ignoreCase = true) }
+        }
+        if (failureIndex >= 0 || !completed) {
+            // An unfinished phase is the evidence: never truncate or summarize it.
+            output += "⛔ مرحله «${phase.name}» تکمیل نشد؛ لاگ کامل مرحله:"
+            output += chunk
+        } else {
+            val duration = chunk.firstNotNullOfOrNull { line ->
+                Regex("""(?:duration|elapsed|time|took)=([0-9]+(?:\\.[0-9]+)?\\s*(?:ms|s))""", RegexOption.IGNORE_CASE)
+                    .find(line)?.groupValues?.get(1)
+            }
+            val detail = chunk.asSequence()
+                .filterNot { line -> excludedVerbose.any { line.contains(it, true) } }
+                .filter { line ->
+                    successTokens.any { line.contains(it, true) } ||
+                        line.contains("RESIDENCY_SUMMARY", true) ||
+                        line.contains("NATIVE_WEIGHT_RESIDENCY", true) ||
+                        line.contains("OPENGL_ES_DEVICE", true) ||
+                        line.contains("tokens=", true) || line.contains("MiB", true) ||
+                        line.contains("ms", true)
+                }
+                .distinct().takeLast(3).toList()
+            output += "✓ مرحله «${phase.name}» تکمیل شد${duration?.let { "؛ زمان: $it" } ?: ""}."
+            detail.forEach { output += "  • ${it.take(240)}" }
+        }
+        cursor = endIndex
+    }
+    if (cursor < lines.size) output += summarizeLooseLines(lines.subList(cursor, lines.size), excludedVerbose)
+    return output.distinct().takeIf { it.isNotEmpty() } ?: lines.takeLast(50)
+}
+
+private fun summarizeLooseLines(lines: List<String>, excludedVerbose: List<String>): List<String> =
+    lines.asSequence()
+        .filterNot { line -> excludedVerbose.any { line.contains(it, true) } }
+        .filter { line ->
+            listOf("FAILED", "ERROR", "EXCEPTION", "READY", "SUCCESS", "COMPLETED",
+                "MODEL_LOAD", "CONTEXT_INIT", "OPENGL_ES_BACKEND", "OPENGL_ES_DEVICE",
+                "RESIDENCY_SUMMARY", "NATIVE_WEIGHT_RESIDENCY", "GENERATION",
+                "KV_CACHE", "PREFILL", "DECODE", "TOKENIZATION")
+                .any { line.contains(it, true) }
+        }
+        .distinct()
+        .toList()
 
 internal fun RuntimeDiagnostic.errorReport(): String {
     val phaseLog = failedPhaseLog()
