@@ -1,3 +1,4 @@
+#include "opengles_runtime.h"
 #include <jni.h>
 #include <android/log.h>
 #include <algorithm>
@@ -13,9 +14,17 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+#include <dlfcn.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <ucontext.h>
 #include "llama.h"
 #include "gguf.h"
+#include "llama-model.h"
+#include "ggml-backend.h"
+#include "ggml-backend-impl.h"
+#include "ggml-opengles.h"
+#include <set>
 
 #define LOG_TAG "AIChatRuntime"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -34,9 +43,136 @@ static std::mutex g_native_marker_mutex;
 static std::mutex g_backend_init_mutex;
 static bool g_backend_initialized = false;
 static bool g_gpu_backend_loaded = false;
+static uint32_t g_context_length = 0;
 
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
-static int threads() { return std::clamp((int)std::max(1u, std::thread::hardware_concurrency()) - 2, 2, 4); }
+static void append_native_trace(const char *text);
+static bool has_opengles_gpu_device();
+static bool init_generation_context();
+static bool init_speculative_runtime();
+static int generation_threads() {
+    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+    // Decode is memory-bandwidth bound; keep a bounded number of workers and
+    // derive it from the host topology rather than hard-coding a device.
+    return std::clamp((int)cores, 2, 4);
+}
+
+static int batch_threads() {
+    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+    // Prompt evaluation benefits from more host workers for scheduling/token
+    // preparation while model inference remains GPU-only.
+    return std::clamp((int)cores - 2, 4, 6);
+}
+
+static bool init_generation_context() {
+    if (!g_model || g_context_length == 0) return false;
+    llama_context_params cp = llama_context_default_params();
+    cp.n_ctx = g_context_length;
+    cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
+    cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 128);
+    cp.n_rs_seq = 0;
+    // Let llama.cpp select the backend-safe attention implementation. The previous
+    // forced-disabled path expanded attention work and was a major mobile decode
+    // cost at 8K context. AUTO preserves the normal attention math while allowing
+    // OpenGL ES to use its optimized path when supported.
+    cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
+    cp.type_k = GGML_TYPE_F16;
+    cp.type_v = GGML_TYPE_F16;
+    cp.offload_kqv = true;
+    cp.n_seq_max = 1;
+    const int runtime_threads = generation_threads();
+    const int runtime_batch_threads = batch_threads();
+    cp.n_threads = runtime_threads;
+    cp.n_threads_batch = runtime_batch_threads;
+    append_native_trace((std::string("NATIVE_CONTEXT_THREADS generation=") +
+        std::to_string(cp.n_threads) + " batch=" +
+        std::to_string(cp.n_threads_batch) + " nBatch=" +
+        std::to_string(cp.n_batch) + " nUbatch=" +
+        std::to_string(cp.n_ubatch) + " flashAttn=auto").c_str());
+    g_context = llama_init_from_model(g_model, cp);
+    if (!g_context) return false;
+    llama_set_abort_callback(g_context, abort_callback, nullptr);
+    return true;
+}
+
+static const char * diagnostic_device_type_name(ggml_backend_dev_t dev) {
+    if (!dev) return "NONE";
+    switch (ggml_backend_dev_type(dev)) {
+        case GGML_BACKEND_DEVICE_TYPE_CPU:  return "CPU";
+        case GGML_BACKEND_DEVICE_TYPE_GPU:  return "GPU";
+        case GGML_BACKEND_DEVICE_TYPE_IGPU: return "IGPU";
+        case GGML_BACKEND_DEVICE_TYPE_ACCEL:return "ACCEL";
+        default: return "UNKNOWN";
+    }
+}
+
+static void append_diagnostic_tensor_residency(const char *phase) {
+    if (!g_model) return;
+
+    size_t gpu_bytes = 0, cpu_bytes = 0, host_only_bytes = 0, other_bytes = 0;
+    size_t gpu_tensors = 0, cpu_tensors = 0, host_only_tensors = 0, other_tensors = 0;
+
+    for (const auto & [name, tensor] : g_model->tensors_by_name) {
+        if (!tensor || !tensor->buffer) continue;
+
+        const size_t bytes = ggml_nbytes(tensor);
+        const ggml_backend_buffer_type_t buft = ggml_backend_buffer_get_type(tensor->buffer);
+        const ggml_backend_dev_t dev = ggml_backend_buft_get_device(buft);
+        const auto dev_type = dev ? ggml_backend_dev_type(dev) : GGML_BACKEND_DEVICE_TYPE_CPU;
+        const char *dev_name = dev ? ggml_backend_dev_name(dev) : "<no-device>";
+        const bool is_host = ggml_backend_buft_is_host(buft);
+
+        const bool is_gpu = dev_type == GGML_BACKEND_DEVICE_TYPE_GPU ||
+                            dev_type == GGML_BACKEND_DEVICE_TYPE_IGPU;
+        const bool is_cpu = dev_type == GGML_BACKEND_DEVICE_TYPE_CPU;
+        const bool is_host_only = !is_gpu && !is_cpu && is_host;
+
+        const char *classification = is_gpu ? "GPU" :
+                                     (is_cpu ? "CPU" :
+                                     (is_host_only ? "HOST_ONLY" : "OTHER"));
+
+        if (is_gpu) {
+            gpu_bytes += bytes;
+            ++gpu_tensors;
+        } else if (is_cpu) {
+            cpu_bytes += bytes;
+            ++cpu_tensors;
+        } else if (is_host_only) {
+            host_only_bytes += bytes;
+            ++host_only_tensors;
+        } else {
+            other_bytes += bytes;
+            ++other_tensors;
+        }
+
+        const std::string line =
+            std::string("OPENGL_ES_TENSOR_RESIDENCY") +
+            " phase=" + (phase ? phase : "unknown") +
+            " name=" + name +
+            " type=" + ggml_type_name(tensor->type) +
+            " bytes=" + std::to_string(bytes) +
+            " buffer_host=" + (is_host ? "1" : "0") +
+            " classification=" + classification +
+            " device=" + (dev_name ? dev_name : "<null>") +
+            " device_type=" + diagnostic_device_type_name(dev) +
+            " device_type_id=" + std::to_string((int)dev_type) +
+            " device_assigned=" + (dev ? "1" : "0");
+        append_native_trace(line.c_str());
+    }
+
+    const std::string summary =
+        std::string("OPENGL_ES_RESIDENCY_SUMMARY") +
+        " phase=" + (phase ? phase : "unknown") +
+        " gpu_bytes=" + std::to_string(gpu_bytes) +
+        " gpu_tensors=" + std::to_string(gpu_tensors) +
+        " cpu_bytes=" + std::to_string(cpu_bytes) +
+        " cpu_tensors=" + std::to_string(cpu_tensors) +
+        " host_only_bytes=" + std::to_string(host_only_bytes) +
+        " host_only_tensors=" + std::to_string(host_only_tensors) +
+        " other_bytes=" + std::to_string(other_bytes) +
+        " other_tensors=" + std::to_string(other_tensors);
+    append_native_trace(summary.c_str());
+}
 
 static void append_native_trace(const char *text) {
     if (!text || !*text || g_native_trace_file.empty()) return;
@@ -47,6 +183,14 @@ static void append_native_trace(const char *text) {
         if (text[std::strlen(text) - 1] != '\n') out << '\n';
         out.flush();
     }
+}
+
+// Exported for the OpenGL ES GGML backend so shader/program/buffer failures
+// are included in the same diagnostic report shown by the Android app.
+extern "C" void ai_chat_native_trace(const char *text) {
+    if (!text || !*text) return;
+    LOGE("%s", text);
+    append_native_trace(text);
 }
 
 static const char *native_signal_name(int signal_number) {
@@ -84,6 +228,11 @@ static void native_write_hex(int fd, const char *label, uintptr_t value) {
     native_write_text(fd, buffer, pos);
 }
 
+// Preserve Android's debuggerd handler. If we consume SIGABRT/SIGSEGV and _exit,
+// Android never gets a chance to write the tombstone containing the native stack.
+static struct sigaction g_previous_fatal_actions[NSIG]{};
+static std::atomic_bool g_fatal_handlers_installed{false};
+
 static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void *raw_context) {
     if (g_native_fatal_fd >= 0) {
         const char prefix[] = "NATIVE_FATAL_SIGNAL=";
@@ -118,24 +267,59 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
             lr = (uintptr_t)context->uc_mcontext.regs[30];
         }
 #endif
+        const char phase_prefix[] = "NATIVE_FATAL_SPEC_PHASE=";
+        native_write_text(g_native_fatal_fd, phase_prefix, sizeof(phase_prefix) - 1);
+        char phase[96];
+        size_t phase_len = 0;
+        const volatile char *phase_src = g_spec_phase ? g_spec_phase : "UNKNOWN";
+        while (phase_len + 1 < sizeof(phase) && phase_src[phase_len]) {
+            phase[phase_len] = phase_src[phase_len];
+            ++phase_len;
+        }
+        phase[phase_len] = '\0';
+        native_write_text(g_native_fatal_fd, phase, phase_len);
+        native_write_text(g_native_fatal_fd, "\n", 1);
         native_write_hex(g_native_fatal_fd, pc_prefix, pc);
         native_write_hex(g_native_fatal_fd, lr_prefix, lr);
         native_write_hex(g_native_fatal_fd, addr_prefix, info ? (uintptr_t)info->si_addr : 0);
+        // Do not unwind or allocate inside a fatal signal handler. Android's
+        // debuggerd tombstone is the authoritative native backtrace and can be
+        // symbolized against the exact unstripped library from this build.
         fsync(g_native_fatal_fd);
+    }
+
+    // Restore the handler that was installed by Android (normally debuggerd),
+    // unblock this signal and re-raise it on the same thread. Calling the previous
+    // handler as an ordinary function is not equivalent to signal delivery; it can
+    // skip debuggerd's signal protocol and the _exit below would discard the tombstone.
+    if (signal_number > 0 && signal_number < NSIG) {
+        const struct sigaction previous = g_previous_fatal_actions[signal_number];
+        (void)sigaction(signal_number, &previous, nullptr);
+        sigset_t unblocked;
+        sigemptyset(&unblocked);
+        sigaddset(&unblocked, signal_number);
+        (void)sigprocmask(SIG_UNBLOCK, &unblocked, nullptr);
+        (void)syscall(SYS_tgkill, getpid(), syscall(SYS_gettid), signal_number);
     }
     _exit(128 + signal_number);
 }
 
 static void install_native_fatal_handlers() {
+    // nativeInit may be called more than once in a process. Never save our own
+    // handler as the "previous" handler or signal chaining would recurse.
+    bool expected = false;
+    if (!g_fatal_handlers_installed.compare_exchange_strong(expected, true)) return;
+
     struct sigaction action{};
     sigemptyset(&action.sa_mask);
     action.sa_sigaction = native_fatal_signal_handler;
     action.sa_flags = SA_SIGINFO;
-    sigaction(SIGSEGV, &action, nullptr);
-    sigaction(SIGBUS, &action, nullptr);
-    sigaction(SIGABRT, &action, nullptr);
-    sigaction(SIGILL, &action, nullptr);
-    sigaction(SIGFPE, &action, nullptr);
+    const int signals[] = {SIGSEGV, SIGBUS, SIGABRT, SIGILL, SIGFPE};
+    for (int signal_number : signals) {
+        if (sigaction(signal_number, &action, &g_previous_fatal_actions[signal_number]) != 0) {
+            LOGE("Failed to install native fatal handler for signal=%d", signal_number);
+        }
+    }
 }
 
 static void checkpoint(const char *event) {
@@ -149,8 +333,14 @@ static void checkpoint(const char *event) {
 }
 
 static void free_all() {
+    if (g_spec) { common_speculative_free(g_spec); g_spec = nullptr; }
+    g_spec_init.reset();
+    g_spec_requested = false;
+    g_spec_draft_path.clear();
+    clear_android_generation_cache();
     if (g_sampler) { llama_sampler_free(g_sampler); g_sampler = nullptr; }
-    if (g_context) { llama_free(g_context); g_context = nullptr; }
+    if (g_context) { llama_synchronize(g_context); llama_free(g_context); g_context = nullptr; }
+    g_context_length = 0;
     if (g_model) { llama_model_free(g_model); g_model = nullptr; }
     g_gpu = false;
 }
@@ -206,7 +396,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
     LOGI("ACTIVATION_NATIVE_INIT_STARTED gpu=%d", enable_gpu ? 1 : 0);
     if (!g_native_marker_file.empty()) {
         append_native_trace(enable_gpu ? "===== NATIVE INIT GPU REQUESTED =====" : "===== NATIVE INIT CPU ONLY =====");
+#ifndef AI_CHAT_EXTERNAL_FATAL_HANDLER
         install_native_fatal_handlers();
+#endif
     }
     if (g_native_marker_file.empty()) {
         jclass system_class = env->FindClass("java/lang/System");
@@ -223,6 +415,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
                         g_native_marker_file = base + "/ai-chat-last-native-event.txt";
                         g_native_trace_file = base + "/ai-chat-native-trace.txt";
                         g_native_fatal_fd = open((base + "/ai-chat-native-trace.txt").c_str(), O_WRONLY | O_CREAT | O_APPEND, 0600);
+                        // Keep the OpenGL ES program cache in an app-private subdirectory.
+                        // llama.cpp already invalidates entries by kernel source, build
+                        // options, device, driver and platform, so this is a persistence
+                        // location only; it does not alter kernel selection.
+                        const std::string gl_cache_dir = base + "/ai-chat-opengles-cache";
+                        (void) gl_cache_dir;
                         env->ReleaseStringUTFChars(tmp_dir, dir);
                     }
                     env->DeleteLocalRef(tmp_dir);
@@ -232,7 +430,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         }
         if (!g_native_marker_file.empty()) {
             append_native_trace(enable_gpu ? "===== NATIVE INIT GPU REQUESTED =====" : "===== NATIVE INIT CPU ONLY =====");
-            install_native_fatal_handlers();
+    #ifndef AI_CHAT_EXTERNAL_FATAL_HANDLER
+        install_native_fatal_handlers();
+#endif
         }
     }
     llama_log_set([](enum ggml_log_level level, const char *text, void *) {
@@ -244,109 +444,300 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
 
     std::lock_guard<std::mutex> lock(g_backend_init_mutex);
     if (!g_backend_initialized) {
-        if (enable_gpu) {
-            unsetenv("GGML_DISABLE_VULKAN");
-            append_native_trace("GPU_BACKEND_LOAD_ALL_STARTED");
-            ggml_backend_load_all();
-            append_native_trace("GPU_BACKEND_LOAD_ALL_RETURNED");
-            g_gpu_backend_loaded = true;
+        // Device selection is capability-driven. No vendor-specific GPU policy is used.
+        // Model kernels are selected through GGML operation support, while unsupported
+        // operations are rejected by the GPU backend instead of opting into a CPU path.
+
+        append_native_trace("OPENGL_ES_BACKEND_INITIALIZATION_STARTED");
+        if (!opengles_runtime_init()) {
+            const auto & info = opengles_runtime_info();
+            append_native_trace((std::string("OPENGL_ES_INIT_FAILED reason=") + info.failure).c_str());
+            g_gpu_backend_loaded = false;
         } else {
-            setenv("GGML_DISABLE_VULKAN", "1", 1);
-            append_native_trace("CPU_ONLY_VULKAN_DISABLE_ENV_SET");
-            append_native_trace("CPU_ONLY_BACKEND_LOAD_ALL_SKIPPED");
+            const auto & info = opengles_runtime_info();
+            append_native_trace((std::string("OPENGL_ES_DEVICE vendor=") + info.vendor +
+                " renderer=" + info.renderer + " version=" + info.version +
+                " glsl=" + info.glsl_version +
+                " maxComputeSsboBlocks=" + std::to_string(info.max_compute_ssbo_blocks) +
+                " maxWorkgroupX=" + std::to_string(info.max_workgroup_size_x) +
+                " maxSsboBlockBytes=" + std::to_string(info.max_ssbo_block_size)).c_str());
+            const size_t before = ggml_backend_reg_count();
+            ggml_backend_register(ggml_backend_opengles_reg());
+            const size_t after = ggml_backend_reg_count();
+            const bool registered = ggml_backend_reg_by_name("OpenGL ES") != nullptr;
+            g_gpu_backend_loaded = registered && has_opengles_gpu_device();
+            append_native_trace((std::string("OPENGL_ES_STATIC_REGISTRATION before=") +
+                std::to_string(before) + " after=" + std::to_string(after) +
+                " registered=" + (registered ? "1" : "0") +
+                " gpuDevice=" + (g_gpu_backend_loaded ? "1" : "0")).c_str());
         }
+        append_native_trace((std::string("OPENGL_ES_BACKEND_DEVICE_STATE loaded=") +
+            (g_gpu_backend_loaded ? "1" : "0") +
+            " deviceCount=" + std::to_string(ggml_backend_dev_count())).c_str());
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
         llama_backend_init();
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_RETURNED");
-        if (!enable_gpu) {
-            const size_t backend_count = ggml_backend_reg_count();
-            const bool cpu_available = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU) != nullptr;
-            const bool gpu_available = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) != nullptr ||
-                                       ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU) != nullptr;
-            append_native_trace((std::string("CPU_ONLY_BACKEND_REG_COUNT=") + std::to_string(backend_count)).c_str());
-            append_native_trace(cpu_available ? "CPU_ONLY_CPU_DEVICE_AVAILABLE" : "CPU_ONLY_CPU_DEVICE_MISSING");
-            append_native_trace(gpu_available ? "CPU_ONLY_GPU_DEVICE_UNEXPECTEDLY_AVAILABLE" : "CPU_ONLY_GPU_DEVICE_ABSENT");
-        }
         g_backend_initialized = true;
-    } else if (enable_gpu && !g_gpu_backend_loaded) {
-        unsetenv("GGML_DISABLE_VULKAN");
-        append_native_trace("LATE_GPU_BACKEND_LOAD_STARTED");
-        ggml_backend_load_all();
-        append_native_trace("LATE_GPU_BACKEND_LOAD_ALL_RETURNED");
-        g_gpu_backend_loaded = true;
-    } else if (!enable_gpu) {
-        append_native_trace(g_gpu_backend_loaded ? "CPU_MODE_AFTER_GPU_INIT_VULKAN_ALREADY_LOADED" : "CPU_ONLY_BACKEND_ALREADY_INITIALIZED");
+    } else {
+        append_native_trace("OPENGL_ES_BACKEND_ALREADY_INITIALIZED");
+        if (!g_gpu_backend_loaded) {
+            append_native_trace("OPENGL_ES_BACKEND_RETRY_STARTED");
+            if (opengles_runtime_init()) {
+                ggml_backend_register(ggml_backend_opengles_reg());
+                g_gpu_backend_loaded = ggml_backend_reg_by_name("OpenGL ES") != nullptr && has_opengles_gpu_device();
+            }
+            append_native_trace((std::string("OPENGL_ES_BACKEND_RETRY_RESULT loaded=") +
+                (g_gpu_backend_loaded ? "1" : "0") +
+                " deviceCount=" + std::to_string(ggml_backend_dev_count())).c_str());
+        }
     }
 }
 
+static bool has_opengles_gpu_device() {
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        if (!dev) continue;
+        const char * name = ggml_backend_dev_name(dev);
+        if (name && std::string(name) == "OpenGL ES") return true;
+    }
+    return false;
+}
+
+static void append_weight_residency_trace() {
+    if (!g_model) return;
+
+    size_t gpu_bytes = 0, host_bytes = 0, cpu_bytes = 0, other_bytes = 0;
+    size_t gpu_tensors = 0, host_tensors = 0, cpu_tensors = 0, other_tensors = 0;
+    std::set<ggml_backend_buffer_t> gpu_buffers, host_buffers, cpu_buffers, other_buffers;
+
+    for (const auto & entry : g_model->tensors_by_name) {
+        const ggml_tensor * tensor = entry.second;
+        if (!tensor || !tensor->buffer) continue;
+
+        const size_t bytes = ggml_nbytes(tensor);
+        const ggml_backend_buffer_t buffer = tensor->buffer;
+        const ggml_backend_buffer_type_t buft = ggml_backend_buffer_get_type(buffer);
+        const bool is_host = ggml_backend_buft_is_host(buft);
+        const ggml_backend_dev_t dev = ggml_backend_buft_get_device(buft);
+        const auto dev_type = dev ? ggml_backend_dev_type(dev) : GGML_BACKEND_DEVICE_TYPE_CPU;
+
+        // OpenGL ES buffers on Android may be host-accessible because the device is
+        // unified memory. Classify by backend device first; otherwise a real GPU
+        // buffer is incorrectly reported as "Host Tensor Memory".
+        if (dev_type == GGML_BACKEND_DEVICE_TYPE_GPU || dev_type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            gpu_bytes += bytes; gpu_tensors++; gpu_buffers.insert(buffer);
+        } else if (is_host) {
+            host_bytes += bytes; host_tensors++; host_buffers.insert(buffer);
+        } else if (dev_type == GGML_BACKEND_DEVICE_TYPE_CPU) {
+            cpu_bytes += bytes; cpu_tensors++; cpu_buffers.insert(buffer);
+        } else {
+            other_bytes += bytes; other_tensors++; other_buffers.insert(buffer);
+        }
+    }
+
+    // Prefer the actual non-CPU device registered by the OpenGL ES backend.
+    ggml_backend_dev_t gpu_dev = nullptr;
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        ggml_backend_dev_t candidate = ggml_backend_dev_get(i);
+        if (!candidate) continue;
+        const auto type = ggml_backend_dev_type(candidate);
+        if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            gpu_dev = candidate;
+            break;
+        }
+    }
+
+    // If the registry classification is unusual, use the device actually
+    // attached to a model tensor as the authoritative runtime device.
+    if (!gpu_dev) {
+        for (const auto & entry : g_model->tensors_by_name) {
+            const ggml_tensor * tensor = entry.second;
+            if (!tensor || !tensor->buffer) continue;
+            ggml_backend_dev_t candidate = ggml_backend_buft_get_device(
+                    ggml_backend_buffer_get_type(tensor->buffer));
+            if (!candidate) continue;
+            const auto type = ggml_backend_dev_type(candidate);
+            if (type != GGML_BACKEND_DEVICE_TYPE_CPU && type != GGML_BACKEND_DEVICE_TYPE_ACCEL) {
+                gpu_dev = candidate;
+                break;
+            }
+        }
+    }
+
+    // Expose the complete registry state so a real backend-registration problem
+    // cannot be hidden behind an "unavailable" UI value.
+    append_native_trace((std::string("NATIVE_BACKEND_DEVICES count=") +
+        std::to_string(ggml_backend_dev_count())).c_str());
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        ggml_backend_dev_t candidate = ggml_backend_dev_get(i);
+        if (!candidate) continue;
+        ggml_backend_dev_props props{};
+        ggml_backend_dev_get_props(candidate, &props);
+        append_native_trace((std::string("NATIVE_BACKEND_DEVICE index=") +
+            std::to_string(i) + " name=" + (props.name ? props.name : "unknown") +
+            " description=" + (props.description ? props.description : "unknown") +
+            " type=" + std::to_string((int)props.type) +
+            " memoryFreeMiB=" + std::to_string((double)props.memory_free / (1024.0 * 1024.0)) +
+            " memoryTotalMiB=" + std::to_string((double)props.memory_total / (1024.0 * 1024.0))).c_str());
+    }
+    const char * gpu_name = gpu_dev ? ggml_backend_dev_name(gpu_dev) : "unavailable";
+    const char * gpu_description = gpu_dev ? ggml_backend_dev_description(gpu_dev) : "unavailable";
+    size_t free_bytes = 0, total_bytes = 0;
+    if (gpu_dev) {
+        ggml_backend_dev_memory(gpu_dev, &free_bytes, &total_bytes);
+    }
+
+    std::string gpu_name_text = gpu_name ? gpu_name : "unknown";
+    std::string gpu_description_text = gpu_description ? gpu_description : "unknown";
+    std::replace(gpu_name_text.begin(), gpu_name_text.end(), ' ', '_');
+    std::replace(gpu_description_text.begin(), gpu_description_text.end(), ' ', '_');
+
+    append_native_trace((std::string("NATIVE_OPENGL_ES_DEVICE") +
+        " name=" + gpu_name_text +
+        " description=" + gpu_description_text +
+        " memoryFreeMiB=" + std::to_string((double) free_bytes / (1024.0 * 1024.0)) +
+        " memoryTotalMiB=" + std::to_string((double) total_bytes / (1024.0 * 1024.0)) +
+        " memoryKnown=" + ((free_bytes > 0 && total_bytes > 0) ? "1" : "0")).c_str());
+
+    append_native_trace((std::string("NATIVE_WEIGHT_RESIDENCY") +
+        " gpuTensorBytes=" + std::to_string(gpu_bytes) +
+        " gpuTensorMiB=" + std::to_string((double) gpu_bytes / (1024.0 * 1024.0)) +
+        " gpuTensors=" + std::to_string(gpu_tensors) +
+        " gpuBuffers=" + std::to_string(gpu_buffers.size()) +
+        " hostTensorBytes=" + std::to_string(host_bytes) +
+        " hostTensorMiB=" + std::to_string((double) host_bytes / (1024.0 * 1024.0)) +
+        " hostTensors=" + std::to_string(host_tensors) +
+        " hostBuffers=" + std::to_string(host_buffers.size()) +
+        " cpuTensorBytes=" + std::to_string(cpu_bytes) +
+        " cpuTensorMiB=" + std::to_string((double) cpu_bytes / (1024.0 * 1024.0)) +
+        " cpuTensors=" + std::to_string(cpu_tensors) +
+        " cpuBuffers=" + std::to_string(cpu_buffers.size()) +
+        " otherTensorBytes=" + std::to_string(other_bytes) +
+        " otherTensors=" + std::to_string(other_tensors) +
+        " gpuFreeMiB=" + std::to_string((double) free_bytes / (1024.0 * 1024.0)) +
+        " gpuTotalMiB=" + std::to_string((double) total_bytes / (1024.0 * 1024.0))).c_str());
+}
+
 static llama_model *load_model_android(const char *path, llama_model_params mp, bool gpu) {
-    // Avoid the mmap -> Vulkan host-pointer import path on Android. Mobile UMA Vulkan
+    // Avoid the mmap -> OpenGL ES host-pointer import path on Android. Mobile UMA OpenGL ES
     // drivers can fail inside buffer_from_host_ptr while the model is being initialized.
     // LLAMA_LOAD_MODE_NONE keeps bounded file reads and normal backend allocations, so
     // GPU layers remain enabled without relying on the fragile mmap buffer import.
     mp.load_mode = LLAMA_LOAD_MODE_NONE;
     mp.check_tensors = false;
-    checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_STAGED" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
+    // Allow llama.cpp to keep token_embd.weight in its supported host/CPU buffer
+    // while offloading the transformer weights to OpenGL ES. This is intentional:
+    // mixed embedding residency is permitted, and CPU fallback for the whole model
+    // remains disabled because n_gpu_layers is set to 999 by the caller.
+    // Forcing the large Q6_K embedding tensor onto OpenGL ES can make context
+    // initialization fail on mobile drivers, so do not override its buffer type.
+    mp.no_host = false;
+    mp.tensor_buft_overrides = nullptr;
+    append_native_trace((std::string("OPENGL_ES_MIXED_RESIDENCY_POLICY enabled=") +
+        (gpu ? "1" : "0") +
+        " no_host=0 token_embedding_override=disabled cpu_full_model_fallback=disabled").c_str());
+    checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_RESIDENT" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
+    append_native_trace((std::string("OPENGL_ES_GPU_ONLY_PLACEMENT_POLICY enabled=") + (gpu ? "1" : "0") +
+        " no_host=" + (mp.no_host ? "1" : "0") +
+        " reason=diagnostic_load_failure_isolation").c_str());
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
-        " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
+        " check_tensors=" + (mp.check_tensors ? "1" : "0") +
+        " token_embedding_gpu_override=" + (gpu ? "OpenGL_ES" : "disabled")).c_str());
     return llama_model_load_from_file(path, mp);
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jclass, jstring jpath, jint ctx_len, jint gpu_layers) {
+Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jclass, jstring jpath, jint ctx_len, jint gpu_layers, jstring jdraftpath) {
     checkpoint("NATIVE_LOAD_STARTED");
     append_native_trace((std::string("ACTIVATION_NATIVE_LOAD_STARTED ctx_len=") + std::to_string((int)ctx_len) + " gpu_layers=" + std::to_string((int)gpu_layers)).c_str());
     checkpoint("FREE_OLD_RUNTIME_STARTED"); free_all(); checkpoint("FREE_OLD_RUNTIME_RETURNED"); g_stop.store(false);
     const char *path = env->GetStringUTFChars(jpath, nullptr);
     if (!path) { checkpoint("PATH_UTF8_FAILED"); return 3; }
+    g_spec_draft_path.clear(); g_spec_requested = false; g_spec_mtp = false; g_target_model_path.clear(); g_spec_accept_ema = 1.0;
+    // Draft/speculative decoding is removed from the product; retain the legacy JNI argument but never use it.
+    (void) jdraftpath;
+    g_spec_draft_path.clear(); g_spec_requested = false; g_spec_mtp = false; g_spec_accept_ema = 1.0;
+    append_native_trace("DRAFT_FEATURE_REMOVED");
+    g_target_model_path = path;
     const std::string preflight = gguf_preflight(path); checkpoint(preflight.c_str());
-    llama_model_params mp = llama_model_default_params(); mp.n_gpu_layers = gpu_layers;
-
-    if (gpu_layers == 0) {
-        checkpoint("CPU_ONLY_DEVICE_SELECTION_STARTED");
-        mp.load_mode = LLAMA_LOAD_MODE_MMAP;
-        mp.check_tensors = false;
-        checkpoint("CPU_ONLY_CANONICAL_DEVICE_SELECTION");
-        checkpoint("CPU_ONLY_LOAD_MODE_MMAP");
-        checkpoint("CPU_ONLY_CHECK_TENSORS_DISABLED");
-    } else {
-        checkpoint("GPU_DEVICE_SELECTION_DEFAULT");
-        mp.load_mode = LLAMA_LOAD_MODE_MMAP;
-        mp.check_tensors = false;
-        checkpoint("GPU_LOAD_MODE_MMAP");
-        checkpoint("GPU_CHECK_TENSORS_DISABLED");
+    // Target activation must never implicitly enable speculative/MTP.
+    // A target GGUF may contain MTP metadata, but that is not a request to
+    // allocate a second context during activation. Draft/speculative setup
+    // happens only after the target runtime is fully ready.
+    append_native_trace("SPECULATIVE_AUTO_DETECTION_DISABLED_DURING_TARGET_LOAD");
+    if (!g_gpu_backend_loaded || !has_opengles_gpu_device()) {
+        checkpoint("OPENGL_ES_GPU_ONLY_REJECTED_NO_OPENGL_ES_GPU_DEVICE");
+        append_native_trace("OPENGL_ES_GPU_ONLY_NO_CPU_FALLBACK");
+        env->ReleaseStringUTFChars(jpath, path);
+        return 5;
     }
-
+    if (gpu_layers <= 0) {
+        checkpoint("OPENGL_ES_GPU_ONLY_REJECTED_INVALID_GPU_LAYERS");
+        env->ReleaseStringUTFChars(jpath, path);
+        return 4;
+    }
+    llama_model_params mp = llama_model_default_params();
+    mp.n_gpu_layers = 999;
+    append_native_trace((std::string("OPENGL_ES_GPU_ONLY_ALL_LAYERS requested=") + std::to_string((int)gpu_layers) + " effective=999").c_str());
+    mp.load_mode = LLAMA_LOAD_MODE_NONE;
+    mp.check_tensors = false;
+    checkpoint("OPENGL_ES_GPU_DEVICE_SELECTION");
+    checkpoint("OPENGL_ES_GPU_ONLY_LOAD_MODE_STAGED");
+    checkpoint("OPENGL_ES_GPU_ONLY_CHECK_TENSORS_DISABLED");
     checkpoint((std::string("MODEL_LOAD_PARAMS gpu_layers=") + std::to_string((int)mp.n_gpu_layers) +
         " load_mode=" + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
-    checkpoint(gpu_layers == 0 ? "MODEL_LOAD_STARTED gpu_layers=0" : "MODEL_LOAD_STARTED gpu_layers=GPU");
-    g_model = load_model_android(path, mp, gpu_layers != 0);
+    checkpoint("MODEL_LOAD_STARTED gpu_layers=OPENGL_ES");
+    g_model = load_model_android(path, mp, true);
     checkpoint(g_model ? "MODEL_LOAD_RETURNED_SUCCESS" : "MODEL_LOAD_RETURNED_FAILED");
+    if (!g_model) {
+        append_native_trace("OPENGL_ES_MODEL_LOAD_FAILURE_STAGE=llama_model_load_from_file_returned_null");
+        append_native_trace("OPENGL_ES_MODEL_LOAD_FAILURE_NO_CPU_FALLBACK=1");
+        const std::string device_count = std::string("OPENGL_ES_MODEL_LOAD_FAILURE_DEVICE_COUNT=") + std::to_string(ggml_backend_dev_count());
+        append_native_trace(device_count.c_str());
+        for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+            ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+            if (!dev) continue;
+            const char * name = ggml_backend_dev_name(dev);
+            const char * description = ggml_backend_dev_description(dev);
+            append_native_trace((std::string("OPENGL_ES_MODEL_LOAD_FAILURE_DEVICE index=") + std::to_string(i) +
+                " name=" + (name ? name : "<null>") +
+                " description=" + (description ? description : "<null>") +
+                " type=" + std::to_string((int)ggml_backend_dev_type(dev))).c_str());
+        }
+    }
+    if (g_model) {
+        append_weight_residency_trace();
+        append_diagnostic_tensor_residency("after_load");
+        // Residency is diagnostic-only. Host-resident tensors (including
+        // token_embd.weight) must never veto model/context initialization.
+        // GPU execution policy remains controlled by the selected OpenGL ES
+        // backend and GPU-layer configuration; no CPU-only fallback is enabled.
+        append_native_trace("OPENGL_ES_RESIDENCY_DIAGNOSTIC_ONLY activation_gate=disabled cpu_fallback=disabled");
+    }
     env->ReleaseStringUTFChars(jpath, path);
-    if (!g_model && gpu_layers != 0) {
-        checkpoint("GPU_MODEL_LOAD_FAILED_CPU_FALLBACK_STARTED");
-        path = env->GetStringUTFChars(jpath, nullptr); if (!path) return 3;
-        mp = llama_model_default_params(); mp.n_gpu_layers = 0;
-        mp.load_mode = LLAMA_LOAD_MODE_MMAP;
-        mp.check_tensors = false;
-        checkpoint("CPU_MODEL_LOAD_STARTED mmap check_tensors=0");
-        g_model = load_model_android(path, mp, false);
-        checkpoint(g_model ? "CPU_MODEL_LOAD_RETURNED_SUCCESS" : "CPU_MODEL_LOAD_RETURNED_FAILED");
-        env->ReleaseStringUTFChars(jpath, path); g_gpu = false;
-    } else g_gpu = g_model != nullptr && gpu_layers != 0;
-    if (!g_model) { checkpoint("MODEL_LOAD_FAILED"); return 1; }
+    if (!g_model) {
+        checkpoint("OPENGL_ES_GPU_ONLY_MODEL_LOAD_FAILED_NO_CPU_FALLBACK");
+        g_gpu = false;
+        return 1;
+    }
+    g_gpu = true;
     const int trained = llama_model_n_ctx_train(g_model);
     const int requested = ctx_len > 0 ? ctx_len : 4096;
     const int effective = std::max(1, std::min(requested, trained));
     checkpoint((std::string("MODEL_READY trained_ctx=") + std::to_string(trained) + " effective_ctx=" + std::to_string(effective)).c_str());
-    llama_context_params cp = llama_context_default_params();
-    cp.n_ctx = (uint32_t)effective; cp.n_batch = std::min<uint32_t>(cp.n_ctx, 512); cp.n_ubatch = cp.n_batch;
-    cp.n_threads = threads(); cp.n_threads_batch = threads();
-    checkpoint("CONTEXT_INIT_STARTED"); g_context = llama_init_from_model(g_model, cp);
-    checkpoint(g_context ? "CONTEXT_INIT_RETURNED_SUCCESS" : "CONTEXT_INIT_RETURNED_FAILED");
-    if (!g_context) { checkpoint("CONTEXT_INIT_FAILED"); free_all(); return 2; }
-    llama_set_abort_callback(g_context, abort_callback, nullptr); checkpoint("NATIVE_LOAD_COMPLETED"); return 0;
+    g_context_length = (uint32_t)effective;
+    checkpoint("CONTEXT_INIT_STARTED");
+    const bool context_ready = init_generation_context();
+    checkpoint(context_ready ? "CONTEXT_INIT_RETURNED_SUCCESS" : "CONTEXT_INIT_RETURNED_FAILED");
+    if (!context_ready) { checkpoint("CONTEXT_INIT_FAILED"); free_all(); return 2; }
+    append_native_trace("TARGET_RUNTIME_READY_BEFORE_SPECULATIVE");
+    if (g_spec_requested) {
+        append_native_trace("SPECULATIVE_ATTACH_AFTER_TARGET_READY");
+        const bool spec_ready = init_speculative_runtime();
+        checkpoint(spec_ready ? "SPECULATIVE_INIT_RETURNED_SUCCESS" : "SPECULATIVE_INIT_RETURNED_FAILED");
+    }
+    checkpoint("NATIVE_LOAD_COMPLETED"); return 0;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -355,7 +746,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeUnload(JNIEnv *, jclass) { g_stop.store(true); free_all(); }
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeRuntimeInfo(JNIEnv *env, jclass) {
-    const std::string value = std::string(g_gpu ? "Hybrid(CPU+Vulkan)" : "CPU/NEON") + "; llama.cpp=c5fc7e34885ba31217e330809437afa993d27745";
+    const std::string value = std::string(g_gpu && g_gpu_backend_loaded ? "OpenGL-ES-GPU-ONLY" : "OpenGL-ES-UNAVAILABLE") + "; llama.cpp=" + AI_CHAT_LLAMA_CPP_SHA;
     return env->NewStringUTF(value.c_str());
 }
 

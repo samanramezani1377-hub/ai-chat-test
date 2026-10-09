@@ -8,6 +8,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.io.File
 
 internal object NativeLlamaCpp {
@@ -15,8 +16,6 @@ internal object NativeLlamaCpp {
     private const val PREFLIGHT_FILE = "ai-chat-model-preflight.txt"
     private var nativeInitialized = false
 
-    const val GPU_LAYERS_CPU_ONLY = 0
-    const val GPU_LAYERS_70 = 70
     const val GPU_LAYERS_MAX = 99
 
     init {
@@ -25,46 +24,30 @@ internal object NativeLlamaCpp {
         Log.i(TAG, "ACTIVATION_NATIVE_LIBRARY_LOAD_RETURNED")
     }
 
-    /**
-     * Backend selection is a per-load request. The native side owns the process-wide
-     * backend registry and safely handles first initialization plus late Vulkan loading.
-     * Do not reject CPU -> GPU (or GPU -> CPU model) transitions here: nativeLoad always
-     * releases the previous model/context before loading the newly requested model.
-     */
-    private fun ensureNativeInitialized(gpuLayers: Int) {
-        val enableGpu = gpuLayers != GPU_LAYERS_CPU_ONLY
+    /** OpenGL ES is the only native inference backend; every model load requests full GPU offload. */
+    private fun ensureNativeInitialized() {
         synchronized(this) {
-            Log.i(
-                TAG,
-                "ACTIVATION_NATIVE_INIT_REQUESTED gpu=$enableGpu gpu_layers=$gpuLayers " +
-                    "previously_initialized=$nativeInitialized"
-            )
-            nativeInit(enableGpu)
-            // native_runtime.cpp has its legacy installer for standalone use. The Android
-            // safe translation unit exposes a second JNI entry point that installs the
-            // Android handler after nativeInit, avoiding preprocessor call-site collisions.
+            Log.i(TAG, "ACTIVATION_NATIVE_INIT_REQUESTED backend=OpenGL_ES previously_initialized=$nativeInitialized")
+            nativeInit(true)
             nativeInstallFatalHandlers()
             nativeInitialized = true
-            Log.i(
-                TAG,
-                "ACTIVATION_NATIVE_INIT_RETURNED gpu=$enableGpu gpu_layers=$gpuLayers"
-            )
+            Log.i(TAG, "ACTIVATION_NATIVE_INIT_RETURNED backend=OpenGL_ES")
         }
     }
 
     /** One serialized native activation transaction. Native side owns model/context lifetime. */
     @Synchronized
-    fun load(path: String, contextLength: Int, gpuLayers: Int): Int {
-        require(gpuLayers >= 0) { "gpuLayers must be >= 0" }
+    fun load(path: String, contextLength: Int, gpuLayers: Int, draftPath: String? = null): Int {
+        require(gpuLayers > 0) { "OpenGL ES GPU-only runtime requires at least one GPU layer" }
         require(path.isNotBlank()) { "Model path must not be blank" }
         val file = File(path)
         require(file.isFile && file.canRead()) { "Model file is not readable: $path" }
 
         persistModelLoadPreflight(path, contextLength, gpuLayers)
-        ensureNativeInitialized(gpuLayers)
+        ensureNativeInitialized()
         Log.i(TAG, "ACTIVATION_LOAD_BEGIN ctx_len=$contextLength gpu_layers=$gpuLayers file=${file.name}")
         return try {
-            val result = nativeLoad(path, contextLength, gpuLayers)
+            val result = nativeLoad(path, contextLength, gpuLayers, draftPath)
             Log.i(TAG, "ACTIVATION_LOAD_END result=$result gpu_layers=$gpuLayers")
             result
         } catch (t: Throwable) {
@@ -100,7 +83,7 @@ internal object NativeLlamaCpp {
                 appendLine("file_size_mib=${if (file.isFile) file.length() / 1048576.0 else -1.0}")
                 appendLine("requested_context=$contextLength")
                 appendLine("gpu_layers=$gpuLayers")
-                appendLine("backend_mode=${if (gpuLayers == 0) "CPU" else "GPU"}")
+                appendLine("backend_mode=OpenGL_ES_GPU_ONLY")
                 appendLine("device_mem_total_bytes=${memoryInfo.totalMem}")
                 appendLine("device_mem_available_bytes=${memoryInfo.availMem}")
                 appendLine("device_mem_available_mib=${memoryInfo.availMem / 1048576.0}")
@@ -118,6 +101,8 @@ internal object NativeLlamaCpp {
         }
     }
 
+    fun countTokens(prompt: String): Int = nativeCountTokens(prompt)
+
     fun generate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float): Flow<String> = callbackFlow {
         val listener = object : TokenListener {
             override fun onToken(token: String) { trySend(token) }
@@ -128,8 +113,13 @@ internal object NativeLlamaCpp {
             else close(IllegalStateException("llama.cpp generation failed: code=$result"))
         }
         awaitClose {
-            if (!worker.isCompleted) nativeStop()
-            worker.cancel()
+            if (!worker.isCompleted) {
+                // callbackFlow cancellation does not interrupt a blocking JNI call.
+                // Stop the native decode and wait for it to return before releasing
+                // the Flow, otherwise the next generation can race the previous one.
+                nativeStop()
+                runBlocking { worker.join() }
+            }
         }
     }
 
@@ -141,7 +131,8 @@ internal object NativeLlamaCpp {
     private interface TokenListener { fun onToken(token: String) }
     @JvmStatic private external fun nativeInit(enableGpu: Boolean)
     @JvmStatic private external fun nativeInstallFatalHandlers()
-    @JvmStatic private external fun nativeLoad(path: String, contextLength: Int, gpuLayers: Int): Int
+    @JvmStatic private external fun nativeLoad(path: String, contextLength: Int, gpuLayers: Int, draftPath: String?): Int
+    @JvmStatic private external fun nativeCountTokens(prompt: String): Int
     @JvmStatic private external fun nativeGenerate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float, listener: TokenListener): Int
     @JvmStatic private external fun nativeStop()
     @JvmStatic private external fun nativeUnload()

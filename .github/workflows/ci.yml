@@ -4,16 +4,20 @@ on:
   push:
     branches:
       - main
+      - OpenGL
   pull_request:
     branches:
       - main
+      - OpenGL
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Keep push and PR runs separate; otherwise they cancel each other when both
+  # events fire for the same branch/commit. Duplicates within one event still cancel.
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -27,7 +31,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK
         uses: actions/setup-java@v5
@@ -39,11 +43,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
-
-      - name: Show toolchain
-        run: |
-          java -version
-          gradle --version
 
       - name: Run JVM and Android unit tests
         run: >-
@@ -54,12 +53,84 @@ jobs:
           :core:domain:test
           :core:observability:test
           :core:runtime:test
+          :core:runtime-android:test
           :core:settings:test
           :app:testDebugUnitTest
           --stacktrace
           --console=plain
-          --no-daemon
           --parallel
+
+  opengles-shader-tests:
+    name: OpenGL ES shader compile regression tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install GLSL compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y glslang-tools
+
+      - name: Compile every embedded OpenGL ES compute shader
+        run: python3 scripts/test_opengles_shaders.py
+
+  gpu-only-contract-tests:
+    name: GPU-only runtime contract tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Verify GPU-only runtime invariants
+        run: python3 scripts/test_gpu_only_contract.py
+
+  runtime-safety-contract-tests:
+    name: Runtime lifecycle and prompt safety regression tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Check cancellation, model lifecycle, cache and context guards
+        run: python3 scripts/test_runtime_safety_contract.py
+
+  shader-math-reference-tests:
+    name: Shader math reference invariants
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Check deterministic Softmax and RoPE reference invariants
+        run: python3 scripts/test_opengles_shader_math.py
+
+  runtime-contract-tests:
+    name: GGUF and diagnostics regression tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate Python test scripts
+        run: python3 -m compileall -q scripts
+
+      - name: Check GGUF loader input and failure contracts
+        run: python3 scripts/test_gguf_loader_contract.py
+
+      - name: Check model activation and native context readiness contract
+        run: python3 scripts/test_model_activation_contract.py
+
+      - name: Check runtime diagnostics accuracy contract
+        run: python3 scripts/test_diagnostics_contract.py
+
+      - name: Verify device benchmark regression comparator
+        run: python3 scripts/compare_device_benchmark.py --self-test
 
   android-build:
     name: Android debug build
@@ -67,7 +138,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK
         uses: actions/setup-java@v5
@@ -80,24 +151,117 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
-      - name: Show toolchain
-        run: |
-          java -version
-          gradle --version
-
       - name: Verify Android SDK
         run: |
-          test -n "$ANDROID_HOME"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list >/dev/null
+          test -n "${ANDROID_HOME:-}"
+          test -d "$ANDROID_HOME/platforms/android-36"
+
+      - name: Cache exact native build state
+        uses: actions/cache@v4
+        with:
+          path: |
+            core/runtime-android/.cxx
+            core/runtime-android/src/.cxx
+          key: >-
+            native-${{ runner.os }}-
+            ${{ hashFiles(
+              'gradle.properties',
+              'settings.gradle.kts',
+              'build.gradle.kts',
+              'gradle/libs.versions.toml',
+              'core/runtime-android/build.gradle.kts',
+              'core/runtime-android/src/main/cpp/**',
+              'core/runtime-android/src/main/cpp/cmake/**',
+              '.github/workflows/ci.yml'
+            ) }}
+
+      - name: Verify generic OpenGL ES GPU-only invariants
+        run: |
+          set -euo pipefail
+          test -f core/runtime-android/src/main/cpp/opengles_runtime.cpp
+          test -f core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
+          test -f core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles-registration.cpp
+          ! grep -R -nE 'GGML_USE_OPENCL|ggml-opencl|OpenCL|Vulkan' core/runtime-android/src/main/cpp core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_GPU_BACKEND_OPENGL=1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_REQUIRE_OPENGL_GPU=1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          ! grep -R -nE 'GGML_OPENCL=ON|AI_CHAT_OPENCL|OPENCL_PROFILING' core/runtime-android/build.gradle.kts core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_GPU_ONLY_SCHEDULER_PATCH' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'OpenGL ES' core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
+          grep -q 'GGML_OP_GET_ROWS' core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
+          grep -q 'GGML_TYPE_Q4_0' core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
+          grep -q 'GGML_TYPE_Q6_K' core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
+          grep -q 'GGML_TYPE_Q8_0' core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp
+          echo "Generic OpenGL ES GPU-only invariants verified"
 
       - name: Assemble debug APK
         run: >-
           gradle
+          :core:runtime-android:assembleDebug
           :app:assembleDebug
           --stacktrace
           --console=plain
-          --no-daemon
           --parallel
+
+      - name: Verify final APK packaging
+        run: |
+          set -euo pipefail
+          apk="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -n "$apk"
+          python3 scripts/verify_android_apk.py "$apk"
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/aapt" dump badging "$apk" | grep -q "package: name='com.samanramezani.aichattest'"
+          echo "Verified APK package id and native ABI packaging"
+
+      - name: Verify OpenGL ES static backend linkage
+        run: |
+          set -euo pipefail
+          source_file="core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp"
+          test -f "$source_file"
+          grep -q 'GGML_OP_GET_ROWS' "$source_file"
+          grep -q 'GGML_TYPE_Q4_0' "$source_file"
+          grep -q 'GGML_TYPE_Q6_K' "$source_file"
+          grep -q 'GGML_TYPE_Q8_0' "$source_file"
+
+          gl_target="$(find core/runtime-android -path '*/.cxx/*' -type f \( -name 'build.ninja' -o -name 'rules.ninja' \) -print0 | xargs -0 grep -l 'ggml-opengles' | head -n 1 || true)"
+          test -n "$gl_target"
+          native_so="$(find app core/runtime-android -type f -name 'libai_chat_runtime.so' -print -quit)"
+          test -n "$native_so"
+          readelf -d "$native_so" | grep -q 'libGLESv3'
+          if readelf -d "$native_so" | grep -Ei 'libOpenCL|libvulkan' >/dev/null 2>&1; then
+            echo "Forbidden OpenCL/Vulkan runtime dependency detected: $native_so"
+            readelf -d "$native_so"
+            exit 1
+          fi
+          echo "Static OpenGL ES backend linkage verified: $gl_target -> $native_so"
+
+      - name: Collect unstripped native symbols for crash line resolution
+        run: |
+          set -euo pipefail
+          mkdir -p native-symbols
+          mapfile -t symbol_candidates < <(find core/runtime-android/.cxx -type f -name 'libai_chat_runtime.so' -print)
+          test "${#symbol_candidates[@]}" -gt 0
+          selected=""
+          for candidate in "${symbol_candidates[@]}"; do
+            if readelf -S "$candidate" | grep -Fq '.debug_line'; then
+              selected="$candidate"
+              break
+            fi
+          done
+          if [ -z "$selected" ]; then
+            echo "No unstripped libai_chat_runtime.so with .debug_line found"
+            printf '%s\n' "${symbol_candidates[@]}"
+            exit 1
+          fi
+          cp "$selected" native-symbols/libai_chat_runtime.so
+          readelf -n "$selected" | grep -A1 'Build ID' > native-symbols/build-id.txt
+          echo "Collected source-line symbols from $selected"
+
+      - name: Upload unstripped native symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-chat-test-native-symbols
+          path: native-symbols/*
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -113,7 +277,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK
         uses: actions/setup-java@v5
@@ -132,7 +296,9 @@ jobs:
           :app:lintDebug
           --stacktrace
           --console=plain
-          --no-daemon
+          --configuration-cache
+          --parallel
+          --build-cache
 
       - name: Upload lint report
         if: always()

@@ -12,6 +12,11 @@ android {
         applicationId = "com.samanramezani.aichattest"
         minSdk = 29
         targetSdk = 35
+        // This app ships only the native runtime's supported production ABI.
+        // Keep transitive AndroidX native libraries aligned with the runtime ABI.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
         versionCode = 1
         versionName = "0.1.0"
     }
@@ -29,6 +34,21 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            // Keep native libraries uncompressed and avoid a second extracted copy on disk.
+            useLegacyPackaging = false
+        }
+    }
 }
 
 dependencies {
@@ -37,14 +57,19 @@ dependencies {
     implementation(project(":core:observability"))
     implementation(project(":core:settings"))
     implementation(project(":core:runtime"))
+    implementation(project(":core:runtime-android"))
     implementation(project(":core:conversation"))
     implementation(project(":core:agent"))
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
-    implementation(platform("androidx.compose:compose-bom:2025.02.00"))
+    // Keep all Compose artifacts on Google's stable BOM so Gradle cannot resolve
+    // unversioned Compose modules to an incompatible alpha release.
+    val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
+    implementation(composeBom)
+    androidTestImplementation(composeBom)
+
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-text-google-fonts")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.foundation:foundation-layout")
     implementation("androidx.compose.material3:material3")
@@ -57,8 +82,5 @@ dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("androidx.compose.material3:material3-adaptive-navigation-suite")
-
-    androidTestImplementation(platform("androidx.compose:compose-bom:2025.02.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
 }

@@ -77,7 +77,17 @@ class LocalModelService(
                 }
 
                 try {
-                    runtime.unload()
+                    if (activeId == id) {
+                        return@withLock ModelResult.Success(
+                            model.copy(
+                                state = ModelState.ACTIVE,
+                                runtimeCompatibility = RuntimeCompatibility(true, null),
+                            )
+                        )
+                    }
+                    if (activeId != null) {
+                        runtime.unload()
+                    }
                     runtime.load(model)
                     when (val persisted = repository.setActive(id)) {
                         is ModelResult.Success -> {
@@ -91,9 +101,17 @@ class LocalModelService(
                         }
                     }
                 } catch (t: OutOfMemoryError) {
+                    // A failed target load must never leave a half-loaded native runtime
+                    // or a persisted active-model pointer behind.
+                    runCatching { runtime.unload() }
+                    runCatching { repository.setActive(null) }
                     activeId = null
                     ModelResult.Failure(ModelError.OutOfMemory("Not enough memory to load model", t))
                 } catch (t: Throwable) {
+                    // Always tear down both the previous/partial native state and the
+                    // persisted active state before reporting activation failure.
+                    runCatching { runtime.unload() }
+                    runCatching { repository.setActive(null) }
                     activeId = null
                     ModelResult.Failure(ModelError.LoadFailed("Unable to load model", t))
                 }
@@ -112,10 +130,11 @@ class LocalModelService(
                 when (val result = repository.getActive()) {
                     is ModelResult.Success -> {
                         val model = result.value
-                        if (model != null && activeId != model.id) {
-                            runtime.load(model)
-                            activeId = model.id
-                        }
+                        // Generation must never implicitly activate/reload a model.
+                        // The runtime is loaded explicitly by activate()/restoreActive().
+                        // Re-loading here can allocate a second native model/context while
+                        // the previous generation has just completed, which is unsafe on
+                        // mobile OpenCL and was the source of second-message crashes.
                         model
                     }
                     is ModelResult.Failure -> return@withLock result
@@ -139,8 +158,13 @@ class LocalModelService(
         }
     }
 
-    suspend fun stopGeneration() = generationMutex.withLock {
-        stopGenerationUnsafe()
+    suspend fun stopGeneration() {
+        // Generation holds generationMutex for its entire lifetime. Waiting for that
+        // mutex here prevents the stop signal from ever reaching a running decode.
+        // The runtime stop API is specifically designed to interrupt inference safely.
+        if (generationJob != null) {
+            runCatching { runtime.stopGeneration() }
+        }
     }
 
     private suspend fun stopGenerationUnsafe() {

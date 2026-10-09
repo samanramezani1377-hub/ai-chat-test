@@ -6,19 +6,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
-set(LLAMA_CPP_TAG "c5fc7e34885ba31217e330809437afa993d27745" CACHE STRING "Pinned llama.cpp revision")
+set(LLAMA_CPP_TAG "9871df5911a03a813518bcd623ee2eba91bf32aa" CACHE STRING "Pinned llama.cpp revision for the Android OpenGL ES runtime")
 set(FETCHCONTENT_QUIET OFF)
-
 set(FETCHCONTENT_BASE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../.cxx/fetch-content" CACHE PATH "Stable FetchContent base directory")
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "Do not update pinned FetchContent dependencies")
-
-if (ANDROID AND DEFINED ENV{VULKAN_SDK})
-    set(Vulkan_INCLUDE_DIR "$ENV{VULKAN_SDK}/include" CACHE PATH "Vulkan headers" FORCE)
-    set(Vulkan_GLSLC_EXECUTABLE "$ENV{VULKAN_SDK}/bin/glslc" CACHE FILEPATH "Vulkan shader compiler" FORCE)
-    set(Vulkan_LIBRARY "${CMAKE_ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/29/libvulkan.so" CACHE FILEPATH "Android Vulkan loader" FORCE)
-    set(SPIRV-Headers_DIR "$ENV{VULKAN_SDK}/share/cmake/SPIRV-Headers" CACHE PATH "SPIRV-Headers CMake package" FORCE)
-    set(CMAKE_PREFIX_PATH "$ENV{VULKAN_SDK};${CMAKE_PREFIX_PATH}" CACHE STRING "CMake package search path" FORCE)
-endif()
 
 FetchContent_Declare(
     llama_cpp
@@ -26,80 +17,141 @@ FetchContent_Declare(
     GIT_TAG ${LLAMA_CPP_TAG}
     GIT_SHALLOW TRUE
 )
+# OpenGL ES is provided by Android's system EGL/GLES implementation.
+# No vendor-specific GPU SDK is bundled in the APK.
+set(GGML_BACKEND_DL OFF CACHE BOOL "Disable dynamic ggml backend loading on Android" FORCE)
+set(GGML_BACKEND_DIR "" CACHE STRING "No dynamic backend directory" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_UI OFF CACHE BOOL "" FORCE)
+set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
+set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+# GPU-only Android runtime: disable CPU_REPACK so quantized model weights are never diverted to CPU_REPACK.
+# OpenGL ES owns all model weights; CPU remains only as an internal host-side helper.
+set(GGML_CPU_REPACK OFF CACHE BOOL "Disable CPU weight repacking for GPU-only runtime" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
+
 FetchContent_MakeAvailable(llama_cpp)
 
-set(LLAMA_MODEL_LOADING_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/llama-model-loading-memory.patch")
-set(LLAMA_BACKEND_DIAGNOSTICS_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/llama-backend-vulkan-diagnostics.patch")
-set(LLAMA_VULKAN_MICRO_DIAGNOSTICS_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/llama-vulkan-micro-diagnostics.patch")
-set(LLAMA_VULKAN_BDA_SAFETY_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/llama-vulkan-bda-android-safety.patch")
-foreach(LLAMA_PATCH IN ITEMS "${LLAMA_MODEL_LOADING_PATCH}" "${LLAMA_BACKEND_DIAGNOSTICS_PATCH}" "${LLAMA_VULKAN_MICRO_DIAGNOSTICS_PATCH}" "${LLAMA_VULKAN_BDA_SAFETY_PATCH}")
-    if (NOT EXISTS "${LLAMA_PATCH}")
-        message(FATAL_ERROR "Missing llama.cpp downstream patch: ${LLAMA_PATCH}")
-    endif()
-endforeach()
+# Android GPU-only contract: keep the CPU backend registered for host-side metadata
+# and preallocated GGML_OP_NONE tensors, but never let it execute inference ops.
+# An earlier scheduler variant removed CPU from the scheduler entirely; recurrent models keep
+# rs_seq and related control tensors in CPU buffers, so llama.cpp aborts on those
+# preallocated GGML_OP_NONE leaves during sched_reserve().
+set(_llama_context_cpp "${llama_cpp_SOURCE_DIR}/src/llama-context.cpp")
+file(READ "${_llama_context_cpp}" _llama_context_source)
 
-file(SHA256 "${LLAMA_MODEL_LOADING_PATCH}" LLAMA_MODEL_LOADING_PATCH_SHA256)
-file(SHA256 "${LLAMA_BACKEND_DIAGNOSTICS_PATCH}" LLAMA_BACKEND_DIAGNOSTICS_PATCH_SHA256)
-file(SHA256 "${LLAMA_VULKAN_MICRO_DIAGNOSTICS_PATCH}" LLAMA_VULKAN_MICRO_DIAGNOSTICS_PATCH_SHA256)
-file(SHA256 "${LLAMA_VULKAN_BDA_SAFETY_PATCH}" LLAMA_VULKAN_BDA_SAFETY_PATCH_SHA256)
-set(LLAMA_PREPARED_MARKER "${FETCHCONTENT_BASE_DIR}/.ai-chat-test-llama-prepared-${LLAMA_CPP_TAG}")
-set(LLAMA_PREPARED_EXPECTED "${LLAMA_CPP_TAG}\n${LLAMA_MODEL_LOADING_PATCH_SHA256}\n${LLAMA_BACKEND_DIAGNOSTICS_PATCH_SHA256}\n${LLAMA_VULKAN_MICRO_DIAGNOSTICS_PATCH_SHA256}\n${LLAMA_VULKAN_BDA_SAFETY_PATCH_SHA256}\n")
-set(LLAMA_SOURCE_PREPARED FALSE)
+# Undo the earlier over-broad patch when configuring an existing FetchContent tree.
+set(_old_scheduler_replacement [=[            auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
 
-if (EXISTS "${LLAMA_PREPARED_MARKER}")
-    file(READ "${LLAMA_PREPARED_MARKER}" LLAMA_PREPARED_CONTENT)
-    execute_process(
-        COMMAND git -C "${llama_cpp_SOURCE_DIR}" rev-parse HEAD
-        RESULT_VARIABLE LLAMA_HEAD_RESULT
-        OUTPUT_VARIABLE LLAMA_HEAD
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
-    if (LLAMA_HEAD_RESULT EQUAL 0 AND LLAMA_HEAD STREQUAL LLAMA_CPP_TAG AND LLAMA_PREPARED_CONTENT STREQUAL LLAMA_PREPARED_EXPECTED)
-        execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --recount --reverse --check "${LLAMA_MODEL_LOADING_PATCH}" RESULT_VARIABLE LLAMA_MODEL_REVERSE_RESULT OUTPUT_QUIET ERROR_QUIET)
-        execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --recount --reverse --check "${LLAMA_BACKEND_DIAGNOSTICS_PATCH}" RESULT_VARIABLE LLAMA_BACKEND_REVERSE_RESULT OUTPUT_QUIET ERROR_QUIET)
-        execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --recount --reverse --check "${LLAMA_VULKAN_MICRO_DIAGNOSTICS_PATCH}" RESULT_VARIABLE LLAMA_MICRO_REVERSE_RESULT OUTPUT_QUIET ERROR_QUIET)
-        execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --recount --reverse --check "${LLAMA_VULKAN_BDA_SAFETY_PATCH}" RESULT_VARIABLE LLAMA_BDA_REVERSE_RESULT OUTPUT_QUIET ERROR_QUIET)
-        if (LLAMA_MODEL_REVERSE_RESULT EQUAL 0 AND LLAMA_BACKEND_REVERSE_RESULT EQUAL 0 AND LLAMA_MICRO_REVERSE_RESULT EQUAL 0 AND LLAMA_BDA_REVERSE_RESULT EQUAL 0)
-            set(LLAMA_SOURCE_PREPARED TRUE)
-            message(STATUS "llama.cpp source preparation already complete; skipping reset/clean/reapply")
-        endif()
-    endif()
+            // AI_CHAT_GPU_ONLY_SCHEDULER_PATCH: CPU remains initialized as a host helper,
+            // but it is never inserted into the graph scheduler backend list.
+            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU) {
+                continue;
+            }
+
+            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {]=])
+set(_scheduler_needle [=[            auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
+
+            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {]=])
+string(REPLACE "${_old_scheduler_replacement}" "${_scheduler_needle}" _llama_context_source "${_llama_context_source}")
+
+if(NOT _llama_context_source MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2")
+    set(_scheduler_replacement [=[            auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
+
+            // AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2: retain CPU backend for host metadata,
+            // graph inputs, and preallocated GGML_OP_NONE tensors only.
+            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {]=])
+    string(REPLACE "${_scheduler_needle}" "${_scheduler_replacement}" _llama_context_source "${_llama_context_source}")
 endif()
 
-if (NOT LLAMA_SOURCE_PREPARED)
-    execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" reset --hard ${LLAMA_CPP_TAG} RESULT_VARIABLE LLAMA_RESET_RESULT ERROR_VARIABLE LLAMA_RESET_ERROR)
-    if (NOT LLAMA_RESET_RESULT EQUAL 0)
-        message(FATAL_ERROR "Failed to reset llama.cpp source to ${LLAMA_CPP_TAG}: ${LLAMA_RESET_ERROR}")
-    endif()
-    execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" clean -fd RESULT_VARIABLE LLAMA_CLEAN_RESULT ERROR_VARIABLE LLAMA_CLEAN_ERROR)
-    if (NOT LLAMA_CLEAN_RESULT EQUAL 0)
-        message(FATAL_ERROR "Failed to clean llama.cpp source: ${LLAMA_CLEAN_ERROR}")
-    endif()
-    foreach(LLAMA_PATCH IN ITEMS "${LLAMA_MODEL_LOADING_PATCH}" "${LLAMA_BACKEND_DIAGNOSTICS_PATCH}" "${LLAMA_VULKAN_MICRO_DIAGNOSTICS_PATCH}" "${LLAMA_VULKAN_BDA_SAFETY_PATCH}")
-        execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --recount --check "${LLAMA_PATCH}" RESULT_VARIABLE LLAMA_PATCH_CHECK_RESULT OUTPUT_QUIET ERROR_VARIABLE LLAMA_PATCH_CHECK_ERROR)
-        if (NOT LLAMA_PATCH_CHECK_RESULT EQUAL 0)
-            message(FATAL_ERROR "Pinned llama.cpp source does not accept downstream patch ${LLAMA_PATCH}: ${LLAMA_PATCH_CHECK_ERROR}")
-        endif()
-        execute_process(COMMAND git -C "${llama_cpp_SOURCE_DIR}" apply --recount "${LLAMA_PATCH}" RESULT_VARIABLE LLAMA_PATCH_APPLY_RESULT ERROR_VARIABLE LLAMA_PATCH_APPLY_ERROR)
-        if (NOT LLAMA_PATCH_APPLY_RESULT EQUAL 0)
-            message(FATAL_ERROR "Failed to apply llama.cpp downstream patch ${LLAMA_PATCH}: ${LLAMA_PATCH_APPLY_ERROR}")
-        endif()
-    endforeach()
-    file(MAKE_DIRECTORY "${FETCHCONTENT_BASE_DIR}")
-    file(WRITE "${LLAMA_PREPARED_MARKER}" "${LLAMA_PREPARED_EXPECTED}")
-    message(STATUS "Prepared llama.cpp ${LLAMA_CPP_TAG} and applied Android model-loading/backend/micro/BDA safety patches")
+# Remove the old direct free, which was only added when CPU was excluded from the scheduler.
+set(_old_cleanup_replacement [=[    ggml_opt_free(opt_ctx);
+    if (backend_cpu) {
+        ggml_backend_free(backend_cpu);
+        backend_cpu = nullptr;
+    }
+}]=])
+string(REPLACE "${_old_cleanup_replacement}" [=[    ggml_opt_free(opt_ctx);
+}]=] _llama_context_source "${_llama_context_source}")
+file(WRITE "${_llama_context_cpp}" "${_llama_context_source}")
+
+if(NOT _llama_context_source MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2")
+    message(FATAL_ERROR "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2 was not applied; refusing an unsafe GPU-only scheduler build")
 endif()
 
-add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp)
+# CPU stays in the scheduler to resolve CPU-resident metadata leaves, but it must
+# not be selected for any inference/computation op. Gate both scheduler assignment
+# paths; views are handled structurally by the scheduler and GGML_OP_NONE does no compute.
+set(_ggml_backend_cpp "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-backend.cpp")
+file(READ "${_ggml_backend_cpp}" _ggml_backend_source)
+if(NOT _ggml_backend_source MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK")
+    set(_cpu_guard_needle [=[static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, struct ggml_tensor * node, int cur_backend_id, int * node_backend_id) {
+    if (ggml_backend_supports_op(sched->backends[cur_backend_id], node)) {]=])
+    set(_cpu_guard_replacement [=[static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, struct ggml_tensor * node, int cur_backend_id, int * node_backend_id) {
+    // AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK: CPU is host/metadata-only.
+    if (cur_backend_id == sched->n_backends - 1 && node->op != GGML_OP_NONE) {
+        return;
+    }
+    if (ggml_backend_supports_op(sched->backends[cur_backend_id], node)) {]=])
+    string(REPLACE "${_cpu_guard_needle}" "${_cpu_guard_replacement}" _ggml_backend_source "${_ggml_backend_source}")
 
+    set(_cpu_pass3_needle [=[if (ggml_backend_supports_op(sched->backends[b], node)) {]=])
+    set(_cpu_pass3_replacement [=[if (ggml_backend_supports_op(sched->backends[b], node) &&
+                    !(b == sched->n_backends - 1 && node->op != GGML_OP_NONE)) {]=])
+    string(REPLACE "${_cpu_pass3_needle}" "${_cpu_pass3_replacement}" _ggml_backend_source "${_ggml_backend_source}")
+    file(WRITE "${_ggml_backend_cpp}" "${_ggml_backend_source}")
+endif()
+
+file(READ "${_ggml_backend_cpp}" _ggml_backend_verify)
+if(NOT _ggml_backend_verify MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK")
+    message(FATAL_ERROR "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK was not applied; refusing a CPU-fallback runtime")
+endif()
+
+add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp opengles_runtime.cpp ggml-opengles/ggml-opengles.cpp ggml-opengles/ggml-opengles-registration.cpp)
+
+# native_runtime_android_safe.cpp intentionally includes llama.cpp/ggml internal
+# headers for strict backend and tensor-residency validation. Keep both
+# internal source directories on the include path; the public ggml include
+# directory alone is insufficient for ggml-backend-impl.h on this pinned revision.
 target_include_directories(ai_chat_runtime PRIVATE
     ${llama_cpp_SOURCE_DIR}/include
+    ${llama_cpp_SOURCE_DIR}/src
     ${llama_cpp_SOURCE_DIR}/ggml/include
+    ${llama_cpp_SOURCE_DIR}/ggml/src
+    ${CMAKE_CURRENT_LIST_DIR}/ggml-opengles
 )
 
-target_link_libraries(ai_chat_runtime llama android log)
-target_compile_definitions(ai_chat_runtime PRIVATE AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}")
+# The runtime is a single arm64 production native library. Strip unused sections
+# and symbols at link time to reduce the installed footprint without changing inference.
+target_compile_options(ai_chat_runtime PRIVATE
+    -Os
+    -g3
+    -fno-limit-debug-info
+    -ffunction-sections
+    -fdata-sections
+)
+target_link_options(ai_chat_runtime PRIVATE
+    -Wl,--gc-sections
+    -Wl,--no-strip-all
+    -Wl,--build-id=sha1
+    # Keep native symbols/debug line tables so Android tombstones can identify the
+    # crashing function and resolve source lines with the matching unstripped build.
+)
+
+target_link_libraries(ai_chat_runtime PRIVATE llama llama-common android log EGL GLESv3)
+
+target_compile_definitions(ai_chat_runtime PRIVATE
+    AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"
+    AI_CHAT_GPU_BACKEND_OPENGL=1
+    AI_CHAT_REQUIRE_OPENGL_GPU=1
+)
 
 if (ANDROID)
     set_target_properties(ai_chat_runtime PROPERTIES

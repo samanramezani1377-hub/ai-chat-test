@@ -11,14 +11,15 @@ android {
     defaultConfig {
         minSdk = 29
         consumerProguardFiles("consumer-rules.pro")
+        ndk {
+            debugSymbolLevel = "none"
+        }
         externalNativeBuild {
             cmake {
                 // Validation is intentionally debug-only while native loading is under investigation.
                 // Keep the native build strictly single-ABI; the app also packages arm64-v8a only.
                 abiFilters += "arm64-v8a"
                 arguments += listOf(
-                    "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
-                    "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
                     "-DLLAMA_BUILD_COMMON=OFF",
                     "-DLLAMA_BUILD_TESTS=OFF",
                     "-DLLAMA_BUILD_EXAMPLES=OFF",
@@ -31,9 +32,9 @@ android {
                     "-DGGML_CPU_ARM_ARCH=armv8-a",
                     "-DGGML_OPENMP=OFF",
                     "-DGGML_LLAMAFILE=OFF",
-                    "-DGGML_VULKAN=ON",
-                    "-DGGML_VULKAN_RUN_TESTS=OFF",
-                    "-DGGML_VULKAN_VALIDATE=OFF",
+                    "-DGGML_OPENCL=OFF",
+                    "-DGGML_VULKAN=OFF",
+                    "-DGGML_BACKEND_DL=OFF",
                 )
             }
         }
@@ -45,6 +46,31 @@ android {
         }
     }
 
+    buildTypes {
+        debug {
+            externalNativeBuild {
+                cmake {
+                    arguments += listOf(
+                        "-DAI_CHAT_OPENGL_DIAGNOSTICS=ON",
+                        // Apply DWARF flags to llama.cpp/ggml dependencies too, not only our target.
+                        "-DCMAKE_C_FLAGS=-g3",
+                        "-DCMAKE_CXX_FLAGS=-g3",
+                        "-DCMAKE_C_FLAGS_DEBUG=-O0 -g3",
+                        "-DCMAKE_CXX_FLAGS_DEBUG=-O0 -g3",
+                    )
+                }
+            }
+        }
+        release {
+            externalNativeBuild {
+                cmake {
+                    arguments += "-DAI_CHAT_OPENGL_DIAGNOSTICS=ON"
+                }
+            }
+        }
+    }
+
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -52,17 +78,6 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
-    }
-}
-
-// There is no release APK/package in the current development phase.
-// Disable the library release variant so Gradle cannot configure/build
-// buildCMakeRelease for this native runtime module.
-androidComponents {
-    beforeVariants { variantBuilder ->
-        if (variantBuilder.buildType == "release") {
-            variantBuilder.enable = false
-        }
     }
 }
 
