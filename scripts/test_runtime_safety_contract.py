@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ADAPTER = ROOT / "core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/LlamaCppAndroidRuntimeAdapter.kt"
 NATIVE_BRIDGE = ROOT / "core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/NativeLlamaCpp.kt"
 NATIVE_CPP = ROOT / "core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp"
+SHARED_NATIVE_CPP = ROOT / "core/runtime-android/src/main/cpp/native_runtime.cpp"
 
 
 def main() -> int:
@@ -21,6 +22,7 @@ def main() -> int:
         print("FAIL: missing source(s): " + ", ".join(missing), file=sys.stderr)
         return 2
     adapter, bridge, native = [p.read_text(encoding="utf-8") for p in paths]
+    shared_native = SHARED_NATIVE_CPP.read_text(encoding="utf-8")
     checks = [
         ("load/unload/generation serialized by coroutine mutex",
          "private val nativeOperationMutex = Mutex()" in adapter and
@@ -66,12 +68,20 @@ def main() -> int:
          "SPECULATIVE_DOUBLE_INIT_GUARD" in native and
          "if (g_spec || g_spec_init)" in native,
          "draft runtime must not initialize twice"),
-        ("fatal signal handler preserves Android debuggerd backtraces",
-         "g_previous_fatal_actions" in native and
-         "handler(signal_number, info, raw_context)" in native and
+        ("active OpenGL fatal handler re-delivers signals to Android debuggerd",
+         "g_android_previous_fatal_actions" in native and
+         "sigaction(signal_number, &previous, nullptr)" in native and
+         "syscall(SYS_tgkill" in native and
          "NATIVE_FATAL_PC=" in native and "NATIVE_FATAL_LR=" in native and
-         "NATIVE_FATAL_BACKTRACE_BEGIN" in native and "backtrace_symbols_fd" in native,
-         "fatal diagnostics must preserve signal context and chain to the previous handler"),
+         "g_android_fatal_handlers_installed" in native and
+         "AI_CHAT_EXTERNAL_FATAL_HANDLER 1" in native and
+         "#ifndef AI_CHAT_EXTERNAL_FATAL_HANDLER" in shared_native and
+         "default_action.sa_handler = SIG_DFL" not in native and
+         "raise(signal_number)" not in native,
+         "the active handler must restore the original debuggerd action and re-deliver the fatal signal, without replacing it with SIG_DFL"),
+        ("shared JNI init does not shadow debuggerd with a legacy handler",
+         shared_native.count("#ifndef AI_CHAT_EXTERNAL_FATAL_HANDLER") >= 2,
+         "the included native runtime must leave fatal-handler ownership to the Android wrapper"),
         ("native library keeps symbols needed to resolve crash addresses",
          "-g" in (ROOT / "core/runtime-android/src/main/cpp/CMakeLists.txt").read_text(encoding="utf-8") and
          "-Wl,--strip-all" not in (ROOT / "core/runtime-android/src/main/cpp/CMakeLists.txt").read_text(encoding="utf-8"),
