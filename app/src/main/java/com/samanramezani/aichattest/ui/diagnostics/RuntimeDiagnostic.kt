@@ -232,11 +232,44 @@ private fun RuntimeDiagnostic.failedPhaseLog(): List<String> {
     return lines.subList(startIndex, lines.size)
 }
 
+internal fun RuntimeDiagnostic.logLines(): List<String> {
+    val all = nativeDiagnostics.orEmpty().lineSequence()
+        .map(String::trim).filter(String::isNotBlank).toList()
+    if (all.isEmpty()) return emptyList()
+
+    val failure = failedPhaseLog()
+    if (error != null || status.equals("FAILED", true) || status.equals("ERROR", true)) {
+        // On an incomplete/failed operation, show the complete failing phase.
+        // If no phase marker exists, retain all logs rather than hide evidence.
+        return failure.ifEmpty { all }
+    }
+
+    // A successful load should be readable: show only load lifecycle milestones
+    // and a bounded 50-line sample, never the per-tensor dump.
+    val loadMarkers = listOf(
+        "NATIVE_LOAD_STARTED", "MODEL_LOAD_PARAMS", "MODEL_LOAD_STARTED",
+        "MODEL_LOAD_RETURNED_SUCCESS", "MODEL_READY", "CONTEXT_INIT_STARTED",
+        "CONTEXT_INIT_RETURNED_SUCCESS", "TARGET_RUNTIME_READY_BEFORE_SPECULATIVE",
+        "OPENGL_ES_DEVICE", "OPENGL_ES_BACKEND_DEVICE_STATE",
+        "OPENGL_ES_RESIDENCY_SUMMARY", "NATIVE_WEIGHT_RESIDENCY"
+    )
+    val sample = all.filter { line ->
+        loadMarkers.any { line.contains(it, ignoreCase = true) } &&
+            !line.contains("OPENGL_ES_TENSOR_RESIDENCY", true) &&
+            !line.contains("create_tensor: loading tensor", true)
+    }.distinct()
+    return (sample.ifEmpty { all.filterNot {
+        it.contains("OPENGL_ES_TENSOR_RESIDENCY", true) ||
+            it.contains("create_tensor: loading tensor", true) ||
+            it.contains("unused tensor", true)
+    }.takeLast(50) }).takeLast(50)
+}
+
 internal fun RuntimeDiagnostic.errorReport(): String {
     val phaseLog = failedPhaseLog()
     return if (phaseLog.isEmpty()) report()
-    else report() + "\\n\\n===== FULL LOGS FOR FAILED PHASE (\\${phaseLog.size} lines) =====\\n" +
-        phaseLog.joinToString("\\n")
+    else report() + "\n\n===== FULL LOGS FOR FAILED PHASE (${phaseLog.size} lines) =====\n" +
+        phaseLog.joinToString("\n")
 }
 
 private fun RuntimeDiagnostic.uniqueRuntimeEvents(): List<String> {
