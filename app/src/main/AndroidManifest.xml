@@ -9,9 +9,6 @@
         android:theme="@style/Theme.AIChatTest"
         android:allowBackup="true"
         android:supportsRtl="true">
-        <uses-native-library
-            android:name="libOpenCL.so"
-            android:required="false" />
         <service
             android:name=".ModelRuntimeForegroundService"
             android:exported="false"
