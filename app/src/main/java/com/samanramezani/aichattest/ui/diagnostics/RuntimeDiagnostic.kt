@@ -158,7 +158,8 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
         "NATIVE_WEIGHT_RESIDENCY", "CONTEXT_INIT_STARTED", "CONTEXT_INIT_RETURNED_FAILED",
         "CONTEXT_INIT_FAILED", "llama_init_from_model", "MODEL_LOAD_FAILURE",
         "failed to initialize", "OutOfMemory", "exception", "allocation failed",
-        "NATIVE_FATAL_SIGNAL", "NATIVE_FATAL_SIGNAL_NAME", "NATIVE_FATAL_PHASE",
+        "NATIVE_FATAL_SIGNAL", "NATIVE_FATAL_SIGNAL_NAME", "NATIVE_FATAL_SI_CODE",
+        "NATIVE_FATAL_PHASE", "NATIVE_FATAL_PC", "NATIVE_FATAL_LR", "NATIVE_FATAL_FAULT_ADDR",
         "CONTEXT_INIT_ENTER_LLAMA_INIT_FROM_MODEL", "CONTEXT_INIT_RETURNED_FROM_LLAMA_INIT"
     )
     val technicalLines = diagnosticMarkers.flatMap { marker ->
@@ -194,6 +195,9 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     val fatalSignal = nativeLinesForState.lastOrNull { it.startsWith("NATIVE_FATAL_SIGNAL_NAME=") }
         ?: nativeLinesForState.lastOrNull { it.startsWith("NATIVE_FATAL_SIGNAL=") }
     val fatalPhase = nativeLinesForState.lastOrNull { it.startsWith("NATIVE_FATAL_PHASE=") }
+    val fatalPc = nativeLinesForState.lastOrNull { it.startsWith("NATIVE_FATAL_PC=") }
+    val fatalLr = nativeLinesForState.lastOrNull { it.startsWith("NATIVE_FATAL_LR=") }
+    val fatalAddress = nativeLinesForState.lastOrNull { it.startsWith("NATIVE_FATAL_FAULT_ADDR=") }
     if (resolved != null) {
         appendLine("Error: ${resolved.code} | ${resolved.title}")
         appendLine("Meaning: ${resolved.message}")
@@ -204,6 +208,12 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
         appendLine("Error: Native context initialization did not reach READY")
         appendLine("Failure stage: CONTEXT_INIT_STARTED without a later successful context-ready marker")
     } else appendLine("Error: N/A")
+    if (fatalSignal != null) {
+        appendLine("Native fatal: ${fatalSignal.substringAfter('=')} | phase=${fatalPhase?.substringAfter('=') ?: "N/A"}")
+        fatalPc?.let { appendLine(it) }
+        fatalLr?.let { appendLine(it) }
+        fatalAddress?.let { appendLine(it) }
+    }
     val cleanError = (rawError ?: error)?.replace(Regex("\\s+"), " ")?.take(220)
     if (!cleanError.isNullOrBlank()) appendLine("Raw error: $cleanError")
     appendLine("----- Key native diagnostics -----")
