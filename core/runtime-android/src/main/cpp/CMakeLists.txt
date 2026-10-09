@@ -74,6 +74,30 @@ set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
 
+# Android OpenCL vendor libraries are often complete OpenCL implementations but
+# not ICDs. Patch only the pinned ggml OpenCL call sites to use our direct API
+# dispatcher; the Khronos loader remains linked for ABI compatibility but is not
+# used for driver dispatch. This avoids fabricating the ICD extension entrypoint.
+set(AI_CHAT_OPENCL_SOURCE_FILES
+    "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-opencl/ggml-opencl.cpp"
+    "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-opencl/cl-program-cache.cpp"
+)
+foreach(AI_CHAT_OPENCL_SOURCE IN LISTS AI_CHAT_OPENCL_SOURCE_FILES)
+    file(READ "${AI_CHAT_OPENCL_SOURCE}" AI_CHAT_OPENCL_SOURCE_TEXT)
+    string(FIND "${AI_CHAT_OPENCL_SOURCE_TEXT}" "#include <CL/cl.h>" AI_CHAT_OPENCL_INCLUDE_POS)
+    if (AI_CHAT_OPENCL_INCLUDE_POS EQUAL -1)
+        message(FATAL_ERROR "Could not patch direct Android OpenCL dispatch in ${AI_CHAT_OPENCL_SOURCE}")
+    endif()
+    string(REPLACE "#include <CL/cl.h>"
+        "#include <CL/cl.h>\n#include \"android_opencl_dispatch.h\""
+        AI_CHAT_OPENCL_SOURCE_TEXT "${AI_CHAT_OPENCL_SOURCE_TEXT}")
+    file(WRITE "${AI_CHAT_OPENCL_SOURCE}" "${AI_CHAT_OPENCL_SOURCE_TEXT}")
+endforeach()
+if (NOT TARGET ggml-opencl)
+    message(FATAL_ERROR "GPU-only runtime requires the statically linked ggml-opencl target")
+endif()
+target_include_directories(ggml-opencl PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
+
 # Static backend hardening: make the OpenCL registration visible to the final
 # runtime target as a real link dependency. This prevents linker GC from
 # discarding the backend registration object and makes a missing OpenCL target
