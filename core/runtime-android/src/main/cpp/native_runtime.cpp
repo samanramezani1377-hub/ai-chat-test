@@ -552,6 +552,11 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
     mp.load_mode = LLAMA_LOAD_MODE_NONE;
     mp.check_tensors = false;
     mp.no_host = true;
+    // Do not allow llama.cpp's optional CPU_REPACK buffers to retain model weights
+    // on the CPU. GPU-only activation must either place weights on Vulkan or fail
+    // the explicit residency validation after load.
+    mp.use_extra_bufts = false;
+    checkpoint("VULKAN_LOAD_POLICY no_host=1 use_extra_bufts=0 async_uploads=disabled");
 
     // Do not force token_embd onto Vulkan. llama.cpp's backend placement is
     // architecture/device aware; overriding the embedding buffer here adds a
