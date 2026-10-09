@@ -24,8 +24,8 @@ internal object RuntimeErrorMapper {
             "Invalid GPU-only configuration. Activate the model with full OpenCL GPU offload."
         )
         5 -> ModelError.RuntimeUnavailable(
-            "This device's OpenCL GPU is not supported by the current GPU-only backend. " +
-                "CPU fallback is disabled; no model was activated."
+            "No supported OpenCL GPU was registered. The GPU family may be unsupported or " +
+                "the vendor OpenCL driver may be unavailable. CPU fallback is disabled; no model was activated."
         )
         6 -> ModelError.RuntimeUnavailable(
             "The model could not remain fully resident on the OpenCL GPU. " +
