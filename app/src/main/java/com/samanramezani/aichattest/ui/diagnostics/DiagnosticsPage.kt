@@ -149,7 +149,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             }
         }
 
-        Text("گزارش کامل شامل مشخصات مدل، عملکرد، حافظه، OpenCL، تنظیمات، همه رویدادهای Runtime و Agent و لاگ خام Native است.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("گزارش کامل شامل مشخصات مدل، عملکرد، حافظه GPU، تنظیمات، همه رویدادهای Runtime و Agent و لاگ خام Native است.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
