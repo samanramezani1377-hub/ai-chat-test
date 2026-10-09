@@ -383,10 +383,6 @@ static bool probe_android_vendor_icd_candidates() {
                             platforms[i], CL_DEVICE_TYPE_GPU, gpu_count, devices.data(), nullptr);
                         if (device_list_result == CL_SUCCESS) {
                             for (cl_uint d = 0; d < gpu_count; ++d) {
-                                const std::string device_name = direct_platform_string(
-                                    reinterpret_cast<cl_int (CL_API_CALL *)(cl_platform_id, cl_platform_info, size_t, void *, size_t *)>(nullptr),
-                                    nullptr, 0);
-                                (void)device_name;
                                 auto read_device_string = [&](cl_device_info field) -> std::string {
                                     size_t size = 0;
                                     if (get_device_info(devices[d], field, 0, nullptr, &size) != CL_SUCCESS || size == 0)
