@@ -107,35 +107,12 @@ foreach(AI_CHAT_OPENCL_SOURCE IN LISTS AI_CHAT_OPENCL_SOURCE_FILES)
     endif()
 endforeach()
 
-# The pinned upstream backend rejects devices whose vendor name is not in its
-# hard-coded GPU-family table, even when they expose the OpenCL 2+ features
-# required by the portable kernels. On Android, allow UNKNOWN family devices
-# through the normal feature checks; Adreno-specific kernels are disabled above.
-# Fail configuration if upstream changes the rejection block so this patch
-# cannot silently stop applying.
-set(AI_CHAT_OPENCL_SOURCE "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-opencl/ggml-opencl.cpp")
-file(READ "${AI_CHAT_OPENCL_SOURCE}" AI_CHAT_OPENCL_SOURCE_TEXT)
-set(AI_CHAT_UNKNOWN_GPU_REJECTION [=[
-GGML_LOG_WARN("ggml_opencl: unsupported GPU '%s'.\n", dev_ctx->device_name.c_str());
-        dev_ctx->gpu_family = GPU_FAMILY::UNKNOWN;
-        return false;
-]=])
-string(FIND "${AI_CHAT_OPENCL_SOURCE_TEXT}" "${AI_CHAT_UNKNOWN_GPU_REJECTION}" AI_CHAT_UNKNOWN_GPU_REJECTION_POS)
-if (NOT AI_CHAT_UNKNOWN_GPU_REJECTION_POS EQUAL -1)
-    set(AI_CHAT_UNKNOWN_GPU_ACCEPTANCE [=[
-GGML_LOG_WARN("ggml_opencl: unknown GPU family '%s'; attempting portable OpenCL kernels after feature checks.\n", dev_ctx->device_name.c_str());
-        dev_ctx->gpu_family = GPU_FAMILY::UNKNOWN;
-]=])
-    string(REPLACE "${AI_CHAT_UNKNOWN_GPU_REJECTION}" "${AI_CHAT_UNKNOWN_GPU_ACCEPTANCE}"
-        AI_CHAT_OPENCL_SOURCE_TEXT "${AI_CHAT_OPENCL_SOURCE_TEXT}")
-    file(WRITE "${AI_CHAT_OPENCL_SOURCE}" "${AI_CHAT_OPENCL_SOURCE_TEXT}")
-else()
-    string(FIND "${AI_CHAT_OPENCL_SOURCE_TEXT}" "unknown GPU family" AI_CHAT_UNKNOWN_GPU_ALREADY_PATCHED)
-    if (AI_CHAT_UNKNOWN_GPU_ALREADY_PATCHED EQUAL -1)
-        message(FATAL_ERROR "Could not safely patch upstream OpenCL unknown-GPU rejection; inspect ggml-opencl.cpp")
-    endif()
-endif()
-
+# Do not bypass upstream GPU-family validation. The pinned OpenCL kernels
+# contain Intel/Adreno-specific subgroup assumptions (for example N_SIMDWIDTH,
+# N_SIMDGROUP and N_DST) and the dispatch paths assert on unknown GPU families.
+# Accepting an unknown device here causes OpenCL kernel compilation to fail
+# fatally at model activation. Keep unsupported devices rejected until a real
+# vendor-neutral kernel/dispatch implementation is added and tested.
 target_include_directories(ggml-opencl PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
 
 if (NOT TARGET ggml-opencl)
