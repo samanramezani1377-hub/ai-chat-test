@@ -99,7 +99,11 @@ inline auto call(const char * symbol, Args... args)
 // turns it into an ordinary integer and breaks C++ overload conversion.
 #define AI_CHAT_OPENCL_DIRECT_CALL(fn, ...) ([&]() { \
     auto ai_chat_opencl_fn = ai_chat_opencl_dispatch::resolve<decltype(&fn)>(#fn); \
-    if (!ai_chat_opencl_fn) return ai_chat_opencl_dispatch::missing_result<decltype(ai_chat_opencl_fn(__VA_ARGS__))>(); \
+    using AIChatOpenCLResult = decltype(ai_chat_opencl_fn(__VA_ARGS__)); \
+    if (!ai_chat_opencl_fn) { \
+        if constexpr (std::is_void_v<AIChatOpenCLResult>) return; \
+        else return ai_chat_opencl_dispatch::missing_result<AIChatOpenCLResult>(); \
+    } \
     return ai_chat_opencl_fn(__VA_ARGS__); \
 }())
 #define clBuildProgram(...) AI_CHAT_OPENCL_DIRECT_CALL(clBuildProgram, __VA_ARGS__)
