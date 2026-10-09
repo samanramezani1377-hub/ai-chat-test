@@ -56,6 +56,31 @@ set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
 
+# Android devices may expose Vulkan 1.1 without core Vulkan 1.2 buffer-device-address
+# support. Keep the optional BDA optimization disabled on those devices rather than
+# letting the backend use an unavailable core entry point. This does not disable Vulkan.
+set(AI_CHAT_VULKAN_SOURCE "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-vulkan/ggml-vulkan.cpp")
+if (NOT EXISTS "${AI_CHAT_VULKAN_SOURCE}")
+    message(FATAL_ERROR "Pinned llama.cpp Vulkan source is missing: ${AI_CHAT_VULKAN_SOURCE}")
+endif()
+file(READ "${AI_CHAT_VULKAN_SOURCE}" AI_CHAT_VULKAN_SOURCE_TEXT)
+string(FIND "${AI_CHAT_VULKAN_SOURCE_TEXT}" "AI_CHAT_VULKAN_ANDROID_BDA_GUARD_V1" AI_CHAT_VULKAN_BDA_PATCHED)
+if (AI_CHAT_VULKAN_BDA_PATCHED EQUAL -1)
+    string(FIND "${AI_CHAT_VULKAN_SOURCE_TEXT}" "device->buffer_device_address = vk12_features.bufferDeviceAddress;" AI_CHAT_VULKAN_BDA_ASSIGNMENT)
+    if (AI_CHAT_VULKAN_BDA_ASSIGNMENT EQUAL -1)
+        message(FATAL_ERROR "Could not locate Vulkan buffer-device-address feature assignment in pinned llama.cpp")
+    endif()
+    string(REPLACE
+        "VkPhysicalDeviceVulkan12Features vk12_features;"
+        "VkPhysicalDeviceVulkan12Features vk12_features{};"
+        AI_CHAT_VULKAN_SOURCE_TEXT "${AI_CHAT_VULKAN_SOURCE_TEXT}")
+    string(REPLACE
+        "device->buffer_device_address = vk12_features.bufferDeviceAddress;"
+        "device->buffer_device_address = vk12_features.bufferDeviceAddress;\n        // AI_CHAT_VULKAN_ANDROID_BDA_GUARD_V1: Vulkan 1.1 devices must not use the core 1.2 BDA path.\n        if (device->properties.apiVersion < VK_API_VERSION_1_2) {\n            device->buffer_device_address = false;\n        }"
+        AI_CHAT_VULKAN_SOURCE_TEXT "${AI_CHAT_VULKAN_SOURCE_TEXT}")
+    file(WRITE "${AI_CHAT_VULKAN_SOURCE}" "${AI_CHAT_VULKAN_SOURCE_TEXT}")
+endif()
+
 if (NOT TARGET ggml-vulkan)
     message(FATAL_ERROR "GPU-only runtime requires the statically linked ggml-vulkan target")
 endif()
