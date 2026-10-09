@@ -393,8 +393,8 @@ internal fun RuntimeDiagnostic.fullNativeLogLines(): List<String> =
     nativeDiagnostics.orEmpty().lineSequence()
         .map(String::trim)
         .filter(String::isNotBlank)
-        .takeLast(1000)
         .toList()
+        .takeLast(1000)
 
 private fun RuntimeDiagnostic.uniqueRuntimeEvents(): List<String> {
     data class EventLine(val timestamp: Long, val text: String, val key: String)
