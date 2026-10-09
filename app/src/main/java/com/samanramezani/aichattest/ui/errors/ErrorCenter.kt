@@ -30,24 +30,24 @@ internal object ErrorCenter {
                     "متن را کوتاه‌تر کن یا آن را در چند پیام بفرست.", technical)
 
             // The driver probe can successfully enumerate a real GPU while the
-            // pinned ggml-opencl backend rejects its GPU family. Report that distinctly:
+            // pinned ggml-vulkan backend rejects its GPU family. Report that distinctly:
             // asking the user to reinstall/check a working driver is misleading here.
             "unsupported gpu" in text || "drop unsupported device" in text ->
-                PersianError("OPENCL-003", "GPU شناسایی شد اما پشتیبانی نمی‌شود",
-                    "درایور OpenCL سالم است و دستگاه Mali-G57 شناسایی شده؛ اما نسخه فعلی backend در llama.cpp این خانواده GPU را رد می‌کند. به همین دلیل مدل فعال نشده است.",
+                PersianError("VULKAN-003", "GPU شناسایی شد اما پشتیبانی نمی‌شود",
+                    "درایور Vulkan سالم است و دستگاه GPU شناسایی شده، اما backend Vulkan نتوانسته دستگاه قابل استفاده‌ای ثبت کند. مدل فعال نشده است.",
                     "این مشکل با نصب دوباره درایور یا تغییر فایل مدل حل نمی‌شود. باید مسیر کرنل‌ها و dispatch برای Mali به‌صورت واقعی پیاده‌سازی و روی دستگاه آزمایش شود. حالت CPU fallback همچنان غیرفعال است.",
                     technical)
 
-            "OPENCL_GPU_ONLY_REJECTED_NO_OPENCL_GPU_DEVICE".lowercase() in text ||
+            "VULKAN_GPU_ONLY_REJECTED_NO_VULKAN_GPU_DEVICE".lowercase() in text ||
                 "platform ids not available" in text ||
-                "no opencl gpu device" in text ->
-                PersianError("OPENCL-001", "GPU ‏OpenCL پیدا نشد",
-                    "برنامه نتوانست یک دستگاه GPU قابل استفاده از درایور OpenCL پیدا کند.",
-                    "درایور OpenCL دستگاه را بررسی کن و برنامه را دوباره اجرا کن. اگر مشکل باقی ماند، گزارش کامل را ارسال کن.",
+                "no vulkan gpu device" in text ->
+                PersianError("VULKAN-001", "GPU ‏Vulkan پیدا نشد",
+                    "برنامه نتوانست یک دستگاه GPU قابل استفاده از درایور Vulkan پیدا کند.",
+                    "درایور Vulkan دستگاه را بررسی کن و برنامه را دوباره اجرا کن. اگر مشکل باقی ماند، گزارش کامل را ارسال کن.",
                     technical)
 
-            "OPENCL_GPU_ONLY_MODEL_RESIDENCY_REJECTED".lowercase() in text ->
-                PersianError("OPENCL-002", "وزن‌های مدل روی GPU قرار نگرفتند",
+            "VULKAN_GPU_ONLY_MODEL_RESIDENCY_REJECTED".lowercase() in text ->
+                PersianError("VULKAN-002", "وزن‌های مدل روی GPU قرار نگرفتند",
                     "مدل بارگذاری شد، اما بخشی از وزن‌ها روی دستگاه GPU مورد انتظار قرار نگرفت.",
                     "این خطا به مسیر GPU مربوط است و نباید با فعال‌کردن حالت CPU دور زده شود. گزارش کامل را بررسی کن.",
                     technical)
