@@ -592,6 +592,39 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
         native_write_hex(g_native_fatal_fd, "NATIVE_FATAL_PC=", pc);
         native_write_hex(g_native_fatal_fd, "NATIVE_FATAL_LR=", lr);
         native_write_hex(g_native_fatal_fd, "NATIVE_FATAL_FAULT_ADDR=", info ? (uintptr_t) info->si_addr : 0);
+        const char code_prefix[] = "NATIVE_FATAL_SI_CODE=";
+        native_write_text(g_native_fatal_fd, code_prefix, sizeof(code_prefix) - 1);
+        char code_value[24];
+        int code_len = 0;
+        int code = info ? info->si_code : 0;
+        if (code == 0) {
+            code_value[code_len++] = '0';
+        } else {
+            const bool negative = code < 0;
+            unsigned int magnitude = negative ? (unsigned int)(-(code + 1)) + 1u : (unsigned int)code;
+            char reverse[16];
+            int reverse_len = 0;
+            while (magnitude > 0 && reverse_len < (int)sizeof(reverse)) {
+                reverse[reverse_len++] = (char)('0' + magnitude % 10u);
+                magnitude /= 10u;
+            }
+            if (negative) code_value[code_len++] = '-';
+            while (reverse_len > 0) code_value[code_len++] = reverse[--reverse_len];
+        }
+        native_write_text(g_native_fatal_fd, code_value, (size_t)code_len);
+        native_write_text(g_native_fatal_fd, "\n", 1);
+        const char phase_prefix[] = "NATIVE_FATAL_SPEC_PHASE=";
+        native_write_text(g_native_fatal_fd, phase_prefix, sizeof(phase_prefix) - 1);
+        char phase[96];
+        size_t phase_len = 0;
+        const volatile char *phase_src = g_spec_phase ? g_spec_phase : "UNKNOWN";
+        while (phase_len + 1 < sizeof(phase) && phase_src[phase_len]) {
+            phase[phase_len] = phase_src[phase_len];
+            ++phase_len;
+        }
+        phase[phase_len] = '\0';
+        native_write_text(g_native_fatal_fd, phase, phase_len);
+        native_write_text(g_native_fatal_fd, "\n", 1);
         // The signal handler must not allocate, unwind the stack or call into
         // llama/OpenGL. Leave source-line backtraces to debuggerd and matching symbols.
         (void) fsync(g_native_fatal_fd);
