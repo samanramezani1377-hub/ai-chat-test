@@ -812,6 +812,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         // Let the Android/Khronos loader discover the vendor ICD through its
         // registered vendor paths instead, and record the actual search paths.
         unsetenv("OCL_ICD_FILENAMES");
+        unsetenv("AI_CHAT_OPENCL_ALLOW_DIRECT_PROVIDER");
         // Do not override the Android ICD vendor directory. Khronos documents
         // OCL_ICD_VENDORS as a replacement for the loader's default search path;
         // hard-coding guessed directories can hide the device vendor's real ICD.
