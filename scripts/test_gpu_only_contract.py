@@ -48,7 +48,7 @@ def main() -> int:
          "CPU weight repacking must not be enabled"),
         ("GPU-only scheduler retains host metadata but forbids CPU inference", "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2" in src["cmake"] and
          "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK" in src["cmake"] and
-         "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH: CPU remains initialized as a host helper" not in src["cmake"],
+         "if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU) {\n                continue;" not in src["cmake"],
          "CPU may resolve preallocated metadata leaves but must never execute inference ops"),
         ("Build fails if GPU-only scheduler patch is missing", "message(FATAL_ERROR" in src["cmake"] and
          "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2 was not applied" in src["cmake"],
