@@ -147,6 +147,41 @@ foreach(_trace_marker
     endif()
 endforeach()
 
+# Trace allocations inside llm_graph_result::reset(). The latest device log
+# stops while constructing this object, before the scheduler itself is created.
+set(_llama_graph_cpp "${llama_cpp_SOURCE_DIR}/src/llama-graph.cpp")
+file(READ "${_llama_graph_cpp}" _llama_graph_source)
+if(NOT _llama_graph_source MATCHES "AI_CHAT_GRAPH_RESULT_TRACE_PATCH")
+    set(_graph_resize_needle [=[    buf_compute_meta.resize(ggml_tensor_overhead()*max_nodes + ggml_graph_overhead_custom(max_nodes, false));]=])
+    set(_graph_resize_replacement [=[    // AI_CHAT_GRAPH_RESULT_TRACE_PATCH
+    LLAMA_LOG_INFO("AI_CHAT_GRAPH_RESULT_STAGE=before_compute_meta_resize max_nodes=%lld\\n", (long long) max_nodes);
+    buf_compute_meta.resize(ggml_tensor_overhead()*max_nodes + ggml_graph_overhead_custom(max_nodes, false));
+    LLAMA_LOG_INFO("AI_CHAT_GRAPH_RESULT_STAGE=after_compute_meta_resize bytes=%zu\\n", buf_compute_meta.size());]=])
+    set(_graph_init_needle [=[    ctx_compute.reset(ggml_init(params));]=])
+    set(_graph_init_replacement [=[    LLAMA_LOG_INFO("AI_CHAT_GRAPH_RESULT_STAGE=before_ggml_init bytes=%zu\\n", buf_compute_meta.size());
+    ctx_compute.reset(ggml_init(params));
+    LLAMA_LOG_INFO("AI_CHAT_GRAPH_RESULT_STAGE=after_ggml_init success=%d\\n", ctx_compute ? 1 : 0);]=])
+    set(_graph_new_needle [=[    gf = ggml_new_graph_custom(ctx_compute.get(), max_nodes, false);]=])
+    set(_graph_new_replacement [=[    LLAMA_LOG_INFO("AI_CHAT_GRAPH_RESULT_STAGE=before_new_graph_custom max_nodes=%lld\\n", (long long) max_nodes);
+    gf = ggml_new_graph_custom(ctx_compute.get(), max_nodes, false);
+    LLAMA_LOG_INFO("AI_CHAT_GRAPH_RESULT_STAGE=after_new_graph_custom success=%d\\n", gf ? 1 : 0);]=])
+    string(REPLACE "${_graph_resize_needle}" "${_graph_resize_replacement}" _llama_graph_source "${_llama_graph_source}")
+    string(REPLACE "${_graph_init_needle}" "${_graph_init_replacement}" _llama_graph_source "${_llama_graph_source}")
+    string(REPLACE "${_graph_new_needle}" "${_graph_new_replacement}" _llama_graph_source "${_llama_graph_source}")
+    file(WRITE "${_llama_graph_cpp}" "${_llama_graph_source}")
+endif()
+file(READ "${_llama_graph_cpp}" _llama_graph_trace_verify)
+foreach(_graph_marker
+        "AI_CHAT_GRAPH_RESULT_TRACE_PATCH"
+        "AI_CHAT_GRAPH_RESULT_STAGE=before_compute_meta_resize"
+        "AI_CHAT_GRAPH_RESULT_STAGE=before_ggml_init"
+        "AI_CHAT_GRAPH_RESULT_STAGE=before_new_graph_custom"
+        "AI_CHAT_GRAPH_RESULT_STAGE=after_new_graph_custom")
+    if(NOT _llama_graph_trace_verify MATCHES "${_graph_marker}")
+        message(FATAL_ERROR "Required graph-result diagnostic marker missing: ${_graph_marker}")
+    endif()
+endforeach()
+
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp opengles_runtime.cpp ggml-opengles/ggml-opengles.cpp ggml-opengles/ggml-opengles-registration.cpp)
 
 # native_runtime_android_safe.cpp intentionally includes llama.cpp/ggml internal
