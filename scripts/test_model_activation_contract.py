@@ -50,7 +50,8 @@ def main() -> int:
         ("context setup requires a loaded model and nonzero context",
          "if (!g_model || g_context_length == 0) return false;" in context),
         ("GDN scheduler support is not gated by a shader handle compiled later",
-         "GGML_OP_GATED_DELTA_NET" in support and "g_gdn != 0" not in support),
+         "GGML_OP_GATED_DELTA_NET" in support and
+         "op->op == GGML_OP_GATED_DELTA_NET && opengles_runtime_info().max_compute_ssbo_blocks >= 7 &&\\n        g_gdn != 0" not in support),
         ("required GDN shader compilation failure is detected before dispatch",
          'compile_compute(gated_delta_net_shader(), "gated_delta_net")' in ensure and
          "(caps.max_compute_ssbo_blocks < 7 || g_gdn != 0)" in ensure),
