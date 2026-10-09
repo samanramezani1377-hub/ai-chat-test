@@ -200,7 +200,44 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     else events.forEach { appendLine(it.take(180)) }
 }.lineSequence().take(50).joinToString("\n")
 
-internal fun RuntimeDiagnostic.errorReport(): String = report()
+private fun RuntimeDiagnostic.failedPhaseLog(): List<String> {
+    val lines = nativeDiagnostics.orEmpty().lineSequence().map(String::trim)
+        .filter(String::isNotBlank).toList()
+    if (lines.isEmpty()) return emptyList()
+
+    val failureIndex = lines.indexOfLast { line ->
+        line.contains("CONTEXT_INIT_FAILED", true) ||
+            line.contains("CONTEXT_INIT_RETURNED_FAILED", true) ||
+            line.contains("MODEL_LOAD_RETURNED_FAILED", true) ||
+            line.contains("MODEL_LOAD_FAILURE", true) ||
+            line.contains("OPENGL_ES_BACKEND_INIT_FAILED", true) ||
+            line.contains("OPENGL_ES_INIT_FAILED", true) ||
+            line.contains("SHADER_COMPILE_FAILED", true) ||
+            line.contains("PROGRAM_LINK_FAILED", true) ||
+            line.contains("BUFFER_ALLOCATION_FAILED", true) ||
+            line.contains("OutOfMemory", true) ||
+            line.contains("failed to initialize", true)
+    }
+    if (failureIndex < 0) return emptyList()
+
+    val phaseStartMarkers = listOf(
+        "NATIVE_LOAD_STARTED", "MODEL_LOAD_STARTED", "CONTEXT_INIT_STARTED",
+        "OPENGL_ES_BACKEND_INITIALIZATION_STARTED", "ACTIVATION_LLAMA_BACKEND_INIT_STARTED"
+    )
+    val startIndex = (0..failureIndex).lastOrNull { index ->
+        phaseStartMarkers.any { lines[index].contains(it, ignoreCase = true) }
+    } ?: maxOf(0, failureIndex - 49)
+    // Preserve every line for the failing phase. Successful earlier phases are
+    // intentionally excluded to keep the failure report actionable.
+    return lines.subList(startIndex, lines.size)
+}
+
+internal fun RuntimeDiagnostic.errorReport(): String {
+    val phaseLog = failedPhaseLog()
+    return if (phaseLog.isEmpty()) report()
+    else report() + "\\n\\n===== FULL LOGS FOR FAILED PHASE (\\${phaseLog.size} lines) =====\\n" +
+        phaseLog.joinToString("\\n")
+}
 
 private fun RuntimeDiagnostic.uniqueRuntimeEvents(): List<String> {
     data class EventLine(val timestamp: Long, val text: String, val key: String)
