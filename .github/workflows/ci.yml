@@ -241,14 +241,14 @@ jobs:
           test "${#symbol_candidates[@]}" -gt 0
           selected=""
           for candidate in "${symbol_candidates[@]}"; do
-            if readelf -S "$candidate" | grep -q '\\.debug_line'; then
+            if readelf -S "$candidate" | grep -Fq '.debug_line'; then
               selected="$candidate"
               break
             fi
           done
           if [ -z "$selected" ]; then
             echo "No unstripped libai_chat_runtime.so with .debug_line found"
-            printf '%s\\n' "${symbol_candidates[@]}"
+            printf '%s\n' "${symbol_candidates[@]}"
             exit 1
           fi
           cp "$selected" native-symbols/libai_chat_runtime.so
