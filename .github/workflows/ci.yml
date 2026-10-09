@@ -59,6 +59,22 @@ jobs:
           --console=plain
           --parallel
 
+  opengles-shader-tests:
+    name: OpenGL ES shader compile regression tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install GLSL compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y glslang-tools
+
+      - name: Compile every embedded OpenGL ES compute shader
+        run: python3 scripts/test_opengles_shaders.py
+
   android-build:
     name: Android debug build
     runs-on: ubuntu-22.04
