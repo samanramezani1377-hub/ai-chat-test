@@ -59,7 +59,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         generation = runtime.generation,
         settings = runtime.settings,
         status = execution?.status ?: when {
-            nativeActivationIncomplete && error.isNullOrBlank() -> "FAILED — context initialization interrupted"
+            nativeActivationIncomplete -> "FAILED"
             !error.isNullOrBlank() -> "FAILED"
             runtime.generation != null -> "SUCCESS"
             else -> "READY"
