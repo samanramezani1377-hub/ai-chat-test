@@ -108,6 +108,23 @@ jobs:
       - name: Check deterministic Softmax and RoPE reference invariants
         run: python3 scripts/test_opengles_shader_math.py
 
+  runtime-contract-tests:
+    name: GGUF and diagnostics regression tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate Python test scripts
+        run: python3 -m compileall -q scripts
+
+      - name: Check GGUF loader input and failure contracts
+        run: python3 scripts/test_gguf_loader_contract.py
+
+      - name: Check runtime diagnostics accuracy contract
+        run: python3 scripts/test_diagnostics_contract.py
+
   android-build:
     name: Android debug build
     runs-on: ubuntu-22.04
