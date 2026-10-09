@@ -39,18 +39,16 @@ set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
 
-# Android GPU-only contract: keep llama.cpp's CPU backend available as an internal
-# helper for host-side tensor utilities, but exclude it from the graph scheduler.
-# This prevents unsupported GGML nodes from silently being reassigned to CPU.
+# Android GPU-only contract: keep the CPU backend registered for host-side metadata
+# and preallocated GGML_OP_NONE tensors, but never let it execute inference ops.
+# The previous patch removed CPU from the scheduler entirely; recurrent models keep
+# rs_seq and related control tensors in CPU buffers, so llama.cpp aborts on those
+# preallocated GGML_OP_NONE leaves during sched_reserve().
 set(_llama_context_cpp "${llama_cpp_SOURCE_DIR}/src/llama-context.cpp")
 file(READ "${_llama_context_cpp}" _llama_context_source)
-if(NOT _llama_context_source MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH")
-    # Store multiline C++ fragments in variables first, then pass quoted expansions
-    # to string(REPLACE). This prevents CMake list splitting on C++ semicolons.
-    set(_scheduler_needle [=[            auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
 
-            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {]=])
-    set(_scheduler_replacement [=[            auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
+# Undo the earlier over-broad patch when configuring an existing FetchContent tree.
+set(_old_scheduler_replacement [=[            auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
 
             // AI_CHAT_GPU_ONLY_SCHEDULER_PATCH: CPU remains initialized as a host helper,
             // but it is never inserted into the graph scheduler backend list.
@@ -59,24 +57,61 @@ if(NOT _llama_context_source MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH")
             }
 
             if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {]=])
-    set(_scheduler_cleanup_needle [=[    ggml_opt_free(opt_ctx);
-}]=])
-    set(_scheduler_cleanup_replacement [=[    ggml_opt_free(opt_ctx);
+set(_scheduler_needle [=[            auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
+
+            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {]=])
+string(REPLACE "${_old_scheduler_replacement}" "${_scheduler_needle}" _llama_context_source "${_llama_context_source}")
+
+if(NOT _llama_context_source MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2")
+    set(_scheduler_replacement [=[            auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
+
+            // AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2: retain CPU backend for host metadata,
+            // graph inputs, and preallocated GGML_OP_NONE tensors only.
+            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {]=])
+    string(REPLACE "${_scheduler_needle}" "${_scheduler_replacement}" _llama_context_source "${_llama_context_source}")
+endif()
+
+# Remove the old direct free, which was only added when CPU was excluded from the scheduler.
+set(_old_cleanup_replacement [=[    ggml_opt_free(opt_ctx);
     if (backend_cpu) {
         ggml_backend_free(backend_cpu);
         backend_cpu = nullptr;
     }
 }]=])
-    string(REPLACE "${_scheduler_needle}" "${_scheduler_replacement}" _llama_context_source "${_llama_context_source}")
-    string(REPLACE "${_scheduler_cleanup_needle}" "${_scheduler_cleanup_replacement}" _llama_context_source "${_llama_context_source}")
-    file(WRITE "${_llama_context_cpp}" "${_llama_context_source}")
+string(REPLACE "${_old_cleanup_replacement}" [=[    ggml_opt_free(opt_ctx);
+}]=] _llama_context_source "${_llama_context_source}")
+file(WRITE "${_llama_context_cpp}" "${_llama_context_source}")
+
+if(NOT _llama_context_source MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2")
+    message(FATAL_ERROR "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2 was not applied; refusing an unsafe GPU-only scheduler build")
 endif()
 
-# Fail configuration if the pinned llama.cpp source could not be patched. In GPU-only
-# mode a silent miss here would re-enable the CPU scheduler and violate the runtime contract.
-file(READ "${_llama_context_cpp}" _llama_context_verify)
-if(NOT _llama_context_verify MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH")
-    message(FATAL_ERROR "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH was not applied to pinned llama-context.cpp; refusing to build a CPU-fallback runtime")
+# CPU stays in the scheduler to resolve CPU-resident metadata leaves, but it must
+# not be selected for any inference/computation op. Gate both scheduler assignment
+# paths; views are handled structurally by the scheduler and GGML_OP_NONE does no compute.
+set(_ggml_backend_cpp "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-backend.cpp")
+file(READ "${_ggml_backend_cpp}" _ggml_backend_source)
+if(NOT _ggml_backend_source MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK")
+    set(_cpu_guard_needle [=[static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, struct ggml_tensor * node, int cur_backend_id, int * node_backend_id) {
+    if (ggml_backend_supports_op(sched->backends[cur_backend_id], node)) {]=])
+    set(_cpu_guard_replacement [=[static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, struct ggml_tensor * node, int cur_backend_id, int * node_backend_id) {
+    // AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK: CPU is host/metadata-only.
+    if (cur_backend_id == sched->n_backends - 1 && node->op != GGML_OP_NONE) {
+        return;
+    }
+    if (ggml_backend_supports_op(sched->backends[cur_backend_id], node)) {]=])
+    string(REPLACE "${_cpu_guard_needle}" "${_cpu_guard_replacement}" _ggml_backend_source "${_ggml_backend_source}")
+
+    set(_cpu_pass3_needle [=[if (ggml_backend_supports_op(sched->backends[b], node)) {]=])
+    set(_cpu_pass3_replacement [=[if (ggml_backend_supports_op(sched->backends[b], node) &&
+                    !(b == sched->n_backends - 1 && node->op != GGML_OP_NONE)) {]=])
+    string(REPLACE "${_cpu_pass3_needle}" "${_cpu_pass3_replacement}" _ggml_backend_source "${_ggml_backend_source}")
+    file(WRITE "${_ggml_backend_cpp}" "${_ggml_backend_source}")
+endif()
+
+file(READ "${_ggml_backend_cpp}" _ggml_backend_verify)
+if(NOT _ggml_backend_verify MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK")
+    message(FATAL_ERROR "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK was not applied; refusing a CPU-fallback runtime")
 endif()
 
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp opengles_runtime.cpp ggml-opengles/ggml-opengles.cpp ggml-opengles/ggml-opengles-registration.cpp)
