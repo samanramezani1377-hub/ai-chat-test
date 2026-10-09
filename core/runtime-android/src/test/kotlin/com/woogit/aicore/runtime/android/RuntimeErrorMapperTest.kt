@@ -12,8 +12,9 @@ class RuntimeErrorMapperTest {
         val error = RuntimeErrorMapper.nativeLoadFailure(5)
 
         assertIs<ModelError.RuntimeUnavailable>(error)
-        assertTrue(error.message.contains("OpenCL GPU is not supported"))
+        assertTrue(error.message.contains("No supported OpenCL GPU was registered"))
         assertTrue(error.message.contains("CPU fallback is disabled"))
+        assertTrue(error.message.contains("vendor OpenCL driver may be unavailable"))
     }
 
     @Test
