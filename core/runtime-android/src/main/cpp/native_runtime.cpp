@@ -25,6 +25,7 @@
 #include "ggml-opencl.h"
 #include <CL/cl.h>
 #include <set>
+#include "android_opencl_dispatch.h"
 
 // CL_PLATFORM_ICD_SUFFIX_KHR belongs to cl_khr_icd and is not declared by every
 // vendor-neutral OpenCL header package. Keep the standard extension value available
