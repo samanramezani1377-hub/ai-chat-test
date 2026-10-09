@@ -6,7 +6,6 @@ import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeTraceEvent
-import com.woogit.aicore.runtime.OpenClGpuProfile
 import com.samanramezani.aichattest.ui.errors.ErrorCenter
 
 private const val RECENT_RUNTIME_EVENTS = 20
@@ -58,7 +57,6 @@ internal data class RuntimeDiagnostic(
     val actionTrace: List<ActionTraceEvent> = emptyList(),
     val runtimeTrace: List<RuntimeTraceEvent> = emptyList(),
     val nativeDiagnostics: String? = null,
-    val openClProfile: OpenClGpuProfile? = null,
     val gpuDevice: com.woogit.aicore.runtime.GpuDeviceProfile? = null,
     val weightResidency: com.woogit.aicore.runtime.GpuWeightResidency? = null,
 ) {
@@ -167,9 +165,6 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("GPU Resident Buffers: ${weightResidency?.gpuBuffers ?: "N/A"}")
     appendLine("Host Tensor Memory: ${weightResidency?.hostTensorMiB?.let { "%.1f MiB".format(it) } ?: "N/A"}")
     appendLine()
-    appendLine("===== GPU / OPENCL KERNEL PROFILE =====")
-    openClProfile?.reportLines()?.forEach(::appendLine)
-        ?: appendLine("OpenCL GPU profile: N/A")
     appendLine()
     appendLine("===== DECODE BOTTLENECK PROFILE =====")
     appendLine("Measured Decode Calls: ${perf.profileDecodeMs?.let { "$it ms" } ?: "N/A"}")
