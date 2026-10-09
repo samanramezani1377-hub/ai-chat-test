@@ -128,6 +128,8 @@ jobs:
           grep -q 'ggml-vulkan' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'VULKAN_GPU_ONLY_NO_CPU_FALLBACK' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'AI_CHAT_GPU_BACKEND_VULKAN=1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_VULKAN_ANDROID_BDA_GUARD_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          ! grep -R 'OPENCL_GPU_ONLY\|NATIVE_OPENCL_DEVICE\|cl_profiling.csv\|OpenClGpuProfile' -n app core/runtime core/runtime-android
           ! grep -R 'GGML_OPENCL=ON\|GGML_OPENCL ON\|AI_CHAT_OPENCL_PROFILING\|ggml-opencl.h\|android_opencl_dispatch' -n core/runtime-android/src/main/cpp core/runtime-android/build.gradle.kts
           echo "Vulkan GPU-only/no-OpenCL invariants verified"
 
@@ -152,6 +154,9 @@ jobs:
           grep -R 'GGML_VULKAN' "${native_dirs[@]}" >/dev/null
           grep -R 'ggml-vulkan' "${native_dirs[@]}" >/dev/null
           grep -R 'vulkan-shaders-gen' "${native_dirs[@]}" >/dev/null
+          vulkan_source="$(find core/runtime-android -path '*/llama_cpp-src/ggml/src/ggml-vulkan/ggml-vulkan.cpp' -print -quit)"
+          test -n "$vulkan_source"
+          grep -q 'AI_CHAT_VULKAN_ANDROID_BDA_GUARD_V1' "$vulkan_source"
           echo "Vulkan backend target and shader generation verified"
 
       - name: Upload debug APK
