@@ -184,6 +184,14 @@ static void append_native_trace(const char *text) {
     }
 }
 
+// Exported for the OpenGL ES GGML backend so shader/program/buffer failures
+// are included in the same diagnostic report shown by the Android app.
+extern "C" void ai_chat_native_trace(const char *text) {
+    if (!text || !*text) return;
+    LOGE("%s", text);
+    append_native_trace(text);
+}
+
 static const char *native_signal_name(int signal_number) {
     switch (signal_number) {
         case SIGSEGV: return "SIGSEGV";
