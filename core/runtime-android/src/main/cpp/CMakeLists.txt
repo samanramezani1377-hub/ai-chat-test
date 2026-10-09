@@ -132,12 +132,15 @@ target_include_directories(ai_chat_runtime PRIVATE
 # and symbols at link time to reduce the installed footprint without changing inference.
 target_compile_options(ai_chat_runtime PRIVATE
     -Os
-    -g
+    -g3
+    -fno-limit-debug-info
     -ffunction-sections
     -fdata-sections
 )
 target_link_options(ai_chat_runtime PRIVATE
     -Wl,--gc-sections
+    -Wl,--no-strip-all
+    -Wl,--build-id=sha1
     # Keep native symbols/debug line tables so Android tombstones can identify the
     # crashing function and resolve source lines with the matching unstripped build.
 )
