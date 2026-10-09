@@ -20,7 +20,7 @@ SOURCE = ROOT / "core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.c
 
 def extract_shaders(source: str) -> dict[str, str]:
     pattern = re.compile(
-        r'static\\s+const\\s+char\\s*\\*\\s*(\\w+)\\s*\\([^)]*\\)\\s*\\{\\s*return\\s+R"\\((.*?)\\)"\\s*;',
+        r'static\s+const\s+char\s*\*\s*(\w+)\s*\([^)]*\)\s*\{\s*return\s+R"\((.*?)\)"\s*;',
         re.DOTALL,
     )
     return {match.group(1): match.group(2) for match in pattern.finditer(source)}
@@ -47,13 +47,13 @@ def main() -> int:
     q6k = shaders["q6k_matmul_shader"]
     softmax = shaders["softmax_shader"]
     rope = shaders["rope_shader"]
-    if re.search(r"\\bout\\b", q6k):
+    if re.search(r"\bout\b", q6k):
         print("FAIL: Q6_K shader uses reserved GLSL identifier 'out'", file=sys.stderr)
         return 1
-    if not re.search(r"uint\\s+output_idx\\s*=", q6k) or "output_idx/(rows*cols)" not in q6k:
+    if not re.search(r"uint\s+output_idx\s*=", q6k) or "output_idx/(rows*cols)" not in q6k:
         print("FAIL: Q6_K output index declaration/use is inconsistent", file=sys.stderr)
         return 1
-    if not re.search(r"layout\\s*\\(std430,\\s*binding\\s*=\\s*2\\)\\s*buffer\\s+Y", softmax):
+    if not re.search(r"layout\s*\(std430,\s*binding\s*=\s*2\)\s*buffer\s+Y", softmax):
         print("FAIL: Softmax output must be readable during in-place normalization", file=sys.stderr)
         return 1
     if "float(int(d0/2u)-cumulative)" not in rope:
@@ -78,13 +78,13 @@ def main() -> int:
                 check=False,
             )
             if result.returncode:
-                failures.append(f"{name}:\\n{result.stdout}")
+                failures.append(f"{name}:\n{result.stdout}")
                 print(f"FAIL GLSL compile: {name}")
             else:
                 print(f"PASS GLSL compile: {name}")
 
     if failures:
-        print("\\n".join(failures), file=sys.stderr)
+        print("\n".join(failures), file=sys.stderr)
         return 1
 
     print(
