@@ -55,10 +55,11 @@ def main() -> int:
         checks.append((f"softmax finite/normalized for {values}",
                        all(math.isfinite(v) and v >= 0.0 for v in out) and near(sum(out), 1.0)))
     checks.append(("softmax preserves ordering", softmax([1.0, 2.0, 3.0])[0] < softmax([1.0, 2.0, 3.0])[1] < softmax([1.0, 2.0, 3.0])[2]))
-    checks.append(("RoPE preserves pair norm", all(near(x*x + y*y, a*a + b*b, 1e-5) for x,y,a,b in [
-        (rope_pair(3.0, 4.0, angle)[0], rope_pair(3.0, 4.0, angle)[1], 3.0, 4.0)
-        for angle in (0.0, 0.1, math.pi / 2, math.pi, -2.3)
-    ]))
+    norm_checks = []
+    for angle in (0.0, 0.1, math.pi / 2, math.pi, -2.3):
+        rx, ry = rope_pair(3.0, 4.0, angle)
+        norm_checks.append(near(rx * rx + ry * ry, 3.0 * 3.0 + 4.0 * 4.0, 1e-5))
+    checks.append(("RoPE preserves pair norm", all(norm_checks)))
     checks.append(("RoPE zero angle is identity", all(near(a,b) for a,b in zip(rope_pair(2.5, -7.0, 0.0), (2.5, -7.0))))
     checks.append(("Softmax shader uses max-subtraction stabilization", "max" in softmax_src and re.search(r"exp\s*\(", softmax_src) is not None))
     checks.append(("Softmax output buffer is readable for normalization", bool(re.search(r"buffer\s+Y", softmax_src))))
