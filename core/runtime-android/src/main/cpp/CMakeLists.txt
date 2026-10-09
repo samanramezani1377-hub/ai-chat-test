@@ -147,6 +147,29 @@ foreach(_trace_marker
     endif()
 endforeach()
 
+
+# llama.cpp's generic scheduler currently asserts that its final backend is CPU.
+# This Android runtime intentionally constructs a GPU-only backend list, so that
+# upstream invariant conflicts with the no-CPU-fallback contract and aborts
+# inside ggml_backend_sched_new() before any graph reservation begins.
+# The scheduler implementation is otherwise backend-agnostic; keep the CPU
+# backend out of the list and remove only this CPU-tail assertion for this build.
+set(_llama_backend_cpp "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-backend.cpp")
+file(READ "${_llama_backend_cpp}" _llama_backend_source)
+if(NOT _llama_backend_source MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_TAIL_PATCH")
+    set(_scheduler_cpu_tail_needle [=[    GGML_ASSERT(ggml_backend_dev_type(ggml_backend_get_device(backends[n_backends - 1])) == GGML_BACKEND_DEVICE_TYPE_CPU);]=])
+    set(_scheduler_cpu_tail_replacement [=[    // AI_CHAT_GPU_ONLY_SCHEDULER_TAIL_PATCH: CPU backend is intentionally absent in the Android GPU-only scheduler.]=])
+    string(REPLACE "${_scheduler_cpu_tail_needle}" "${_scheduler_cpu_tail_replacement}" _llama_backend_source "${_llama_backend_source}")
+    file(WRITE "${_llama_backend_cpp}" "${_llama_backend_source}")
+endif()
+file(READ "${_llama_backend_cpp}" _llama_backend_verify)
+if(NOT _llama_backend_verify MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_TAIL_PATCH")
+    message(FATAL_ERROR "Could not apply GPU-only scheduler CPU-tail invariant patch to pinned ggml-backend.cpp")
+endif()
+if(_llama_backend_verify MATCHES "GGML_ASSERT\\(ggml_backend_dev_type\\(ggml_backend_get_device\\(backends\\[n_backends - 1\\]\\)\\) == GGML_BACKEND_DEVICE_TYPE_CPU\\)")
+    message(FATAL_ERROR "Upstream CPU-tail assertion remains active; refusing to build an unusable GPU-only scheduler")
+endif()
+
 # Trace allocations inside llm_graph_result::reset(). The latest device log
 # stops while constructing this object, before the scheduler itself is created.
 set(_llama_graph_cpp "${llama_cpp_SOURCE_DIR}/src/llama-graph.cpp")
