@@ -12,9 +12,9 @@ class RuntimeErrorMapperTest {
         val error = RuntimeErrorMapper.nativeLoadFailure(5)
 
         assertIs<ModelError.RuntimeUnavailable>(error)
-        assertTrue(error.message.contains("No supported OpenCL GPU was registered"))
+        assertTrue(error.message.contains("No supported Vulkan GPU was registered"))
         assertTrue(error.message.contains("CPU fallback is disabled"))
-        assertTrue(error.message.contains("vendor OpenCL driver may be unavailable"))
+        assertTrue(error.message.contains("Vulkan loader or vendor driver may be unavailable"))
     }
 
     @Test
@@ -22,7 +22,7 @@ class RuntimeErrorMapperTest {
         val error = RuntimeErrorMapper.nativeLoadFailure(6)
 
         assertIs<ModelError.RuntimeUnavailable>(error)
-        assertTrue(error.message.contains("fully resident on the OpenCL GPU"))
+        assertTrue(error.message.contains("fully resident on the Vulkan GPU"))
         assertTrue(error.message.contains("CPU weight fallback is disabled"))
     }
 
