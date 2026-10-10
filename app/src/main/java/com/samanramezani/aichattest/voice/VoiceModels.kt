@@ -365,7 +365,10 @@ class VoiceModelStore(
         if (rootHasData) {
             val temp = File(staging, ".espeak-root")
             if (!temp.mkdirs()) error("VOICE-PIPER-013: ایجاد پوشهٔ داده‌های آواشناسی ناموفق بود.")
-            staging.listFiles()?.filter { it != temp && it != expected }?.forEach { item ->
+            staging.listFiles()?.filter {
+                it != temp && it != expected &&
+                    it.name != "model.onnx" && it.name != "model.onnx.json" && it.name != "tokens.txt"
+            }?.forEach { item ->
                 check(item.renameTo(File(temp, item.name))) {
                     "VOICE-PIPER-014: انتقال فایل‌های دادهٔ آواشناسی ناموفق بود."
                 }
