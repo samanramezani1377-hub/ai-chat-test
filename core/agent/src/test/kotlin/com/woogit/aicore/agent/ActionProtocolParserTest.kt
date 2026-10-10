@@ -31,7 +31,7 @@ class ActionProtocolParserTest {
     @Test
     fun parsesActionRequestAfterClosedQwenReasoningBlock() {
         val intent = ActionProtocolParser().parse(
-            "Let me calculate this carefully.\\n</think>\\n{\\\"version\\\":1,\\\"actionId\\\":\\\"calc-2\\\",\\\"action\\\":\\\"calculate\\\",\\\"arguments\\\":{\\\"expression\\\":\\\"2+2\\\"}}"
+            "Let me calculate this carefully.\n</think>\n{\\\"version\\\":1,\\\"actionId\\\":\\\"calc-2\\\",\\\"action\\\":\\\"calculate\\\",\\\"arguments\\\":{\\\"expression\\\":\\\"2+2\\\"}}"
         )
         requireNotNull(intent)
         assertEquals("calculate", intent.actionId)
