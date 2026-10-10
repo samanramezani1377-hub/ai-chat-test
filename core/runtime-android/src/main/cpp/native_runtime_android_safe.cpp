@@ -944,6 +944,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         llama_batch_free(batch);
         env->DeleteLocalRef(listener_class);
         llama_sampler_free(sampler);
+        clear_android_generation_cache();
+        llama_memory_clear(memory, true);
         checkpoint("NATIVE_GENERATE_BATCH_INIT_FAILED");
         return 9;
     }
@@ -1151,7 +1153,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         const llama_pos published_min = llama_memory_seq_pos_min(memory, 0);
         const llama_pos published_max = llama_memory_seq_pos_max(memory, 0);
         const bool resident_publish_valid = hybrid_memory
-                ? (!g_cached_prompt_tokens.empty() && published_max >= 0)
+                ? !g_cached_prompt_tokens.empty()
                 : (published_min == 0 &&
                    published_max >= 0 &&
                    static_cast<size_t>(published_max + 1) == g_cached_prompt_tokens.size());
@@ -1172,9 +1174,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                 " residentMax=" + std::to_string(published_max) +
                 " mode=" + (hybrid_memory ? "resident_hybrid_exact_prefix" : "resident_kv")).c_str());
         }
-    } else if (prefill_recorded) {
-        // Interrupted/failed generations are not cacheable: the visible output
-        // may not match the last token decoded into the native context.
+    } else if (result != 0) {
+        // Any interrupted/failed request may have trimmed or partially changed
+        // the resident memory, even when prefill never reached its completion
+        // marker. Invalidate both sides together to prevent a stale token/state pair.
         clear_android_generation_cache();
         llama_memory_clear(memory, true);
         checkpoint("NATIVE_KV_CACHE_NOT_PUBLISHED_AFTER_FAILED_GENERATION");
