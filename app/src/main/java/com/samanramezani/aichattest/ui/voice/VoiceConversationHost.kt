@@ -47,12 +47,17 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     var activeTtsId by remember { mutableStateOf(ttsModels.firstOrNull()?.id) }
     var lines by remember { mutableStateOf(emptyList<VoiceLine>()) }
     var status by remember { mutableStateOf("برای شروع، مدل‌های محلی STT و TTS را انتخاب یا وارد کنید.") }
+    var diagnosticLogs by remember { mutableStateOf(listOf("[${System.currentTimeMillis()}] صفحه مکالمه صوتی باز شد.")) }
+    fun updateVoiceStatus(value: String) {
+        status = value
+        diagnosticLogs = (diagnosticLogs + "[${System.currentTimeMillis()}] $value").takeLast(200)
+    }
     var listening by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
 
     val controller = remember(container, context) {
         VoiceConversationController(context, container,
-            onStatus = { value -> uiScope.launch(Dispatchers.Main.immediate) { status = value } },
+            onStatus = { value -> uiScope.launch(Dispatchers.Main.immediate) { updateVoiceStatus(value) } },
             onListening = { value -> uiScope.launch(Dispatchers.Main.immediate) { listening = value; busy = false } },
             onLine = { speaker, text -> uiScope.launch(Dispatchers.Main.immediate) {
                 if (text.isNotBlank()) lines = lines + VoiceLine(System.nanoTime(), speaker, text)
@@ -71,14 +76,14 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     fun importSmallSttComponent(uri: Uri, component: SmallSttComponent, label: String) {
         uiScope.launch {
             busy = true
-            status = "در حال وارد کردن ${label} مدل فارسی کوچک…"
+            updateVoiceStatus("در حال وارد کردن ${label} مدل فارسی کوچک…")
             try {
                 val ready = withContext(Dispatchers.IO) { store.importSmallPersianSttComponent(uri, component) }
                 refreshModels()
-                status = if (ready != null) "مدل کوچک Shenava Rizeh-Pizeh آماده است؛ تشخیص نهایی پس از مکث کوتاه گفتار انجام می‌شود."
-                    else "فایل وارد شد؛ برای آماده‌شدن مدل Shenava باید model.onnx و tokens.txt هر دو وارد شوند."
+                updateVoiceStatus(if (ready != null) "مدل کوچک Shenava Rizeh-Pizeh آماده است؛ تشخیص نهایی پس از مکث کوتاه گفتار انجام می‌شود."
+                    else "فایل وارد شد؛ برای آماده‌شدن مدل Shenava باید model.onnx و tokens.txt هر دو وارد شوند.")
             } catch (t: Throwable) {
-                status = t.message ?: "VOICE-STT-IMPORT: وارد کردن مدل کوچک فارسی ناموفق بود."
+                updateVoiceStatus("VOICE-STT-IMPORT: ${t.message ?: t.javaClass.simpleName}")
             } finally { busy = false }
         }
     }
@@ -93,27 +98,27 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     val sttPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) uiScope.launch {
             busy = true
-            status = "در حال وارد کردن و اعتبارسنجی مدل تشخیص گفتار…"
+            updateVoiceStatus("در حال وارد کردن و اعتبارسنجی مدل تشخیص گفتار…")
             try {
                 withContext(Dispatchers.IO) { store.importArchive(uri, VoiceModelKind.STT) }
                 refreshModels()
-                status = "مدل STT وارد شد. مدل سازگار با زبان فارسی باید انتخاب شود."
+                updateVoiceStatus("مدل STT وارد شد. مدل سازگار با زبان فارسی باید انتخاب شود.")
             } catch (t: Throwable) {
-                status = t.message ?: "VOICE-STT-IMPORT: وارد کردن مدل STT ناموفق بود."
+                updateVoiceStatus("VOICE-STT-IMPORT: ${t.message ?: t.javaClass.simpleName}")
             } finally { busy = false }
         }
     }
     fun importPiperComponent(uri: Uri, component: PiperComponent, label: String) {
         uiScope.launch {
             busy = true
-            status = "در حال وارد کردن ${label} و آماده‌سازی مدل محلی…"
+            updateVoiceStatus("در حال وارد کردن ${label} و آماده‌سازی مدل محلی…")
             try {
                 val ready = withContext(Dispatchers.IO) { store.importPiperComponent(uri, component) }
                 refreshModels()
-                status = if (ready != null) "مدل fa_IR-amir-medium آمادهٔ استفاده است."
-                    else "فایل وارد شد. برای آماده‌شدن مدل Amir، هر سه مورد ONNX، JSON و espeak-ng-data باید وارد شوند."
+                updateVoiceStatus(if (ready != null) "مدل fa_IR-amir-medium آمادهٔ استفاده است."
+                    else "فایل وارد شد. برای آماده‌شدن مدل Amir، هر سه مورد ONNX، JSON و espeak-ng-data باید وارد شوند.")
             } catch (t: Throwable) {
-                status = t.message ?: "VOICE-PIPER-IMPORT: وارد کردن جزء مدل Piper ناموفق بود."
+                updateVoiceStatus("VOICE-PIPER-IMPORT: ${t.message ?: t.javaClass.simpleName}")
             } finally { busy = false }
         }
     }
@@ -131,13 +136,13 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     val ttsPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) uiScope.launch {
             busy = true
-            status = "در حال وارد کردن و اعتبارسنجی مدل گفتار…"
+            updateVoiceStatus("در حال وارد کردن و اعتبارسنجی مدل گفتار…")
             try {
                 withContext(Dispatchers.IO) { store.importArchive(uri, VoiceModelKind.TTS) }
                 refreshModels()
-                status = "مدل TTS وارد شد."
+                updateVoiceStatus("مدل TTS وارد شد.")
             } catch (t: Throwable) {
-                status = t.message ?: "VOICE-TTS-IMPORT: وارد کردن مدل TTS ناموفق بود."
+                updateVoiceStatus("VOICE-TTS-IMPORT: ${t.message ?: t.javaClass.simpleName}")
             } finally { busy = false }
         }
     }
@@ -145,6 +150,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     VoiceConversationPage(
         lines = lines,
         status = status,
+        diagnosticLogs = diagnosticLogs,
         listening = listening,
         busy = busy,
         sttModels = sttModels,
@@ -164,7 +170,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         onStart = {
             val stt = sttModels.firstOrNull { it.id == activeSttId }
             val tts = ttsModels.firstOrNull { it.id == activeTtsId }
-            if (stt == null || tts == null) status = "VOICE-MODEL-001: ابتدا مدل‌های STT و TTS را وارد و انتخاب کنید."
+            if (stt == null || tts == null) updateVoiceStatus("VOICE-MODEL-001: ابتدا مدل‌های STT و TTS را وارد و انتخاب کنید.")
             else {
                 busy = true
                 controller.start(stt, tts)
