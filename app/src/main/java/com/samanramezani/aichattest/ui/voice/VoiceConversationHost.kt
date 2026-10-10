@@ -129,7 +129,10 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         activeTtsId = activeTtsId,
         onBack = onBack,
         onImportStt = { sttPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-bzip2", "application/octet-stream")) },
-        onImportTts = { ttsPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) },
+        onImportTts = { ttsPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-bzip2", "application/octet-stream")) },
+        onImportTtsModel = { ttsModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
+        onImportTtsConfig = { ttsConfigPicker.launch(arrayOf("application/json", "text/json", "text/plain", "*/*")) },
+        onImportEspeakData = { espeakPicker.launch(arrayOf("application/x-bzip2", "application/zip", "application/octet-stream", "*/*")) },
         onSelectStt = { activeSttId = it },
         onSelectTts = { activeTtsId = it },
         onStart = {
