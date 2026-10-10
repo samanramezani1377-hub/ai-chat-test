@@ -197,6 +197,38 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     )
 }
 
+
+/**
+ * Strip private reasoning and presentation markup before displaying or speaking an answer.
+ * TTS receives only the final sanitized response, never partial generation tokens.
+ */
+private fun sanitizeAssistantVoiceText(raw: String): String {
+    var text = raw
+        .replace(Regex("(?is)<think\\b[^>]*>.*?(?:</think\\s*>|$)"), " ")
+        .replace(Regex("(?is)<think\\s*/\\s*>"), " ")
+        .replace(Regex("(?is)</?think\\b[^>]*>"), " ")
+        .replace(Regex("(?is)<(analysis|reasoning|scratchpad)\\b[^>]*>.*?</\\1\\s*>"), " ")
+        .replace(Regex("(?m)^\\s*`{3,}[^\\n]*"), " ")
+        .replace(Regex("(?m)^\\s*#{1,6}\\s*"), "")
+        .replace(Regex("(?m)^\\s*(?:[-*_]\\s*){3,}$"), " ")
+        .replace(Regex("(?m)^\\s*[-*+]\\s+"), "")
+        .replace(Regex("(?m)^\\s*\\d+[.)]\\s+"), "")
+        .replace(Regex("(?<!\\w)(?:\\*\\*|__)(?=\\S)|(?<=\\S)(?:\\*\\*|__)"), "")
+        .replace(Regex("(?<!\\w)[*_~](?=\\S)|(?<=\\S)[*_~](?!\\w)"), "")
+        .replace(Regex("(?is)<[^>]+>"), " ")
+        .replace(Regex("[ \\t]+"), " ")
+        .replace(Regex(" *\\n *"), "\\n")
+        .replace(Regex("\\n{3,}"), "\\n\\n")
+        .trim()
+    // Also discard orphaned reasoning markers from malformed model output.
+    val marker = Regex("(?i)<think\\s*/?>")
+    while (marker.containsMatchIn(text)) {
+        val match = marker.find(text) ?: break
+        text = text.removeRange(match.range).trimStart()
+    }
+    return text
+}
+
 private class VoiceConversationController(
     private val context: Context,
     private val container: AppContainer,
@@ -347,7 +379,7 @@ private class VoiceConversationController(
             val id = conversationId ?: error("VOICE-CHAT-001: شناسه مکالمه ایجاد نشده است.")
             val modelFailure = AtomicReference<String?>(null)
             val session = container.createAgentSession(id, eventSink = { event ->
-                if (event is AgentEvent.Token && !turnCancel.get()) enqueueCompleteSentences(event.value)
+                // Avoid speaking streamed fragments: <think> and Markdown may be split across callbacks.
                 if (event is AgentEvent.Failed) {
                     modelFailure.compareAndSet(null, event.message)
                     onDiagnostic("VOICE-LLM-001: ${event.message}")
@@ -362,10 +394,11 @@ private class VoiceConversationController(
                 requestedRecentMessages = 12,
             )
             if (!turnCancel.get()) {
-                enqueueCompleteSentences("", flush = true)
+                val generation = result.generation
+                val answer = sanitizeAssistantVoiceText(generation.text)
+                if (answer.isNotBlank()) enqueueCompleteSentences(answer, flush = true)
                 queue.close()
                 activeSpeechJob.join()
-                val generation = result.generation
                 val outputTokens = generation.outputTokens
                 val generationMs = generation.generationTimeMs
                 val firstTokenMs = generation.firstTokenTimeMs
@@ -383,7 +416,6 @@ private class VoiceConversationController(
                         "postFirstTokenEstimateTokensPerSec=${postFirstTokenTps?.let { "%.2f".format(java.util.Locale.US, it) } ?: "n/a"} " +
                         "enableThinking=false recentMessages=12 maxNewTokens=384"
                 )
-                val answer = generation.text
                 if (answer.isNotBlank()) {
                     onLine("دستیار", answer)
                     onStatus(if (speaking.get()) "در حال پخش پاسخ…" else "پاسخ آماده است؛ می‌توانید صحبت کنید.")
