@@ -144,7 +144,7 @@ class VoiceModelStore(
             when (component) {
                 PiperComponent.MODEL -> {
                     require(displayName.endsWith(".onnx", true)) { "VOICE-PIPER-003: برای مدل Piper یک فایل .onnx انتخاب کنید." }
-                    File(staging, displayName).outputStream().use(input::copyTo)
+                    File(staging, File(displayName).name).outputStream().use(input::copyTo)
                 }
                 PiperComponent.CONFIG -> {
                     require(displayName.endsWith(".onnx.json", true) || displayName.endsWith(".json", true)) {
