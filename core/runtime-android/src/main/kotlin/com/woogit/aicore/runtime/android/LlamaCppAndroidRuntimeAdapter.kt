@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.io.File
 import kotlin.math.roundToInt
 
-/** Direct llama.cpp Android runtime. OpenCL is the only supported inference backend. */
+/** Direct llama.cpp Android runtime. Prefer OpenCL; allow CPU execution for unsupported ops/devices. */
 class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 8192,
     gpuLayers: Int = GPU_LAYERS_MAX,
@@ -44,13 +44,13 @@ class LlamaCppAndroidRuntimeAdapter(
     @Volatile private var selectedDraftPath: String? = null
     @Volatile private var loadedDraftPath: String? = null
 
-    init { require(gpuLayers == GPU_LAYERS_MAX) { "Unsupported diagnostic GPU layer mode: $gpuLayers" } }
+    init { require(gpuLayers in 0..GPU_LAYERS_MAX) { "GPU layer preference must be between 0 and $GPU_LAYERS_MAX" } }
 
     fun setGpuLayers(value: Int) {
-        require(value == GPU_LAYERS_MAX) { "Unsupported diagnostic GPU layer mode: $value" }
+        require(value in 0..GPU_LAYERS_MAX) { "GPU layer preference must be between 0 and $GPU_LAYERS_MAX" }
         gpuLayersMode = value
-        RuntimeDiagnosticsStore.recordNativeEvent("OPENCL_GPU_ONLY_SELECTED")
-        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "OPENCL_GPU_ONLY_SELECTED (applies on next activation)")
+        RuntimeDiagnosticsStore.recordNativeEvent("OPENCL_GPU_PREFERRED_CPU_FALLBACK_ALLOWED")
+        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "OPENCL GPU preferred; CPU fallback allowed (applies on next activation)")
     }
 
     fun gpuLayers(): Int = gpuLayersMode
@@ -89,11 +89,11 @@ class LlamaCppAndroidRuntimeAdapter(
         val file = model.path.toFile()
         if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
         val startedAt = System.nanoTime()
-        val requestedGpuPercent = 100
+        val requestedGpuPercent = if (gpuLayersMode > 0) 100 else 0
         val totalBlocks = model.metadata.blockCount?.toInt()?.takeIf { it > 0 }
-        val requestedGpuLayers = when {
+        val requestedGpuLayers = if (gpuLayersMode <= 0) 0 else when {
             totalBlocks != null -> totalBlocks
-            else -> 99
+            else -> GPU_LAYERS_MAX
         }
         return try {
             // Use a larger working context so a long user prompt does not immediately
@@ -111,7 +111,7 @@ class LlamaCppAndroidRuntimeAdapter(
             }
             val result = NativeLlamaCpp.load(file.absolutePath, requested, requestedGpuLayers, draftFile?.absolutePath)
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_RETURNED code=$result gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers")
-            if (result != 0) return ModelResult.Failure(ModelError.Inference("llama.cpp failed to load the model (code=$result)"))
+            if (result != 0) return ModelResult.Failure(RuntimeErrorMapper.nativeLoadFailure(result))
             val info = NativeLlamaCpp.runtimeInfo()
             selectedBackend = info.substringBefore(';').ifBlank { "OpenCL" }
             selectedGpuLayers = if (selectedBackend.contains("OpenCL", ignoreCase = true)) requestedGpuLayers else 0
@@ -122,7 +122,7 @@ class LlamaCppAndroidRuntimeAdapter(
             loadedDraftPath = draftFile?.absolutePath
             latestGeneration = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
-            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_RUNTIME_READY backend=$selectedBackend gpuPercent=$requestedGpuPercent gpuLayers=$selectedGpuLayers context=$loadedContextLength")
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_RUNTIME_READY backend=$selectedBackend gpuPercent=$requestedGpuPercent requestedGpuLayers=$requestedGpuLayers context=$loadedContextLength cpuFallbackAllowed=true")
             RuntimeDiagnosticsStore.recordLoaded(model, latestLoadTimeMs, runtimeInfo())
             ModelResult.Success(Unit)
         } catch (t: Throwable) {
@@ -166,6 +166,11 @@ class LlamaCppAndroidRuntimeAdapter(
         currentCoroutineContext().ensureActive()
         if (loadedContextLength == null) return ModelResult.Failure(ModelError.RuntimeUnavailable("No local model is loaded"))
         val settings = request.settings
+        RuntimeDiagnosticsStore.recordNativeEvent(
+            "NATIVE_CONVERSATION_INPUT messages=" + request.messages.size +
+                " roles=" + request.messages.joinToString(",") { it.role.name } +
+                " contentChars=" + request.messages.sumOf { it.content.length }
+        )
         val safeMessages = trimMessagesToContext(request.messages, settings.maxNewTokens.coerceAtLeast(1))
         val prompt = try {
             when (loadedArchitecture) {
@@ -186,6 +191,11 @@ class LlamaCppAndroidRuntimeAdapter(
         val contextCapacity = loadedContextLength ?: defaultContextLength
         val promptBudget = (contextCapacity - (promptTokens ?: 0) - 32).coerceAtLeast(1)
         val effectiveMaxTokens = minOf(settings.maxNewTokens.coerceAtLeast(1), promptBudget)
+        RuntimeDiagnosticsStore.recordNativeEvent(
+            "NATIVE_PROMPT_HISTORY_SELECTED messages=${safeMessages.size} " +
+                "roles=" + safeMessages.joinToString(",") { it.role.name } +
+                " contentChars=" + safeMessages.sumOf { it.content.length }
+        )
         RuntimeDiagnosticsStore.recordNativeEvent(
             "NATIVE_PROMPT_READY context=$loadedContextLength promptTokens=${promptTokens ?: "n/a"} " +
                 "requestedMaxTokens=${settings.maxNewTokens} effectiveMaxTokens=$effectiveMaxTokens"
@@ -366,7 +376,18 @@ class LlamaCppAndroidRuntimeAdapter(
         NativeLlamaCpp.stop()
     }
 
-    override fun runtimeInfo(): RuntimeInfo = RuntimeInfo(name = "llama.cpp-android-direct", version = "2ca15f5", backend = selectedBackend, threads = selectedCpuThreads, gpuLayers = selectedGpuLayers, contextLength = loadedContextLength ?: defaultContextLength)
+    override fun runtimeInfo(): RuntimeInfo {
+        val nativeInfo = NativeLlamaCpp.runtimeInfo()
+        val nativeVersion = nativeInfo.substringAfter("llama.cpp=", "").substringBefore(';').ifBlank { "unknown" }
+        return RuntimeInfo(
+            name = "llama.cpp-android-direct",
+            version = nativeVersion,
+            backend = selectedBackend,
+            threads = selectedCpuThreads,
+            gpuLayers = selectedGpuLayers,
+            contextLength = loadedContextLength ?: defaultContextLength,
+        )
+    }
 
     private class RuntimeFailure(val error: ModelError) : IllegalStateException(error.message)
 }

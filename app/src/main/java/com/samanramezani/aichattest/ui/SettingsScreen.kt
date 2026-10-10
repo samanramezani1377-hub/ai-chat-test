@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.InferenceSettingsStore
 import com.woogit.aicore.domain.ModelDescriptor
+import com.samanramezani.aichattest.ui.errors.ErrorCenter
 
 private const val PREFS = "inference_settings"
 private const val KEY_SCHEMA_VERSION = "schema_version"
@@ -134,8 +135,13 @@ private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescript
 }
 
 @Composable private fun ErrorCard(message: String) {
+    val error = ErrorCenter.resolve(message)
     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
-        Text(message, Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onErrorContainer)
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text("${error.code} · ${error.title}", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onErrorContainer)
+            Text(error.message, color = MaterialTheme.colorScheme.onErrorContainer)
+            Text("اقدام پیشنهادی: ${error.action}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+        }
     }
 }
 

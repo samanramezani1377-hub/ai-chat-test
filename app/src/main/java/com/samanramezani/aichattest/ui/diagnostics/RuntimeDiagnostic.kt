@@ -7,6 +7,7 @@ import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeTraceEvent
 import com.woogit.aicore.runtime.OpenClGpuProfile
+import com.samanramezani.aichattest.ui.errors.ErrorCenter
 
 private const val RECENT_RUNTIME_EVENTS = 20
 private const val RECENT_ACTION_EVENTS = 10
@@ -21,6 +22,7 @@ internal data class NativePerformance(
     val cacheHitRatio: Double? = null,
     val generatedTokens: Int? = null,
     val generationMs: Long? = null,
+    val decodeMs: Long? = null,
     val decodeTokensPerSec: Double? = null,
     val speculativeDraftTokens: Int? = null,
     val speculativeAcceptedTokens: Int? = null,
@@ -41,8 +43,6 @@ internal data class NativePerformance(
     val speculativeTokensPerSec: Double? = null,
     val speculativeFallbackCode: Int? = null,
 ) {
-    val decodeMs: Long?
-        get() = if (generationMs != null && prefillMs != null) (generationMs - prefillMs).coerceAtLeast(0L) else null
 }
 
 internal data class RuntimeDiagnostic(
@@ -73,6 +73,7 @@ internal data class RuntimeDiagnostic(
             cacheHitRatio = nativeCacheValue("hitRatio")?.toDoubleOrNull(),
             generatedTokens = nativeValue("generatedTokens")?.toIntOrNull(),
             generationMs = nativeValue("generationMs")?.toLongOrNull(),
+            decodeMs = nativeValue("decodeMs")?.toLongOrNull(),
             decodeTokensPerSec = nativeValue("decodeTokensPerSec")?.toDoubleOrNull(),
             speculativeDraftTokens = nativeValue("draftTokens")?.toIntOrNull(),
             speculativeAcceptedTokens = nativeValue("acceptedTokens")?.toIntOrNull(),
@@ -120,6 +121,14 @@ internal data class RuntimeDiagnostic(
         val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("NATIVE_PERF_PROFILE") && it.contains("$key=") } ?: return null
         return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
     }
+
+    internal fun nativeExecutionValue(key: String): String? {
+        val text = nativeDiagnostics ?: return null
+        val line = text.lineSequence().toList().asReversed()
+            .firstOrNull { it.contains("NATIVE_EXECUTION_PROFILE") && it.contains("$key=") }
+            ?: return null
+        return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
+    }
 }
 
 internal fun RuntimeDiagnostic.report(): String = buildString {
@@ -138,9 +147,9 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine()
     appendLine("Load Time: ${loadTimeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("TTFT: ${generation?.firstTokenTimeMs?.let { "$it ms" } ?: "N/A"}")
-    appendLine("Generation Time: ${generation?.generationTimeMs?.let { "$it ms" } ?: "N/A"}")
-    appendLine("Prompt Tokens: ${generation?.inputTokens ?: "N/A"}")
-    appendLine("Output Tokens: ${generation?.outputTokens ?: "N/A"}")
+    appendLine("Generation Time: ${perf.generationMs?.let { "$it ms" } ?: generation?.generationTimeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Prompt Tokens: ${perf.promptTokens ?: generation?.inputTokens ?: "N/A"}")
+    appendLine("Output Tokens: ${perf.generatedTokens ?: generation?.outputTokens ?: "N/A"}")
     appendLine("Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: tokensPerSecond(generation)?.let { "%.2f".format(it) } ?: "N/A"}")
     appendLine()
     appendLine("===== NATIVE PERFORMANCE =====")
@@ -166,6 +175,14 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("GPU Resident Buffers: ${weightResidency?.gpuBuffers ?: "N/A"}")
     appendLine("Host Tensor Memory: ${weightResidency?.hostTensorMiB?.let { "%.1f MiB".format(it) } ?: "N/A"}")
     appendLine()
+    appendLine("===== CPU / GPU EXECUTION POLICY =====")
+    appendLine("Execution Mode: ${nativeExecutionValue("mode") ?: "N/A"}")
+    appendLine("OpenCL Backend Registered: ${nativeExecutionValue("gpuBackendRegistered") ?: "N/A"}")
+    appendLine("CPU Measured Subtotal (sampling + logits + callbacks): ${nativeExecutionValue("cpuMeasuredSubtotalMs")?.let { "$it ms" } ?: "N/A"}")
+    appendLine("GPU Kernel Timings: measured separately by OpenCL events below; do not equate with decode wall time.")
+    appendLine("Per-operation CPU/OpenCL assignment: see native trace lines from ggml scheduler.")
+    appendLine("Sampled CPU/OpenCL split wall time: see AI_CHAT_BACKEND_SPLIT_TIMING (one sample per 8 splits per backend).")
+    appendLine()
     appendLine("===== GPU / OPENCL KERNEL PROFILE =====")
     openClProfile?.reportLines()?.forEach(::appendLine)
         ?: appendLine("OpenCL GPU profile: N/A")
@@ -181,18 +198,6 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Accounted Decode Time: ${perf.profileAccountedMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Unaccounted Decode Time: ${perf.profileUnaccountedMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Decode Window: ${perf.profileDecodeWindowMs?.let { "$it ms" } ?: "N/A"}")
-    appendLine()
-    appendLine("===== GPU / OPENCL KERNEL PROFILE =====")
-    val gpu = openClProfile
-    if (gpu == null) {
-        appendLine("OpenCL GPU profile: N/A")
-    } else {
-        gpu.reportLines().forEach(::appendLine)
-        appendLine("Top kernels:")
-        gpu.topKernels.forEach { k ->
-            appendLine("  ${k.kernelName}: ${String.format(java.util.Locale.US, "%.3f ms", k.executionMs)}")
-        }
-    }
     appendLine()
     appendLine("===== SPECULATIVE DECODING =====")
     appendLine("Draft Tokens: ${perf.speculativeDraftTokens ?: "N/A"}")
@@ -217,6 +222,14 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine()
     appendLine("Status: $status")
     appendLine("Execution: ${executionId ?: "N/A"}")
+    if (!error.isNullOrBlank()) {
+        val resolved = ErrorCenter.resolve(listOf(error, nativeDiagnostics).filterNotNull().joinToString("\n"))
+        appendLine("Error Code: ${resolved.code}")
+        appendLine("Error Title: ${resolved.title}")
+        appendLine("Error Message: ${resolved.message}")
+        appendLine("Recommended Action: ${resolved.action}")
+        appendLine("Technical Error: ${resolved.technical}")
+    }
     if (!error.isNullOrBlank()) appendLine("Error: $error")
     if (!rawError.isNullOrBlank()) appendLine("Raw Error: $rawError")
     appendLine()
@@ -227,6 +240,9 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Action Trace")
     if (actionTrace.isEmpty()) appendLine("N/A")
     else actionTrace.forEach { event -> appendLine("${event.timestampMs} | ${event.type} | ${event.message ?: ""}".trimEnd()) }
+    appendLine()
+    appendLine("===== NATIVE DIAGNOSTICS / RAW LOG =====")
+    appendLine(nativeDiagnostics ?: "N/A")
 }
 
 internal fun RuntimeDiagnostic.errorReport(): String = buildString {
@@ -241,9 +257,9 @@ internal fun RuntimeDiagnostic.errorReport(): String = buildString {
     appendLine("Context: ${runtime.contextLength ?: "N/A"}")
     appendLine("Load Time: ${loadTimeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("TTFT: ${generation?.firstTokenTimeMs?.let { "$it ms" } ?: "N/A"}")
-    appendLine("Generation Time: ${generation?.generationTimeMs?.let { "$it ms" } ?: "N/A"}")
-    appendLine("Prompt Tokens: ${generation?.inputTokens ?: perf.promptTokens ?: "N/A"}")
-    appendLine("Output Tokens: ${generation?.outputTokens ?: perf.generatedTokens ?: "N/A"}")
+    appendLine("Generation Time: ${perf.generationMs?.let { "$it ms" } ?: generation?.generationTimeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Prompt Tokens: ${perf.promptTokens ?: generation?.inputTokens ?: "N/A"}")
+    appendLine("Output Tokens: ${perf.generatedTokens ?: generation?.outputTokens ?: "N/A"}")
     appendLine("Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: tokensPerSecond(generation)?.let { "%.2f".format(it) } ?: "N/A"}")
     appendLine()
     appendLine("===== NATIVE PERFORMANCE =====")

@@ -57,6 +57,8 @@ android {
         release {
             externalNativeBuild {
                 cmake {
+                    // Keep the real OpenCL kernel profile available in the shipped
+                    // diagnostic build; the profiler writes asynchronously to app cache.
                     arguments += "-DAI_CHAT_OPENCL_PROFILING=ON"
                 }
             }
