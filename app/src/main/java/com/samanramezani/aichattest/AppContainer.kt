@@ -39,7 +39,7 @@ import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
 import java.nio.file.Files
 
-/** Application composition root. Local GGUF inference is the only runtime. */
+/** Application composition root. GGUF uses llama.cpp; exported MNN packs use MNN-LLM. */
 class AppContainer(context: Context? = null) {
     companion object {
         @Volatile var latest: AppContainer? = null
