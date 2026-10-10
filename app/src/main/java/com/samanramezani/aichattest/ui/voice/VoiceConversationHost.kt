@@ -354,7 +354,13 @@ private class VoiceConversationController(
                     onStatus("VOICE-LLM-001: ${event.message}")
                 }
             } ?: error("VOICE-CHAT-002: نشست مدل محلی در دسترس نیست.")
-            // Voice is latency-sensitive: skip Qwen reasoning, cap response length, and keep\n            // a short rolling history so each decode step attends to less accumulated KV state.\n            val result = session.send(\n                utterance,\n                InferenceSettings(maxNewTokens = 384, recentMessages = 12, enableThinking = false),\n                requestedRecentMessages = 12,\n            )
+            // Voice is latency-sensitive: skip Qwen reasoning, cap response length, and keep
+            // a short rolling history so each decode step attends to less accumulated KV state.
+            val result = session.send(
+                utterance,
+                InferenceSettings(maxNewTokens = 384, recentMessages = 12, enableThinking = false),
+                requestedRecentMessages = 12,
+            )
             if (!turnCancel.get()) {
                 enqueueCompleteSentences("", flush = true)
                 queue.close()
