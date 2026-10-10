@@ -120,6 +120,57 @@ if(NOT _ai_chat_backend_verify MATCHES "AI_CHAT_SELECTIVE_CPU_OP_FALLBACK_V1" OR
     message(FATAL_ERROR "Selective GPU-first CPU operator fallback policy is missing or an old CPU-compute guard remains")
 endif()
 
+# Avoid process-fatal GGML_ASSERT when the scheduler cannot assign a graph node.
+# View nodes must inherit the placement of their underlying source. Truly unsupported
+# compute ops fail context creation with a detailed error, which llama_init_from_model
+# catches and returns as nullptr instead of terminating the Android process.
+if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_UNASSIGNED_NODE_DIAGNOSTICS_V1")
+    set(_ai_chat_unassigned_needle [=[        GGML_ASSERT(*cur_backend_id != -1);]=])
+    set(_ai_chat_unassigned_replacement [=[        // AI_CHAT_UNASSIGNED_NODE_DIAGNOSTICS_V1: resolve view chains, then fail context init safely.
+        if (*cur_backend_id == -1 && ggml_is_view_op(node->op)) {
+            struct ggml_tensor * ai_chat_view_src = node->view_src;
+            for (int ai_chat_depth = 0; ai_chat_view_src != nullptr && ai_chat_depth < 32 && *cur_backend_id == -1; ++ai_chat_depth) {
+                const int ai_chat_source_backend = tensor_backend_id(ai_chat_view_src);
+                if (ai_chat_source_backend != -1) {
+                    *cur_backend_id = ai_chat_source_backend;
+                    SET_CAUSE(node, "4.view-chain");
+                    break;
+                }
+                ai_chat_view_src = ai_chat_view_src->view_src;
+            }
+        }
+        if (*cur_backend_id == -1) {
+            std::string ai_chat_support = "AI_CHAT_UNSUPPORTED_GRAPH_OP node=";
+            ai_chat_support += node->name;
+            ai_chat_support += " op=";
+            ai_chat_support += ggml_op_name(node->op);
+            ai_chat_support += " type=";
+            ai_chat_support += ggml_type_name(node->type);
+            ai_chat_support += " ne=" + std::to_string(node->ne[0]) + "," +
+                std::to_string(node->ne[1]) + "," + std::to_string(node->ne[2]) + "," +
+                std::to_string(node->ne[3]) + " backend_support=";
+            for (int ai_chat_b = 0; ai_chat_b < sched->n_backends; ++ai_chat_b) {
+                if (ai_chat_b > 0) ai_chat_support += ",";
+                ai_chat_support += std::to_string(ai_chat_b) + ":" +
+                    (ggml_backend_supports_op(sched->backends[ai_chat_b], node) ? "1" : "0");
+            }
+            GGML_LOG_ERROR("%s\n", ai_chat_support.c_str());
+            if (ai_chat_append_native_trace) ai_chat_append_native_trace(ai_chat_support.c_str());
+            throw std::runtime_error(ai_chat_support);
+        }]=])
+    string(FIND "${_ai_chat_backend_source}" "${_ai_chat_unassigned_needle}" _ai_chat_unassigned_location)
+    if(_ai_chat_unassigned_location EQUAL -1)
+        message(FATAL_ERROR "Could not locate pinned ggml unassigned-node assertion; refusing an unsafe scheduler patch")
+    endif()
+    string(REPLACE "${_ai_chat_unassigned_needle}" "${_ai_chat_unassigned_replacement}" _ai_chat_backend_source "${_ai_chat_backend_source}")
+    file(WRITE "${_ai_chat_backend_cpp}" "${_ai_chat_backend_source}")
+endif()
+file(READ "${_ai_chat_backend_cpp}" _ai_chat_unassigned_verify)
+if(NOT _ai_chat_unassigned_verify MATCHES "AI_CHAT_UNASSIGNED_NODE_DIAGNOSTICS_V1" OR
+   _ai_chat_unassigned_verify MATCHES "GGML_ASSERT\\(\\*cur_backend_id != -1\\);")
+    message(FATAL_ERROR "Safe scheduler handling for unassigned graph nodes was not applied")
+endif()
+
 # Compact scheduler placement telemetry. One summary line per graph avoids per-node disk I/O.
 if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1")
     set(_ai_chat_assignment_needle [=[    if (sched->debug) {
@@ -178,6 +229,7 @@ if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1")
     if(NOT _ai_chat_backend_source MATCHES "ai_chat_append_native_trace")
         set(_ai_chat_trace_include [=[#include <unordered_map>
 #include <string>
+#include <stdexcept>
 #if defined(__GNUC__)
 extern "C" void ai_chat_append_native_trace(const char *) __attribute__((weak));
 #endif]=])
