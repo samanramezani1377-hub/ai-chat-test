@@ -47,7 +47,19 @@ class AndroidModelManager(
             }
         }.getOrNull().orEmpty()
         val mimeType = runCatching { contentResolver.getType(uri) }.getOrNull().orEmpty()
-        if (displayName.endsWith(".zip", ignoreCase = true) || displayName.endsWith(".mnnpack", ignoreCase = true) || mimeType == "application/zip" || mimeType == "application/x-zip-compressed") {
+        val zipMagic = runCatching {
+            contentResolver.openInputStream(uri)?.use { stream ->
+                val signature = ByteArray(4)
+                var offset = 0
+                while (offset < signature.size) {
+                    val read = stream.read(signature, offset, signature.size - offset)
+                    if (read < 0) break
+                    offset += read
+                }
+                offset >= 2 && signature[0] == 'P'.code.toByte() && signature[1] == 'K'.code.toByte()
+            }
+        }.getOrDefault(false)
+        if (displayName.endsWith(".zip", ignoreCase = true) || displayName.endsWith(".mnnpack", ignoreCase = true) || mimeType == "application/zip" || mimeType == "application/x-zip-compressed" || zipMagic) {
             return@withContext importMnnPack(uri)
         }
         try {
