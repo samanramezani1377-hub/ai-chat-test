@@ -62,8 +62,29 @@ object RuntimeDiagnosticsStore {
     private val state = MutableStateFlow(RuntimeDiagnosticsSnapshot(lastNativeEvent = readNativeDiagnostics(), gpuDevice = readGpuDevice(), weightResidency = readWeightResidency()))
     val snapshot: StateFlow<RuntimeDiagnosticsSnapshot> = state.asStateFlow()
 
-    private fun lastNativeDiagnosticLines(text: String): String =
-        text.lineSequence().toList().takeLast(MAX_NATIVE_DIAGNOSTIC_LINES).joinToString("\n")
+    private val importantNativeMarkers = listOf(
+        "MODEL_LOAD_PREFLIGHT", "path=", "file_exists=", "file_size_bytes=",
+        "requested_context=", "gpu_layers=", "backend_mode=",
+        "device_mem_available_mib=", "process_pss_kib=",
+        "NATIVE_LOAD_STARTED", "ACTIVATION_NATIVE_LOAD_STARTED",
+        "NATIVE_CONTEXT_THREADS", "NATIVE_CONTEXT_INIT", "NATIVE_FATAL_",
+        "NATIVE_VULKAN_DEVICE", "NATIVE_WEIGHT_RESIDENCY", "NATIVE_BACKEND_DEVICES",
+        "VULKAN_GPU_DEVICE", "VULKAN_MODEL_RESIDENCY",
+        "AI_CHAT_BACKEND_GRAPH_ASSIGNMENT", "NATIVE_PERF_PROFILE",
+        "LAST_NATIVE_EVENT="
+    )
+
+    private fun lastNativeDiagnosticLines(text: String): String {
+        val lines = text.lineSequence().toList()
+        val important = lines.filter { line ->
+            importantNativeMarkers.any { marker -> line.contains(marker) }
+        }.takeLast(48)
+        val tail = lines.takeLast(MAX_NATIVE_DIAGNOSTIC_LINES)
+        // Keep startup/device/fatal/profile markers even when verbose graph-reserve
+        // logs flood the tail. De-duplicate while preserving chronological order.
+        val retained = (important + tail).distinct()
+        return retained.joinToString("\n")
+    }
 
     private fun readNativeDiagnostics(): String? = runCatching {
         val preflight = preflightFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotBlank() }

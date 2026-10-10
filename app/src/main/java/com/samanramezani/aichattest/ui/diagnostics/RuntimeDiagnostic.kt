@@ -129,21 +129,36 @@ internal data class RuntimeDiagnostic(
         val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("NATIVE_PERF_PROFILE") && it.contains("$key=") } ?: return null
         return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
     }
+
+    private fun preflightValue(key: String): String? {
+        val text = nativeDiagnostics ?: return null
+        val line = text.lineSequence().firstOrNull { it.startsWith("$key=") } ?: return null
+        return line.substringAfter('=', "").takeIf { it.isNotBlank() }
+    }
+
+    private val attemptedModelName: String?
+        get() = preflightValue("path")?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+
+    private val attemptedContext: String?
+        get() = preflightValue("requested_context")
+
+    private val attemptedGpuLayers: String?
+        get() = preflightValue("gpu_layers")
 }
 
 internal fun RuntimeDiagnostic.report(): String = buildString {
     val perf = nativePerformance
     appendLine("AI Chat Test — Runtime Diagnostic Report")
     appendLine()
-    appendLine("Model: ${model?.displayName ?: "N/A"}")
+    appendLine("Model: ${model?.displayName ?: attemptedModelName ?: "N/A"}")
     appendLine("Format: ${model?.format ?: "N/A"}")
     appendLine("Quantization: ${model?.quantization ?: "N/A"}")
     appendLine("Runtime: ${runtime.name}")
     appendLine("Runtime Version: ${runtime.version}")
-    appendLine("Backend: ${runtime.backend ?: "N/A"}")
+    appendLine("Backend: ${runtime.backend ?: preflightValue("backend_mode") ?: "N/A"}")
     appendLine("Threads: ${runtime.threads ?: "N/A"}")
-    appendLine("GPU Layers: ${runtime.gpuLayers ?: "N/A"}")
-    appendLine("Context: ${runtime.contextLength ?: "N/A"}")
+    appendLine("GPU Layers: ${runtime.gpuLayers ?: attemptedGpuLayers ?: "N/A"}")
+    appendLine("Context: ${runtime.contextLength ?: attemptedContext ?: "N/A"}")
     appendLine()
     appendLine("Load Time: ${loadTimeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("TTFT: ${generation?.firstTokenTimeMs?.let { "$it ms" } ?: "N/A"}")
