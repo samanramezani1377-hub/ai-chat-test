@@ -15,6 +15,7 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 
 enum class VoiceModelKind { STT, TTS }
 enum class PiperComponent { MODEL, CONFIG, ESPEAK_DATA }
+enum class SmallSttComponent { MODEL, TOKENS }
 
 data class VoiceModelEntry(
     val id: String,
@@ -51,6 +52,72 @@ class VoiceModelStore(
     fun list(kind: VoiceModelKind): List<VoiceModelEntry> =
         root.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") }
             ?.mapNotNull { validateDirectory(it, kind) }?.sortedBy { it.title } ?: emptyList()
+
+    /**
+     * Import the tiny Persian Shenava Rizeh-Pizeh NeMo-CTC model in two steps.
+     * Model and tokens can be selected in either order; incomplete imports stay hidden.
+     */
+    fun importSmallPersianSttComponent(uri: Uri, component: SmallSttComponent): VoiceModelEntry? {
+        root.mkdirs()
+        val staging = File(root, ".shenava-rizeh-import")
+        if (!staging.exists() && !staging.mkdirs()) {
+            error("VOICE-STT-IMPORT-001: ایجاد پوشه موقت مدل فارسی ناموفق بود.")
+        }
+        val displayName = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0).orEmpty() else "" }.orEmpty()
+        require(displayName.isNotBlank()) { "VOICE-STT-IMPORT-002: نام فایل انتخاب‌شده قابل خواندن نیست." }
+        val source = resolver.openInputStream(uri)
+            ?: error("VOICE-STT-IMPORT-003: فایل انتخاب‌شده قابل خواندن نیست.")
+        source.use { input ->
+            when (component) {
+                SmallSttComponent.MODEL -> {
+                    require(displayName.endsWith(".onnx", true)) {
+                        "VOICE-STT-IMPORT-004: فایل مدل Shenava باید با پسوند .onnx باشد."
+                    }
+                    val target = File(staging, "model.onnx")
+                    FileOutputStream(target).use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        var total = 0L
+                        while (true) {
+                            val n = input.read(buffer)
+                            if (n < 0) break
+                            total += n
+                            require(total <= MAX_STT_MODEL_BYTES) {
+                                "VOICE-STT-IMPORT-005: حجم مدل STT از حد مجاز بیشتر است."
+                            }
+                            output.write(buffer, 0, n)
+                        }
+                    }
+                }
+                SmallSttComponent.TOKENS -> {
+                    require(displayName.equals("tokens.txt", true) || displayName.endsWith(".txt", true)) {
+                        "VOICE-STT-IMPORT-006: فایل واژگان مدل باید tokens.txt باشد."
+                    }
+                    val bytes = input.readBytes()
+                    require(bytes.size <= 4 * 1024 * 1024) {
+                        "VOICE-STT-IMPORT-007: فایل tokens.txt بیش از حد بزرگ است."
+                    }
+                    val text = bytes.toString(Charsets.UTF_8)
+                    val nonEmptyLines = text.lineSequence().count { it.isNotBlank() }
+                    require(nonEmptyLines >= 100 && text.contains("0")) {
+                        "VOICE-STT-IMPORT-008: فایل tokens.txt معتبر به نظر نمی‌رسد."
+                    }
+                    File(staging, "tokens.txt").writeBytes(bytes)
+                }
+            }
+        }
+        val model = File(staging, "model.onnx")
+        val tokens = File(staging, "tokens.txt")
+        if (!model.isFile || model.length() < 1024 || !tokens.isFile) return null
+        val id = "stt-shenava-rizeh-pizeh-${System.currentTimeMillis()}"
+        val destination = File(root, id)
+        check(staging.renameTo(destination)) { "VOICE-STT-IMPORT-009: ذخیره نهایی مدل فارسی ناموفق بود." }
+        return validateDirectory(destination, VoiceModelKind.STT)
+            ?: run {
+                destination.deleteRecursively()
+                error("VOICE-STT-IMPORT-010: فایل‌های مدل Shenava با ساختار مورد انتظار سازگار نیستند.")
+            }
+    }
 
     fun importArchive(uri: Uri, kind: VoiceModelKind): VoiceModelEntry {
         root.mkdirs()
@@ -325,6 +392,7 @@ class VoiceModelStore(
     }
 
     companion object {
+        private const val MAX_STT_MODEL_BYTES = 512L * 1024 * 1024
         private const val MAX_ENTRIES = 20_000
         private const val MAX_EXPANDED_BYTES = 2L * 1024 * 1024 * 1024
     }
