@@ -114,8 +114,9 @@ static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, stru
     file(WRITE "${_ai_chat_backend_cpp}" "${_ai_chat_backend_source}")
 endif()
 file(READ "${_ai_chat_backend_cpp}" _ai_chat_backend_verify)
+string(CONCAT _ai_chat_old_guard_token "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_" "FALLBACK")
 if(NOT _ai_chat_backend_verify MATCHES "AI_CHAT_SELECTIVE_CPU_OP_FALLBACK_V1" OR
-   _ai_chat_backend_verify MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK")
+   _ai_chat_backend_verify MATCHES "${_ai_chat_old_guard_token}")
     message(FATAL_ERROR "Selective GPU-first CPU operator fallback policy is missing or an old CPU-compute guard remains")
 endif()
 
