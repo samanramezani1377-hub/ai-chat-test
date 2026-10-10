@@ -853,6 +853,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     const llama_pos resident_max = llama_memory_seq_pos_max(memory, 0);
     const bool resident_sequence_matches_cache = hybrid_memory
             ? (!g_cached_prompt_tokens.empty() &&
+               resident_max >= 0 &&
+               static_cast<size_t>(resident_max + 1) == g_cached_prompt_tokens.size() &&
                prompt_tokens.size() > g_cached_prompt_tokens.size() &&
                common_prefix == g_cached_prompt_tokens.size())
             : (!g_cached_prompt_tokens.empty() &&
