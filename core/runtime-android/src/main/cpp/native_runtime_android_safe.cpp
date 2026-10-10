@@ -244,17 +244,23 @@ static int choose_cpu_thread_trial() {
         g_cpu_default_threads = current;
     }
     const auto candidates = cpu_thread_candidates();
-    int min_attempts = std::numeric_limits<int>::max();
-    for (int candidate : candidates)
-        min_attempts = std::min(min_attempts, g_cpu_thread_tuning[candidate].attempts);
-    if (min_attempts == 0) {
-        if (g_cpu_thread_tuning[current].attempts == 0 &&
-            std::find(candidates.begin(), candidates.end(), current) != candidates.end()) return current;
-        for (int candidate : candidates)
-            if (g_cpu_thread_tuning[candidate].attempts == 0) return candidate;
-    }
     const int best = best_measured_cpu_threads();
-    return best > 0 ? best : g_cpu_default_threads;
+
+    // Never discard a valid measured winner just because the configured default
+    // thread count has not yet been trialed in this process. The old ordering
+    // could repeatedly pick the default (e.g. 2 threads) even when persisted
+    // measurements showed a faster candidate (e.g. 4 threads).
+    if (best > 0) return best;
+
+    // No valid decode sample exists yet: collect a baseline, then move to an
+    // untested candidate on subsequent generations. Do not use wall-clock or
+    // prefill timings as a proxy for decode throughput.
+    if (g_cpu_thread_tuning[current].attempts == 0 &&
+        std::find(candidates.begin(), candidates.end(), current) != candidates.end()) return current;
+    for (int candidate : candidates)
+        if (g_cpu_thread_tuning[candidate].attempts == 0) return candidate;
+
+    return g_cpu_default_threads;
 }
 static void record_cpu_thread_trial(int threads, int generated, int64_t decode_ms,
                                     double tokens_per_sec, int result) {
