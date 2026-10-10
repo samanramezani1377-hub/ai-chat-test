@@ -1,6 +1,9 @@
 package com.woogit.aicore.actions
 
 import com.woogit.aicore.domain.Action
+import com.woogit.aicore.domain.ActionArgument
+import com.woogit.aicore.domain.ActionArgumentType
+import com.woogit.aicore.domain.ActionSchema
 import com.woogit.aicore.domain.RiskLevel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -92,6 +95,8 @@ private class ExpressionParser(private val source: String) {
 
 class CalculateAction : Action<Any, Any> {
     override val id = "calculate"
+    override val description = "Evaluate a basic arithmetic expression safely; no code execution."
+    override val schema = ActionSchema(arguments = listOf(ActionArgument("expression", ActionArgumentType.STRING, maxLength = 512)))
     override val risk = RiskLevel.LOW
     override suspend fun execute(input: Any): Any {
         val expression = ActionArguments.string(input, "expression")
@@ -103,6 +108,8 @@ class CalculateAction : Action<Any, Any> {
 
 class GetTimeAction(private val clock: () -> Instant = { Instant.now() }, private val zoneId: ZoneId = ZoneId.systemDefault()) : Action<Any, Any> {
     override val id = "get_time"
+    override val description = "Return the device current date and time with its UTC offset. Takes no arguments."
+    override val schema = ActionSchema()
     override val risk = RiskLevel.LOW
     override suspend fun execute(input: Any): Any {
         require(input.toString().trim().let { it == "{}" || it.isBlank() }) { "get_time accepts no arguments" }
@@ -137,6 +144,8 @@ class WorkspacePathResolver(private val root: Path) {
 
 class CreateFileAction(private val workspace: WorkspacePathResolver) : Action<Any, Any> {
     override val id = "create_file"
+    override val description = "Create a UTF-8 text file inside the app Workspace. Paths are relative; existing files with different content are not overwritten."
+    override val schema = ActionSchema(arguments = listOf(ActionArgument("file_name", ActionArgumentType.STRING, maxLength = 1024), ActionArgument("content", ActionArgumentType.STRING, maxLength = 1_048_576)))
     override val risk = RiskLevel.NORMAL
     override val stateChanging = true
     override val idempotent = true
@@ -175,6 +184,8 @@ class CreateFileAction(private val workspace: WorkspacePathResolver) : Action<An
 
 class ReadFileAction(private val workspace: WorkspacePathResolver) : Action<Any, Any> {
     override val id = "read_file"
+    override val description = "Read a UTF-8 text file inside the app Workspace. Paths are relative; files larger than 1 MiB are rejected."
+    override val schema = ActionSchema(arguments = listOf(ActionArgument("file_name", ActionArgumentType.STRING, maxLength = 1024)))
     override val risk = RiskLevel.LOW
     override suspend fun execute(input: Any): Any {
         val path = workspace.resolve(ActionArguments.string(input, "file_name"))
@@ -186,6 +197,8 @@ class ReadFileAction(private val workspace: WorkspacePathResolver) : Action<Any,
 
 class ListFilesAction(private val workspace: WorkspacePathResolver) : Action<Any, Any> {
     override val id = "list_files"
+    override val description = "List names of files and directories in the app Workspace. Optional path is relative; omit it to list the Workspace root."
+    override val schema = ActionSchema(arguments = listOf(ActionArgument("path", ActionArgumentType.STRING, required = false, maxLength = 1024)))
     override val risk = RiskLevel.LOW
     override suspend fun execute(input: Any): Any {
         val relative = runCatching { ActionArguments.string(input, "path") }.getOrNull().orEmpty()
@@ -197,6 +210,8 @@ class ListFilesAction(private val workspace: WorkspacePathResolver) : Action<Any
 
 class DeleteFileAction(private val workspace: WorkspacePathResolver) : Action<Any, Any> {
     override val id = "delete_file"
+    override val description = "Permanently delete a regular file inside the app Workspace. Sensitive action; requires explicit user approval."
+    override val schema = ActionSchema(arguments = listOf(ActionArgument("file_name", ActionArgumentType.STRING, maxLength = 1024)))
     override val risk = RiskLevel.SENSITIVE
     override val stateChanging = true
     override val idempotent = false
