@@ -9,7 +9,7 @@ if (NOT EXISTS "${_sched_file}")
 endif()
 
 file(READ "${_sched_file}" _sched)
-if (_sched MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V1")
+if (_sched MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V2")
     return()
 endif()
 
@@ -19,7 +19,7 @@ if (_print_pos LESS 0)
     message(FATAL_ERROR "AI Chat backend trace: scheduler print function anchor not found")
 endif()
 string(REPLACE "${_print_anchor}"
-    "static bool ai_chat_backend_assignment_trace_emitted = false;\n// AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V1\n${_print_anchor}"
+    "static bool ai_chat_backend_assignment_trace_emitted = false;\n// AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V2\n${_print_anchor}"
     _sched "${_sched}")
 
 set(_dispatch_anchor "    if (sched->debug) {\n        ggml_backend_sched_print_assignments(sched, graph);\n    }")
@@ -41,6 +41,7 @@ endif()
 math(EXPR _print_len "${_print_end} - ${_print_start}")
 string(SUBSTRING "${_sched}" ${_print_start} ${_print_len} _print_block)
 string(REPLACE "GGML_LOG_DEBUG(" "GGML_LOG_INFO(" _print_block "${_print_block}")
+string(REPLACE "if (sched->debug > 1) {" "if (sched->debug > 1 || getenv(\"AI_CHAT_BACKEND_TRACE\") != nullptr) {" _print_block "${_print_block}")
 string(SUBSTRING "${_sched}" 0 ${_print_start} _before_print)
 string(LENGTH "${_sched}" _sched_len)
 math(EXPR _after_pos "${_print_start} + ${_print_len}")
