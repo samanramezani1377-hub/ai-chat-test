@@ -59,7 +59,7 @@ class AgentSession(
                 val executor = actionExecutor ?: break
                 var outcome = executor(nextPlan)
                 actionResult = outcome.message
-                eventSink(AgentEvent.ActionExecuted(plan.prepared.executionId))
+                eventSink(AgentEvent.ActionExecuted(nextPlan.prepared.executionId))
                 conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(nextPlan), System.currentTimeMillis()))
                 steps++
 
