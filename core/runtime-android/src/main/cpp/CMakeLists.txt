@@ -98,27 +98,20 @@ endif()
 # GDN and Lightning-Indexer kernels have passed device validation on Mali.
 # This changes kernel selection only, not model weights or sampling semantics.
 if (ANDROID)
-    foreach(_ai_chat_fused_pair
-            "cparams.fused_gdn_ar = true;|cparams.fused_gdn_ar = false; // AI_CHAT_ANDROID_DISABLE_VULKAN_FUSED_RECURRENT_V1"
-            "cparams.fused_gdn_ch = true;|cparams.fused_gdn_ch = false; // AI_CHAT_ANDROID_DISABLE_VULKAN_FUSED_RECURRENT_V1"
-            "cparams.fused_lid = true;|cparams.fused_lid = false; // AI_CHAT_ANDROID_DISABLE_VULKAN_FUSED_RECURRENT_V1")
-        string(REPLACE "|" ";" _ai_chat_fused_fields "${_ai_chat_fused_pair}")
-        list(GET _ai_chat_fused_fields 0 _ai_chat_fused_from)
-        list(GET _ai_chat_fused_fields 1 _ai_chat_fused_to)
-        string(FIND "${_ai_chat_dsv4_context_verify}" "${_ai_chat_fused_from}" _ai_chat_fused_location)
-        if(_ai_chat_fused_location EQUAL -1)
-            # Already patched on a reconfigure, or upstream changed: verify below.
-            continue()
-        endif()
-        string(REPLACE "${_ai_chat_fused_from}" "${_ai_chat_fused_to}"
-            _ai_chat_dsv4_context_verify "${_ai_chat_dsv4_context_verify}")
-    endforeach()
+    string(REPLACE "cparams.fused_gdn_ar = true;" "cparams.fused_gdn_ar = false;"
+        _ai_chat_dsv4_context_verify "${_ai_chat_dsv4_context_verify}")
+    string(REPLACE "cparams.fused_gdn_ch = true;" "cparams.fused_gdn_ch = false;"
+        _ai_chat_dsv4_context_verify "${_ai_chat_dsv4_context_verify}")
+    string(REPLACE "cparams.fused_lid = true;" "cparams.fused_lid = false;"
+        _ai_chat_dsv4_context_verify "${_ai_chat_dsv4_context_verify}")
     file(WRITE "${_ai_chat_dsv4_context_cpp}" "${_ai_chat_dsv4_context_verify}")
     file(READ "${_ai_chat_dsv4_context_cpp}" _ai_chat_fused_verify)
-    if(NOT _ai_chat_fused_verify MATCHES "AI_CHAT_ANDROID_DISABLE_VULKAN_FUSED_RECURRENT_V1" OR
-       _ai_chat_fused_verify MATCHES "cparams.fused_gdn_ar[ ]*= true;" OR
+    if(_ai_chat_fused_verify MATCHES "cparams.fused_gdn_ar[ ]*= true;" OR
        _ai_chat_fused_verify MATCHES "cparams.fused_gdn_ch[ ]*= true;" OR
-       _ai_chat_fused_verify MATCHES "cparams.fused_lid[ ]*= true;")
+       _ai_chat_fused_verify MATCHES "cparams.fused_lid[ ]*= true;" OR
+       NOT _ai_chat_fused_verify MATCHES "cparams.fused_gdn_ar[ ]*= false;" OR
+       NOT _ai_chat_fused_verify MATCHES "cparams.fused_gdn_ch[ ]*= false;" OR
+       NOT _ai_chat_fused_verify MATCHES "cparams.fused_lid[ ]*= false;")
         message(FATAL_ERROR "Android Vulkan fused recurrent-op mitigation was not applied")
     endif()
 endif()

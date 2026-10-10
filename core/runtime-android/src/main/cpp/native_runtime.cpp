@@ -308,10 +308,6 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
     default_action.sa_handler = SIG_DFL;
     sigemptyset(&default_action.sa_mask);
     sigaction(signal_number, &default_action, nullptr);
-    sigset_t unblocked_signal;
-    sigemptyset(&unblocked_signal);
-    sigaddset(&unblocked_signal, signal_number);
-    sigprocmask(SIG_UNBLOCK, &unblocked_signal, nullptr);
     syscall(SYS_tgkill, getpid(), syscall(SYS_gettid), signal_number);
     _exit(128 + signal_number);
 }
