@@ -290,13 +290,18 @@ class LocalMicrophone {
             running.set(false)
             error("VOICE-MIC-002: اندازه بافر میکروفون نامعتبر است.")
         }
-        val record = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            sampleRate,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            maxOf(min * 2, sampleRate / 2),
-        )
+        val record = try {
+            AudioRecord(
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                sampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                maxOf(min * 2, sampleRate / 2),
+            )
+        } catch (e: SecurityException) {
+            running.set(false)
+            throw IllegalStateException("VOICE-MIC-004: مجوز ضبط صدا داده نشده است.", e)
+        }
         if (record.state != AudioRecord.STATE_INITIALIZED) {
             running.set(false); record.release()
             error("VOICE-MIC-003: راه‌اندازی میکروفون ناموفق بود.")
@@ -304,7 +309,16 @@ class LocalMicrophone {
         recorder = record
         if (AcousticEchoCanceler.isAvailable()) echoCanceler = AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true }
         if (NoiseSuppressor.isAvailable()) noiseSuppressor = NoiseSuppressor.create(record.audioSessionId)?.apply { enabled = true }
-        record.startRecording()
+        try {
+            record.startRecording()
+        } catch (e: SecurityException) {
+            running.set(false)
+            recorder = null
+            runCatching { noiseSuppressor?.release() }; noiseSuppressor = null
+            runCatching { echoCanceler?.release() }; echoCanceler = null
+            record.release()
+            throw IllegalStateException("VOICE-MIC-004: مجوز ضبط صدا داده نشده است.", e)
+        }
         Thread({
             val buffer = ShortArray(640) // 40 ms at 16 kHz
             while (running.get()) {
