@@ -76,8 +76,12 @@ static bool init_generation_context() {
     // ubatch can reserve a much larger Vulkan graph than is useful for interactive
     // chat, especially at 8K context. This affects prompt prefill chunk size, not
     // the decode token loop.
-    cp.n_batch = std::min<uint32_t>(cp.n_ctx, 32);
-    cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 32);
+    // Mali Vulkan graph reservation for hybrid/recurrent models can abort at 32 tokens
+    // before llama_init_from_model can return an error. Keep the 8192-token context
+    // intact, but bound each graph micro-batch to reduce transient GPU allocation.
+    // This primarily affects prompt prefill; single-token decode and model weights are unchanged.
+    cp.n_batch = std::min<uint32_t>(cp.n_ctx, 16);
+    cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 16);
     cp.n_rs_seq = 0;
     // The device trace showed FLASH_ATTN_EXT nodes immediately before SIGABRT
     // during context graph reservation on the affected Vulkan/Mali path. Keep the
