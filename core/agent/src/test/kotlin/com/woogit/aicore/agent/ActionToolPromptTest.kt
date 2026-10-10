@@ -22,7 +22,7 @@ class ActionToolPromptTest {
         assertContains(prompt, "expression: string, required, maxLength=512")
         assertContains(prompt, "get_time")
         assertFalse("create_file" in prompt)
-        assertContains(prompt, """"version":1,"actionId":"call-1","action":"calculate"""")
+        assertContains(prompt, "\"version\":1,\"actionId\":\"call-1\",\"action\":\"calculate\"")
         assertContains(prompt, "فقط یک شیء JSON")
     }
 
