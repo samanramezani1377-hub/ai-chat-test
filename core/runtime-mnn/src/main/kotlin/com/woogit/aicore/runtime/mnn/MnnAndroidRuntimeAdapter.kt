@@ -9,7 +9,6 @@ import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
 import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
-import com.woogit.aicore.runtime.RuntimeTraceEvent
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
@@ -46,7 +45,6 @@ class MnnAndroidRuntimeAdapter(private val cpuThreads: Int = 4) : RuntimeAdapter
                 backendReason = selection.substringAfter(";", "none")
                 loadedConfig = config.absolutePath
                 RuntimeDiagnosticsStore.recordNativeEvent("MNN_BACKEND_SELECTED backend=$backend fallbackReason=$backendReason")
-                RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "MNN_BACKEND_SELECTED backend=$backend fallbackReason=$backendReason")
             } catch (t: Throwable) {
                 loadError = t
                 backend = "failed"
@@ -91,7 +89,6 @@ class MnnAndroidRuntimeAdapter(private val cpuThreads: Int = 4) : RuntimeAdapter
             RuntimeDiagnosticsStore.recordNativeEvent("MNN_BACKEND_AFTER_GENERATION backend=$backend fallbackReason=$backendReason")
         }
         if (text.startsWith("ERROR:")) {
-            backend = runCatching { MnnNative.nativeBackend() }.getOrDefault("failed")
             throw IllegalStateException("MNN generation failed: ${text.removePrefix("ERROR:")}")
         }
         // Buffer before publishing so failed OpenCL output is never concatenated with a CPU retry.
