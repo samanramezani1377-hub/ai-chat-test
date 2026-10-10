@@ -73,6 +73,12 @@ static bool init_speculative_runtime();
 #ifndef AI_CHAT_CPU_REPACK
 #define AI_CHAT_CPU_REPACK 0
 #endif
+#ifndef AI_CHAT_CPU_NEON_KERNELS
+#define AI_CHAT_CPU_NEON_KERNELS 0
+#endif
+#ifndef AI_CHAT_CPU_Q6K_ARM_KERNELS
+#define AI_CHAT_CPU_Q6K_ARM_KERNELS 0
+#endif
 #ifndef AI_CHAT_CPU_KLEIDIAI
 #define AI_CHAT_CPU_KLEIDIAI 0
 #endif
@@ -126,10 +132,13 @@ static void trace_cpu_hardware_profile() {
     append_native_trace((std::string("NATIVE_CPU_KERNEL_POLICY baseline=") +
         AI_CHAT_CPU_BASELINE_ARM_ARCH +
         " repack=" + std::to_string(AI_CHAT_CPU_REPACK) +
+        " neonKernelsCompiled=" + std::to_string(AI_CHAT_CPU_NEON_KERNELS) +
+        " q6kArmKernelCompiled=" + std::to_string(AI_CHAT_CPU_Q6K_ARM_KERNELS) +
         " kleidiai=" + std::to_string(AI_CHAT_CPU_KLEIDIAI) +
         " dotprodKernelCompiled=" + std::to_string(AI_CHAT_CPU_DOTPROD_KERNELS) +
         " i8mmKernelCompiled=" + std::to_string(AI_CHAT_CPU_I8MM_KERNELS) +
-        " policy=ENABLE_ONLY_COMPILED_PORTABLE_KERNELS").c_str());
+        " q6kDispatch=" + (AI_CHAT_CPU_Q6K_ARM_KERNELS ? "ARM_NEON_BASELINE" : "UPSTREAM_GENERIC") +
+        " policy=NO_UNSAFE_GLOBAL_ISA").c_str());
 }
 static int generation_threads() {
     const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
