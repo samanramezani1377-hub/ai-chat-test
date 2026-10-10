@@ -231,7 +231,7 @@ private fun sanitizeAssistantVoiceText(raw: String): String {
         .replace(Regex("(?<!\\w)(?:\\*\\*|__)(?=\\S)|(?<=\\S)(?:\\*\\*|__)"), "")
         .replace(Regex("(?<!\\w)[*_~](?=\\S)|(?<=\\S)[*_~](?!\\w)"), "")
         .replace(Regex("(?is)<[^>]+>"), " ")
-        // Some local model outputs leak one or two Latin `n` characters directly before Persian text (e.g. `nnسلام`).\n        // Drop only this narrow leading artifact; preserve legitimate Latin text elsewhere.\n        .replace(Regex("(?i)^n{1,2}(?=[\\u0600-\\u06FF])"), "")\n        .replace(Regex("[ \\t]+"), " ")
+        // Some local model outputs leak one or two Latin `n` characters directly before Persian text (e.g. `nnسلام`).\n        // Drop only this narrow leading artifact; preserve legitimate Latin text elsewhere.\n        .replace(Regex("(?i)^\\s*n{1,2}(?=[\\u0600-\\u06FF])"), "")\n        .replace(Regex("[ \\t]+"), " ")
         .replace(Regex(" *\\n *"), "\\n")
         .replace(Regex("\\n{3,}"), "\\n\\n")
         .trim()
