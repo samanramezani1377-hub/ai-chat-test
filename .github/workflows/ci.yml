@@ -91,8 +91,6 @@ jobs:
             core/runtime-android/src/.cxx
             core/runtime-mnn/.cxx
             core/runtime-mnn/src/.cxx
-            core/runtime-mnn/.cxx
-            core/runtime-mnn/src/.cxx
           key: >-
             native-${{ runner.os }}-
             ${{ hashFiles(
@@ -103,8 +101,6 @@ jobs:
               'core/runtime-android/build.gradle.kts',
               'core/runtime-android/src/main/cpp/**',
               'core/runtime-android/src/main/cpp/cmake/**',
-              'core/runtime-mnn/build.gradle.kts',
-              'core/runtime-mnn/src/main/cpp/**',
               'core/runtime-mnn/build.gradle.kts',
               'core/runtime-mnn/src/main/cpp/**',
               '.github/workflows/ci.yml'
@@ -220,6 +216,8 @@ jobs:
           path: |
             core/runtime-android/.cxx
             core/runtime-android/src/.cxx
+            core/runtime-mnn/.cxx
+            core/runtime-mnn/src/.cxx
           key: >-
             native-lint-${{ runner.os }}-
             ${{ hashFiles(
@@ -230,6 +228,8 @@ jobs:
               'core/runtime-android/build.gradle.kts',
               'core/runtime-android/src/main/cpp/**',
               'core/runtime-android/src/main/cpp/cmake/**',
+              'core/runtime-mnn/build.gradle.kts',
+              'core/runtime-mnn/src/main/cpp/**',
               '.github/workflows/ci.yml'
             ) }}
 
