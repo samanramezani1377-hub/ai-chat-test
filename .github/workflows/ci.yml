@@ -1,12 +1,14 @@
 name: CI
 
 on:
+  # Run CI for every branch so feature branches are validated on every push.
   push:
     branches:
-      - main
+      - '**'
+  # Validate pull requests regardless of their target branch.
   pull_request:
     branches:
-      - main
+      - '**'
   workflow_dispatch:
 
 permissions:
