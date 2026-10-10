@@ -191,7 +191,6 @@ class LocalQwen3Asr(private val entry: VoiceModelEntry) : LocalAsr {
         val stream = recognizer.createStream()
         return try {
             stream.acceptWaveform(audio, sampleRate)
-            stream.inputFinished()
             recognizer.decode(stream)
             AsrUpdate(recognizer.getResult(stream).text.trim(), true)
         } finally {
