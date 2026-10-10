@@ -163,8 +163,8 @@ class AppContainer(context: Context? = null) {
 
     fun createAgentSession(
         conversationId: String,
-        eventSink: suspend (AgentEvent) -> Unit = {},
         includeAgentTools: Boolean = true,
+        eventSink: suspend (AgentEvent) -> Unit = {},
     ): AgentSession? {
         if (appContext == null) return null
         val store = HistoryConversationStore(conversationHistory, conversationId)
