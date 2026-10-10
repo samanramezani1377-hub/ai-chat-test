@@ -58,7 +58,11 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     // Local-only ASR/TTS engines; no network inference or cloud API.
-    implementation("com.github.k2-fsa:sherpa-onnx:v1.13.8")
+    implementation("com.github.k2-fsa:sherpa-onnx:v1.13.8") {
+        // The Android AAR already bundles the sherpa Kotlin/JVM API classes.
+        // Exclude the duplicate JVM jar published as a transitive dependency.
+        exclude(group = "com.github.k2-fsa.sherpa-onnx", module = "sherpa-onnx-jvm")
+    }
     implementation("org.apache.commons:commons-compress:1.28.0")
 
     // Keep all Compose artifacts on Google's stable BOM so Gradle cannot resolve
