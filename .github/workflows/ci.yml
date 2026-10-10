@@ -99,7 +99,7 @@ jobs:
               '.github/workflows/ci.yml'
             ) }}
 
-      - name: Verify OpenCL GPU-only runtime invariants
+      - name: Verify OpenCL-first runtime invariants
         run: |
           set -euo pipefail
           ! grep -R "GGML_OPENCL_ADRENO_XMEM_GEMM.*1" -n core/runtime-android/src/main/cpp
@@ -108,19 +108,21 @@ jobs:
           # subgroup assumptions, so unsupported devices must fail closed.
           grep -q 'Do not spoof an unsupported GPU family' core/runtime-android/src/main/cpp/CMakeLists.txt
           ! grep -q 'AI_CHAT_ADRENO_A7X_FAMILY_EXPANSION_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
-          ! grep -q 'setenv("GGML_OPENCL_Q6K_GEMV_TILED"' core/runtime-android/src/main/cpp/native_runtime.cpp
+          # Match a real setenv call, not unsetenv (which contains setenv as a substring).
+          ! grep -Eq '(^|[^[:alnum:]_])setenv\("GGML_OPENCL_Q6K_GEMV_TILED"' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'GGML_OPENCL_USE_ADRENO_KERNELS OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
-          grep -q 'NATIVE_EXECUTION_POLICY mode=OPENCL_GPU_ONLY' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'wholeModelCpuFallback=disabled' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'GPU_ONLY_REJECTED_NO_OPENCL_GPU_DEVICE' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'NATIVE_EXECUTION_POLICY mode=OPENCL_GPU_PREFERRED' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'wholeModelCpuFallback=enabled' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'OPENCL_ATTEMPT_FAILED reason=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'CPU_FALLBACK_STARTED gpuAttempted=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'CPU_FALLBACK_FAILED reason=' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'OPENCL_MODEL_RESIDENCY_POLICY mode=' core/runtime-android/src/main/cpp/native_runtime.cpp
-          ! grep -Eq 'RETRYING_CPU|CPU_FALLBACK_MODEL|CPU_FALLBACK_CONTEXT' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'NATIVE_EXECUTION_PROFILE mode=' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
           grep -q 'AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V3' core/runtime-android/src/main/cpp/cmake/patch_backend_assignment_trace.cmake
           grep -q 'AI_CHAT_BACKEND_SPLIT_TIMING' core/runtime-android/src/main/cpp/cmake/patch_backend_assignment_trace.cmake
           grep -q 'AI_CHAT_OPENCL_PROFILING=ON' core/runtime-android/build.gradle.kts
           grep -q 'resident_max + 1' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          echo "OpenCL GPU-only policy, backend assignment, profiling, and KV-cache invariants verified"
+          echo "OpenCL-first fallback policy, backend assignment, profiling, and KV-cache invariants verified"
 
       - name: Assemble debug APK
         run: >-

@@ -127,13 +127,13 @@ static bool validate_gpu_model_residency() {
         std::to_string(cpu_tensors) + " otherBytes=" + std::to_string(other_bytes) +
         " otherTensors=" + std::to_string(other_tensors)).c_str());
 
-    // A GPU-only activation is accepted only when the loaded model has actual GPU
-    // weight buffers. CPU-side tokenization/sampling and scheduler-required operators
-    // are separate from silently loading the entire model on CPU.
+    // Accept the OpenCL attempt only when the loaded model has actual GPU weight
+    // buffers. If not, the caller releases this partial runtime and retries the same
+    // model on CPU; this is a fallback policy, not a GPU-only activation requirement.
     const bool has_gpu_weights = gpu_bytes > 0;
     append_native_trace((std::string("OPENCL_MODEL_RESIDENCY_POLICY mode=") +
-        (has_gpu_weights ? "OPENCL_GPU_RESIDENT" : "GPU_ONLY_REJECTED_NO_GPU_WEIGHTS") +
-        " wholeModelCpuFallback=disabled").c_str());
+        (has_gpu_weights ? "OPENCL_GPU_RESIDENT" : "OPENCL_REJECTED_NO_GPU_WEIGHTS") +
+        " wholeModelCpuFallback=enabled").c_str());
     return has_gpu_weights;
 }
 
@@ -1049,7 +1049,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     if (!path) { checkpoint("PATH_UTF8_FAILED"); return 3; }
     const std::string stable_model_path(path);
     g_spec_draft_path.clear(); g_spec_requested = false; g_spec_mtp = false; g_target_model_path.clear(); g_spec_accept_ema = 1.0;
-    // Draft/speculative decoding is removed from the product; retain the legacy JNI argument but never use it.\n    (void) jdraftpath;\n    g_spec_draft_path.clear(); g_spec_requested = false; g_spec_mtp = false; g_spec_accept_ema = 1.0;\n    append_native_trace("DRAFT_FEATURE_REMOVED");
+    // Draft/speculative decoding is removed from the product; retain the legacy JNI argument but never use it.
+    (void) jdraftpath;
+    g_spec_draft_path.clear();
+    g_spec_requested = false;
+    g_spec_mtp = false;
+    g_spec_accept_ema = 1.0;
+    append_native_trace("DRAFT_FEATURE_REMOVED");
     g_target_model_path = path;
     const std::string preflight = gguf_preflight(path); checkpoint(preflight.c_str());
     // Target activation must never implicitly enable speculative/MTP.
