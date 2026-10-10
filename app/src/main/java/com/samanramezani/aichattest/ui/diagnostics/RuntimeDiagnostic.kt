@@ -130,19 +130,19 @@ internal data class RuntimeDiagnostic(
         return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
     }
 
-    private fun preflightValue(key: String): String? {
+    fun preflightValue(key: String): String? {
         val text = nativeDiagnostics ?: return null
         val line = text.lineSequence().firstOrNull { it.startsWith("$key=") } ?: return null
         return line.substringAfter('=', "").takeIf { it.isNotBlank() }
     }
 
-    private val attemptedModelName: String?
+    val attemptedModelName: String?
         get() = preflightValue("path")?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
 
-    private val attemptedContext: String?
+    val attemptedContext: String?
         get() = preflightValue("requested_context")
 
-    private val attemptedGpuLayers: String?
+    val attemptedGpuLayers: String?
         get() = preflightValue("gpu_layers")
 }
 

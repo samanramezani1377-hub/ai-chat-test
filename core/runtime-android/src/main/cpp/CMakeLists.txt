@@ -155,7 +155,6 @@ if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_UNASSIGNED_NODE_DIAGNOSTICS_V1")
                     (ggml_backend_supports_op(sched->backends[ai_chat_b], node) ? "1" : "0");
             }
             GGML_LOG_ERROR("%s\n", ai_chat_support.c_str());
-            if (ai_chat_append_native_trace) ai_chat_append_native_trace(ai_chat_support.c_str());
             throw std::runtime_error(ai_chat_support);
         }]=])
     string(FIND "${_ai_chat_backend_source}" "${_ai_chat_unassigned_needle}" _ai_chat_unassigned_location)
@@ -217,7 +216,6 @@ if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1")
             " otherNodes=" + std::to_string(ai_chat_other_nodes) +
             " unassignedNodes=" + std::to_string(ai_chat_unassigned_nodes) +
             " cpuOpTypes=" + (ai_chat_cpu_op_summary.empty() ? "none" : ai_chat_cpu_op_summary);
-        if (ai_chat_append_native_trace) ai_chat_append_native_trace(ai_chat_assignment_line.c_str());
         GGML_LOG_DEBUG("%s\n", ai_chat_assignment_line.c_str());
     }
     if (sched->debug) {
