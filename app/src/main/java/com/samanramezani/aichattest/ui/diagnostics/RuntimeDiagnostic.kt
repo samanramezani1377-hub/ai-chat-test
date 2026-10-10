@@ -121,6 +121,14 @@ internal data class RuntimeDiagnostic(
         val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("NATIVE_PERF_PROFILE") && it.contains("$key=") } ?: return null
         return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
     }
+
+    private fun nativeExecutionValue(key: String): String? {
+        val text = nativeDiagnostics ?: return null
+        val line = text.lineSequence().toList().asReversed()
+            .firstOrNull { it.contains("NATIVE_EXECUTION_PROFILE") && it.contains("$key=") }
+            ?: return null
+        return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
+    }
 }
 
 internal fun RuntimeDiagnostic.report(): String = buildString {
@@ -166,6 +174,12 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("GPU Resident Tensors: ${weightResidency?.gpuTensors ?: "N/A"}")
     appendLine("GPU Resident Buffers: ${weightResidency?.gpuBuffers ?: "N/A"}")
     appendLine("Host Tensor Memory: ${weightResidency?.hostTensorMiB?.let { "%.1f MiB".format(it) } ?: "N/A"}")
+    appendLine()
+    appendLine("===== CPU / GPU EXECUTION POLICY =====")
+    appendLine("Execution Mode: ${nativeExecutionValue("mode") ?: "N/A"}")
+    appendLine("OpenCL Backend Registered: ${nativeExecutionValue("gpuBackendRegistered") ?: "N/A"}")
+    appendLine("CPU Measured Subtotal (sampling + logits + callbacks): ${nativeExecutionValue("cpuMeasuredSubtotalMs")?.let { "$it ms" } ?: "N/A"}")
+    appendLine("GPU Kernel Timings: measured separately by OpenCL events below; do not equate with decode wall time.")
     appendLine()
     appendLine("===== GPU / OPENCL KERNEL PROFILE =====")
     openClProfile?.reportLines()?.forEach(::appendLine)
