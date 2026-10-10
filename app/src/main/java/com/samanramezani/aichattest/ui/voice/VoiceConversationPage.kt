@@ -35,6 +35,9 @@ internal fun VoiceConversationPage(
     onBack: () -> Unit,
     onImportStt: () -> Unit,
     onImportTts: () -> Unit,
+    onImportTtsModel: () -> Unit,
+    onImportTtsConfig: () -> Unit,
+    onImportEspeakData: () -> Unit,
     onSelectStt: (String) -> Unit,
     onSelectTts: (String) -> Unit,
     onStart: () -> Unit,
@@ -89,7 +92,11 @@ internal fun VoiceConversationPage(
                         }
                     }
                 }
-                OutlinedButton(onClick = onImportTts, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن بستهٔ TTS (.zip یا .tar.bz2)") }
+                OutlinedButton(onClick = onImportTtsModel, modifier = Modifier.fillMaxWidth()) { Text("۱. وارد کردن fa_IR-amir-medium.onnx") }
+                OutlinedButton(onClick = onImportTtsConfig, modifier = Modifier.fillMaxWidth()) { Text("۲. وارد کردن فایل تنظیمات .onnx.json") }
+                OutlinedButton(onClick = onImportEspeakData, modifier = Modifier.fillMaxWidth()) { Text("۳. وارد کردن espeak-ng-data.tar.bz2") }
+                Text("اگر بستهٔ تبدیل‌شدهٔ sherpa-onnx را دارید، می‌توانید به‌جای سه مرحله، کل بسته را وارد کنید.", style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = onImportTts, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن بستهٔ کامل TTS (.zip یا .tar.bz2)") }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
