@@ -35,7 +35,7 @@ class MnnModelPackImporterTest {
             assertFailsWith<IllegalArgumentException> {
                 MnnModelPackImporter().unpack(ByteArrayInputStream(zip(entries)), root)
             }
-            assertTrue(!Files.exists(root.parent.resolve("escape.txt")))
+            assertTrue(!Files.exists(root.resolve("escape.txt")))
         } finally {
             MnnModelPackImporter().deleteRecursively(root)
         }
