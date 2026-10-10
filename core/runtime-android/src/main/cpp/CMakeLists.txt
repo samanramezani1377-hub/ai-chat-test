@@ -40,7 +40,7 @@ FetchContent_MakeAvailable(opencl_icd_loader)
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 set(GGML_OPENCL ON CACHE BOOL "Use OpenCL GPU backend" FORCE)
-# Android production runtime must link the OpenCL backend statically. Dynamic backend
+# Android runtime links the OpenCL backend statically when available. Dynamic backend
 # loading is unreliable on Android because ggml_backend_load_all() cannot discover
 # MODULE libraries from the APK's native library namespace.
 set(GGML_BACKEND_DL OFF CACHE BOOL "Disable dynamic ggml backend loading on Android" FORCE)
@@ -118,7 +118,7 @@ endforeach()
 target_include_directories(ggml-opencl PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
 
 if (NOT TARGET ggml-opencl)
-    message(FATAL_ERROR "GPU-only runtime requires the statically linked ggml-opencl target")
+    message(FATAL_ERROR "OpenCL-preferred runtime requires the statically linked ggml-opencl target")
 endif()
 target_include_directories(ggml-opencl PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
 
@@ -170,7 +170,6 @@ target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"
     AI_CHAT_GPU_BACKEND_OPENCL=1
     AI_CHAT_GPU_BACKEND_VULKAN=0
-    AI_CHAT_REQUIRE_OPENCL_GPU=1
 )
 
 if (ANDROID)
