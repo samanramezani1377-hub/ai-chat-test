@@ -173,10 +173,10 @@ static void save_cpu_tuning_state(const std::string &identity) {
             append_native_trace("NATIVE_CPU_AUTOTUNE_STORE status=write_failed");
             return;
         }
-        output << cpu_tuning_hash(identity) << '\\n';
+        output << cpu_tuning_hash(identity) << '\n';
         for (const auto &entry : g_cpu_thread_tuning) {
             output << entry.first << ' ' << entry.second.attempts << ' '
-                   << entry.second.samples << ' ' << entry.second.ema_tokens_per_sec << '\\n';
+                   << entry.second.samples << ' ' << entry.second.ema_tokens_per_sec << '\n';
         }
         output.flush();
         if (!output.good()) {
