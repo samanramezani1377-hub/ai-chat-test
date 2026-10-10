@@ -34,7 +34,7 @@ class Qwen3PromptFormatterTest {
         )
 
         assertEquals(
-            "<|im_start|>user\\nسلام<|im_end|>\\n<|im_start|>assistant\\n",
+            "<|im_start|>user\nسلام<|im_end|>\n<|im_start|>assistant\n",
             prompt,
         )
     }
