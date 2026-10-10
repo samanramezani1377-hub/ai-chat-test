@@ -363,6 +363,18 @@ class VoiceModelStore(
                 VoiceModelEntry(directory.name, model.nameWithoutExtension, kind, directory, model, tokensFile = tokens, dataDirectory = data)
             }
             VoiceModelKind.STT -> {
+                val simpleCtcModel = files.firstOrNull { it.name.equals("model.onnx", true) }
+                val simpleCtcTokens = files.firstOrNull { it.name.equals("tokens.txt", true) }
+                val hasTransducerParts = files.any { it.name.contains("encoder", true) } &&
+                    files.any { it.name.contains("decoder", true) }
+                if (simpleCtcModel != null && simpleCtcTokens != null && !hasTransducerParts &&
+                    simpleCtcModel.length() >= 1024 && simpleCtcTokens.length() > 0L) {
+                    return VoiceModelEntry(
+                        directory.name, "Shenava Rizeh-Pizeh · فارسی · 6.9M",
+                        kind, directory, simpleCtcModel, tokensFile = simpleCtcTokens,
+                        modelType = "nemo-ctc", asrMode = "nemo-ctc",
+                    )
+                }
                 val convFrontend = files.firstOrNull { it.name.equals("conv_frontend.onnx", true) }
                 val tokenizer = directory.walkTopDown().firstOrNull { it.isDirectory && it.name.equals("tokenizer", true) }
                 val encoder = files.firstOrNull { it.name.contains("encoder", true) && it.extension.equals("onnx", true) } ?: return null
