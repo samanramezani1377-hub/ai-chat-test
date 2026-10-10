@@ -79,8 +79,7 @@ if (NOT _sched MATCHES "AI_CHAT_BACKEND_SPLIT_TIMING")
                 const struct ggml_tensor * ai_chat_last = split->graph.n_nodes > 0 ? split->graph.nodes[split->graph.n_nodes - 1] : nullptr;
                 const double ai_chat_elapsed_ms = std::chrono::duration<double, std::milli>(
                     ai_chat_split_finished - ai_chat_split_started).count();
-                GGML_LOG_INFO("AI_CHAT_BACKEND_SPLIT_TIMING backend=%s nodes=%d firstOp=%s firstName=%s lastOp=%s lastName=%s elapsedMs=%.3f sampleEvery=8
-",
+                GGML_LOG_INFO("AI_CHAT_BACKEND_SPLIT_TIMING backend=%s nodes=%d firstOp=%s firstName=%s lastOp=%s lastName=%s elapsedMs=%.3f sampleEvery=8",
                     ai_chat_backend_name.c_str(), split->graph.n_nodes,
                     ai_chat_first ? ggml_op_name(ai_chat_first->op) : "none",
                     ai_chat_first ? ai_chat_first->name : "none",
