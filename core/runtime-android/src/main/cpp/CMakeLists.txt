@@ -243,7 +243,9 @@ endif()
 # including when CMake reconfigures an already-patched FetchContent checkout.
 file(READ "${_ai_chat_backend_cpp}" _ai_chat_backend_include_source)
 if(NOT _ai_chat_backend_include_source MATCHES "#include <stdexcept>")
-    string(REPLACE "#include <string>" "#include <string>\\n#include <stdexcept>"
+    set(_ai_chat_stdexcept_include [=[#include <string>
+#include <stdexcept>]=])
+    string(REPLACE "#include <string>" "${_ai_chat_stdexcept_include}"
         _ai_chat_backend_include_source "${_ai_chat_backend_include_source}")
     file(WRITE "${_ai_chat_backend_cpp}" "${_ai_chat_backend_include_source}")
 endif()
