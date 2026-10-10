@@ -66,8 +66,8 @@ static int generation_threads() {
 
 static int batch_threads() {
     const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
-    // Prompt evaluation benefits from more host workers for scheduling/token
-    // preparation while model inference remains GPU-only.
+    // Prompt evaluation benefits from host workers for scheduling/token preparation;
+    // ggml may route unsupported operations to CPU while supported ops use OpenCL.
     return std::clamp((int)cores - 2, 4, 6);
 }
 
@@ -806,6 +806,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         // registered vendor paths instead, and record the actual search paths.
         unsetenv("OCL_ICD_FILENAMES");
         unsetenv("AI_CHAT_OPENCL_ALLOW_DIRECT_PROVIDER");
+        setenv("AI_CHAT_BACKEND_TRACE", "1", 0);
+        append_native_trace("NATIVE_BACKEND_ASSIGNMENT_TRACE=one_shot_per_process");
         // Do not override the Android ICD vendor directory. Khronos documents
         // OCL_ICD_VENDORS as a replacement for the loader's default search path;
         // hard-coding guessed directories can hide the device vendor's real ICD.
@@ -992,7 +994,7 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
     // Do not force token_embd onto OpenCL. llama.cpp's backend placement is
     // architecture/device aware; overriding the embedding buffer here adds a
     // large device allocation and has caused avoidable load pressure on Android.
-    // GPU-only residency is still enforced after the model is loaded.
+    // GPU residency is measured for diagnostics; mixed CPU/GPU placement is allowed.
     checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_PREFERRED_CPU_OP_FALLBACK" : "ANDROID_MODEL_LOAD_POLICY_CPU_FALLBACK");
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
