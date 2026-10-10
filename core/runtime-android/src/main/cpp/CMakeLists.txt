@@ -94,6 +94,42 @@ if(NOT _ai_chat_dsv4_context_verify MATCHES "AI_CHAT_ANDROID_DISABLE_DSV4_HC_VUL
     message(FATAL_ERROR "Android Vulkan DSV4 HC stability mitigation was not applied")
 endif()
 
+# Qwen3.5-style hybrid models contain recurrent Gated-Delta-Net layers. In this
+# Android Vulkan runtime, the fused GDN and Lightning-Indexer paths have not been
+# validated on Mali drivers; use the equivalent unfused graph until device tests
+# prove these fused kernels safe. This preserves model weights and numerical
+# semantics while avoiding unsupported fused-op pipelines during context reserve.
+if (ANDROID)
+    if (NOT _ai_chat_dsv4_context_verify MATCHES "AI_CHAT_ANDROID_DISABLE_VULKAN_FUSED_RECURRENT_V1")
+        foreach(_ai_chat_fused_setting
+                "cparams.fused_gdn_ar = true;"
+                "cparams.fused_gdn_ch = true;"
+                "cparams.fused_lid = true;")
+            string(FIND "${_ai_chat_dsv4_context_verify}" "${_ai_chat_fused_setting}" _ai_chat_fused_location)
+            if(_ai_chat_fused_location EQUAL -1)
+                message(FATAL_ERROR "Could not locate pinned llama.cpp fused recurrent setting: ${_ai_chat_fused_setting}")
+            endif()
+            string(REPLACE "${_ai_chat_fused_setting}"
+                "${_ai_chat_fused_setting}\\n    // AI_CHAT_ANDROID_DISABLE_VULKAN_FUSED_RECURRENT_V1: use portable unfused graph on Android Vulkan."
+                _ai_chat_dsv4_context_verify "${_ai_chat_dsv4_context_verify}")
+        endforeach()
+        string(REPLACE "cparams.fused_gdn_ar = true;" "cparams.fused_gdn_ar = false;"
+            _ai_chat_dsv4_context_verify "${_ai_chat_dsv4_context_verify}")
+        string(REPLACE "cparams.fused_gdn_ch = true;" "cparams.fused_gdn_ch = false;"
+            _ai_chat_dsv4_context_verify "${_ai_chat_dsv4_context_verify}")
+        string(REPLACE "cparams.fused_lid = true;" "cparams.fused_lid = false;"
+            _ai_chat_dsv4_context_verify "${_ai_chat_dsv4_context_verify}")
+        file(WRITE "${_ai_chat_dsv4_context_cpp}" "${_ai_chat_dsv4_context_verify}")
+    endif()
+    file(READ "${_ai_chat_dsv4_context_cpp}" _ai_chat_fused_verify)
+    if(NOT _ai_chat_fused_verify MATCHES "AI_CHAT_ANDROID_DISABLE_VULKAN_FUSED_RECURRENT_V1" OR
+       _ai_chat_fused_verify MATCHES "cparams.fused_gdn_ar[ ]*= true;" OR
+       _ai_chat_fused_verify MATCHES "cparams.fused_gdn_ch[ ]*= true;" OR
+       _ai_chat_fused_verify MATCHES "cparams.fused_lid[ ]*= true;")
+        message(FATAL_ERROR "Android Vulkan fused recurrent-op mitigation was not applied")
+    endif()
+endif()
+
 # Keep CPU available for host/control tensors and as a last-resort backend for
 # individual operators that no GPU backend supports. The normal ggml scheduler
 # orders Vulkan before CPU, so supported inference ops remain on Vulkan; CPU is
@@ -324,7 +360,8 @@ target_compile_options(ai_chat_runtime PRIVATE
 )
 target_link_options(ai_chat_runtime PRIVATE
     -Wl,--gc-sections
-    -Wl,--strip-all
+    # Preserve native function symbols so Android tombstones can be symbolicated.
+    -Wl,--strip-debug
 )
 
 target_link_libraries(ai_chat_runtime PRIVATE

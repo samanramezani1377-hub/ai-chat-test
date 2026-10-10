@@ -17,6 +17,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <ucontext.h>
+#include <sys/syscall.h>
 #include "llama.h"
 #include "gguf.h"
 #include "llama-model.h"
@@ -300,6 +301,14 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
         native_write_hex(g_native_fatal_fd, addr_prefix, info ? (uintptr_t)info->si_addr : 0);
         fsync(g_native_fatal_fd);
     }
+    // Do not swallow the fatal signal: re-raise it with the default disposition
+    // so Android's debuggerd writes a native tombstone/backtrace. The old _exit()
+    // erased the only reliable path to symbolicate SIGABRT during context init.
+    struct sigaction default_action{};
+    default_action.sa_handler = SIG_DFL;
+    sigemptyset(&default_action.sa_mask);
+    sigaction(signal_number, &default_action, nullptr);
+    syscall(SYS_tgkill, getpid(), syscall(SYS_gettid), signal_number);
     _exit(128 + signal_number);
 }
 
