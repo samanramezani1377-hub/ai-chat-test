@@ -202,6 +202,13 @@ static void append_native_trace(const char *text) {
     }
 }
 
+// Optional bridge used by the patched ggml scheduler to add backend placement
+// summaries to the same report file consumed by RuntimeDiagnostic. The weak
+// reference on the ggml side keeps other consumers of the vendored source linkable.
+extern "C" void ai_chat_append_native_trace(const char *text) {
+    append_native_trace(text);
+}
+
 static const char *native_signal_name(int signal_number) {
     switch (signal_number) {
         case SIGSEGV: return "SIGSEGV";

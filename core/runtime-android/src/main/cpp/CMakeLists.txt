@@ -157,10 +157,16 @@ if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1")
             if (!ai_chat_cpu_op_summary.empty()) ai_chat_cpu_op_summary += ",";
             ai_chat_cpu_op_summary += ai_chat_entry.first + ":" + std::to_string(ai_chat_entry.second);
         }
-        GGML_LOG_DEBUG("AI_CHAT_BACKEND_GRAPH_ASSIGNMENT nodes=%d splits=%d gpuNodes=%d cpuNodes=%d otherNodes=%d unassignedNodes=%d cpuOpTypes=%s\n",
-            graph->n_nodes, sched->n_splits, ai_chat_gpu_nodes, ai_chat_cpu_nodes,
-            ai_chat_other_nodes, ai_chat_unassigned_nodes,
-            ai_chat_cpu_op_summary.empty() ? "none" : ai_chat_cpu_op_summary.c_str());
+        const std::string ai_chat_assignment_line =
+            std::string("AI_CHAT_BACKEND_GRAPH_ASSIGNMENT nodes=") + std::to_string(graph->n_nodes) +
+            " splits=" + std::to_string(sched->n_splits) +
+            " gpuNodes=" + std::to_string(ai_chat_gpu_nodes) +
+            " cpuNodes=" + std::to_string(ai_chat_cpu_nodes) +
+            " otherNodes=" + std::to_string(ai_chat_other_nodes) +
+            " unassignedNodes=" + std::to_string(ai_chat_unassigned_nodes) +
+            " cpuOpTypes=" + (ai_chat_cpu_op_summary.empty() ? "none" : ai_chat_cpu_op_summary);
+        if (ai_chat_append_native_trace) ai_chat_append_native_trace(ai_chat_assignment_line.c_str());
+        GGML_LOG_DEBUG("%s\n", ai_chat_assignment_line.c_str());
     }
     if (sched->debug) {
         ggml_backend_sched_print_assignments(sched, graph);
@@ -171,6 +177,7 @@ if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1")
     endif()
     if(NOT _ai_chat_backend_source MATCHES "#include <string>")
         string(REPLACE "#include <unordered_map>" "#include <unordered_map>\n#include <string>" _ai_chat_backend_source "${_ai_chat_backend_source}")
+        string(REPLACE "#include <unordered_map>" "#include <unordered_map>\n#include <string>\n#if defined(__GNUC__)\\nextern \\"C\\" void ai_chat_append_native_trace(const char *) __attribute__((weak));\\n#endif" _ai_chat_backend_source "${_ai_chat_backend_source}")
     endif()
     string(REPLACE "${_ai_chat_assignment_needle}" "${_ai_chat_assignment_replacement}" _ai_chat_backend_source "${_ai_chat_backend_source}")
     file(WRITE "${_ai_chat_backend_cpp}" "${_ai_chat_backend_source}")
