@@ -36,6 +36,7 @@ static void clear_android_generation_cache() {
 #include <algorithm>
 #include <cmath>
 #include <sched.h>
+#include <cstdio>
 
 static std::mutex g_native_runtime_mutex;
 static bool g_spec_requested=false;
