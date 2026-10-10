@@ -8,6 +8,8 @@ import com.woogit.aicore.domain.ModelFormat
 import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
+import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
+import com.woogit.aicore.runtime.RuntimeTraceEvent
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
@@ -19,6 +21,7 @@ class MnnAndroidRuntimeAdapter(private val cpuThreads: Int = 4) : RuntimeAdapter
     private val mutex = Mutex()
     private val stopped = AtomicBoolean(false)
     @Volatile private var backend = "unloaded"
+    @Volatile private var backendReason = "not_loaded"
     @Volatile private var loadedConfig: String? = null
     @Volatile private var lastResult: GenerationResult? = null
     @Volatile private var lastLoadMs: Long? = null
@@ -37,10 +40,13 @@ class MnnAndroidRuntimeAdapter(private val cpuThreads: Int = 4) : RuntimeAdapter
         var loadError: Throwable? = null
         val elapsed = measureTimeMillis {
             try {
-                val selected = MnnNative.nativeLoad(config.absolutePath, cpuThreads)
-                require(!selected.startsWith("ERROR:")) { "MNN load failed: $selected" }
-                backend = selected
+                val selection = MnnNative.nativeLoad(config.absolutePath, cpuThreads)
+                require(!selection.startsWith("ERROR:")) { "MNN load failed: $selection" }
+                backend = selection.substringBefore(";")
+                backendReason = selection.substringAfter(";", "none")
                 loadedConfig = config.absolutePath
+                RuntimeDiagnosticsStore.recordNativeEvent("MNN_BACKEND_SELECTED backend=$backend fallbackReason=$backendReason")
+                RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "MNN_BACKEND_SELECTED backend=$backend fallbackReason=$backendReason")
             } catch (t: Throwable) {
                 loadError = t
                 backend = "failed"
@@ -56,6 +62,7 @@ class MnnAndroidRuntimeAdapter(private val cpuThreads: Int = 4) : RuntimeAdapter
         stopped.set(true)
         runCatching { MnnNative.nativeUnload() }
         backend = "unloaded"
+        backendReason = "not_loaded"
         loadedConfig = null
         lastResult = null
         stopped.set(false)
@@ -74,9 +81,15 @@ class MnnAndroidRuntimeAdapter(private val cpuThreads: Int = 4) : RuntimeAdapter
         }.toTypedArray()
         val contents = request.messages.map(ChatMessage::content).toTypedArray()
         val started = System.nanoTime()
+        val previousBackend = backend
         val text = MnnNative.nativeGenerate(roles, contents, request.settings.maxNewTokens)
         val elapsed = (System.nanoTime() - started) / 1_000_000
-        backend = runCatching { MnnNative.nativeBackend() }.getOrDefault(backend)
+        val status = runCatching { MnnNative.nativeBackend() }.getOrDefault(backend)
+        backend = status.substringBefore(";")
+        backendReason = status.substringAfter(";", backendReason)
+        if (backend != previousBackend || backendReason != "none") {
+            RuntimeDiagnosticsStore.recordNativeEvent("MNN_BACKEND_AFTER_GENERATION backend=$backend fallbackReason=$backendReason")
+        }
         if (text.startsWith("ERROR:")) {
             backend = runCatching { MnnNative.nativeBackend() }.getOrDefault("failed")
             throw IllegalStateException("MNN generation failed: ${text.removePrefix("ERROR:")}")
@@ -94,7 +107,7 @@ class MnnAndroidRuntimeAdapter(private val cpuThreads: Int = 4) : RuntimeAdapter
     override fun runtimeInfo(): RuntimeInfo = RuntimeInfo(
         name = "MNN-LLM",
         version = "3.6.1",
-        backend = backend,
+        backend = if (backendReason == "none" || backend == "unloaded") backend else "$backend (fallback: $backendReason)",
         threads = if (backend == "cpu") cpuThreads else null,
         gpuLayers = null,
         contextLength = null,
