@@ -18,6 +18,7 @@ static std::mutex g_mutex;
 static Llm* g_llm = nullptr;
 static std::string g_config_path;
 static std::string g_backend = "unloaded";
+static std::string g_backend_reason = "not_loaded";
 static int g_cpu_threads = 4;
 static std::atomic_bool g_stop{false};
 static std::string from_jstring(JNIEnv* env, jstring value) {
@@ -55,16 +56,19 @@ static bool load_with_fallback_locked(const std::string& config, int threads) {
     g_config_path = config;
     g_cpu_threads = std::max(1, std::min(threads, 8));
     g_stop.store(false);
+    g_backend_reason = "none";
     if (create_and_load_locked(config, "opencl", 68)) {
         LOGI("MNN_BACKEND_SELECTED backend=opencl policy=opencl-first");
         return true;
     }
+    g_backend_reason = "opencl_load_failed";
     LOGW("MNN_OPENCL_LOAD_FAILED fallback=cpu");
     if (create_and_load_locked(config, "cpu", g_cpu_threads)) {
         LOGI("MNN_BACKEND_SELECTED backend=cpu reason=opencl_load_failed");
         return true;
     }
     g_backend = "failed";
+    g_backend_reason = "opencl_and_cpu_load_failed";
     LOGE("MNN_BOTH_BACKENDS_FAILED config=%s", config.c_str());
     return false;
 }
@@ -74,7 +78,7 @@ Java_com_woogit_aicore_runtime_mnn_MnnNative_nativeLoad(JNIEnv* env, jclass, jst
     const std::string config = from_jstring(env, configPath);
     if (config.empty()) return env->NewStringUTF("ERROR:empty_config_path");
     if (!load_with_fallback_locked(config, cpuThreads)) return env->NewStringUTF("ERROR:opencl_and_cpu_load_failed");
-    return env->NewStringUTF(g_backend.c_str());
+    return env->NewStringUTF((g_backend + ";" + g_backend_reason).c_str());
 }
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_woogit_aicore_runtime_mnn_MnnNative_nativeGenerate(JNIEnv* env, jclass, jobjectArray roles, jobjectArray contents, jint maxTokens) {
@@ -114,6 +118,7 @@ Java_com_woogit_aicore_runtime_mnn_MnnNative_nativeGenerate(JNIEnv* env, jclass,
     if (g_stop.load()) return env->NewStringUTF(output.c_str());
     if (g_backend == "opencl") {
         LOGW("MNN_OPENCL_GENERATION_FAILED retry=cpu partial_chars=%zu", output.size());
+        g_backend_reason = "opencl_generation_failed";
         if (create_and_load_locked(g_config_path, "cpu", g_cpu_threads)) {
             output.clear();
             if (run(g_llm, output)) {
@@ -142,10 +147,11 @@ Java_com_woogit_aicore_runtime_mnn_MnnNative_nativeUnload(JNIEnv*, jclass) {
     std::lock_guard<std::mutex> lock(g_mutex);
     destroy_llm_locked();
     g_backend = "unloaded";
+    g_backend_reason = "not_loaded";
     g_config_path.clear();
 }
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_woogit_aicore_runtime_mnn_MnnNative_nativeBackend(JNIEnv* env, jclass) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    return env->NewStringUTF(g_backend.c_str());
+    return env->NewStringUTF((g_backend + ";" + g_backend_reason).c_str());
 }
