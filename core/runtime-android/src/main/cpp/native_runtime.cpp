@@ -39,6 +39,8 @@ static bool g_gpu = false;
 static std::string g_native_marker_file;
 static std::string g_native_trace_file;
 static int g_native_fatal_fd = -1;
+// String literals only: safe to read from the fatal signal handler.
+static const char * volatile g_native_phase = "NATIVE_INIT";
 static std::mutex g_native_marker_mutex;
 static std::mutex g_backend_init_mutex;
 static bool g_backend_initialized = false;
@@ -278,6 +280,14 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
         }
         phase[phase_len] = '\0';
         native_write_text(g_native_fatal_fd, phase, phase_len);
+        native_write_text(g_native_fatal_fd, "\n", 1);
+        // Separate the runtime phase from speculative-decoding state.
+        const char runtime_phase_prefix[] = "NATIVE_FATAL_PHASE=";
+        native_write_text(g_native_fatal_fd, runtime_phase_prefix, sizeof(runtime_phase_prefix) - 1);
+        const char *runtime_phase = g_native_phase ? g_native_phase : "UNKNOWN";
+        size_t runtime_phase_len = 0;
+        while (runtime_phase_len < 95 && runtime_phase[runtime_phase_len]) ++runtime_phase_len;
+        native_write_text(g_native_fatal_fd, runtime_phase, runtime_phase_len);
         native_write_text(g_native_fatal_fd, "\n", 1);
         native_write_hex(g_native_fatal_fd, pc_prefix, pc);
         native_write_hex(g_native_fatal_fd, lr_prefix, lr);
@@ -688,8 +698,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         " load_mode=" + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
     checkpoint("MODEL_LOAD_STARTED gpu_layers=OPENGL_ES");
+    g_native_phase = "MODEL_LOAD";
     g_model = load_model_android(path, mp, true);
     checkpoint(g_model ? "MODEL_LOAD_RETURNED_SUCCESS" : "MODEL_LOAD_RETURNED_FAILED");
+    g_native_phase = "MODEL_LOAD_RETURNED";
     if (!g_model) {
         append_native_trace("OPENGL_ES_MODEL_LOAD_FAILURE_STAGE=llama_model_load_from_file_returned_null");
         append_native_trace("OPENGL_ES_MODEL_LOAD_FAILURE_NO_CPU_FALLBACK=1");
@@ -727,9 +739,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     const int effective = std::max(1, std::min(requested, trained));
     checkpoint((std::string("MODEL_READY trained_ctx=") + std::to_string(trained) + " effective_ctx=" + std::to_string(effective)).c_str());
     g_context_length = (uint32_t)effective;
+    g_native_phase = "LLAMA_CONTEXT_INIT";
     checkpoint("CONTEXT_INIT_STARTED");
+    checkpoint("CONTEXT_INIT_ENTER_LLAMA_INIT_FROM_MODEL");
     const bool context_ready = init_generation_context();
+    checkpoint("CONTEXT_INIT_RETURNED_FROM_LLAMA_INIT");
     checkpoint(context_ready ? "CONTEXT_INIT_RETURNED_SUCCESS" : "CONTEXT_INIT_RETURNED_FAILED");
+    g_native_phase = context_ready ? "CONTEXT_READY" : "CONTEXT_INIT_FAILED";
     if (!context_ready) { checkpoint("CONTEXT_INIT_FAILED"); free_all(); return 2; }
     append_native_trace("TARGET_RUNTIME_READY_BEFORE_SPECULATIVE");
     if (g_spec_requested) {

@@ -157,7 +157,10 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
         "OPENGL_ES_INIT_FAILED", "OPENGL_ES_RESIDENCY_SUMMARY",
         "NATIVE_WEIGHT_RESIDENCY", "CONTEXT_INIT_STARTED", "CONTEXT_INIT_RETURNED_FAILED",
         "CONTEXT_INIT_FAILED", "llama_init_from_model", "MODEL_LOAD_FAILURE",
-        "failed to initialize", "OutOfMemory", "exception", "allocation failed"
+        "failed to initialize", "OutOfMemory", "exception", "allocation failed",
+        "NATIVE_FATAL_SIGNAL", "NATIVE_FATAL_SIGNAL_NAME", "NATIVE_FATAL_SI_CODE",
+        "NATIVE_FATAL_PHASE", "NATIVE_FATAL_PC", "NATIVE_FATAL_LR", "NATIVE_FATAL_FAULT_ADDR",
+        "CONTEXT_INIT_ENTER_LLAMA_INIT_FROM_MODEL", "CONTEXT_INIT_RETURNED_FROM_LLAMA_INIT"
     )
     val technicalLines = diagnosticMarkers.flatMap { marker ->
         nativeLines.filter { it.contains(marker, ignoreCase = true) }.takeLast(2)
@@ -169,7 +172,12 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     val keyLines = (technicalLines.ifEmpty { fallbackLines }).takeLast(10)
 
     appendLine("AI Chat Test — گزارش عیب‌یابی (حداکثر ۵۰ خط)")
-    appendLine("Status: $status | Execution: ${executionId ?: "N/A"}")
+    val nativeLinesForState = nativeDiagnostics.orEmpty().lineSequence().toList()
+    val contextStart = nativeLinesForState.indexOfLast { it.contains("CONTEXT_INIT_STARTED") }
+    val contextSuccess = nativeLinesForState.indexOfLast { it.contains("CONTEXT_INIT_RETURNED_SUCCESS") || it.contains("NATIVE_LOAD_COMPLETED") }
+    val nativeContextInterrupted = contextStart >= 0 && contextSuccess < contextStart
+    val displayStatus = if (nativeContextInterrupted && (status.equals("READY", true) || status.equals("FAILED", true))) "FAILED — native context initialization interrupted" else status
+    appendLine("Status: $displayStatus | Execution: ${executionId ?: "N/A"}")
     appendLine("Model: ${model?.displayName ?: "N/A"} | Format: ${model?.format ?: "N/A"} | Quantization: ${model?.quantization ?: "N/A"}")
     appendLine("Runtime: ${runtime.name} ${runtime.version} | Backend: ${runtime.backend ?: "N/A"}")
     appendLine("Device: ${gpuDevice?.name ?: "N/A"}")
@@ -184,11 +192,28 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("KV cache: ${perf.cacheStatus ?: "N/A"} | cached=${perf.cachedTokens ?: "N/A"} reused=${perf.reusedTokens ?: "N/A"} new=${perf.newTokens ?: "N/A"}")
     appendLine("Settings: temp=${settings?.temperature ?: "N/A"} topP=${settings?.topP ?: "N/A"} topK=${settings?.topK ?: "N/A"} minP=${settings?.minP ?: "N/A"}")
     appendLine("Generation config: maxTokens=${settings?.maxNewTokens ?: "N/A"} context=${settings?.contextLength ?: "N/A"} repeatPenalty=${settings?.repeatPenalty ?: "N/A"} seed=${settings?.seed ?: "N/A"}")
+    val fatalSignal = nativeLinesForState.lastOrNull { it.startsWith("NATIVE_FATAL_SIGNAL_NAME=") }
+        ?: nativeLinesForState.lastOrNull { it.startsWith("NATIVE_FATAL_SIGNAL=") }
+    val fatalPhase = nativeLinesForState.lastOrNull { it.startsWith("NATIVE_FATAL_PHASE=") }
+    val fatalPc = nativeLinesForState.lastOrNull { it.startsWith("NATIVE_FATAL_PC=") }
+    val fatalLr = nativeLinesForState.lastOrNull { it.startsWith("NATIVE_FATAL_LR=") }
+    val fatalAddress = nativeLinesForState.lastOrNull { it.startsWith("NATIVE_FATAL_FAULT_ADDR=") }
     if (resolved != null) {
         appendLine("Error: ${resolved.code} | ${resolved.title}")
         appendLine("Meaning: ${resolved.message}")
         appendLine("Suggested action: ${resolved.action}")
+    } else if (fatalSignal != null) {
+        appendLine("Error: ${fatalSignal.substringAfter('=')} | ${fatalPhase?.substringAfter('=') ?: "native phase unavailable"}")
+    } else if (nativeContextInterrupted) {
+        appendLine("Error: Native context initialization did not reach READY")
+        appendLine("Failure stage: CONTEXT_INIT_STARTED without a later successful context-ready marker")
     } else appendLine("Error: N/A")
+    if (fatalSignal != null) {
+        appendLine("Native fatal: ${fatalSignal.substringAfter('=')} | phase=${fatalPhase?.substringAfter('=') ?: "N/A"}")
+        fatalPc?.let { appendLine(it) }
+        fatalLr?.let { appendLine(it) }
+        fatalAddress?.let { appendLine(it) }
+    }
     val cleanError = (rawError ?: error)?.replace(Regex("\\s+"), " ")?.take(220)
     if (!cleanError.isNullOrBlank()) appendLine("Raw error: $cleanError")
     appendLine("----- Key native diagnostics -----")

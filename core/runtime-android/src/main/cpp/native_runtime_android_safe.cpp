@@ -580,6 +580,23 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
         }
         native_write_text(g_native_fatal_fd, value, (size_t) n);
         native_write_text(g_native_fatal_fd, "\n", 1);
+        const char *signal_name = signal_number == SIGABRT ? "SIGABRT" :
+            signal_number == SIGSEGV ? "SIGSEGV" :
+            signal_number == SIGBUS ? "SIGBUS" :
+            signal_number == SIGILL ? "SIGILL" :
+            signal_number == SIGFPE ? "SIGFPE" : "UNKNOWN";
+        const char name_prefix[] = "NATIVE_FATAL_SIGNAL_NAME=";
+        native_write_text(g_native_fatal_fd, name_prefix, sizeof(name_prefix) - 1);
+        native_write_text(g_native_fatal_fd, signal_name, strlen(signal_name));
+        native_write_text(g_native_fatal_fd, "\n", 1);
+        const char phase_prefix[] = "NATIVE_FATAL_PHASE=";
+        native_write_text(g_native_fatal_fd, phase_prefix, sizeof(phase_prefix) - 1);
+        const char *phase = g_native_phase ? g_native_phase : "UNKNOWN";
+        size_t phase_len = 0;
+        while (phase_len < 95 && phase[phase_len]) ++phase_len;
+        native_write_text(g_native_fatal_fd, phase, phase_len);
+        native_write_text(g_native_fatal_fd, "\n", 1);
+        native_write_hex(g_native_fatal_fd, "NATIVE_FATAL_SI_CODE=", info ? (uintptr_t) info->si_code : 0);
         uintptr_t pc = 0;
         uintptr_t lr = 0;
 #if defined(__aarch64__)

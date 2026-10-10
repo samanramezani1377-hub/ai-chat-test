@@ -13,6 +13,8 @@ NATIVE = ROOT / "core/runtime-android/src/main/cpp/native_runtime.cpp"
 GPU = ROOT / "core/runtime-android/src/main/cpp/ggml-opengles/ggml-opengles.cpp"
 ADAPTER = ROOT / "core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/LlamaCppAndroidRuntimeAdapter.kt"
 BRIDGE = ROOT / "core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/NativeLlamaCpp.kt"
+ACTIVE_NATIVE = ROOT / "core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp"
+CMAKE = ROOT / "core/runtime-android/src/main/cpp/CMakeLists.txt"
 
 
 def section(text: str, start: str, end: str) -> str:
@@ -24,13 +26,13 @@ def section(text: str, start: str, end: str) -> str:
 
 
 def main() -> int:
-    paths = [NATIVE, GPU, ADAPTER, BRIDGE]
+    paths = [NATIVE, GPU, ADAPTER, BRIDGE, ACTIVE_NATIVE, CMAKE]
     missing = [str(p.relative_to(ROOT)) for p in paths if not p.is_file()]
     if missing:
         print("FAIL: missing source(s): " + ", ".join(missing), file=sys.stderr)
         return 2
 
-    native, gpu, adapter, bridge = [p.read_text(encoding="utf-8") for p in paths]
+    native, gpu, adapter, bridge, active_native, cmake = [p.read_text(encoding="utf-8") for p in paths]
     load = section(native, "Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad", "Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeStop")
     context = section(native, "static bool init_generation_context() {", "static bool init_speculative_runtime() {")
     support = section(gpu, "static bool supports_op", "static enum ggml_status graph_compute")
@@ -50,9 +52,36 @@ def main() -> int:
          load.find('checkpoint("NATIVE_LOAD_COMPLETED")') > load.find("init_generation_context()")),
         ("context setup requires a loaded model and nonzero context",
          "if (!g_model || g_context_length == 0) return false;" in context),
+        ("native fatal handler records broad runtime phase separately from speculative phase",
+         "NATIVE_FATAL_PHASE=" in native and 'g_native_phase = "LLAMA_CONTEXT_INIT"' in load),
+        ("context-init trace brackets llama_init_from_model for crash localization",
+         "CONTEXT_INIT_ENTER_LLAMA_INIT_FROM_MODEL" in load and
+         "CONTEXT_INIT_RETURNED_FROM_LLAMA_INIT" in load),
+        ("native fatal report retains PC/LR/fault address markers",
+         all(token in native for token in ("NATIVE_FATAL_PC=", "NATIVE_FATAL_LR=", "NATIVE_FATAL_FAULT_ADDR="))),
+        ("installed Android fatal handler reports signal name and runtime phase",
+         all(token in active_native for token in ("NATIVE_FATAL_SIGNAL_NAME=", "NATIVE_FATAL_PHASE=", "g_native_phase"))),
+        ("pinned llama.cpp scheduler exposes internal reservation stage markers",
+         all(token in cmake for token in ("AI_CHAT_SCHEDULER_TRACE_PATCH", "AI_CHAT_SCHED_STAGE=before_backend_scheduler_create", "AI_CHAT_SCHED_STAGE=before_memory_init_full", "AI_CHAT_SCHED_STAGE=before_resolve_fused_ops", "AI_CHAT_SCHED_STAGE=before_prompt_graph_reserve", "AI_CHAT_SCHED_STAGE=before_token_graph_reserve", "AI_CHAT_SCHED_STAGE=reserve_graphs_completed"))),
+        ("GPU memory marked unknown is not reported as a measured zero",
+         'if (nativeField(line, "memoryKnown") == "1")' in
+         (ROOT / "core/runtime/src/main/kotlin/com/woogit/aicore/runtime/RuntimeDiagnostics.kt").read_text(encoding="utf-8")),
         ("GDN scheduler support is not gated by a shader handle compiled later",
          "GGML_OP_GATED_DELTA_NET" in support and
          re.search(r"if\s*\(op->op == GGML_OP_GATED_DELTA_NET.*?g_gdn\s*!=\s*0", support, re.S) is None),
+        ("graph-result allocation stages are traced inside llama_graph_result::reset",
+         all(marker in cmake for marker in (
+             "AI_CHAT_GRAPH_RESULT_STAGE=before_compute_meta_resize",
+             "AI_CHAT_GRAPH_RESULT_STAGE=before_ggml_init",
+             "AI_CHAT_GRAPH_RESULT_STAGE=before_new_graph_custom",
+             "AI_CHAT_GRAPH_RESULT_STAGE=after_new_graph_custom"))),
+        ("GPU-only scheduler no longer trips llama.cpp's CPU-last assertion",
+         "AI_CHAT_GPU_ONLY_SCHEDULER_TAIL_PATCH" in cmake and
+         "CPU backend is intentionally absent" in cmake and
+         "GGML_BACKEND_DEVICE_TYPE_CPU" in cmake),
+        ("scheduler remains GPU-only rather than restoring a CPU fallback",
+         "if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU) {" in cmake and
+         "continue;" in cmake and "OPENGL_ES_GPU_ONLY_NO_CPU_FALLBACK" in load),
         ("required GDN shader compilation failure is detected before dispatch",
          'compile_compute(gated_delta_net_shader(), "gated_delta_net")' in ensure and
          "(caps.max_compute_ssbo_blocks < 7 || g_gdn != 0)" in ensure),

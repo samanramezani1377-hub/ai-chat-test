@@ -46,14 +46,25 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
     LaunchedEffect(Unit) { RuntimeDiagnosticsStore.refreshNativeEvent() }
 
     val selectedActions = actionTraces.filter { execution == null || it.executionId == execution.id }
+    val nativeActivationIncomplete = remember(runtime.lastNativeEvent) {
+        val lines = runtime.lastNativeEvent.orEmpty().lineSequence().toList()
+        val start = lines.indexOfLast { it.contains("CONTEXT_INIT_STARTED") }
+        val ready = lines.indexOfLast { it.contains("CONTEXT_INIT_RETURNED_SUCCESS") || it.contains("NATIVE_LOAD_COMPLETED") }
+        start >= 0 && ready < start
+    }
     val diagnostic = RuntimeDiagnostic(
         model = runtime.model,
         runtime = runtime.runtime,
         loadTimeMs = runtime.loadTimeMs,
         generation = runtime.generation,
         settings = runtime.settings,
-        status = execution?.status ?: if (!error.isNullOrBlank()) "FAILED" else if (runtime.generation != null) "SUCCESS" else "READY",
-        error = error ?: execution?.error,
+        status = execution?.status ?: when {
+            nativeActivationIncomplete -> "FAILED"
+            !error.isNullOrBlank() -> "FAILED"
+            runtime.generation != null -> "SUCCESS"
+            else -> "READY"
+        },
+        error = error ?: execution?.error ?: if (nativeActivationIncomplete) "Native context initialization was interrupted before readiness" else null,
         rawError = execution?.error,
         executionId = execution?.id,
         actionTrace = selectedActions,
