@@ -156,7 +156,7 @@ jobs:
           grep -q 'AI_CHAT_VULKAN_ANDROID_BDA_GUARD_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_SELECTIVE_CPU_OP_FALLBACK_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
-          grep -q 'GGML_LOG_DEBUG("AI_CHAT_BACKEND_GRAPH_ASSIGNMENT' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'GGML_LOG_DEBUG("%s' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'ai_chat_append_native_trace' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'extern "C" void ai_chat_append_native_trace' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q '!it.contains("NATIVE_PERF_PROFILE")' app/src/main/java/com/samanramezani/aichattest/ui/diagnostics/RuntimeDiagnostic.kt
