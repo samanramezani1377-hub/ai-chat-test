@@ -11,11 +11,12 @@ import com.samanramezani.aichattest.ui.voice.VoiceConversationPage
 import com.samanramezani.aichattest.voice.LocalMicrophone
 import com.samanramezani.aichattest.voice.LocalPiperTts
 import com.samanramezani.aichattest.voice.LocalStreamingAsr
+import com.samanramezani.aichattest.voice.LocalAsr
+import com.samanramezani.aichattest.voice.LocalQwen3Asr
 import com.samanramezani.aichattest.voice.VoiceModelEntry
 import com.samanramezani.aichattest.voice.VoiceModelKind
 import com.samanramezani.aichattest.voice.VoiceModelStore
 import com.samanramezani.aichattest.voice.PiperComponent
-import com.samanramezani.aichattest.voice.AsrUpdate
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.domain.InferenceSettings
 import kotlinx.coroutines.CancellationException
@@ -155,7 +156,7 @@ private class VoiceConversationController(
     private val speaking = AtomicBoolean(false)
     private val turnRunning = AtomicBoolean(false)
     private var microphone: LocalMicrophone? = null
-    private var recognizer: LocalStreamingAsr? = null
+    private var recognizer: LocalAsr? = null
     private var tts: LocalPiperTts? = null
     private var frameJob: Job? = null
     private var turnJob: Job? = null
@@ -168,7 +169,7 @@ private class VoiceConversationController(
             try {
                 onStatus("در حال آماده‌سازی موتورهای محلی صوت…")
                 val engines = withContext(Dispatchers.IO) {
-                    LocalStreamingAsr(stt) to LocalPiperTts(ttsModel)
+                    (if (stt.asrMode == "qwen3-asr") LocalQwen3Asr(stt) else LocalStreamingAsr(stt)) to LocalPiperTts(ttsModel)
                 }
                 recognizer = engines.first
                 tts = engines.second
@@ -189,7 +190,7 @@ private class VoiceConversationController(
                             interrupt("صدای کاربر تشخیص داده شد؛ پاسخ قبلی متوقف شد.")
                             loudSpeechFrames = 0
                         }
-                        val update = try { recognizer?.accept(frame.samples) } catch (t: Throwable) {
+                        val update = try { recognizer?.accept(frame.samples, 16000, frame.speech) } catch (t: Throwable) {
                             onStatus("VOICE-STT-002: خطا در تشخیص گفتار: ${t.message ?: "نامشخص"}")
                             null
                         } ?: continue
