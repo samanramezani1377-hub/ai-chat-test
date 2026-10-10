@@ -122,7 +122,7 @@ internal data class RuntimeDiagnostic(
         return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
     }
 
-    private fun nativeExecutionValue(key: String): String? {
+    internal fun nativeExecutionValue(key: String): String? {
         val text = nativeDiagnostics ?: return null
         val line = text.lineSequence().toList().asReversed()
             .firstOrNull { it.contains("NATIVE_EXECUTION_PROFILE") && it.contains("$key=") }
