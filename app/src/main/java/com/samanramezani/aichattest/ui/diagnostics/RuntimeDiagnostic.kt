@@ -29,6 +29,11 @@ internal data class NativePerformance(
     val speculativeSteps: Int? = null,
     val speculativeMeanAcceptedPerStep: Double? = null,
     val profileDecodeMs: Long? = null,
+    val profileDecodeUs: Long? = null,
+    val profileDecodeCalls: Int? = null,
+    val profileDecodeCallMinUs: Long? = null,
+    val profileDecodeCallMaxUs: Long? = null,
+    val profileDecodeCallAvgUs: Long? = null,
     val profileLogitsSyncMs: Long? = null,
     val profileSamplingMs: Long? = null,
     val profileCallbackMs: Long? = null,
@@ -79,6 +84,11 @@ internal data class RuntimeDiagnostic(
             speculativeSteps = nativeValue("steps")?.toIntOrNull(),
             speculativeMeanAcceptedPerStep = nativeValue("meanAcceptedPerStep")?.toDoubleOrNull(),
             profileDecodeMs = nativeProfileValue("decodeMs")?.toLongOrNull(),
+            profileDecodeUs = nativeProfileValue("decodeUs")?.toLongOrNull(),
+            profileDecodeCalls = nativeProfileValue("decodeCalls")?.toIntOrNull(),
+            profileDecodeCallMinUs = nativeProfileValue("decodeCallMinUs")?.toLongOrNull(),
+            profileDecodeCallMaxUs = nativeProfileValue("decodeCallMaxUs")?.toLongOrNull(),
+            profileDecodeCallAvgUs = nativeProfileValue("decodeCallAvgUs")?.toLongOrNull(),
             profileLogitsSyncMs = nativeProfileValue("logitsSyncMs")?.toLongOrNull(),
             profileSamplingMs = nativeProfileValue("samplingMs")?.toLongOrNull(),
             profileCallbackMs = nativeProfileValue("callbackMs")?.toLongOrNull(),
@@ -177,6 +187,17 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Accounted Decode Time: ${perf.profileAccountedMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Unaccounted Decode Time: ${perf.profileUnaccountedMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Decode Window: ${perf.profileDecodeWindowMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Decode Call Count: ${perf.profileDecodeCalls ?: "N/A"}")
+    appendLine("Decode Call Min / Avg / Max: ${perf.profileDecodeCallMinUs?.let { "$it us" } ?: "N/A"} / ${perf.profileDecodeCallAvgUs?.let { "$it us" } ?: "N/A"} / ${perf.profileDecodeCallMaxUs?.let { "$it us" } ?: "N/A"}")
+    appendLine("Decode Call Accumulated: ${perf.profileDecodeUs?.let { "$it us" } ?: "N/A"}")
+    appendLine()
+    appendLine("===== BACKEND OP ASSIGNMENTS =====")
+    val backendLines = nativeDiagnostics.orEmpty().lineSequence()
+        .filter { it.contains("AI_CHAT_BACKEND_GRAPH_ASSIGNMENT") || it.contains("AI_CHAT_BACKEND_CPU_OP") }
+        .toList().takeLast(24)
+    if (backendLines.isEmpty()) appendLine("Backend assignment profiling: N/A (use a build with scheduler profiling)")
+    else backendLines.forEach { appendLine(it) }
+    appendLine("Note: assignment is scheduler placement, not per-op duration. GPU execution may be asynchronous; llama_decode timing is wall-clock.")
     appendLine()
     appendLine("===== SPECULATIVE DECODING =====")
     appendLine("Draft Tokens: ${perf.speculativeDraftTokens ?: "N/A"}")

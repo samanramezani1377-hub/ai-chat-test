@@ -120,6 +120,58 @@ if(NOT _ai_chat_backend_verify MATCHES "AI_CHAT_SELECTIVE_CPU_OP_FALLBACK_V1" OR
     message(FATAL_ERROR "Selective GPU-first CPU operator fallback policy is missing or an old CPU-compute guard remains")
 endif()
 
+# Compact scheduler placement telemetry. Assignment is not per-op execution timing.
+if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1")
+    set(_ai_chat_assignment_needle [=[    if (sched->debug) {
+        ggml_backend_sched_print_assignments(sched, graph);
+    }]=])
+    set(_ai_chat_assignment_replacement [=[    // AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1: scheduler-selected device placement.
+    {
+        int ai_chat_gpu_nodes = 0;
+        int ai_chat_cpu_nodes = 0;
+        int ai_chat_other_nodes = 0;
+        int ai_chat_unassigned_nodes = 0;
+        for (int ai_chat_i = 0; ai_chat_i < graph->n_nodes; ++ai_chat_i) {
+            struct ggml_tensor * ai_chat_node = graph->nodes[ai_chat_i];
+            if (ggml_is_view_op(ai_chat_node->op)) continue;
+            ggml_backend_t ai_chat_backend = ggml_backend_sched_get_tensor_backend(sched, ai_chat_node);
+            if (!ai_chat_backend) {
+                ++ai_chat_unassigned_nodes;
+                continue;
+            }
+            ggml_backend_dev_t ai_chat_dev = ggml_backend_get_device(ai_chat_backend);
+            const enum ggml_backend_dev_type ai_chat_type = ai_chat_dev
+                ? ggml_backend_dev_type(ai_chat_dev) : GGML_BACKEND_DEVICE_TYPE_CPU;
+            if (ai_chat_type == GGML_BACKEND_DEVICE_TYPE_GPU || ai_chat_type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+                ++ai_chat_gpu_nodes;
+            } else if (ai_chat_type == GGML_BACKEND_DEVICE_TYPE_CPU) {
+                ++ai_chat_cpu_nodes;
+                GGML_LOG_INFO("AI_CHAT_BACKEND_CPU_OP op=%s tensor=%s bytes=%zu backend=%s\n",
+                    ggml_op_name(ai_chat_node->op), ai_chat_node->name,
+                    ggml_nbytes(ai_chat_node), ggml_backend_name(ai_chat_backend));
+            } else {
+                ++ai_chat_other_nodes;
+            }
+        }
+        GGML_LOG_INFO("AI_CHAT_BACKEND_GRAPH_ASSIGNMENT nodes=%d splits=%d gpuNodes=%d cpuNodes=%d otherNodes=%d unassignedNodes=%d\n",
+            graph->n_nodes, sched->n_splits, ai_chat_gpu_nodes, ai_chat_cpu_nodes,
+            ai_chat_other_nodes, ai_chat_unassigned_nodes);
+    }
+    if (sched->debug) {
+        ggml_backend_sched_print_assignments(sched, graph);
+    }]=])
+    string(FIND "${_ai_chat_backend_source}" "${_ai_chat_assignment_needle}" _ai_chat_assignment_location)
+    if(_ai_chat_assignment_location EQUAL -1)
+        message(FATAL_ERROR "Could not locate pinned ggml scheduler graph assignment logging point")
+    endif()
+    string(REPLACE "${_ai_chat_assignment_needle}" "${_ai_chat_assignment_replacement}" _ai_chat_backend_source "${_ai_chat_backend_source}")
+    file(WRITE "${_ai_chat_backend_cpp}" "${_ai_chat_backend_source}")
+endif()
+file(READ "${_ai_chat_backend_cpp}" _ai_chat_backend_profile_verify)
+if(NOT _ai_chat_backend_profile_verify MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1")
+    message(FATAL_ERROR "Scheduler backend assignment profiling patch was not applied")
+endif()
+
 # Android Vulkan drivers are not uniformly reliable with llama.cpp's pinned-memory
 # asynchronous model-upload path. The app has already observed a SIGSEGV at a null
 # address while loading Qwen3.5 immediately after "using async uploads". Disable only
