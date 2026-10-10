@@ -34,7 +34,7 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 
-# GPU-only Android runtime: no OpenCL, CPU fallback, or dynamic backend discovery.
+# GPU-first Android runtime: no OpenCL or full-model CPU fallback. The scheduler may run an individual op on CPU only when no earlier GPU backend supports it.
 set(GGML_VULKAN ON CACHE BOOL "Use Vulkan GPU backend" FORCE)
 set(GGML_OPENCL OFF CACHE BOOL "OpenCL backend removed on the Vulkan branch" FORCE)
 set(GGML_BACKEND_DL OFF CACHE BOOL "Statically link the Vulkan backend on Android" FORCE)
@@ -94,63 +94,30 @@ if(NOT _ai_chat_dsv4_context_verify MATCHES "AI_CHAT_ANDROID_DISABLE_DSV4_HC_VUL
     message(FATAL_ERROR "Android Vulkan DSV4 HC stability mitigation was not applied")
 endif()
 
-# GPU-only scheduler contract for recurrent/hybrid models.
-# Keep llama.cpp's CPU backend registered for CPU-resident metadata/control
-# tensors (e.g. rs_seq, GGML_OP_NONE), but forbid CPU execution of computation
-# nodes. Removing CPU from the scheduler entirely makes recurrent graph
-# reservation abort when it encounters preallocated host-side control tensors.
-set(_ai_chat_context_cpp "${llama_cpp_SOURCE_DIR}/src/llama-context.cpp")
-file(READ "${_ai_chat_context_cpp}" _ai_chat_context_source)
-if(NOT _ai_chat_context_source MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2")
-    set(_ai_chat_context_needle [=[            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {]=])
-    set(_ai_chat_context_replacement [=[            // AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2: CPU remains a host helper.
-            if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {]=])
-    string(FIND "${_ai_chat_context_source}" "${_ai_chat_context_needle}" _ai_chat_context_location)
-    if(_ai_chat_context_location EQUAL -1)
-        message(FATAL_ERROR "Could not locate pinned llama.cpp CPU host-buffer scheduler block")
-    endif()
-    string(REPLACE "${_ai_chat_context_needle}" "${_ai_chat_context_replacement}" _ai_chat_context_source "${_ai_chat_context_source}")
-    file(WRITE "${_ai_chat_context_cpp}" "${_ai_chat_context_source}")
-endif()
-file(READ "${_ai_chat_context_cpp}" _ai_chat_context_verify)
-if(NOT _ai_chat_context_verify MATCHES "AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2")
-    message(FATAL_ERROR "CPU host-helper scheduler invariant missing; refusing an unsafe build")
-endif()
-
+# Keep CPU available for host/control tensors and as a last-resort backend for
+# individual operators that no GPU backend supports. The normal ggml scheduler
+# orders Vulkan before CPU, so supported inference ops remain on Vulkan; CPU is
+# not selected when an earlier GPU backend supports the op. This avoids aborting
+# graph reservation for unsupported operators without forcing whole-model CPU
+# inference. Do not patch ggml-backend.cpp to reject CPU compute assignments.
 set(_ai_chat_backend_cpp "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-backend.cpp")
 file(READ "${_ai_chat_backend_cpp}" _ai_chat_backend_source)
-if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK")
-    set(_ai_chat_cpu_assign_needle [=[static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, struct ggml_tensor * node, int cur_backend_id, int * node_backend_id) {
-    if (ggml_backend_supports_op(sched->backends[cur_backend_id], node)) {]=])
-    set(_ai_chat_cpu_assign_replacement [=[static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, struct ggml_tensor * node, int cur_backend_id, int * node_backend_id) {
-    // AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK: CPU is host/metadata-only.
-    if (cur_backend_id == sched->n_backends - 1 && node->op != GGML_OP_NONE) {
-        return;
-    }
-    if (ggml_backend_supports_op(sched->backends[cur_backend_id], node)) {]=])
-    string(FIND "${_ai_chat_backend_source}" "${_ai_chat_cpu_assign_needle}" _ai_chat_cpu_assign_location)
-    if(_ai_chat_cpu_assign_location EQUAL -1)
+if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_SELECTIVE_CPU_OP_FALLBACK_V1")
+    set(_ai_chat_backend_policy_needle [=[static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, struct ggml_tensor * node, int cur_backend_id, int * node_backend_id) {]=])
+    set(_ai_chat_backend_policy_replacement [=[// AI_CHAT_SELECTIVE_CPU_OP_FALLBACK_V1: preserve upstream GPU-first scheduling; CPU may execute an op only if no earlier GPU backend supports it.
+static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, struct ggml_tensor * node, int cur_backend_id, int * node_backend_id) {]=])
+    string(FIND "${_ai_chat_backend_source}" "${_ai_chat_backend_policy_needle}" _ai_chat_backend_policy_location)
+    if(_ai_chat_backend_policy_location EQUAL -1)
         message(FATAL_ERROR "Could not locate pinned ggml scheduler assignment helper")
     endif()
-    string(REPLACE "${_ai_chat_cpu_assign_needle}" "${_ai_chat_cpu_assign_replacement}" _ai_chat_backend_source "${_ai_chat_backend_source}")
-
-    set(_ai_chat_cpu_pass3_needle [=[if (ggml_backend_supports_op(sched->backends[b], node)) {]=])
-    set(_ai_chat_cpu_pass3_replacement [=[// AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK_PASS3: do not assign compute ops to CPU.
-                if (ggml_backend_supports_op(sched->backends[b], node) &&
-                    !(b == sched->n_backends - 1 && node->op != GGML_OP_NONE)) {]=])
-    string(FIND "${_ai_chat_backend_source}" "${_ai_chat_cpu_pass3_needle}" _ai_chat_cpu_pass3_location)
-    if(_ai_chat_cpu_pass3_location EQUAL -1)
-        message(FATAL_ERROR "Could not locate pinned ggml scheduler fallback assignment path")
-    endif()
-    string(REPLACE "${_ai_chat_cpu_pass3_needle}" "${_ai_chat_cpu_pass3_replacement}" _ai_chat_backend_source "${_ai_chat_backend_source}")
+    string(REPLACE "${_ai_chat_backend_policy_needle}" "${_ai_chat_backend_policy_replacement}" _ai_chat_backend_source "${_ai_chat_backend_source}")
     file(WRITE "${_ai_chat_backend_cpp}" "${_ai_chat_backend_source}")
 endif()
 file(READ "${_ai_chat_backend_cpp}" _ai_chat_backend_verify)
-if(NOT _ai_chat_backend_verify MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK" OR
-   NOT _ai_chat_backend_verify MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK_PASS3")
-    message(FATAL_ERROR "Both CPU compute fallback guards must be applied; refusing a CPU-fallback runtime")
+if(NOT _ai_chat_backend_verify MATCHES "AI_CHAT_SELECTIVE_CPU_OP_FALLBACK_V1" OR
+   _ai_chat_backend_verify MATCHES "AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK")
+    message(FATAL_ERROR "Selective GPU-first CPU operator fallback policy is missing or an old CPU-compute guard remains")
 endif()
-
 
 # Android Vulkan drivers are not uniformly reliable with llama.cpp's pinned-memory
 # asynchronous model-upload path. The app has already observed a SIGSEGV at a null
