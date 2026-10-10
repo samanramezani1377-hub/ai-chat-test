@@ -2,6 +2,7 @@ package com.samanramezani.aichattest.ui.voice
 
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
@@ -36,6 +37,7 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 @Composable
 internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) {
@@ -254,6 +256,8 @@ private class VoiceConversationController(
     private val speaking = AtomicBoolean(false)
     private val turnRunning = AtomicBoolean(false)
     private val bargeInTriggered = AtomicBoolean(false)
+    // Audio from the loudspeaker can leak into the mic briefly after AudioTrack stops.
+    private val lastTtsPlaybackAtMs = AtomicLong(0L)
     private val pendingUtterance = AtomicReference<String?>(null)
     private var microphone: LocalMicrophone? = null
     private var recognizer: LocalAsr? = null
@@ -289,7 +293,13 @@ private class VoiceConversationController(
                     // Run barge-in detection on the capture thread, not the ASR consumer.
                     // Offline ASR may need hundreds of milliseconds to decode an utterance.
                     // Barge-in must also work while the LLM is generating text, before TTS starts.
-                    if (turnRunning.get() && frame.rms > 0.035f && frame.speech) {
+                    // Never interpret the assistant's own loudspeaker output as barge-in.
+                    // Keep a short tail guard because acoustic echo can remain in captured frames
+                    // after AudioTrack stops. Echo cancellation is device-dependent, so RMS/VAD
+                    // alone must not be allowed to interrupt active TTS.
+                    val nowMs = SystemClock.elapsedRealtime()
+                    val assistantAudioActive = speaking.get() || nowMs - lastTtsPlaybackAtMs.get() < 700L
+                    if (turnRunning.get() && !assistantAudioActive && frame.rms > 0.035f && frame.speech) {
                         if (loudSpeechFrames.incrementAndGet() >= 3 && bargeInTriggered.compareAndSet(false, true)) {
                             interrupt("صدای کاربر تشخیص داده شد؛ تولید یا پخش پاسخ قبلی متوقف شد.")
                             loudSpeechFrames.set(0)
@@ -355,9 +365,13 @@ private class VoiceConversationController(
                     val engine = tts ?: break
                     try {
                         // Mark speaking only when audio playback actually starts, not during synthesis.
-                        engine.speak(segment, turnCancel) { speaking.set(true) }
+                        engine.speak(segment, turnCancel) {
+                            lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
+                            speaking.set(true)
+                        }
                     } finally {
                         speaking.set(false)
+                        lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
                     }
                 }
             } catch (_: CancellationException) {
