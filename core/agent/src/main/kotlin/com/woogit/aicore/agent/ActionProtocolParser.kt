@@ -3,7 +3,20 @@ package com.woogit.aicore.agent
 /** Parses only a complete ActionRequest v1 JSON object; surrounding prose is rejected. */
 class ActionProtocolParser {
     fun parse(text: String): ActionIntent? {
-        val json = text.trim()
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return null
+
+        // Qwen-style local models can emit their reasoning before </think> because
+        // the runtime opens the reasoning section in the generation prompt. Only
+        // discard that explicitly delimited prefix; arbitrary prose around a tool
+        // request remains invalid and must never trigger execution.
+        val json = if (trimmed.startsWith('{')) {
+            trimmed
+        } else {
+            val reasoningEnd = trimmed.lastIndexOf("</think>")
+            if (reasoningEnd < 0) return null
+            trimmed.substring(reasoningEnd + "</think>".length).trim()
+        }
         if (json.isEmpty() || json.first() != '{') return null
         val end = findObjectEnd(json, 0) ?: return null
         if (end != json.lastIndex) return null
