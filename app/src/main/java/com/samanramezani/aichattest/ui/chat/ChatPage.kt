@@ -163,17 +163,17 @@ private fun MessageRow(message: UiMessage, onCopy: (String) -> Unit) {
                         }
                     }
                 } else {
-                    if (message.text.isBlank()) {
-                        Text("در حال آماده‌سازی پاسخ…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
-                    } else {
-                        AssistantMarkdown(message.text)
-                    }
                     if (message.text.isNotBlank()) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             IconButton(onClick = { onCopy(message.text) }, modifier = Modifier.size(34.dp).semantics { contentDescription = "کپی پاسخ" }) {
                                 Icon(Icons.Default.ContentCopy, contentDescription = "کپی")
                             }
                         }
+                    }
+                    if (message.text.isBlank()) {
+                        Text("در حال آماده‌سازی پاسخ…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
+                    } else {
+                        AssistantMarkdown(message.text)
                     }
                 }
             }

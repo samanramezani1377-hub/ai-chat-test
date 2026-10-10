@@ -8,8 +8,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.util.Log
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 import com.samanramezani.aichattest.ui.SettingsScreen
 import com.samanramezani.aichattest.ui.errors.ErrorCenter
 import com.samanramezani.aichattest.ui.about.AboutPage
@@ -58,7 +62,7 @@ internal fun MainScreen(container: AppContainer) {
     var deleted by remember { mutableStateOf<DeletedConversation?>(null) }
     var recentLimit by remember { mutableIntStateOf(20) }
     var activeStreamId by remember { mutableStateOf<String?>(null) }
-    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
 
     data class StartupSnapshot(
         val conversations: List<ConversationRecord>,
@@ -149,7 +153,22 @@ internal fun MainScreen(container: AppContainer) {
     fun openConversation(record: ConversationRecord) { loadConversation(record); destination = AppDestination.CHAT; sidebarOpen = false }
     fun deleteConversation(record: ConversationRecord) { scope.launch(Dispatchers.Default) { val removed = history.delete(record.id) ?: return@launch; val replacement = if (current?.id == removed.id) history.recent(1).firstOrNull() else null; withContext(Dispatchers.Main) { if (replacement != null) loadConversation(replacement) else if (current?.id == removed.id) { current = null; messages = emptyList() }; conversations = history.recent(recentLimit); deleted = DeletedConversation(removed) } } }
     fun restoreDeleted(record: ConversationRecord) { scope.launch(Dispatchers.Default) { if (history.restore(record)) withContext(Dispatchers.Main) { loadConversation(record); conversations = history.recent(recentLimit); deleted = null } } }
-    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) { AppTheme { Surface(Modifier.fillMaxSize()) { Box(Modifier.fillMaxSize()) { Column(Modifier.fillMaxSize()) { AppHeader(destination, runtimeStatus, activeModel, { destination = it; quickMenuOpen = false }, { quickMenuOpen = !quickMenuOpen }, { quickMenuOpen = false; sidebarOpen = !sidebarOpen }, { runtimeDetailsOpen = !runtimeDetailsOpen }); when (destination) { AppDestination.CHAT -> ChatPage(messages, composer, generating, approvalBusy, { composer = it }, ::send, ::stop, execution, ::approveExecution, ::rejectExecution, { destination = AppDestination.WORK }, { value -> clipboard.setText(AnnotatedString(value)) }); AppDestination.WORK -> WorkspacePage(execution, activeModel, { destination = AppDestination.DIAGNOSTICS }); AppDestination.WORKSPACE -> WorkspacePage(execution, activeModel, { destination = AppDestination.DIAGNOSTICS }); AppDestination.DIAGNOSTICS -> DiagnosticsPage(diagnostic, execution); AppDestination.SETTINGS -> SettingsScreen(models, activeModel, diagnostic, { picker.launch(arrayOf("application/octet-stream", "application/*")) }, draftModels, activeDraft, { draftPicker.launch(arrayOf("application/octet-stream", "application/*")) }, ::assignDraft, ::deleteDraft, ::refreshModels, ::activateModel, ::deactivateModel, { id -> scope.launch(Dispatchers.Default) { manager?.delete(id); refreshModels() } }); AppDestination.ABOUT -> AboutPage() } }; if (sidebarOpen) Sidebar(current = current, conversations = conversations.take(recentLimit), destination = destination, onClose = { sidebarOpen = false }, onDestination = { destination = it; sidebarOpen = false }, onNew = ::createConversation, onOpen = ::openConversation, onRename = { renameTarget = it }, onDelete = ::deleteConversation, onMore = { recentLimit += 20; refreshHistory() }, canShowMore = conversations.size >= recentLimit); if (quickMenuOpen) AppQuickMenu({ quickMenuOpen = false; destination = AppDestination.DIAGNOSTICS }, { quickMenuOpen = false; destination = AppDestination.SETTINGS }); if (runtimeDetailsOpen) RuntimeDetailsDialog(status = runtimeStatus, model = activeModel, runtimeName = "llama.cpp", runtimeVersion = "pinned", backend = null, onDismiss = { runtimeDetailsOpen = false }); ApprovalDialog(execution, ::approveExecution, ::rejectExecution); deleted?.let { UndoBar(onUndo = { restoreDeleted(it.record) }, onDismiss = { deleted = null }, onExpire = { deleted = null }) }; renameTarget?.let { RenameDialog(initial = it.title, onDismiss = { renameTarget = null }, onConfirm = { renamed -> scope.launch(Dispatchers.Default) { history.rename(it.id, renamed); withContext(Dispatchers.Main) { renameTarget = null; refreshHistory() } } }) } } } } }
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) { AppTheme { Surface(Modifier.fillMaxSize()) { Box(Modifier.fillMaxSize()) { Column(Modifier.fillMaxSize()) { AppHeader(destination, runtimeStatus, activeModel, { destination = it; quickMenuOpen = false }, { quickMenuOpen = !quickMenuOpen }, { quickMenuOpen = false; sidebarOpen = !sidebarOpen }, { runtimeDetailsOpen = !runtimeDetailsOpen }); when (destination) { AppDestination.CHAT -> ChatPage(messages, composer, generating, approvalBusy, { composer = it }, ::send, ::stop, execution, ::approveExecution, ::rejectExecution, { destination = AppDestination.WORK }, { value ->
+                            try {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("پاسخ", value))
+                                val copiedText = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
+                                if (copiedText == value) {
+                                    Toast.makeText(context, "متن کپی شد", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Log.e("AIChatClipboard", "Clipboard verification failed; expected length=${value.length}, actual length=${copiedText?.length}")
+                                    Toast.makeText(context, "کپی کامل متن تأیید نشد", Toast.LENGTH_LONG).show()
+                                }
+                            } catch (error: Throwable) {
+                                Log.e("AIChatClipboard", "Copy failed; text length=${value.length}", error)
+                                Toast.makeText(context, "کپی متن انجام نشد", Toast.LENGTH_LONG).show()
+                            }
+                        }); AppDestination.WORK -> WorkspacePage(execution, activeModel, { destination = AppDestination.DIAGNOSTICS }); AppDestination.WORKSPACE -> WorkspacePage(execution, activeModel, { destination = AppDestination.DIAGNOSTICS }); AppDestination.DIAGNOSTICS -> DiagnosticsPage(diagnostic, execution); AppDestination.SETTINGS -> SettingsScreen(models, activeModel, diagnostic, { picker.launch(arrayOf("application/octet-stream", "application/*")) }, draftModels, activeDraft, { draftPicker.launch(arrayOf("application/octet-stream", "application/*")) }, ::assignDraft, ::deleteDraft, ::refreshModels, ::activateModel, ::deactivateModel, { id -> scope.launch(Dispatchers.Default) { manager?.delete(id); refreshModels() } }); AppDestination.ABOUT -> AboutPage() } }; if (sidebarOpen) Sidebar(current = current, conversations = conversations.take(recentLimit), destination = destination, onClose = { sidebarOpen = false }, onDestination = { destination = it; sidebarOpen = false }, onNew = ::createConversation, onOpen = ::openConversation, onRename = { renameTarget = it }, onDelete = ::deleteConversation, onMore = { recentLimit += 20; refreshHistory() }, canShowMore = conversations.size >= recentLimit); if (quickMenuOpen) AppQuickMenu({ quickMenuOpen = false; destination = AppDestination.DIAGNOSTICS }, { quickMenuOpen = false; destination = AppDestination.SETTINGS }); if (runtimeDetailsOpen) RuntimeDetailsDialog(status = runtimeStatus, model = activeModel, runtimeName = "llama.cpp", runtimeVersion = "pinned", backend = null, onDismiss = { runtimeDetailsOpen = false }); ApprovalDialog(execution, ::approveExecution, ::rejectExecution); deleted?.let { UndoBar(onUndo = { restoreDeleted(it.record) }, onDismiss = { deleted = null }, onExpire = { deleted = null }) }; renameTarget?.let { RenameDialog(initial = it.title, onDismiss = { renameTarget = null }, onConfirm = { renamed -> scope.launch(Dispatchers.Default) { history.rename(it.id, renamed); withContext(Dispatchers.Main) { renameTarget = null; refreshHistory() } } }) } } } } }
 }
 
 private fun formatDiagnostic(raw: String?, operation: String? = null): String {
