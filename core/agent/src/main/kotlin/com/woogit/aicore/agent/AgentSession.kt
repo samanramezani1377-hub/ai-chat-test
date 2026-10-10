@@ -40,7 +40,11 @@ class AgentSession(
         conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.USER, content, System.currentTimeMillis()))
         eventSink(AgentEvent.Started)
         return try {
-            // Honor an explicit recent-message limit (e.g. real-time voice); callers that do not\n            // specify one retain the complete history for normal chat/agent workflows.\n            val initialContext = conversationStore.recent(\n                if (requestedRecentMessages == null) Int.MAX_VALUE else effectiveRecentMessages\n            )
+            // Honor an explicit recent-message limit (e.g. real-time voice); callers that do not
+            // specify one retain the complete history for normal chat/agent workflows.
+            val initialContext = conversationStore.recent(
+                if (requestedRecentMessages == null) Int.MAX_VALUE else effectiveRecentMessages
+            )
             var result = orchestrator.generate(effectiveSettings, effectiveRecentMessages, { token -> eventSink(AgentEvent.Token(token)) }, initialContext)
             var plan: ActionPlan? = null
             var actionResult: String? = null
