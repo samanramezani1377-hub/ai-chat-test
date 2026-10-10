@@ -987,13 +987,13 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
     // GPU layers remain enabled without relying on the fragile mmap buffer import.
     mp.load_mode = LLAMA_LOAD_MODE_NONE;
     mp.check_tensors = false;
-    mp.no_host = true;
+    mp.no_host = gpu;
 
     // Do not force token_embd onto OpenCL. llama.cpp's backend placement is
     // architecture/device aware; overriding the embedding buffer here adds a
     // large device allocation and has caused avoidable load pressure on Android.
     // GPU-only residency is still enforced after the model is loaded.
-    checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_RESIDENT" : "ANDROID_MODEL_LOAD_POLICY_CPU_STAGED");
+    checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_GPU_PREFERRED_CPU_OP_FALLBACK" : "ANDROID_MODEL_LOAD_POLICY_CPU_FALLBACK");
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
     return llama_model_load_from_file(path, mp);
@@ -1006,6 +1006,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     checkpoint("FREE_OLD_RUNTIME_STARTED"); free_all(); checkpoint("FREE_OLD_RUNTIME_RETURNED"); g_stop.store(false);
     const char *path = env->GetStringUTFChars(jpath, nullptr);
     if (!path) { checkpoint("PATH_UTF8_FAILED"); return 3; }
+    const std::string stable_model_path(path);
     g_spec_draft_path.clear(); g_spec_requested = false; g_spec_mtp = false; g_target_model_path.clear(); g_spec_accept_ema = 1.0;
     // Draft/speculative decoding is removed from the product; retain the legacy JNI argument but never use it.\n    (void) jdraftpath;\n    g_spec_draft_path.clear(); g_spec_requested = false; g_spec_mtp = false; g_spec_accept_ema = 1.0;\n    append_native_trace("DRAFT_FEATURE_REMOVED");
     g_target_model_path = path;
@@ -1015,58 +1016,74 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     // allocate a second context during activation. Draft/speculative setup
     // happens only after the target runtime is fully ready.
     append_native_trace("SPECULATIVE_AUTO_DETECTION_DISABLED_DURING_TARGET_LOAD");
-    if (!g_gpu_backend_loaded || !has_opencl_gpu_device()) {
-        checkpoint("OPENCL_GPU_ONLY_REJECTED_NO_OPENCL_GPU_DEVICE");
-        append_native_trace("OPENCL_GPU_ONLY_NO_CPU_FALLBACK");
-        env->ReleaseStringUTFChars(jpath, path);
-        return 5;
-    }
-    if (gpu_layers <= 0) {
-        checkpoint("OPENCL_GPU_ONLY_REJECTED_INVALID_GPU_LAYERS");
-        env->ReleaseStringUTFChars(jpath, path);
-        return 4;
-    }
+    bool gpu_available = g_gpu_backend_loaded && has_opencl_gpu_device() && gpu_layers > 0;
+    append_native_trace((std::string("NATIVE_EXECUTION_POLICY gpuRequested=1 openclAvailable=") +
+        (gpu_available ? "1" : "0") +
+        " operatorFallback=ggml_scheduler cpuModelFallback=enabled").c_str());
     llama_model_params mp = llama_model_default_params();
-    mp.n_gpu_layers = 999;
-    append_native_trace((std::string("OPENCL_GPU_ONLY_ALL_LAYERS requested=") + std::to_string((int)gpu_layers) + " effective=999").c_str());
+    mp.n_gpu_layers = gpu_available ? 999 : 0;
     mp.load_mode = LLAMA_LOAD_MODE_NONE;
     mp.check_tensors = false;
-    checkpoint("OPENCL_GPU_DEVICE_SELECTION");
-    checkpoint("OPENCL_GPU_ONLY_LOAD_MODE_STAGED");
-    checkpoint("OPENCL_GPU_ONLY_CHECK_TENSORS_DISABLED");
-    checkpoint((std::string("MODEL_LOAD_PARAMS gpu_layers=") + std::to_string((int)mp.n_gpu_layers) +
-        " load_mode=" + llama_load_mode_name(mp.load_mode) +
-        " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
-    checkpoint("MODEL_LOAD_STARTED gpu_layers=OPENCL");
-    g_model = load_model_android(path, mp, true);
+    checkpoint(gpu_available ? "MODEL_LOAD_STARTED_GPU_PREFERRED" : "MODEL_LOAD_STARTED_CPU_FALLBACK");
+    append_native_trace((std::string("MODEL_LOAD_PARAMS requestedGpuLayers=") +
+        std::to_string((int)gpu_layers) + " effectiveGpuLayers=" +
+        std::to_string((int)mp.n_gpu_layers) + " load_mode=" +
+        llama_load_mode_name(mp.load_mode) + " no_host=" +
+        (gpu_available ? "1" : "0")).c_str());
+    g_model = load_model_android(stable_model_path.c_str(), mp, gpu_available);
     checkpoint(g_model ? "MODEL_LOAD_RETURNED_SUCCESS" : "MODEL_LOAD_RETURNED_FAILED");
+
+    // A normal model-load failure can be retried safely on CPU. Fatal driver
+    // signals cannot be recovered in-process, so unsupported OpenCL devices are
+    // not force-enabled; ggml's scheduler remains responsible for per-op fallback.
+    if (!g_model && gpu_available) {
+        append_native_trace("NATIVE_GPU_MODEL_LOAD_FAILED_RETRYING_CPU");
+        gpu_available = false;
+        mp = llama_model_default_params();
+        mp.n_gpu_layers = 0;
+        mp.load_mode = LLAMA_LOAD_MODE_NONE;
+        mp.check_tensors = false;
+        mp.no_host = false;
+        g_model = load_model_android(stable_model_path.c_str(), mp, false);
+        checkpoint(g_model ? "CPU_FALLBACK_MODEL_LOAD_SUCCESS" : "CPU_FALLBACK_MODEL_LOAD_FAILED");
+    }
     if (g_model) {
         append_weight_residency_trace();
-        if (!validate_gpu_model_residency()) {
-            checkpoint("OPENCL_GPU_ONLY_MODEL_RESIDENCY_REJECTED");
-            append_native_trace("OPENCL_GPU_ONLY_NO_CPU_WEIGHT_FALLBACK");
-            env->ReleaseStringUTFChars(jpath, path);
-            free_all();
-            return 6;
-        }
+        append_native_trace("NATIVE_WEIGHT_RESIDENCY_IS_DIAGNOSTIC_NOT_A_LOAD_GATE");
     }
     env->ReleaseStringUTFChars(jpath, path);
     if (!g_model) {
-        checkpoint("OPENCL_GPU_ONLY_MODEL_LOAD_FAILED_NO_CPU_FALLBACK");
+        checkpoint("MODEL_LOAD_FAILED_GPU_AND_CPU");
         g_gpu = false;
         return 1;
     }
-    g_gpu = true;
-    if (!g_model) { checkpoint("MODEL_LOAD_FAILED"); return 1; }
+    g_gpu = gpu_available;
     const int trained = llama_model_n_ctx_train(g_model);
     const int requested = ctx_len > 0 ? ctx_len : 4096;
     const int effective = std::max(1, std::min(requested, trained));
-    checkpoint((std::string("MODEL_READY trained_ctx=") + std::to_string(trained) + " effective_ctx=" + std::to_string(effective)).c_str());
+    checkpoint((std::string("MODEL_READY trained_ctx=") + std::to_string(trained) + " effective_ctx=" + std::to_string(effective) +
+        " execution=" + (g_gpu ? "GPU_PREFERRED_WITH_CPU_OP_FALLBACK" : "CPU_FALLBACK")).c_str());
     g_context_length = (uint32_t)effective;
     checkpoint("CONTEXT_INIT_STARTED");
-    const bool context_ready = init_generation_context();
+    bool context_ready = init_generation_context();
     checkpoint(context_ready ? "CONTEXT_INIT_RETURNED_SUCCESS" : "CONTEXT_INIT_RETURNED_FAILED");
-    if (!context_ready) { checkpoint("CONTEXT_INIT_FAILED"); free_all(); return 2; }
+    if (!context_ready && gpu_available) {
+        append_native_trace("NATIVE_GPU_CONTEXT_INIT_FAILED_RETRYING_CPU");
+        free_all();
+        llama_model_params cpu_params = llama_model_default_params();
+        cpu_params.n_gpu_layers = 0;
+        cpu_params.load_mode = LLAMA_LOAD_MODE_NONE;
+        cpu_params.check_tensors = false;
+        cpu_params.no_host = false;
+        g_model = load_model_android(stable_model_path.c_str(), cpu_params, false);
+        if (g_model) {
+            g_context_length = (uint32_t)std::max(1, std::min(requested, llama_model_n_ctx_train(g_model)));
+            context_ready = init_generation_context();
+        }
+        g_gpu = false;
+        append_native_trace(context_ready ? "CPU_FALLBACK_CONTEXT_INIT_SUCCESS" : "CPU_FALLBACK_CONTEXT_INIT_FAILED");
+    }
+    if (!context_ready) { checkpoint("CONTEXT_INIT_FAILED_GPU_AND_CPU"); free_all(); return 2; }
     append_native_trace("TARGET_RUNTIME_READY_BEFORE_SPECULATIVE");
     if (g_spec_requested) {
         append_native_trace("SPECULATIVE_ATTACH_AFTER_TARGET_READY");
@@ -1082,7 +1099,9 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeUnload(JNIEnv *, jclass) { g_stop.store(true); free_all(); }
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeRuntimeInfo(JNIEnv *env, jclass) {
-    const std::string value = std::string(g_gpu && g_gpu_backend_loaded ? "OpenCL-GPU-ONLY" : "OpenCL-UNAVAILABLE") + "; llama.cpp=" + AI_CHAT_LLAMA_CPP_SHA;
+    const std::string value = std::string(g_gpu && g_gpu_backend_loaded
+        ? "OpenCL+CPU-OP-FALLBACK"
+        : "CPU-FALLBACK") + "; llama.cpp=" + AI_CHAT_LLAMA_CPP_SHA;
     return env->NewStringUTF(value.c_str());
 }
 
