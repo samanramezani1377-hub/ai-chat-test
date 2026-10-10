@@ -216,7 +216,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
  */
 private fun sanitizeAssistantVoiceText(raw: String): String {
     var text = raw
-        .replace(Regex("(?is)<think\\b[^>]*>.*?(?:</think\\s*>|$)"), " ")
+        .replace(Regex("(?is)<think\\b(?!\\s*/)[^>]*>.*?(?:</think\\s*>|<think\\s*/\\s*>|$)"), " ")
         .replace(Regex("(?is)<think\\s*/\\s*>"), " ")
         .replace(Regex("(?is)</?think\\b[^>]*>"), " ")
         .replace(Regex("(?is)<(analysis|reasoning|scratchpad)\\b[^>]*>.*?</\\1\\s*>"), " ")
