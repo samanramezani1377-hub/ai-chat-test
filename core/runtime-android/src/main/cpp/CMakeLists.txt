@@ -112,44 +112,10 @@ foreach(AI_CHAT_OPENCL_SOURCE IN LISTS AI_CHAT_OPENCL_SOURCE_FILES)
     endif()
 endforeach()
 
-# Expand the upstream Adreno A7X name map for additional members of the same
-# architecture family. The pinned OpenCL backend otherwise rejects these GPUs
-# before graph placement, even though its A7X kernel path is shared with 730/740/750.
-# This remains family-based (not device-brand routing) and does not bypass the
-# backend's OpenCL version, FP16, subgroup, or per-op support checks.
-set(AI_CHAT_OPENCL_SOURCE "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-opencl/ggml-opencl.cpp")
-file(READ "${AI_CHAT_OPENCL_SOURCE}" AI_CHAT_OPENCL_SOURCE_TEXT)
-if (NOT AI_CHAT_OPENCL_SOURCE_TEXT MATCHES "AI_CHAT_ADRENO_A7X_FAMILY_EXPANSION_V1")
-    set(AI_CHAT_ADRENO_A7X_OLD [=[if (strstr(device_name, "730") ||
-        strstr(device_name, "740") ||
-        strstr(device_name, "750")) {]=])
-    set(AI_CHAT_ADRENO_A7X_NEW [=[// AI_CHAT_ADRENO_A7X_FAMILY_EXPANSION_V1
-if (strstr(device_name, "710") ||
-        strstr(device_name, "720") ||
-        strstr(device_name, "725") ||
-        strstr(device_name, "730") ||
-        strstr(device_name, "732") ||
-        strstr(device_name, "735") ||
-        strstr(device_name, "740") ||
-        strstr(device_name, "750")) {]=])
-    string(FIND "${AI_CHAT_OPENCL_SOURCE_TEXT}" "${AI_CHAT_ADRENO_A7X_OLD}" AI_CHAT_ADRENO_A7X_POS)
-    if (AI_CHAT_ADRENO_A7X_POS LESS 0)
-        message(FATAL_ERROR "Could not extend upstream Adreno A7X family detection; pinned ggml-opencl.cpp changed")
-    endif()
-    string(REPLACE "${AI_CHAT_ADRENO_A7X_OLD}" "${AI_CHAT_ADRENO_A7X_NEW}"
-        AI_CHAT_OPENCL_SOURCE_TEXT "${AI_CHAT_OPENCL_SOURCE_TEXT}")
-    if (NOT AI_CHAT_OPENCL_SOURCE_TEXT MATCHES "AI_CHAT_ADRENO_A7X_FAMILY_EXPANSION_V1")
-        message(FATAL_ERROR "Adreno A7X family detection patch did not apply")
-    endif()
-    file(WRITE "${AI_CHAT_OPENCL_SOURCE}" "${AI_CHAT_OPENCL_SOURCE_TEXT}")
-endif()
-
-# Do not bypass upstream GPU-family validation. The pinned OpenCL kernels
-# contain Intel/Adreno-specific subgroup assumptions (for example N_SIMDWIDTH,
-# N_SIMDGROUP and N_DST) and the dispatch paths assert on unknown GPU families.
-# Accepting an unknown device here causes OpenCL kernel compilation to fail
-# fatally at model activation. Keep unsupported devices rejected until a real
-# vendor-neutral kernel/dispatch implementation is added and tested.
+# Do not spoof an unsupported GPU family by matching device-name substrings. The pinned
+# upstream OpenCL backend contains family-specific kernels and subgroup assumptions.
+# Device-agnostic support must be added through runtime capability checks and genuinely
+# generic kernels, not by relabeling Mali/unknown devices as Adreno or Intel.
 target_include_directories(ggml-opencl PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
 
 if (NOT TARGET ggml-opencl)
