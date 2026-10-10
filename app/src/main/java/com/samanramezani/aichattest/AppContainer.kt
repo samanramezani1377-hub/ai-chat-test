@@ -161,10 +161,10 @@ class AppContainer(context: Context? = null) {
         reportError("Runtime", "RUNTIME_FAILED", message.ifBlank { "اجرای مدل محلی با خطا مواجه شد." }, IllegalStateException(raw), taskId = taskId)
     }
 
-    fun createAgentSession(conversationId: String, eventSink: suspend (AgentEvent) -> Unit = {}): AgentSession? {
+    fun createAgentSession(\n        conversationId: String,\n        eventSink: suspend (AgentEvent) -> Unit = {},\n        includeAgentTools: Boolean = true,\n    ): AgentSession? {
         if (appContext == null) return null
         val store = HistoryConversationStore(conversationHistory, conversationId)
-        val contextProvider = DefaultContextProvider(conversationStore = store, systemContext = { ActionToolPrompt.build(actionRegistry) }, persistentTaskContext = { null }, workspaceContext = { workspaceRoot?.let { "Workspace files are restricted to the app-private directory. Use relative paths with filesystem actions; do not claim access outside the Workspace." } })
+        // Real-time voice is a direct conversation path, not an agent/action request.\n        // Do not inject the action catalog, workspace instructions, or action execution loop\n        // into its system prompt; regular text chat keeps the full agent capability by default.\n        val contextProvider = DefaultContextProvider(\n            conversationStore = store,\n            systemContext = { if (includeAgentTools) ActionToolPrompt.build(actionRegistry) else null },\n            persistentTaskContext = { null },\n            workspaceContext = {\n                if (includeAgentTools) workspaceRoot?.let {\n                    "Workspace files are restricted to the app-private directory. Use relative paths with filesystem actions; do not claim access outside the Workspace."\n                } else null\n            },\n        )
         return AgentSession(
             orchestrator = AgentOrchestrator(contextProvider = contextProvider, runtime = modelRuntime),
             conversationStore = store,
