@@ -96,8 +96,9 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
                 refreshImportProgress()
                 if (ready != null) activeSttId = ready.id
                 val missing = if (ready == null) store.missingSmallSttComponents(modelType) else emptyList()
-                updateVoiceStatus(if (ready != null) "مدل کوچک Shenava Rizeh-Pizeh آماده و انتخاب شد؛ تشخیص نهایی پس از مکث کوتاه گفتار انجام می‌شود."
-                    else "فایل ${label} ذخیره شد؛ برای تکمیل مدل ${if (modelType == SmallSttModel.KOOCHIK) "Shenava Koochik" else "Shenava Rizeh-Pizeh"} هنوز وارد کنید: ${missing.joinToString(" و ")}.")
+                val modelName = if (modelType == SmallSttModel.KOOCHIK) "Shenava Koochik" else "Shenava Rizeh-Pizeh"
+                updateVoiceStatus(if (ready != null) "مدل $modelName آماده و انتخاب شد؛ تشخیص نهایی پس از مکث کوتاه گفتار انجام می‌شود."
+                    else "فایل ${label} مدل $modelName ذخیره شد؛ برای تکمیل آن هنوز وارد کنید: ${missing.joinToString(" و ")}.")
             } catch (t: Throwable) {
                 updateVoiceStatus("VOICE-STT-IMPORT: ${t.message ?: t.javaClass.simpleName}")
             } finally { refreshImportProgress(); busy = false }
