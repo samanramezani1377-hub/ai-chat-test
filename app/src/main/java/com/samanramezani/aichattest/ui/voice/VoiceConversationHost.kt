@@ -346,7 +346,7 @@ private class VoiceConversationController(
             onStatus("در حال پردازش گفتار و تولید پاسخ محلی…")
             val id = conversationId ?: error("VOICE-CHAT-001: شناسه مکالمه ایجاد نشده است.")
             val modelFailure = AtomicReference<String?>(null)
-            val session = container.createAgentSession(id) { event ->
+            val session = container.createAgentSession(id, includeAgentTools = false) { event ->
                 if (event is AgentEvent.Token && !turnCancel.get()) enqueueCompleteSentences(event.value)
                 if (event is AgentEvent.Failed) {
                     modelFailure.compareAndSet(null, event.message)
