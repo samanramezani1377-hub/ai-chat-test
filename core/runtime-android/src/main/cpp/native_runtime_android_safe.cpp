@@ -759,6 +759,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                 return 5;
             }
             const int spec_capacity = std::max(1, (int)llama_n_ctx(g_context) - n_prompt - 1);
+            // Speculative generation clears and rebuilds both target and draft
+            // contexts internally. Invalidate the ordinary resident-prefix cache
+            // before entering that path so a later non-speculative request cannot
+            // mistake speculative memory for the cached token sequence.
+            clear_android_generation_cache();
+            append_native_trace("NATIVE_KV_CACHE_INVALIDATED reason=speculative_generation");
             const int sr=generate_spec(env,listener,spec_on_token,spec_tokens,std::min((int)max_tokens,spec_capacity),(float)temperature,(int)top_k,(float)top_p,(float)min_p);
             append_native_trace((std::string("SPECULATIVE_GENERATE_RETURNED code=")+std::to_string(sr)).c_str());
             if (spec_listener_class) env->DeleteLocalRef(spec_listener_class);
