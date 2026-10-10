@@ -53,6 +53,7 @@ dependencies {
     implementation(project(":core:settings"))
     implementation(project(":core:runtime"))
     implementation(project(":core:runtime-android"))
+    implementation(project(":core:runtime-mnn"))
     implementation(project(":core:conversation"))
     implementation(project(":core:agent"))
 
