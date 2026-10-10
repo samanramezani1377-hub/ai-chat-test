@@ -47,7 +47,7 @@ internal object Qwen3PromptFormatter {
                 }
             }
             append(IM_START).append("assistant\n")
-            append("<think>\n")
+            if (enableThinking) append("<think>\n")
         }
     }
 
