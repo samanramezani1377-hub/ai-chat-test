@@ -18,6 +18,7 @@ import com.samanramezani.aichattest.voice.VoiceModelKind
 import com.samanramezani.aichattest.voice.VoiceModelStore
 import com.samanramezani.aichattest.voice.PiperComponent
 import com.samanramezani.aichattest.voice.SmallSttComponent
+import com.samanramezani.aichattest.voice.SmallSttModel
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.domain.InferenceSettings
@@ -44,6 +45,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     var sttModels by remember { mutableStateOf(store.list(VoiceModelKind.STT)) }
     var ttsModels by remember { mutableStateOf(store.list(VoiceModelKind.TTS)) }
     var missingSttComponents by remember { mutableStateOf(store.missingSmallSttComponents()) }
+    var missingKoochikComponents by remember { mutableStateOf(store.missingSmallSttComponents(SmallSttModel.KOOCHIK)) }
     var missingTtsComponents by remember { mutableStateOf(store.missingPiperComponents()) }
     var activeSttId by remember { mutableStateOf(sttModels.firstOrNull()?.id) }
     var activeTtsId by remember { mutableStateOf(ttsModels.firstOrNull()?.id) }
@@ -78,21 +80,22 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
 
     fun refreshImportProgress() {
         missingSttComponents = store.missingSmallSttComponents()
+        missingKoochikComponents = store.missingSmallSttComponents(SmallSttModel.KOOCHIK)
         missingTtsComponents = store.missingPiperComponents()
     }
 
-    fun importSmallSttComponent(uri: Uri, component: SmallSttComponent, label: String) {
+    fun importSmallSttComponent(uri: Uri, component: SmallSttComponent, label: String, modelType: SmallSttModel = SmallSttModel.RIZEH_PIZEH) {
         uiScope.launch {
             busy = true
             updateVoiceStatus("در حال وارد کردن ${label} مدل فارسی کوچک…")
             try {
-                val ready = withContext(Dispatchers.IO) { store.importSmallPersianSttComponent(uri, component) }
+                val ready = withContext(Dispatchers.IO) { store.importSmallPersianSttComponent(uri, component, modelType) }
                 refreshModels()
                 refreshImportProgress()
                 if (ready != null) activeSttId = ready.id
-                val missing = if (ready == null) store.missingSmallSttComponents() else emptyList()
+                val missing = if (ready == null) store.missingSmallSttComponents(modelType) else emptyList()
                 updateVoiceStatus(if (ready != null) "مدل کوچک Shenava Rizeh-Pizeh آماده و انتخاب شد؛ تشخیص نهایی پس از مکث کوتاه گفتار انجام می‌شود."
-                    else "فایل ${label} ذخیره شد؛ برای تکمیل مدل Shenava هنوز وارد کنید: ${missing.joinToString(" و ")}.")
+                    else "فایل ${label} ذخیره شد؛ برای تکمیل مدل ${if (modelType == SmallSttModel.KOOCHIK) "Shenava Koochik" else "Shenava Rizeh-Pizeh"} هنوز وارد کنید: ${missing.joinToString(" و ")}.")
             } catch (t: Throwable) {
                 updateVoiceStatus("VOICE-STT-IMPORT: ${t.message ?: t.javaClass.simpleName}")
             } finally { refreshImportProgress(); busy = false }
@@ -104,6 +107,12 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     }
     val smallSttTokensPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) importSmallSttComponent(uri, SmallSttComponent.TOKENS, "tokens.txt")
+    }
+    val koochikModelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importSmallSttComponent(uri, SmallSttComponent.MODEL, "model.onnx", SmallSttModel.KOOCHIK)
+    }
+    val koochikTokensPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importSmallSttComponent(uri, SmallSttComponent.TOKENS, "tokens.txt", SmallSttModel.KOOCHIK)
     }
 
     val sttPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -170,6 +179,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         sttModels = sttModels,
         ttsModels = ttsModels,
         missingSttComponents = missingSttComponents,
+        missingKoochikComponents = missingKoochikComponents,
         missingTtsComponents = missingTtsComponents,
         activeSttId = activeSttId,
         activeTtsId = activeTtsId,
@@ -177,6 +187,8 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         onImportStt = { sttPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-bzip2", "application/octet-stream")) },
         onImportSmallSttModel = { smallSttModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
         onImportSmallSttTokens = { smallSttTokensPicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
+        onImportKoochikModel = { koochikModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
+        onImportKoochikTokens = { koochikTokensPicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
         onImportTts = { ttsPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-bzip2", "application/octet-stream")) },
         onImportTtsModel = { ttsModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
         onImportTtsConfig = { ttsConfigPicker.launch(arrayOf("application/json", "text/json", "text/plain", "*/*")) },
