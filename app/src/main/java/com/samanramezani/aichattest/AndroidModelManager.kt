@@ -46,7 +46,8 @@ class AndroidModelManager(
                 if (cursor.moveToFirst()) cursor.getString(0) else null
             }
         }.getOrNull().orEmpty()
-        if (displayName.endsWith(".zip", ignoreCase = true) || displayName.endsWith(".mnnpack", ignoreCase = true)) {
+        val mimeType = runCatching { contentResolver.getType(uri) }.getOrNull().orEmpty()
+        if (displayName.endsWith(".zip", ignoreCase = true) || displayName.endsWith(".mnnpack", ignoreCase = true) || mimeType == "application/zip" || mimeType == "application/x-zip-compressed") {
             return@withContext importMnnPack(uri)
         }
         try {
