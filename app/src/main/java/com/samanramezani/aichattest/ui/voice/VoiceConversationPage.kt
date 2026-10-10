@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.samanramezani.aichattest.voice.VoiceModelEntry
@@ -47,6 +48,7 @@ internal fun VoiceConversationPage(
     onInterrupt: () -> Unit,
 ) {
     val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
     var permissionGranted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
     }
@@ -68,6 +70,7 @@ internal fun VoiceConversationPage(
             Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("مدل تشخیص گفتار (STT)", style = MaterialTheme.typography.titleMedium)
                 Text("مدل سبک فارسی Shenava Rizeh-Pizeh فقط ۶٫۹ میلیون پارامتر دارد. فایل model.onnx و tokens.txt را از صفحهٔ مدل دریافت و جداگانه وارد کنید؛ تشخیص نهایی پس از مکث کوتاه انجام می‌شود.", style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = { uriHandler.openUri("https://huggingface.co/Reza2kn/Shenava-Rizeh-Pizeh-v1.0-sherpa-onnx") }, modifier = Modifier.fillMaxWidth()) { Text("مشاهده و دریافت مدل کوچک فارسی") }
                 OutlinedButton(onClick = onImportSmallSttModel, modifier = Modifier.fillMaxWidth()) { Text("۱. وارد کردن مدل سبک فارسی (.onnx)") }
                 OutlinedButton(onClick = onImportSmallSttTokens, modifier = Modifier.fillMaxWidth()) { Text("۲. وارد کردن واژگان مدل (tokens.txt)") }
                 Text("همچنین می‌توانید بسته‌های Qwen3-ASR یا Streaming Transducer را وارد کنید.", style = MaterialTheme.typography.bodySmall)
