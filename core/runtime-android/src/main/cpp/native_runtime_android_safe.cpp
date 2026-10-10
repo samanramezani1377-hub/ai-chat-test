@@ -107,6 +107,7 @@ static int g_cpu_thread_trial_count = 0;
 static int g_cpu_default_threads = 0;
 static llama_context * g_cpu_tuned_context = nullptr;
 static std::string g_cpu_tuning_key;
+static std::string g_cpu_tuning_path;
 
 // Use a deterministic key so learned settings survive process restarts but never
 // leak from one model/context/device configuration to another.
@@ -125,7 +126,19 @@ static std::string cpu_tuning_identity(llama_context *ctx) {
         "|hwcap2=" + std::to_string(hwcap2) + "|runtime=" + AI_CHAT_LLAMA_CPP_SHA;
 }
 static std::string cpu_tuning_store_path() {
+    if (!g_cpu_tuning_path.empty()) return g_cpu_tuning_path;
     return g_native_trace_file.empty() ? std::string() : g_native_trace_file + ".cpu-autotune";
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeSetCpuTuningPath(
+        JNIEnv *env, jclass, jstring jpath) {
+    if (!jpath) { g_cpu_tuning_path.clear(); return; }
+    const char *path = env->GetStringUTFChars(jpath, nullptr);
+    if (!path) return;
+    g_cpu_tuning_path.assign(path);
+    env->ReleaseStringUTFChars(jpath, path);
+    append_native_trace("NATIVE_CPU_AUTOTUNE_STORE path_configured=1 location=app_files");
 }
 static void load_cpu_tuning_state(const std::string &identity) {
     g_cpu_thread_tuning.clear();
