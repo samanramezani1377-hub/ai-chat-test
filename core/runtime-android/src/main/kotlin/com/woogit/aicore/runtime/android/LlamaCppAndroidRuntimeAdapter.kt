@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.io.File
 import kotlin.math.roundToInt
 
-/** Direct llama.cpp Android runtime. OpenCL is the only supported inference backend. */
+/** Direct llama.cpp Android runtime. Prefer OpenCL; allow CPU execution for unsupported ops/devices. */
 class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 8192,
     gpuLayers: Int = GPU_LAYERS_MAX,
@@ -44,13 +44,13 @@ class LlamaCppAndroidRuntimeAdapter(
     @Volatile private var selectedDraftPath: String? = null
     @Volatile private var loadedDraftPath: String? = null
 
-    init { require(gpuLayers == GPU_LAYERS_MAX) { "Unsupported diagnostic GPU layer mode: $gpuLayers" } }
+    init { require(gpuLayers in 0..GPU_LAYERS_MAX) { "GPU layer preference must be between 0 and $GPU_LAYERS_MAX" } }
 
     fun setGpuLayers(value: Int) {
-        require(value == GPU_LAYERS_MAX) { "Unsupported diagnostic GPU layer mode: $value" }
+        require(value in 0..GPU_LAYERS_MAX) { "GPU layer preference must be between 0 and $GPU_LAYERS_MAX" }
         gpuLayersMode = value
-        RuntimeDiagnosticsStore.recordNativeEvent("OPENCL_GPU_ONLY_SELECTED")
-        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "OPENCL_GPU_ONLY_SELECTED (applies on next activation)")
+        RuntimeDiagnosticsStore.recordNativeEvent("OPENCL_GPU_PREFERRED_CPU_FALLBACK_ALLOWED")
+        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "OPENCL GPU preferred; CPU fallback allowed (applies on next activation)")
     }
 
     fun gpuLayers(): Int = gpuLayersMode
