@@ -68,9 +68,9 @@ static bool create_and_load_locked(const std::string& config, const char* backen
             LOGE("MNN_CREATE_FAILED backend=%s", backend);
             return false;
         }
-        const std::string overrideConfig = std::string("{\\"backend_type\\":\\"") + backend +
-            "\\",\\"thread_num\\":" + std::to_string(threads) +
-            ",\\"precision\\":\\"low\\",\\"memory\\":\\"low\\",\\"use_mmap\\":true}";
+        const std::string overrideConfig = std::string(R"({"backend_type":")") + backend +
+            R"(","thread_num":)" + std::to_string(threads) +
+            R"(,"precision":"low","memory":"low","use_mmap":true})";
         if (!candidate->set_config(overrideConfig)) {
             LOGE("MNN_SET_CONFIG_REJECTED backend=%s; refusing to misreport the selected backend", backend);
             Llm::destroy(candidate);

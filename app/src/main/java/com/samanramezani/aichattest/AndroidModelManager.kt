@@ -57,7 +57,7 @@ class AndroidModelManager(
                     offset += read
                 }
                 offset >= 2 && signature[0] == 'P'.code.toByte() && signature[1] == 'K'.code.toByte()
-            }
+            } == true
         }.getOrDefault(false)
         if (displayName.endsWith(".zip", ignoreCase = true) || displayName.endsWith(".mnnpack", ignoreCase = true) || mimeType == "application/zip" || mimeType == "application/x-zip-compressed" || zipMagic) {
             return@withContext importMnnPack(uri)
@@ -85,6 +85,69 @@ class AndroidModelManager(
         val mnn = mnnRepository.list()
         if (mnn is ModelResult.Failure) return mnn
         return ModelResult.Success((gguf as ModelResult.Success).value + (mnn as ModelResult.Success).value)
+    }
+
+    /** Imports one required file from an MNN export. Files are accumulated until a complete pack is available. */
+    suspend fun importMnnComponent(uri: Uri, componentName: String): ModelResult<ModelDescriptor?> = withContext(Dispatchers.IO) {
+        val allowed = setOf("config.json", "llm.mnn", "llm.mnn.weight", "llm_config.json", "tokenizer.txt")
+        if (componentName !in allowed) {
+            return@withContext ModelResult.Failure(ModelError.InvalidModel("Unsupported MNN component: $componentName"))
+        }
+        try {
+            val sourceName = runCatching {
+                contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                }
+            }.getOrNull().orEmpty()
+            if (!sourceName.equals(componentName, ignoreCase = true)) {
+                return@withContext ModelResult.Failure(
+                    ModelError.InvalidModel("برای این دکمه باید فایل $componentName انتخاب شود؛ فایل انتخاب‌شده: ${sourceName.ifBlank { "نامشخص" }}")
+                )
+            }
+            Files.createDirectories(mnnRoot)
+            val staging = mnnRoot.resolve("manual-import")
+            Files.createDirectories(staging)
+            val input = contentResolver.openInputStream(uri)
+                ?: return@withContext ModelResult.Failure(ModelError.FileAccess("Unable to open MNN component: $componentName"))
+            input.use { source ->
+                Files.newOutputStream(staging.resolve(componentName)).use { target -> source.copyTo(target) }
+            }
+            val required = listOf("config.json", "llm.mnn", "llm.mnn.weight", "llm_config.json", "tokenizer.txt")
+            val missing = required.filterNot { Files.isRegularFile(staging.resolve(it)) && Files.size(staging.resolve(it)) > 0L }
+            if (missing.isNotEmpty()) {
+                RuntimeDiagnosticsStore.recordNativeEvent("MNN_COMPONENT_IMPORTED file=$componentName missing=${missing.joinToString(",")}")
+                return@withContext ModelResult.Success(null)
+            }
+            val finalDir = mnnRoot.resolve("model-${java.util.UUID.randomUUID()}")
+            Files.move(staging, finalDir)
+            val bytes = Files.walk(finalDir).use { paths ->
+                paths.filter { Files.isRegularFile(it) }.mapToLong { Files.size(it) }.sum()
+            }
+            val model = ModelDescriptor(
+                id = "mnn-${java.util.UUID.randomUUID()}",
+                displayName = "مدل MNN واردشده",
+                path = finalDir.resolve("config.json"),
+                format = com.woogit.aicore.domain.ModelFormat.MNN,
+                quantization = com.woogit.aicore.domain.Quantization.UNKNOWN,
+                sizeBytes = bytes,
+                metadata = com.woogit.aicore.domain.ModelMetadata(name = "مدل MNN واردشده", contextLength = 8192L),
+                validation = com.woogit.aicore.domain.ValidationStatus.VALID,
+                runtimeCompatibility = com.woogit.aicore.domain.RuntimeCompatibility(true, "MNN pack; OpenCL first with CPU fallback"),
+                state = com.woogit.aicore.domain.ModelState.IMPORTED,
+            )
+            when (val registered = mnnRepository.register(model)) {
+                is ModelResult.Success -> {
+                    RuntimeDiagnosticsStore.recordNativeEvent("MNN_COMPONENT_PACK_IMPORTED id=${model.id} sizeBytes=${model.sizeBytes}")
+                    ModelResult.Success(model)
+                }
+                is ModelResult.Failure -> {
+                    runCatching { mnnPackImporter.deleteRecursively(finalDir) }
+                    registered
+                }
+            }
+        } catch (t: Throwable) {
+            ModelResult.Failure(ModelError.InvalidModel("واردکردن فایل MNN ناموفق بود: ${t.message}"))
+        }
     }
 
     private suspend fun importMnnPack(uri: Uri): ModelResult<ModelDescriptor> {
