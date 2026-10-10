@@ -89,33 +89,33 @@ internal fun MainScreen(container: AppContainer) {
         }
     }
     BackHandler(enabled = sidebarOpen || quickMenuOpen) { if (sidebarOpen) sidebarOpen = false else quickMenuOpen = false }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri == null || manager == null) return@rememberLauncherForActivityResult; importBusy = true; runtimeStatus = "در حال وارد کردن مدل…"; diagnostic = null; scope.launch { try { val result = withContext(Dispatchers.IO) { manager.import(uri) }; when (result) { is ModelResult.Success -> { runtimeStatus = "مدل وارد شد؛ برای فعال‌سازی آماده است."; diagnostic = null }; is ModelResult.Failure -> diagnostic = formatDiagnostic(result.error.message) } } catch (t: Throwable) { diagnostic = formatDiagnostic(t.message ?: "وارد کردن مدل ناموفق بود.", "وارد کردن مدل") } finally { withContext(Dispatchers.Main) { importBusy = false; if (diagnostic == null && activeModel == null) runtimeStatus = "مدل وارد شد؛ برای فعال‌سازی آماده است." else if (diagnostic != null) runtimeStatus = "خطا" }; refreshModels() } } }
     var selectedMnnComponent by remember { mutableStateOf<String?>(null) }
-    val mnnComponentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val component = selectedMnnComponent
-        if (uri == null || manager == null || component == null) return@rememberLauncherForActivityResult
+        selectedMnnComponent = null
+        if (uri == null || manager == null) return@rememberLauncherForActivityResult
         importBusy = true
-        runtimeStatus = "در حال وارد کردن فایل $component…"
+        runtimeStatus = if (component == null) "در حال وارد کردن مدل…" else "در حال وارد کردن فایل $component…"
         diagnostic = null
         scope.launch {
             try {
-                when (val result = withContext(Dispatchers.IO) { manager.importMnnComponent(uri, component) }) {
-                    is ModelResult.Success -> {
-                        if (result.value == null) {
-                            runtimeStatus = "فایل $component ذخیره شد؛ فایل‌های ضروری باقی‌مانده را هم وارد کن."
-                        } else {
-                            runtimeStatus = "بستهٔ MNN کامل شد و مدل وارد شد."
-                        }
-                        diagnostic = null
+                if (component == null) {
+                    when (val result = withContext(Dispatchers.IO) { manager.import(uri) }) {
+                        is ModelResult.Success -> { runtimeStatus = "مدل وارد شد؛ برای فعال‌سازی آماده است."; diagnostic = null }
+                        is ModelResult.Failure -> { runtimeStatus = "خطا"; diagnostic = formatDiagnostic(result.error.message, "وارد کردن مدل") }
                     }
-                    is ModelResult.Failure -> {
-                        runtimeStatus = "خطا"
-                        diagnostic = formatDiagnostic(result.error.message, "وارد کردن فایل MNN")
+                } else {
+                    when (val result = withContext(Dispatchers.IO) { manager.importMnnComponent(uri, component) }) {
+                        is ModelResult.Success -> {
+                            runtimeStatus = if (result.value == null) "فایل $component ذخیره شد؛ فایل‌های ضروری باقی‌مانده را هم وارد کن." else "بستهٔ MNN کامل شد و مدل وارد شد."
+                            diagnostic = null
+                        }
+                        is ModelResult.Failure -> { runtimeStatus = "خطا"; diagnostic = formatDiagnostic(result.error.message, "وارد کردن فایل MNN") }
                     }
                 }
             } catch (t: Throwable) {
                 runtimeStatus = "خطا"
-                diagnostic = formatDiagnostic(t.message ?: "وارد کردن فایل MNN ناموفق بود.", "وارد کردن فایل MNN")
+                diagnostic = formatDiagnostic(t.message ?: "وارد کردن فایل ناموفق بود.", "وارد کردن مدل")
             } finally {
                 withContext(Dispatchers.Main) { importBusy = false; refreshModels() }
             }
@@ -199,7 +199,15 @@ internal fun MainScreen(container: AppContainer) {
                                 Log.e("AIChatClipboard", "Copy failed; text length=${value.length}", error)
                                 Toast.makeText(context, "کپی متن انجام نشد", Toast.LENGTH_LONG).show()
                             }
-                        }); AppDestination.WORK -> WorkspacePage(execution, activeModel, { destination = AppDestination.DIAGNOSTICS }); AppDestination.WORKSPACE -> WorkspacePage(execution, activeModel, { destination = AppDestination.DIAGNOSTICS }); AppDestination.DIAGNOSTICS -> DiagnosticsPage(diagnostic, execution); AppDestination.SETTINGS -> SettingsScreen(models, activeModel, diagnostic, { picker.launch(arrayOf("application/octet-stream", "application/*")) }, { fileName -> selectedMnnComponent = fileName; mnnComponentPicker.launch(arrayOf("*/*")) }, draftModels, activeDraft, { draftPicker.launch(arrayOf("application/octet-stream", "application/*")) }, ::assignDraft, ::deleteDraft, ::refreshModels, ::activateModel, ::deactivateModel, { id -> scope.launch(Dispatchers.Default) { manager?.delete(id); refreshModels() } }); AppDestination.ABOUT -> AboutPage() } }; if (sidebarOpen) Sidebar(current = current, conversations = conversations.take(recentLimit), destination = destination, onClose = { sidebarOpen = false }, onDestination = { destination = it; sidebarOpen = false }, onNew = ::createConversation, onOpen = ::openConversation, onRename = { renameTarget = it }, onDelete = ::deleteConversation, onMore = { recentLimit += 20; refreshHistory() }, canShowMore = conversations.size >= recentLimit); if (quickMenuOpen) AppQuickMenu({ quickMenuOpen = false; destination = AppDestination.DIAGNOSTICS }, { quickMenuOpen = false; destination = AppDestination.SETTINGS }); if (runtimeDetailsOpen) RuntimeDetailsDialog(status = runtimeStatus, model = activeModel, runtimeName = "llama.cpp", runtimeVersion = "pinned", backend = null, onDismiss = { runtimeDetailsOpen = false }); ApprovalDialog(execution, ::approveExecution, ::rejectExecution); deleted?.let { UndoBar(onUndo = { restoreDeleted(it.record) }, onDismiss = { deleted = null }, onExpire = { deleted = null }) }; renameTarget?.let { RenameDialog(initial = it.title, onDismiss = { renameTarget = null }, onConfirm = { renamed -> scope.launch(Dispatchers.Default) { history.rename(it.id, renamed); withContext(Dispatchers.Main) { renameTarget = null; refreshHistory() } } }) } } } } }
+                        }); AppDestination.WORK -> WorkspacePage(execution, activeModel, { destination = AppDestination.DIAGNOSTICS }); AppDestination.WORKSPACE -> WorkspacePage(execution, activeModel, { destination = AppDestination.DIAGNOSTICS }); AppDestination.DIAGNOSTICS -> DiagnosticsPage(diagnostic, execution); AppDestination.SETTINGS -> SettingsScreen(models, activeModel, diagnostic, { picker.launch(arrayOf("application/octet-stream", "application/*")) }, { fileName ->
+                            selectedMnnComponent = fileName
+                            runCatching { picker.launch(arrayOf("application/octet-stream", "application/json", "text/plain", "application/*")) }
+                                .onFailure { error ->
+                                    selectedMnnComponent = null
+                                    diagnostic = formatDiagnostic(error.message ?: "بازکردن انتخاب‌گر فایل ناموفق بود.", "وارد کردن فایل MNN")
+                                    runtimeStatus = "خطا"
+                                }
+                        }, draftModels, activeDraft, { draftPicker.launch(arrayOf("application/octet-stream", "application/*")) }, ::assignDraft, ::deleteDraft, ::refreshModels, ::activateModel, ::deactivateModel, { id -> scope.launch(Dispatchers.Default) { manager?.delete(id); refreshModels() } }); AppDestination.ABOUT -> AboutPage() } }; if (sidebarOpen) Sidebar(current = current, conversations = conversations.take(recentLimit), destination = destination, onClose = { sidebarOpen = false }, onDestination = { destination = it; sidebarOpen = false }, onNew = ::createConversation, onOpen = ::openConversation, onRename = { renameTarget = it }, onDelete = ::deleteConversation, onMore = { recentLimit += 20; refreshHistory() }, canShowMore = conversations.size >= recentLimit); if (quickMenuOpen) AppQuickMenu({ quickMenuOpen = false; destination = AppDestination.DIAGNOSTICS }, { quickMenuOpen = false; destination = AppDestination.SETTINGS }); if (runtimeDetailsOpen) RuntimeDetailsDialog(status = runtimeStatus, model = activeModel, runtimeName = "llama.cpp", runtimeVersion = "pinned", backend = null, onDismiss = { runtimeDetailsOpen = false }); ApprovalDialog(execution, ::approveExecution, ::rejectExecution); deleted?.let { UndoBar(onUndo = { restoreDeleted(it.record) }, onDismiss = { deleted = null }, onExpire = { deleted = null }) }; renameTarget?.let { RenameDialog(initial = it.title, onDismiss = { renameTarget = null }, onConfirm = { renamed -> scope.launch(Dispatchers.Default) { history.rename(it.id, renamed); withContext(Dispatchers.Main) { renameTarget = null; refreshHistory() } } }) } } } } }
 }
 
 private fun formatDiagnostic(raw: String?, operation: String? = null): String {

@@ -82,7 +82,6 @@ fun SettingsScreen(
 
 @Composable
 private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescriptor>, error: String?, onImport: () -> Unit, onImportMnnComponent: (String) -> Unit, onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)?, onDelete: (String) -> Unit) {
-    var showMnnFileImport by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.primaryContainer) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -98,23 +97,18 @@ private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescript
             Button(onClick = onImport, modifier = Modifier.weight(1f).height(50.dp)) { Text("افزودن مدل") }
             OutlinedButton(onClick = onRefresh, modifier = Modifier.height(50.dp)) { Text("تازه‌سازی") }
         }
-        TextButton(onClick = { showMnnFileImport = !showMnnFileImport }) {
-            Text(if (showMnnFileImport) "بستن ورود فایل‌های جداگانه" else "ورود فایل‌های MNN به‌صورت جداگانه")
-        }
-        if (showMnnFileImport) {
-            Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("هر فایل را جداگانه انتخاب کن. مدل بعد از ورود هر پنج فایل ضروری ثبت می‌شود.", style = MaterialTheme.typography.bodySmall)
-                    listOf(
-                        "config.json" to "تنظیمات مدل",
-                        "llm.mnn" to "ساختار مدل",
-                        "llm.mnn.weight" to "وزن‌های مدل (حجم زیاد)",
-                        "llm_config.json" to "تنظیمات اجرای LLM",
-                        "tokenizer.txt" to "واژه‌ساز مدل",
-                    ).forEach { (fileName, label) ->
-                        OutlinedButton(onClick = { onImportMnnComponent(fileName) }, modifier = Modifier.fillMaxWidth()) {
-                            Text("انتخاب $fileName · $label")
-                        }
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("فایل GGUF یا ZIP مدل MNN را با «افزودن مدل» وارد کن؛ اگر فایل ZIP نداری، فایل‌های MNN را از همین‌جا جداگانه انتخاب کن.", style = MaterialTheme.typography.bodySmall)
+                listOf(
+                    "config.json" to "تنظیمات مدل",
+                    "llm.mnn" to "ساختار مدل",
+                    "llm.mnn.weight" to "وزن‌های مدل (حجم زیاد)",
+                    "llm_config.json" to "تنظیمات اجرای LLM",
+                    "tokenizer.txt" to "واژه‌ساز مدل",
+                ).forEach { (fileName, label) ->
+                    OutlinedButton(onClick = { onImportMnnComponent(fileName) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("انتخاب $fileName · $label")
                     }
                 }
             }
