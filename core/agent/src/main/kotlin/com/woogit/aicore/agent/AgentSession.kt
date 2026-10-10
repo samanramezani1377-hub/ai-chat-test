@@ -49,17 +49,18 @@ class AgentSession(
             while (actionPlanCoordinator != null && steps < effectiveMaxActionSteps) {
                 conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
                 resultPersisted = true
-                plan = actionPlanCoordinator.prepare(contextProvider.build(effectiveRecentMessages), conversationId) ?: break
-                eventSink(AgentEvent.ActionPrepared(plan.prepared.executionId, plan.prepared.actionId))
-                if (plan.prepared.risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE) {
-                    eventSink(AgentEvent.ApprovalRequired(plan.prepared.executionId))
+                val nextPlan = actionPlanCoordinator.prepare(contextProvider.build(effectiveRecentMessages), conversationId) ?: break
+                plan = nextPlan
+                eventSink(AgentEvent.ActionPrepared(nextPlan.prepared.executionId, nextPlan.prepared.actionId))
+                if (nextPlan.prepared.risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE) {
+                    eventSink(AgentEvent.ApprovalRequired(nextPlan.prepared.executionId))
                     break
                 }
                 val executor = actionExecutor ?: break
-                var outcome = executor(plan)
+                var outcome = executor(nextPlan)
                 actionResult = outcome.message
-                eventSink(AgentEvent.ActionExecuted(plan.prepared.executionId))
-                conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(plan), System.currentTimeMillis()))
+                eventSink(AgentEvent.ActionExecuted(nextPlan.prepared.executionId))
+                conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(nextPlan), System.currentTimeMillis()))
                 steps++
 
                 if (!outcome.success || !outcome.verified) {
@@ -67,11 +68,11 @@ class AgentSession(
                     // regenerate so the model can choose an alternative action/path.
                     val retry = actionRetryExecutor
                     if (retry != null && steps < effectiveMaxActionSteps) {
-                        val retried = runCatching { retry(plan) }.getOrElse {
+                        val retried = runCatching { retry(nextPlan) }.getOrElse {
                             ActionExecutionOutcome(false, false, it.message ?: "Retry failed", errorCode = "RETRY_FAILED")
                         }
                         actionResult = retried.message
-                        conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, retried.toProtocolResult(plan), System.currentTimeMillis()))
+                        conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, retried.toProtocolResult(nextPlan), System.currentTimeMillis()))
                         steps++
                         outcome = retried
                     }

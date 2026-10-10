@@ -20,5 +20,8 @@ class DefaultActionRegistry : ActionRegistry {
     override fun find(actionId: String): Action<Any, Any>? = actions[actionId]
 
     @Synchronized
+    override fun all(): List<Action<Any, Any>> = actions.values.toList()
+
+    @Synchronized
     override fun categories(): Set<String> = categoriesByAction.values.toSet()
 }
