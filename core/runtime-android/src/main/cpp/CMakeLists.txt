@@ -175,9 +175,13 @@ if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1")
     if(_ai_chat_assignment_location EQUAL -1)
         message(FATAL_ERROR "Could not locate pinned ggml scheduler graph assignment logging point")
     endif()
-    if(NOT _ai_chat_backend_source MATCHES "#include <string>")
-        string(REPLACE "#include <unordered_map>" "#include <unordered_map>\n#include <string>" _ai_chat_backend_source "${_ai_chat_backend_source}")
-        string(REPLACE "#include <unordered_map>" "#include <unordered_map>\n#include <string>\n#if defined(__GNUC__)\\nextern \\"C\\" void ai_chat_append_native_trace(const char *) __attribute__((weak));\\n#endif" _ai_chat_backend_source "${_ai_chat_backend_source}")
+    if(NOT _ai_chat_backend_source MATCHES "ai_chat_append_native_trace")
+        set(_ai_chat_trace_include [=[#include <unordered_map>
+#include <string>
+#if defined(__GNUC__)
+extern "C" void ai_chat_append_native_trace(const char *) __attribute__((weak));
+#endif]=])
+        string(REPLACE "#include <unordered_map>" "${_ai_chat_trace_include}" _ai_chat_backend_source "${_ai_chat_backend_source}")
     endif()
     string(REPLACE "${_ai_chat_assignment_needle}" "${_ai_chat_assignment_replacement}" _ai_chat_backend_source "${_ai_chat_backend_source}")
     file(WRITE "${_ai_chat_backend_cpp}" "${_ai_chat_backend_source}")
