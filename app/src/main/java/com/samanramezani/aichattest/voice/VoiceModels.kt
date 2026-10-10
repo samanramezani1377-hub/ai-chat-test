@@ -16,6 +16,7 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 enum class VoiceModelKind { STT, TTS }
 enum class PiperComponent { MODEL, CONFIG, ESPEAK_DATA }
 enum class SmallSttComponent { MODEL, TOKENS }
+enum class SmallSttModel { RIZEH_PIZEH, KOOCHIK }
 
 data class VoiceModelEntry(
     val id: String,
@@ -69,9 +70,10 @@ class VoiceModelStore(
     }
 
     /** Human-readable progress for the two-file Shenava import. */
-    fun missingSmallSttComponents(): List<String> {
-        if (list(VoiceModelKind.STT).any { it.asrMode == "nemo-ctc" }) return emptyList()
-        val staging = File(root, ".shenava-rizeh-import")
+    fun missingSmallSttComponents(modelType: SmallSttModel = SmallSttModel.RIZEH_PIZEH): List<String> {
+        val idPrefix = if (modelType == SmallSttModel.KOOCHIK) "stt-shenava-koochik-" else "stt-shenava-rizeh-pizeh-"
+        if (list(VoiceModelKind.STT).any { it.asrMode == "nemo-ctc" && it.id.startsWith(idPrefix) }) return emptyList()
+        val staging = File(root, if (modelType == SmallSttModel.KOOCHIK) ".shenava-koochik-import" else ".shenava-rizeh-import")
         val model = File(staging, "model.onnx").let { it.isFile && it.length() >= 1024 }
         val tokens = File(staging, "tokens.txt").let { it.isFile && it.length() > 0 }
         return buildList {
@@ -84,9 +86,13 @@ class VoiceModelStore(
      * Import the tiny Persian Shenava Rizeh-Pizeh NeMo-CTC model in two steps.
      * Model and tokens can be selected in either order; incomplete imports stay hidden.
      */
-    fun importSmallPersianSttComponent(uri: Uri, component: SmallSttComponent): VoiceModelEntry? {
+    fun importSmallPersianSttComponent(
+        uri: Uri,
+        component: SmallSttComponent,
+        modelType: SmallSttModel = SmallSttModel.RIZEH_PIZEH,
+    ): VoiceModelEntry? {
         root.mkdirs()
-        val staging = File(root, ".shenava-rizeh-import")
+        val staging = File(root, if (modelType == SmallSttModel.KOOCHIK) ".shenava-koochik-import" else ".shenava-rizeh-import")
         if (!staging.exists() && !staging.mkdirs()) {
             error("VOICE-STT-IMPORT-001: ایجاد پوشه موقت مدل فارسی ناموفق بود.")
         }
@@ -136,7 +142,7 @@ class VoiceModelStore(
         val model = File(staging, "model.onnx")
         val tokens = File(staging, "tokens.txt")
         if (!model.isFile || model.length() < 1024 || !tokens.isFile) return null
-        val id = "stt-shenava-rizeh-pizeh-${System.currentTimeMillis()}"
+        val id = "stt-shenava-${if (modelType == SmallSttModel.KOOCHIK) "koochik" else "rizeh-pizeh"}-${System.currentTimeMillis()}"
         val destination = File(root, id)
         check(staging.renameTo(destination)) { "VOICE-STT-IMPORT-009: ذخیره نهایی مدل فارسی ناموفق بود." }
         return validateDirectory(destination, VoiceModelKind.STT)
@@ -468,7 +474,7 @@ class VoiceModelStore(
                 if (simpleCtcModel != null && simpleCtcTokens != null && !hasTransducerParts &&
                     simpleCtcModel.length() >= 1024 && simpleCtcTokens.length() > 0L) {
                     return VoiceModelEntry(
-                        directory.name, "Shenava Rizeh-Pizeh · فارسی · 6.9M",
+                        directory.name, if (directory.name.startsWith("stt-shenava-koochik-")) "Shenava Koochik · فارسی · 114M" else "Shenava Rizeh-Pizeh · فارسی · 6.9M",
                         kind, directory, simpleCtcModel, tokensFile = simpleCtcTokens,
                         modelType = "nemo-ctc", asrMode = "nemo-ctc",
                     )
