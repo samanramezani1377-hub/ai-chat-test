@@ -102,7 +102,7 @@ class LocalStreamingAsr(private val entry: VoiceModelEntry) {
             tokens = requireNotNull(entry.tokensFile).absolutePath
             numThreads = 2
             provider = "cpu"
-            modelType = "zipformer"
+            modelType = entry.modelType
         }
         recognizer = OnlineRecognizer(config = OnlineRecognizerConfig().apply {
             featConfig = FeatureConfig().apply { sampleRate = 16000; featureDim = 80 }
