@@ -30,7 +30,7 @@ data class InferenceSettings(
     /** Balanced default for local instruction-following models. */
     val temperature: Double = 0.7,
     /** Practical response size that keeps mobile inference responsive. */
-    val maxNewTokens: Int = 512,
+    val maxNewTokens: Int = 2048,
     /** Common local-LLM sampling defaults; nullable means explicitly disabled only when chosen by the user. */
     val topK: Int? = 40,
     val topP: Double? = 0.9,
@@ -41,7 +41,7 @@ data class InferenceSettings(
     /** No forced stop strings by default; the model/runtime decides when generation naturally ends. */
     val stopSequences: List<String> = emptyList(),
     /** Conservative local default; runtime capability may further constrain this value. */
-    val contextLength: Int? = 4096,
+    val contextLength: Int? = 8192,
     /** Number of recent conversation messages included in generated context. */
     val recentMessages: Int = 10,
     /** Maximum number of real Action steps the Agent may execute for one request. */

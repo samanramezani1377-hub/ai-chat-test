@@ -1,8 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.INTERNET" />
+
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".AIChatApplication"
@@ -10,6 +9,17 @@
         android:theme="@style/Theme.AIChatTest"
         android:allowBackup="true"
         android:supportsRtl="true">
+        <uses-native-library
+            android:name="libOpenCL.so"
+            android:required="false" />
+        <service
+            android:name=".ModelRuntimeForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Long-running on-device local AI model inference with native GPU runtime" />
+        </service>
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -19,13 +29,5 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <service
-            android:name=".RuntimeExecutionForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="remote AI API inference" />
-        </service>
     </application>
 </manifest>

@@ -1,12 +1,14 @@
 name: CI
 
 on:
+  # Run CI for every branch so feature branches are validated on every push.
   push:
     branches:
-      - main
+      - '**'
+  # Validate pull requests regardless of their target branch.
   pull_request:
     branches:
-      - main
+      - '**'
   workflow_dispatch:
 
 permissions:
@@ -27,7 +29,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK
         uses: actions/setup-java@v5
@@ -39,11 +41,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
-
-      - name: Show toolchain
-        run: |
-          java -version
-          gradle --version
 
       - name: Run JVM and Android unit tests
         run: >-
@@ -54,11 +51,11 @@ jobs:
           :core:domain:test
           :core:observability:test
           :core:runtime:test
+          :core:runtime-android:test
           :core:settings:test
           :app:testDebugUnitTest
           --stacktrace
           --console=plain
-          --no-daemon
           --parallel
 
   android-build:
@@ -67,7 +64,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK
         uses: actions/setup-java@v5
@@ -80,24 +77,96 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
-      - name: Show toolchain
-        run: |
-          java -version
-          gradle --version
-
       - name: Verify Android SDK
         run: |
-          test -n "$ANDROID_HOME"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list >/dev/null
+          test -n "${ANDROID_HOME:-}"
+          test -d "$ANDROID_HOME/platforms/android-36"
+
+      - name: Cache exact native build state
+        uses: actions/cache@v4
+        with:
+          path: |
+            core/runtime-android/.cxx
+            core/runtime-android/src/.cxx
+          key: >-
+            native-${{ runner.os }}-
+            ${{ hashFiles(
+              'gradle.properties',
+              'settings.gradle.kts',
+              'build.gradle.kts',
+              'gradle/libs.versions.toml',
+              'core/runtime-android/build.gradle.kts',
+              'core/runtime-android/src/main/cpp/**',
+              'core/runtime-android/src/main/cpp/cmake/**',
+              '.github/workflows/ci.yml'
+            ) }}
+
+      - name: Verify OpenCL-first runtime invariants
+        run: |
+          set -euo pipefail
+          ! grep -R "GGML_OPENCL_ADRENO_XMEM_GEMM.*1" -n core/runtime-android/src/main/cpp
+          grep -q 'OPENCL_KERNEL_POLICY=UPSTREAM_DEVICE_CAPABILITY_SELECTION' core/runtime-android/src/main/cpp/native_runtime.cpp
+          # Never spoof device families: upstream kernels have family-specific
+          # subgroup assumptions, so unsupported devices must fail closed.
+          grep -q 'Do not spoof an unsupported GPU family' core/runtime-android/src/main/cpp/CMakeLists.txt
+          ! grep -q 'AI_CHAT_ADRENO_A7X_FAMILY_EXPANSION_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          # Match a real setenv call, not unsetenv (which contains setenv as a substring).
+          ! grep -Eq '(^|[^[:alnum:]_])setenv\("GGML_OPENCL_Q6K_GEMV_TILED"' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'GGML_OPENCL_USE_ADRENO_KERNELS OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'NATIVE_EXECUTION_POLICY mode=OPENCL_GPU_PREFERRED' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'wholeModelCpuFallback=enabled' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'OPENCL_ATTEMPT_FAILED reason=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'CPU_FALLBACK_STARTED gpuAttempted=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'CPU_FALLBACK_FAILED reason=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'OPENCL_MODEL_RESIDENCY_POLICY mode=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'NATIVE_EXECUTION_PROFILE mode=' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V3' core/runtime-android/src/main/cpp/cmake/patch_backend_assignment_trace.cmake
+          grep -q 'AI_CHAT_BACKEND_SPLIT_TIMING' core/runtime-android/src/main/cpp/cmake/patch_backend_assignment_trace.cmake
+          grep -q 'AI_CHAT_OPENCL_PROFILING=ON' core/runtime-android/build.gradle.kts
+          grep -q 'resident_max + 1' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          # Hybrid/recurrent KV state is reused only as an exact resident prefix;
+          # never trim recurrent state or force a full rebuild on every turn.
+          grep -q 'NATIVE_KV_CACHE_HYBRID_EXACT_REUSE' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'resident_hybrid_exact_prefix' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'prompt_tokens.size() > g_cached_prompt_tokens.size()' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          ! grep -q 'NATIVE_KV_CACHE_HYBRID_DISABLED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          echo "OpenCL-first fallback policy, backend assignment, profiling, and KV-cache invariants verified"
 
       - name: Assemble debug APK
         run: >-
           gradle
+          :core:runtime-android:assembleDebug
           :app:assembleDebug
           --stacktrace
           --console=plain
-          --no-daemon
           --parallel
+
+      - name: Verify OpenCL profiling and static backend linkage
+        run: |
+          set -euo pipefail
+          source_file="$(find core/runtime-android -path '*/.cxx/*' -path '*/llama_cpp-src/ggml/src/ggml-opencl/ggml-opencl.cpp' -print -quit)"
+          test -n "$source_file"
+          grep -q 'AI_CHAT_OPENCL_PROFILE_PATCH_V4' "$source_file"
+          grep -q 'fperf_live' "$source_file"
+          grep -q 'cmd_queued_duration_ns' "$source_file"
+          grep -q 'cmd_submit_duration_ns' "$source_file"
+          grep -q 'cmd_complete_duration_ns' "$source_file"
+          grep -q 'cl_profiling.csv' "$source_file"
+
+          # The production runtime is intentionally static. Fail CI if the
+          # OpenCL backend target disappeared or the ggml registry was built
+          # without GGML_USE_OPENCL.
+          opencl_target="$(find core/runtime-android -path '*/.cxx/*' -type f \( -name 'build.ninja' -o -name 'rules.ninja' \) -print0 | xargs -0 grep -l 'ggml-opencl' | head -n 1 || true)"
+          test -n "$opencl_target"
+          native_dirs=()
+          for dir in core/runtime-android/.cxx core/runtime-android/src/.cxx; do
+            if [ -d "$dir" ]; then native_dirs+=( "$dir" ); fi
+          done
+          test "${#native_dirs[@]}" -gt 0
+          grep -R 'GGML_USE_OPENCL' "${native_dirs[@]}" >/dev/null
+          grep -R 'ggml-opencl' "${native_dirs[@]}" >/dev/null
+          echo "Static OpenCL backend linkage verified: $opencl_target"
+          echo "OpenCL profiling instrumentation is present in the compiled llama.cpp source: $source_file"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -113,7 +182,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK
         uses: actions/setup-java@v5
@@ -126,13 +195,32 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
+      - name: Cache exact native build state
+        uses: actions/cache@v4
+        with:
+          path: |
+            core/runtime-android/.cxx
+            core/runtime-android/src/.cxx
+          key: >-
+            native-lint-${{ runner.os }}-
+            ${{ hashFiles(
+              'gradle.properties',
+              'settings.gradle.kts',
+              'build.gradle.kts',
+              'gradle/libs.versions.toml',
+              'core/runtime-android/build.gradle.kts',
+              'core/runtime-android/src/main/cpp/**',
+              'core/runtime-android/src/main/cpp/cmake/**',
+              '.github/workflows/ci.yml'
+            ) }}
+
       - name: Run Android lint
         run: >-
           gradle
           :app:lintDebug
           --stacktrace
           --console=plain
-          --no-daemon
+          --configuration-cache
 
       - name: Upload lint report
         if: always()
