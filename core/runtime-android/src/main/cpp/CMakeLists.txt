@@ -120,7 +120,7 @@ if(NOT _ai_chat_backend_verify MATCHES "AI_CHAT_SELECTIVE_CPU_OP_FALLBACK_V1" OR
     message(FATAL_ERROR "Selective GPU-first CPU operator fallback policy is missing or an old CPU-compute guard remains")
 endif()
 
-# Compact scheduler placement telemetry. Assignment is not per-op execution timing.
+# Compact scheduler placement telemetry. One summary line per graph avoids per-node disk I/O.
 if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1")
     set(_ai_chat_assignment_needle [=[    if (sched->debug) {
         ggml_backend_sched_print_assignments(sched, graph);
@@ -131,6 +131,7 @@ if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1")
         int ai_chat_cpu_nodes = 0;
         int ai_chat_other_nodes = 0;
         int ai_chat_unassigned_nodes = 0;
+        std::unordered_map<std::string, int> ai_chat_cpu_ops;
         for (int ai_chat_i = 0; ai_chat_i < graph->n_nodes; ++ai_chat_i) {
             struct ggml_tensor * ai_chat_node = graph->nodes[ai_chat_i];
             if (ggml_is_view_op(ai_chat_node->op)) continue;
@@ -146,16 +147,20 @@ if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1")
                 ++ai_chat_gpu_nodes;
             } else if (ai_chat_type == GGML_BACKEND_DEVICE_TYPE_CPU) {
                 ++ai_chat_cpu_nodes;
-                GGML_LOG_INFO("AI_CHAT_BACKEND_CPU_OP op=%s tensor=%s bytes=%zu backend=%s\n",
-                    ggml_op_name(ai_chat_node->op), ai_chat_node->name,
-                    ggml_nbytes(ai_chat_node), ggml_backend_name(ai_chat_backend));
+                ++ai_chat_cpu_ops[ggml_op_name(ai_chat_node->op)];
             } else {
                 ++ai_chat_other_nodes;
             }
         }
-        GGML_LOG_INFO("AI_CHAT_BACKEND_GRAPH_ASSIGNMENT nodes=%d splits=%d gpuNodes=%d cpuNodes=%d otherNodes=%d unassignedNodes=%d\n",
+        std::string ai_chat_cpu_op_summary;
+        for (const auto & ai_chat_entry : ai_chat_cpu_ops) {
+            if (!ai_chat_cpu_op_summary.empty()) ai_chat_cpu_op_summary += ",";
+            ai_chat_cpu_op_summary += ai_chat_entry.first + ":" + std::to_string(ai_chat_entry.second);
+        }
+        GGML_LOG_INFO("AI_CHAT_BACKEND_GRAPH_ASSIGNMENT nodes=%d splits=%d gpuNodes=%d cpuNodes=%d otherNodes=%d unassignedNodes=%d cpuOpTypes=%s\n",
             graph->n_nodes, sched->n_splits, ai_chat_gpu_nodes, ai_chat_cpu_nodes,
-            ai_chat_other_nodes, ai_chat_unassigned_nodes);
+            ai_chat_other_nodes, ai_chat_unassigned_nodes,
+            ai_chat_cpu_op_summary.empty() ? "none" : ai_chat_cpu_op_summary.c_str());
     }
     if (sched->debug) {
         ggml_backend_sched_print_assignments(sched, graph);

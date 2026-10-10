@@ -193,11 +193,11 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine()
     appendLine("===== BACKEND OP ASSIGNMENTS =====")
     val backendLines = nativeDiagnostics.orEmpty().lineSequence()
-        .filter { it.contains("AI_CHAT_BACKEND_GRAPH_ASSIGNMENT") || it.contains("AI_CHAT_BACKEND_CPU_OP") }
+        .filter { it.contains("AI_CHAT_BACKEND_GRAPH_ASSIGNMENT") }
         .toList().takeLast(24)
     if (backendLines.isEmpty()) appendLine("Backend assignment profiling: N/A (use a build with scheduler profiling)")
     else backendLines.forEach { appendLine(it) }
-    appendLine("Note: assignment is scheduler placement, not per-op duration. GPU execution may be asynchronous; llama_decode timing is wall-clock.")
+    appendLine("cpuOpTypes lists CPU-assigned operator types and counts for each graph. Assignment is not per-op duration; GPU execution may be asynchronous, while llama_decode timing is wall-clock.")
     appendLine()
     appendLine("===== SPECULATIVE DECODING =====")
     appendLine("Draft Tokens: ${perf.speculativeDraftTokens ?: "N/A"}")
