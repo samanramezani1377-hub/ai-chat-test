@@ -32,6 +32,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicInteger
 
 @Composable
 internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) {
@@ -178,20 +179,25 @@ private class VoiceConversationController(
                 if (conversationId == null) conversationId = container.conversationHistory.create("مکالمه صوتی").id
                 val frames = Channel<LocalMicrophone.Frame>(capacity = 64)
                 val mic = LocalMicrophone()
+                val loudSpeechFrames = AtomicInteger(0)
                 microphone = mic
-                mic.start { frame -> frames.trySend(frame) }
-                var loudSpeechFrames = 0
+                mic.start { frame ->
+                    // Run barge-in detection on the capture thread, not the ASR consumer.
+                    // Offline ASR may need hundreds of milliseconds to decode an utterance.
+                    if (speaking.get() && frame.rms > 0.035f && frame.speech) {
+                        if (loudSpeechFrames.incrementAndGet() >= 3) {
+                            interrupt("صدای کاربر تشخیص داده شد؛ پاسخ قبلی متوقف شد.")
+                            loudSpeechFrames.set(0)
+                        }
+                    } else {
+                        loudSpeechFrames.set(0)
+                    }
+                    frames.trySend(frame)
+                }
                 frameJob = scope.launch {
                     onListening(true)
                     onStatus("در حال گوش‌دادن؛ گفتار و پردازش کاملاً روی دستگاه است.")
                     for (frame in frames) {
-                        // Echo cancellation and noise suppression are enabled on AudioRecord when
-                        // supported. Barge-in uses a short run of elevated input energy.
-                        if (speaking.get() && frame.rms > 0.035f && frame.speech) loudSpeechFrames++ else loudSpeechFrames = 0
-                        if (speaking.get() && loudSpeechFrames >= 3) {
-                            interrupt("صدای کاربر تشخیص داده شد؛ پاسخ قبلی متوقف شد.")
-                            loudSpeechFrames = 0
-                        }
                         val update = try { recognizer?.accept(frame.samples, 16000, frame.speech) } catch (t: Throwable) {
                             onStatus("VOICE-STT-002: خطا در تشخیص گفتار: ${t.message ?: "نامشخص"}")
                             null
