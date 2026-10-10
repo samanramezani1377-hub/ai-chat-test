@@ -1158,10 +1158,58 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                 generated_decoded_tokens.end());
         g_cached_model = g_model;
         g_cached_context = g_context;
-        const llama_pos published_min = llama_memory_seq_pos_min(memory, 0);
-        const llama_pos published_max = llama_memory_seq_pos_max(memory, 0);
+        llama_pos published_min = llama_memory_seq_pos_min(memory, 0);
+        llama_pos published_max = llama_memory_seq_pos_max(memory, 0);
+        // Hybrid/recurrent memory cannot be safely trimmed or rolled back. If its
+        // resident position drifted from the token ledger, rebuild the resident
+        // state from the exact token sequence rather than dropping cache reuse
+        // for every following turn.
+        if (hybrid_memory && !g_cached_prompt_tokens.empty() &&
+            (published_max < 0 ||
+             static_cast<size_t>(published_max + 1) != g_cached_prompt_tokens.size())) {
+            append_native_trace("NATIVE_KV_CACHE_HYBRID_RESYNC_STARTED");
+            llama_memory_clear(memory, true);
+            llama_batch replay_batch = llama_batch_init(decode_batch_size, 0, 1);
+            bool replay_ok = replay_batch.token && replay_batch.pos &&
+                    replay_batch.n_seq_id && replay_batch.seq_id && replay_batch.logits;
+            size_t replay_offset = 0;
+            while (replay_ok && replay_offset < g_cached_prompt_tokens.size()) {
+                const int count = static_cast<int>(std::min(
+                        static_cast<size_t>(decode_batch_size),
+                        g_cached_prompt_tokens.size() - replay_offset));
+                replay_batch.n_tokens = count;
+                for (int i = 0; i < count; ++i) {
+                    replay_batch.token[i] = g_cached_prompt_tokens[replay_offset + static_cast<size_t>(i)];
+                    replay_batch.pos[i] = static_cast<llama_pos>(replay_offset + static_cast<size_t>(i));
+                    replay_batch.n_seq_id[i] = 1;
+                    replay_batch.seq_id[i][0] = 0;
+                    replay_batch.logits[i] = 0;
+                }
+                if (llama_decode(g_context, replay_batch) != 0) {
+                    replay_ok = false;
+                    break;
+                }
+                replay_offset += static_cast<size_t>(count);
+            }
+            llama_batch_free(replay_batch);
+            published_min = llama_memory_seq_pos_min(memory, 0);
+            published_max = llama_memory_seq_pos_max(memory, 0);
+            replay_ok = replay_ok && published_max >= 0 &&
+                    static_cast<size_t>(published_max + 1) == g_cached_prompt_tokens.size();
+            append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_RESYNC_RESULT success=") +
+                    (replay_ok ? "1" : "0") +
+                    " replayedTokens=" + std::to_string(replay_offset) +
+                    " residentMax=" + std::to_string(published_max) +
+                    " cachedTokens=" + std::to_string(g_cached_prompt_tokens.size())).c_str());
+            if (!replay_ok) {
+                clear_android_generation_cache();
+                llama_memory_clear(memory, true);
+            }
+        }
         const bool resident_publish_valid = hybrid_memory
-                ? !g_cached_prompt_tokens.empty()
+                ? (!g_cached_prompt_tokens.empty() &&
+                   published_max >= 0 &&
+                   static_cast<size_t>(published_max + 1) == g_cached_prompt_tokens.size())
                 : (published_min == 0 &&
                    published_max >= 0 &&
                    static_cast<size_t>(published_max + 1) == g_cached_prompt_tokens.size());
