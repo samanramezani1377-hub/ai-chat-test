@@ -19,6 +19,7 @@ import com.woogit.aicore.agent.ActionPlanCoordinator
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.agent.AgentOrchestrator
 import com.woogit.aicore.agent.AgentSession
+import com.woogit.aicore.agent.ActionToolPrompt
 import com.woogit.aicore.agent.ProtocolActionIntentPlanner
 import com.woogit.aicore.conversation.ConversationHistoryRepository
 import com.woogit.aicore.conversation.ConversationMessage
@@ -163,7 +164,7 @@ class AppContainer(context: Context? = null) {
     fun createAgentSession(conversationId: String, eventSink: suspend (AgentEvent) -> Unit = {}): AgentSession? {
         if (appContext == null) return null
         val store = HistoryConversationStore(conversationHistory, conversationId)
-        val contextProvider = DefaultContextProvider(conversationStore = store, systemContext = { null }, persistentTaskContext = { null }, workspaceContext = { workspaceRoot?.toString() })
+        val contextProvider = DefaultContextProvider(conversationStore = store, systemContext = { ActionToolPrompt.build(actionRegistry) }, persistentTaskContext = { null }, workspaceContext = { workspaceRoot?.let { "Workspace files are restricted to the app-private directory. Use relative paths with filesystem actions; do not claim access outside the Workspace." } })
         return AgentSession(
             orchestrator = AgentOrchestrator(contextProvider = contextProvider, runtime = modelRuntime),
             conversationStore = store,
