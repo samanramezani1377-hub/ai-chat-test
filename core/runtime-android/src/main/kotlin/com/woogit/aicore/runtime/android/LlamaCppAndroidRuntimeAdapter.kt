@@ -176,13 +176,13 @@ class LlamaCppAndroidRuntimeAdapter(
             when (loadedArchitecture) {
                 "lfm2" -> Lfm2PromptFormatter.format(safeMessages)
                 "llama" -> MiniCpm5PromptFormatter.format(safeMessages)
-                else -> Qwen3PromptFormatter.format(safeMessages)
+                else -> Qwen3PromptFormatter.format(safeMessages, enableThinking = settings.enableThinking)
             }
         } catch (t: Throwable) {
             return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation"))
         }
         stopRequested.set(false)
-        RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_STARTED context=$loadedContextLength backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
+        RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_STARTED context=$loadedContextLength backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads enableThinking=${settings.enableThinking} maxNewTokens=${settings.maxNewTokens} recentMessages=${settings.recentMessages}")
         RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "context=${loadedContextLength} backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
         val promptTokens = NativeLlamaCpp.countTokens(prompt).takeIf { it >= 0 }
         // Generation is explicitly bounded by the remaining context capacity. This removes
