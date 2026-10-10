@@ -39,6 +39,8 @@ internal fun VoiceConversationPage(
     busy: Boolean,
     sttModels: List<VoiceModelEntry>,
     ttsModels: List<VoiceModelEntry>,
+    missingSttComponents: List<String>,
+    missingTtsComponents: List<String>,
     activeSttId: String?,
     activeTtsId: String?,
     onBack: () -> Unit,
@@ -98,8 +100,16 @@ internal fun VoiceConversationPage(
                         ) { Text("صفحه دریافت مدل سبک فارسی Shenava") }
                         OutlinedButton(onClick = onImportSmallSttModel, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن مدل فارسی · model.onnx") }
                         OutlinedButton(onClick = onImportSmallSttTokens, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن واژگان · tokens.txt") }
-                        OutlinedButton(onClick = onImportStt, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن بسته کامل STT · ZIP / TAR.BZ2") }
-                        if (sttModels.isEmpty()) Text("مدل تشخیص گفتار وارد نشده است.", color = MaterialTheme.colorScheme.error)
+                        OutlinedButton(onClick = onImportStt, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("یا وارد کردن بسته کامل STT · ZIP / TAR.BZ2") }
+                        Text("فایل‌ها را یکی‌یکی وارد کن؛ برنامه آن‌ها را نگه می‌دارد و پس از کامل‌شدن، یک مدل واحد می‌سازد.", style = MaterialTheme.typography.bodySmall)
+                        val sttSteps = listOf("model.onnx", "tokens.txt")
+                        val sttDone = sttSteps.size - missingSttComponents.size
+                        LinearProgressIndicator(progress = { sttDone.toFloat() / sttSteps.size }, modifier = Modifier.fillMaxWidth())
+                        sttSteps.forEach { step ->
+                            Text("${if (step !in missingSttComponents) "✓" else "○"}  $step", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(if (sttDone == sttSteps.size) "هر دو فایل وارد شده‌اند؛ مدل آماده است." else "پیشرفت ورود مدل: $sttDone از ${sttSteps.size} فایل", style = MaterialTheme.typography.labelMedium)
+                        if (sttModels.isEmpty()) Text("مدل تشخیص گفتار واردشده و آماده‌ای وجود ندارد.", color = MaterialTheme.colorScheme.error)
                         sttModels.forEach { model ->
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                                 RadioButton(selected = model.id == activeSttId, onClick = { onSelectStt(model.id) })
@@ -122,8 +132,16 @@ internal fun VoiceConversationPage(
                         OutlinedButton(onClick = onImportTtsModel, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن مدل صوتی · ONNX") }
                         OutlinedButton(onClick = onImportTtsConfig, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن تنظیمات Piper · JSON") }
                         OutlinedButton(onClick = onImportEspeakData, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن espeak-ng-data · TAR.BZ2") }
-                        OutlinedButton(onClick = onImportTts, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن بسته کامل TTS · ZIP / TAR.BZ2") }
-                        if (ttsModels.isEmpty()) Text("مدل تولید گفتار وارد نشده است.", color = MaterialTheme.colorScheme.error)
+                        OutlinedButton(onClick = onImportTts, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("یا وارد کردن بسته کامل TTS · ZIP / TAR.BZ2") }
+                        Text("سه جزء را جداگانه و به هر ترتیبی وارد کن؛ پس از دریافت هر سه، برنامه آن‌ها را خودکار ترکیب و اعتبارسنجی می‌کند.", style = MaterialTheme.typography.bodySmall)
+                        val ttsSteps = listOf("فایل ONNX", "فایل JSON کنار مدل (معمولاً model.onnx.json)", "بسته espeak-ng-data")
+                        val ttsDone = ttsSteps.size - missingTtsComponents.size
+                        LinearProgressIndicator(progress = { ttsDone.toFloat() / ttsSteps.size }, modifier = Modifier.fillMaxWidth())
+                        ttsSteps.forEach { step ->
+                            Text("${if (step !in missingTtsComponents) "✓" else "○"}  $step", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(if (ttsDone == ttsSteps.size) "هر سه جزء وارد شده‌اند؛ مدل آماده است." else "پیشرفت ورود مدل: $ttsDone از ${ttsSteps.size} جزء", style = MaterialTheme.typography.labelMedium)
+                        if (ttsModels.isEmpty()) Text("مدل تولید گفتار واردشده و آماده‌ای وجود ندارد.", color = MaterialTheme.colorScheme.error)
                         ttsModels.forEach { model ->
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                                 RadioButton(selected = model.id == activeTtsId, onClick = { onSelectTts(model.id) })
