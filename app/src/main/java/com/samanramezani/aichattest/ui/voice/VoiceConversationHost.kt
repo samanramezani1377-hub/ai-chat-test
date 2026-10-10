@@ -209,6 +209,8 @@ private class VoiceConversationController(
     private val cancelledSpeech = AtomicReference<AtomicBoolean?>(null)
     private val speaking = AtomicBoolean(false)
     private val turnRunning = AtomicBoolean(false)
+    private val bargeInTriggered = AtomicBoolean(false)
+    private val pendingUtterance = AtomicReference<String?>(null)
     private var microphone: LocalMicrophone? = null
     private var recognizer: LocalAsr? = null
     private var tts: LocalPiperTts? = null
@@ -233,22 +235,30 @@ private class VoiceConversationController(
                 recognizer = engines.first
                 tts = engines.second
                 if (conversationId == null) conversationId = container.conversationHistory.create("مکالمه صوتی").id
-                val frames = Channel<LocalMicrophone.Frame>(capacity = 64)
+                // 256 x 40 ms frames gives the ASR consumer more room during offline decoding.
+                val frames = Channel<LocalMicrophone.Frame>(capacity = 256)
                 val mic = LocalMicrophone()
                 val loudSpeechFrames = AtomicInteger(0)
+                val audioDropReported = AtomicBoolean(false)
                 microphone = mic
                 mic.start { frame ->
                     // Run barge-in detection on the capture thread, not the ASR consumer.
                     // Offline ASR may need hundreds of milliseconds to decode an utterance.
-                    if (speaking.get() && frame.rms > 0.035f && frame.speech) {
-                        if (loudSpeechFrames.incrementAndGet() >= 3) {
-                            interrupt("صدای کاربر تشخیص داده شد؛ پاسخ قبلی متوقف شد.")
+                    // Barge-in must also work while the LLM is generating text, before TTS starts.
+                    if (turnRunning.get() && frame.rms > 0.035f && frame.speech) {
+                        if (loudSpeechFrames.incrementAndGet() >= 3 && bargeInTriggered.compareAndSet(false, true)) {
+                            interrupt("صدای کاربر تشخیص داده شد؛ تولید یا پخش پاسخ قبلی متوقف شد.")
                             loudSpeechFrames.set(0)
                         }
                     } else {
                         loudSpeechFrames.set(0)
                     }
-                    frames.trySend(frame)
+                    if (frames.trySend(frame).isFailure && audioDropReported.compareAndSet(false, true)) {
+                        scope.launch {
+                            onDiagnostic("VOICE-AUDIO-001: صف دریافت صدا پر شد؛ بخشی از فریم‌های میکروفون ممکن است از دست رفته باشد.")
+                            onStatus("VOICE-AUDIO-001: پردازش گفتار عقب افتاده است؛ برای جلوگیری از تشخیص ناقص، مکالمه را دوباره شروع کنید.")
+                        }
+                    }
                 }
                 frameJob = scope.launch {
                     onListening(true)
@@ -262,9 +272,18 @@ private class VoiceConversationController(
                         if (update.text.isNotBlank()) onStatus("در حال شنیدن: ${update.text}")
                         if (update.endpoint && update.text.isNotBlank()) {
                             val utterance = update.text.trim()
-                            if (utterance.isNotBlank() && turnRunning.compareAndSet(false, true)) {
-                                onLine("شما", utterance)
-                                turnJob = scope.launch { processTurn(utterance) }
+                            if (utterance.isNotBlank()) {
+                                if (turnRunning.compareAndSet(false, true)) {
+                                    bargeInTriggered.set(false)
+                                    onLine("شما", utterance)
+                                    turnJob = scope.launch { processTurn(utterance) }
+                                } else {
+                                    // Keep the latest finalized utterance instead of silently dropping it
+                                    // while the previous generation is being cancelled.
+                                    pendingUtterance.set(utterance)
+                                    onLine("شما", utterance)
+                                    onStatus("گفتار جدید دریافت شد؛ پس از توقف امن پاسخ قبلی پردازش می‌شود.")
+                                }
                             }
                         }
                     }
@@ -290,9 +309,9 @@ private class VoiceConversationController(
                 for (segment in queue) {
                     if (turnCancel.get()) break
                     val engine = tts ?: break
-                    speaking.set(true)
                     try {
-                        engine.speak(segment, turnCancel)
+                        // Mark speaking only when audio playback actually starts, not during synthesis.
+                        engine.speak(segment, turnCancel) { speaking.set(true) }
                     } finally {
                         speaking.set(false)
                     }
@@ -367,6 +386,12 @@ private class VoiceConversationController(
             cancelledSpeech.compareAndSet(turnCancel, null)
             if (speechJob === activeSpeechJob) speechJob = null
             turnRunning.set(false)
+            bargeInTriggered.set(false)
+            val pending = pendingUtterance.getAndSet(null)
+            if (!closed && pending != null && turnRunning.compareAndSet(false, true)) {
+                onStatus("در حال پردازش گفتار جدید…")
+                turnJob = scope.launch { processTurn(pending) }
+            }
         }
     }
 
@@ -377,7 +402,7 @@ private class VoiceConversationController(
         turnJob?.cancel(CancellationException("barge-in"))
         turnJob = null
         speechJob?.cancel()
-        turnRunning.set(false)
+        // Let processTurn.finally release the active turn and dispatch any newly finalized utterance.
         onStatus(message)
     }
 
