@@ -94,33 +94,26 @@ if(NOT _ai_chat_dsv4_context_verify MATCHES "AI_CHAT_ANDROID_DISABLE_DSV4_HC_VUL
     message(FATAL_ERROR "Android Vulkan DSV4 HC stability mitigation was not applied")
 endif()
 
-# Qwen3.5-style hybrid models contain recurrent Gated-Delta-Net layers. In this
-# Android Vulkan runtime, the fused GDN and Lightning-Indexer paths have not been
-# validated on Mali drivers; use the equivalent unfused graph until device tests
-# prove these fused kernels safe. This preserves model weights and numerical
-# semantics while avoiding unsupported fused-op pipelines during context reserve.
+# Android Vulkan: use the portable unfused recurrent graph until the fused
+# GDN and Lightning-Indexer kernels have passed device validation on Mali.
+# This changes kernel selection only, not model weights or sampling semantics.
 if (ANDROID)
-    if (NOT _ai_chat_dsv4_context_verify MATCHES "AI_CHAT_ANDROID_DISABLE_VULKAN_FUSED_RECURRENT_V1")
-        foreach(_ai_chat_fused_setting
-                "cparams.fused_gdn_ar = true;"
-                "cparams.fused_gdn_ch = true;"
-                "cparams.fused_lid = true;")
-            string(FIND "${_ai_chat_dsv4_context_verify}" "${_ai_chat_fused_setting}" _ai_chat_fused_location)
-            if(_ai_chat_fused_location EQUAL -1)
-                message(FATAL_ERROR "Could not locate pinned llama.cpp fused recurrent setting: ${_ai_chat_fused_setting}")
-            endif()
-            string(REPLACE "${_ai_chat_fused_setting}"
-                "${_ai_chat_fused_setting}\\n    // AI_CHAT_ANDROID_DISABLE_VULKAN_FUSED_RECURRENT_V1: use portable unfused graph on Android Vulkan."
-                _ai_chat_dsv4_context_verify "${_ai_chat_dsv4_context_verify}")
-        endforeach()
-        string(REPLACE "cparams.fused_gdn_ar = true;" "cparams.fused_gdn_ar = false;"
+    foreach(_ai_chat_fused_pair
+            "cparams.fused_gdn_ar = true;|cparams.fused_gdn_ar = false; // AI_CHAT_ANDROID_DISABLE_VULKAN_FUSED_RECURRENT_V1"
+            "cparams.fused_gdn_ch = true;|cparams.fused_gdn_ch = false; // AI_CHAT_ANDROID_DISABLE_VULKAN_FUSED_RECURRENT_V1"
+            "cparams.fused_lid = true;|cparams.fused_lid = false; // AI_CHAT_ANDROID_DISABLE_VULKAN_FUSED_RECURRENT_V1")
+        string(REPLACE "|" ";" _ai_chat_fused_fields "${_ai_chat_fused_pair}")
+        list(GET _ai_chat_fused_fields 0 _ai_chat_fused_from)
+        list(GET _ai_chat_fused_fields 1 _ai_chat_fused_to)
+        string(FIND "${_ai_chat_dsv4_context_verify}" "${_ai_chat_fused_from}" _ai_chat_fused_location)
+        if(_ai_chat_fused_location EQUAL -1)
+            # Already patched on a reconfigure, or upstream changed: verify below.
+            continue()
+        endif()
+        string(REPLACE "${_ai_chat_fused_from}" "${_ai_chat_fused_to}"
             _ai_chat_dsv4_context_verify "${_ai_chat_dsv4_context_verify}")
-        string(REPLACE "cparams.fused_gdn_ch = true;" "cparams.fused_gdn_ch = false;"
-            _ai_chat_dsv4_context_verify "${_ai_chat_dsv4_context_verify}")
-        string(REPLACE "cparams.fused_lid = true;" "cparams.fused_lid = false;"
-            _ai_chat_dsv4_context_verify "${_ai_chat_dsv4_context_verify}")
-        file(WRITE "${_ai_chat_dsv4_context_cpp}" "${_ai_chat_dsv4_context_verify}")
-    endif()
+    endforeach()
+    file(WRITE "${_ai_chat_dsv4_context_cpp}" "${_ai_chat_dsv4_context_verify}")
     file(READ "${_ai_chat_dsv4_context_cpp}" _ai_chat_fused_verify)
     if(NOT _ai_chat_fused_verify MATCHES "AI_CHAT_ANDROID_DISABLE_VULKAN_FUSED_RECURRENT_V1" OR
        _ai_chat_fused_verify MATCHES "cparams.fused_gdn_ar[ ]*= true;" OR
