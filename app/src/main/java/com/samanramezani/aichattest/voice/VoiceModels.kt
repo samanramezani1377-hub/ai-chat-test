@@ -53,6 +53,31 @@ class VoiceModelStore(
         root.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") }
             ?.mapNotNull { validateDirectory(it, kind) }?.sortedBy { it.title } ?: emptyList()
 
+    /** Human-readable progress for a multi-file Piper import; never reports a partial model as ready. */
+    fun missingPiperComponents(): List<String> {
+        val staging = File(root, ".piper-import")
+        val model = staging.listFiles()?.any { it.isFile && it.extension.equals("onnx", true) && it.length() > 1024 } == true
+        val config = File(staging, "model.onnx.json").isFile ||
+            staging.listFiles()?.any { it.isFile && it.name.endsWith(".onnx.json", true) } == true
+        val espeak = File(staging, "espeak-ng-data").let { it.isDirectory && it.list()?.isNotEmpty() == true }
+        return buildList {
+            if (!model) add("فایل ONNX")
+            if (!config) add("فایل JSON کنار مدل (معمولاً model.onnx.json)")
+            if (!espeak) add("بسته espeak-ng-data")
+        }
+    }
+
+    /** Human-readable progress for the two-file Shenava import. */
+    fun missingSmallSttComponents(): List<String> {
+        val staging = File(root, ".shenava-rizeh-import")
+        val model = File(staging, "model.onnx").let { it.isFile && it.length() >= 1024 }
+        val tokens = File(staging, "tokens.txt").let { it.isFile && it.length() > 0 }
+        return buildList {
+            if (!model) add("model.onnx")
+            if (!tokens) add("tokens.txt")
+        }
+    }
+
     /**
      * Import the tiny Persian Shenava Rizeh-Pizeh NeMo-CTC model in two steps.
      * Model and tokens can be selected in either order; incomplete imports stay hidden.
@@ -214,13 +239,16 @@ class VoiceModelStore(
             when (component) {
                 PiperComponent.MODEL -> {
                     require(displayName.endsWith(".onnx", true)) { "VOICE-PIPER-003: برای مدل Piper یک فایل .onnx انتخاب کنید." }
-                    File(staging, File(displayName).name).outputStream().use { output -> input.copyTo(output) }
+                    // Normalize filenames: SAF providers and downloads often rename files,
+                    // while the previous code required the JSON basename to match byte-for-byte.
+                    // A canonical pair avoids a valid model silently remaining "not imported".
+                    File(staging, "model.onnx").outputStream().use(input::copyTo)
                 }
                 PiperComponent.CONFIG -> {
                     require(displayName.endsWith(".onnx.json", true) || displayName.endsWith(".json", true)) {
                         "VOICE-PIPER-004: فایل پیکربندی Piper با پسوند JSON انتخاب کنید."
                     }
-                    File(staging, displayName).outputStream().use(input::copyTo)
+                    File(staging, "model.onnx.json").outputStream().use(input::copyTo)
                 }
                 PiperComponent.ESPEAK_DATA -> {
                     val archive = displayName.lowercase()
@@ -228,12 +256,14 @@ class VoiceModelStore(
                         "VOICE-PIPER-005: پوشهٔ آواشناسی باید به‌صورت .tar.bz2 یا .zip باشد."
                     }
                     extractEspeakArchive(input, archive, staging)
+                    normalizeEspeakDirectory(staging)
                 }
             }
         }
-        val model = staging.listFiles()?.firstOrNull { it.isFile && it.name.endsWith(".onnx", true) } ?: return null
-        val config = File(staging, model.name + ".json")
-        if (!config.isFile) return null
+        val model = File(staging, "model.onnx")
+        if (!model.isFile || model.length() <= 1024) return null
+        val config = File(staging, "model.onnx.json")
+        if (!config.isFile || config.length() == 0L) return null
         val espeak = File(staging, "espeak-ng-data")
         if (!espeak.isDirectory || espeak.list()?.isEmpty() != false) return null
 
@@ -309,6 +339,38 @@ class VoiceModelStore(
                     writeEntry(item.name, item.isDirectory, tar)
                 }
             }
+        }
+    }
+
+    /**
+     * Archives from different distributors either include an espeak-ng-data/ prefix or
+     * put the data directly under a versioned root directory. Normalize both layouts.
+     */
+    private fun normalizeEspeakDirectory(staging: File) {
+        val expected = File(staging, "espeak-ng-data")
+        if (expected.isDirectory && expected.list()?.isNotEmpty() == true) return
+        val nested = staging.walkTopDown().firstOrNull {
+            it.isDirectory && it != staging && it.name.equals("espeak-ng-data", true) &&
+                it.list()?.isNotEmpty() == true
+        }
+        if (nested != null && nested != expected) {
+            expected.deleteRecursively()
+            check(nested.renameTo(expected)) {
+                "VOICE-PIPER-012: نتوانستم پوشه espeak-ng-data را از ساختار بسته استخراج‌شده آماده کنم."
+            }
+            return
+        }
+        // Some bundles contain the contents at their archive root (phontab/phondata/...).
+        val rootHasData = listOf("phontab", "phondata", "phonindex").any { File(staging, it).exists() }
+        if (rootHasData) {
+            val temp = File(staging, ".espeak-root")
+            if (!temp.mkdirs()) error("VOICE-PIPER-013: ایجاد پوشهٔ داده‌های آواشناسی ناموفق بود.")
+            staging.listFiles()?.filter { it != temp && it != expected }?.forEach { item ->
+                check(item.renameTo(File(temp, item.name))) {
+                    "VOICE-PIPER-014: انتقال فایل‌های دادهٔ آواشناسی ناموفق بود."
+                }
+            }
+            check(temp.renameTo(expected)) { "VOICE-PIPER-015: آماده‌سازی پوشهٔ آواشناسی ناموفق بود." }
         }
     }
 
