@@ -9,16 +9,8 @@ static std::vector<llama_token> g_cached_prompt_tokens;
 // Identity of the model/context that owns the resident KV cache.
 static llama_model * g_cached_model = nullptr;
 static llama_context * g_cached_context = nullptr;
-// Hybrid/recurrent models cannot safely trim their recurrent state with
-// llama_memory_seq_rm(). Keep an exact post-prefill sequence snapshot instead.
-static std::vector<uint8_t> g_cached_prompt_state;
-// ON_DEVICE sequence states keep large recurrent tensors in backend device buffers.
-// The host vector then contains only the small serialized state metadata.
-static bool g_cached_prompt_state_on_device = false;
 static void clear_android_generation_cache() {
     g_cached_prompt_tokens.clear();
-    g_cached_prompt_state.clear();
-    g_cached_prompt_state_on_device = false;
     g_cached_model = nullptr;
     g_cached_context = nullptr;
 }
@@ -833,8 +825,6 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             append_native_trace("NATIVE_KV_CACHE_INVALIDATED reason=model_or_context_replaced");
         }
         g_cached_prompt_tokens.clear();
-        g_cached_prompt_state.clear();
-        g_cached_prompt_state_on_device = false;
         g_cached_model = g_model;
         g_cached_context = g_context;
         llama_memory_clear(memory, true);
@@ -848,32 +838,16 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     }
 
     const bool hybrid_memory = model_uses_recurrent_memory();
-    // Attention-only models can trim the resident KV cache by sequence position.
-    // Hybrid/recurrent models cannot: their recurrent state is path-dependent.
-    // For those models we reuse only an exact cached prompt state captured
-    // immediately after prompt prefill and before generation.
-    // Hybrid/recurrent memory rollback is deliberately disabled for now.
-// A resident recurrent state cannot be reconstructed safely from seq positions,
-// and the previous exact-prefix reuse path could carry state across turns that
-// looked compatible but was not semantically identical. Attention-only KV reuse
-// remains enabled; hybrid models always rebuild from the complete bounded prompt.
-// This is a correctness/stability guard, not a CPU fallback.
-const bool cache_supported = !llama_model_has_encoder(g_model) && !hybrid_memory;
-if (hybrid_memory) {
-    append_native_trace("NATIVE_KV_CACHE_HYBRID_DISABLED reason=stability_guard");
-}
+    // Sequence-state rollback is not equivalent to ordinary KV trimming for
+    // recurrent/hybrid models. The safe fast path is exact append-only reuse:
+    // keep the live resident state and append only when the complete cached
+    // token sequence is an exact prefix of the new prompt. Otherwise rebuild.
+    const bool cache_supported = !llama_model_has_encoder(g_model);
     const llama_pos resident_min = llama_memory_seq_pos_min(memory, 0);
     const llama_pos resident_max = llama_memory_seq_pos_max(memory, 0);
-    // Recurrent/hybrid models expose only their latest recurrent sequence
-    // position through seq_pos_min/max; that is NOT a valid representation of
-    // the full resident state. Qwen3.8 is hybrid, so validating
-    // (resident_max + 1) against the full conversation token count incorrectly
-    // invalidated every completed cache publish and caused every next turn to
-    // become a MISS.
     const bool resident_sequence_matches_cache = hybrid_memory
             ? (!g_cached_prompt_tokens.empty() &&
-               resident_max >= 0 &&
-               static_cast<size_t>(resident_max + 1) == g_cached_prompt_tokens.size())
+               common_prefix == g_cached_prompt_tokens.size())
             : (!g_cached_prompt_tokens.empty() &&
                resident_min == 0 &&
                resident_max >= 0 &&
@@ -887,24 +861,28 @@ if (hybrid_memory) {
         " hybrid=" + (hybrid_memory ? "1" : "0") +
         " cachedTokens=" + std::to_string(g_cached_prompt_tokens.size()) +
         " commonPrefix=" + std::to_string(common_prefix) +
-        " stateBytes=" + std::to_string(g_cached_prompt_state.size()) +
         " residentMin=" + std::to_string(resident_min) +
         " residentMax=" + std::to_string(resident_max) +
         " residentMatches=" + (resident_sequence_matches_cache ? "1" : "0")).c_str());
 
     if (hybrid_memory) {
-        // Hybrid/recurrent contexts must be rebuilt from the bounded prompt.
-        // Never append a new turn to a post-generation recurrent state.
-        cache_reused = false;
-        reuse_prefix = 0;
-        g_cached_prompt_state.clear();
-        g_cached_prompt_tokens.clear();
-        llama_memory_clear(memory, true);
-        checkpoint("NATIVE_KV_CACHE_HYBRID_REBUILD");
+        if (exact_cached_prefix) {
+            // Do not clear or trim recurrent memory. It is still resident from
+            // the last successful generation and corresponds to the cached
+            // token sequence; process only the new suffix at its true position.
+            reuse_prefix = g_cached_prompt_tokens.size();
+            append_native_trace((std::string("NATIVE_KV_CACHE_HYBRID_EXACT_REUSE tokens=") +
+                std::to_string(reuse_prefix)).c_str());
+        } else {
+            cache_reused = false;
+            reuse_prefix = 0;
+            g_cached_prompt_tokens.clear();
+            llama_memory_clear(memory, true);
+            checkpoint("NATIVE_KV_CACHE_HYBRID_REBUILD");
+        }
     } else if (!cache_reused) {
         llama_memory_clear(memory, true);
         g_cached_prompt_tokens.clear();
-        g_cached_prompt_state.clear();
         checkpoint("NATIVE_KV_CACHE_MISS_CLEARED");
     } else {
         const bool exact_prompt = common_prefix == prompt_tokens.size() &&
@@ -913,7 +891,6 @@ if (hybrid_memory) {
         if (!llama_memory_seq_rm(memory, 0, (llama_pos) reuse_prefix, -1)) {
             llama_memory_clear(memory, true);
             g_cached_prompt_tokens.clear();
-            g_cached_prompt_state.clear();
             reuse_prefix = 0;
             cache_reused = false;
             checkpoint("NATIVE_KV_CACHE_PARTIAL_REMOVE_UNSUPPORTED");
@@ -1159,37 +1136,31 @@ if (hybrid_memory) {
         " cpuMeasuredSubtotalMs=" + std::to_string(g_decode_profile.logits_sync_ms +
             g_decode_profile.sampling_ms + g_decode_profile.callback_ms) +
         " gpuKernelTiming=cl_profiling.csv").c_str());
-    if (prefill_recorded && (result == 0 || result == 9)) {
-        // Publish only the token sequence that is actually resident in the live
-        // context. The next request can then reuse the largest exact prefix.
-        if (!hybrid_memory) {
-            g_cached_prompt_tokens = prompt_tokens;
-            g_cached_prompt_tokens.insert(
-                    g_cached_prompt_tokens.end(),
-                    generated_decoded_tokens.begin(),
-                    generated_decoded_tokens.end());
-        } else {
-            g_cached_prompt_tokens.clear();
-        }
-        g_cached_prompt_state.clear();
-        g_cached_prompt_state_on_device = false;
+    if (prefill_recorded && result == 0) {
+        // Publish only the tokens that are actually resident in the live
+        // context. For hybrid models, retain the full recurrent+attention state
+        // in place and allow exact-prefix append-only reuse on the next turn.
+        g_cached_prompt_tokens = prompt_tokens;
+        g_cached_prompt_tokens.insert(
+                g_cached_prompt_tokens.end(),
+                generated_decoded_tokens.begin(),
+                generated_decoded_tokens.end());
         g_cached_model = g_model;
         g_cached_context = g_context;
         const llama_pos published_min = llama_memory_seq_pos_min(memory, 0);
         const llama_pos published_max = llama_memory_seq_pos_max(memory, 0);
-        const bool resident_publish_valid = !hybrid_memory &&
-                published_min == 0 &&
-                published_max >= 0 &&
-                static_cast<size_t>(published_max + 1) == g_cached_prompt_tokens.size();
+        const bool resident_publish_valid = hybrid_memory
+                ? (!g_cached_prompt_tokens.empty() && published_max >= 0)
+                : (published_min == 0 &&
+                   published_max >= 0 &&
+                   static_cast<size_t>(published_max + 1) == g_cached_prompt_tokens.size());
         if (!resident_publish_valid) {
             append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISH_INVALID residentMin=") +
                 std::to_string(published_min) + " residentMax=" +
                 std::to_string(published_max) + " cachedTokens=" +
                 std::to_string(g_cached_prompt_tokens.size()) +
                 " hybrid=" + (hybrid_memory ? "1" : "0")).c_str());
-            g_cached_prompt_tokens.clear();
-            g_cached_model = nullptr;
-            g_cached_context = nullptr;
+            clear_android_generation_cache();
             llama_memory_clear(memory, true);
         } else {
             append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISHED tokens=") +
@@ -1198,11 +1169,12 @@ if (hybrid_memory) {
                 " generatedDecodedTokens=" + std::to_string(generated_decoded_tokens.size()) +
                 " residentMin=" + std::to_string(published_min) +
                 " residentMax=" + std::to_string(published_max) +
-                " mode=" + (hybrid_memory ? "resident_hybrid" : "resident_kv")).c_str());
+                " mode=" + (hybrid_memory ? "resident_hybrid_exact_prefix" : "resident_kv")).c_str());
         }
     } else if (prefill_recorded) {
-        g_cached_prompt_tokens.clear();
-        g_cached_prompt_state.clear();
+        // Interrupted/failed generations are not cacheable: the visible output
+        // may not match the last token decoded into the native context.
+        clear_android_generation_cache();
         llama_memory_clear(memory, true);
         checkpoint("NATIVE_KV_CACHE_NOT_PUBLISHED_AFTER_FAILED_GENERATION");
     }
