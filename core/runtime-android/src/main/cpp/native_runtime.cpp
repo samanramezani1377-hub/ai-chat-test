@@ -72,14 +72,9 @@ static bool init_generation_context() {
     set_native_phase("CONTEXT_INIT");
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx = g_context_length;
-    // Bound the scheduler's worst-case graph reservation on mobile GPUs. A 128-token
-    // ubatch can reserve a much larger Vulkan graph than is useful for interactive
-    // chat, especially at 8K context. This affects prompt prefill chunk size, not
-    // the decode token loop.
-    // Mali Vulkan graph reservation for hybrid/recurrent models can abort at 32 tokens
-    // before llama_init_from_model can return an error. Keep the 8192-token context
-    // intact, but bound each graph micro-batch to reduce transient GPU allocation.
-    // This primarily affects prompt prefill; single-token decode and model weights are unchanged.
+    // Bound graph reservation on mobile GPUs. The 16-token micro-batch reduces
+    // transient Vulkan allocation during prompt prefill; the runtime defaults to a
+    // 4K context for stability. Single-token decode and model weights are unchanged.
     cp.n_batch = std::min<uint32_t>(cp.n_ctx, 16);
     cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 16);
     cp.n_rs_seq = 0;
