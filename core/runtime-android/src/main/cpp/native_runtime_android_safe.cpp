@@ -103,6 +103,7 @@ static void append_speculative_stats_trace(int draft_tokens, int accepted_tokens
 struct CpuThreadTuningState { int attempts = 0; int samples = 0; double ema_tokens_per_sec = 0.0; };
 static std::map<int, CpuThreadTuningState> g_cpu_thread_tuning;
 static int g_cpu_thread_trial_count = 0;
+static int g_cpu_default_threads = 0;
 
 static std::vector<int> cpu_thread_candidates() {
     unsigned cores = std::max(1u, std::thread::hardware_concurrency());
@@ -125,6 +126,7 @@ static int best_measured_cpu_threads() {
 static int choose_cpu_thread_trial() {
     if (!g_context || g_gpu || g_spec_requested || g_spec) return 0;
     const int current = std::max(1, (int) llama_n_threads(g_context));
+    if (g_cpu_default_threads == 0) g_cpu_default_threads = current;
     const auto candidates = cpu_thread_candidates();
     int min_attempts = std::numeric_limits<int>::max();
     for (int candidate : candidates)
@@ -136,7 +138,7 @@ static int choose_cpu_thread_trial() {
             if (g_cpu_thread_tuning[candidate].attempts == 0) return candidate;
     }
     const int best = best_measured_cpu_threads();
-    return best > 0 ? best : current;
+    return best > 0 ? best : g_cpu_default_threads;
 }
 static void record_cpu_thread_trial(int threads, int generated, int64_t decode_ms,
                                     double tokens_per_sec, int result) {
