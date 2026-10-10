@@ -18,21 +18,24 @@ string(FIND "${_sched}" "${_print_anchor}" _print_pos)
 if (_print_pos LESS 0)
     message(FATAL_ERROR "AI Chat backend trace: scheduler print function anchor not found")
 endif()
-string(REPLACE "${_print_anchor}"
-    "static bool ai_chat_backend_assignment_trace_emitted = false;\n// AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V2\n${_print_anchor}"
-    _sched "${_sched}")
+
+# Upgrade an already-patched V1 source tree in-place; clean trees get the complete patch.
+if (_sched MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V1")
+    string(REPLACE "AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V1" "AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V2" _sched "${_sched}")
+else()
+    string(REPLACE "${_print_anchor}"
+        "static bool ai_chat_backend_assignment_trace_emitted = false;\n// AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V2\n${_print_anchor}"
+        _sched "${_sched}")
+endif()
 
 set(_dispatch_anchor "    if (sched->debug) {\n        ggml_backend_sched_print_assignments(sched, graph);\n    }")
-string(FIND "${_sched}" "${_dispatch_anchor}" _dispatch_pos)
-if (_dispatch_pos LESS 0)
-    message(FATAL_ERROR "AI Chat backend trace: scheduler dispatch anchor not found")
+if (_sched MATCHES "if \\(sched->debug\\) \\{")
+    string(REPLACE "${_dispatch_anchor}"
+        "    if (sched->debug || (getenv(\"AI_CHAT_BACKEND_TRACE\") != nullptr && !ai_chat_backend_assignment_trace_emitted)) {\n        if (!sched->debug) ai_chat_backend_assignment_trace_emitted = true;\n        ggml_backend_sched_print_assignments(sched, graph);\n    }"
+        _sched "${_sched}")
 endif()
-string(REPLACE "${_dispatch_anchor}"
-    "    if (sched->debug || (getenv(\"AI_CHAT_BACKEND_TRACE\") != nullptr && !ai_chat_backend_assignment_trace_emitted)) {\n        if (!sched->debug) ai_chat_backend_assignment_trace_emitted = true;\n        ggml_backend_sched_print_assignments(sched, graph);\n    }"
-    _sched "${_sched}")
 
-# Promote only the bounded assignment report to INFO; leave all other backend debug
-# output untouched. The environment gate above emits this report once per process.
+# Promote only the bounded assignment report to INFO and include per-node backend labels.
 string(FIND "${_sched}" "${_print_anchor}" _print_start)
 string(FIND "${_sched}" "static bool ggml_backend_sched_buffer_supported" _print_end)
 if (_print_start LESS 0 OR _print_end LESS 0 OR _print_end LESS _print_start)
