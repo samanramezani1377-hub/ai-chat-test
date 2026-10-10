@@ -17,7 +17,8 @@ import androidx.compose.ui.platform.LocalContext
 import com.samanramezani.aichattest.ui.SettingsScreen
 import com.samanramezani.aichattest.ui.errors.ErrorCenter
 import com.samanramezani.aichattest.ui.about.AboutPage
-import com.samanramezani.aichattest.ui.chat.ChatPage\nimport com.samanramezani.aichattest.ui.voice.VoiceConversationHost
+import com.samanramezani.aichattest.ui.chat.ChatPage
+import com.samanramezani.aichattest.ui.voice.VoiceConversationHost
 import com.samanramezani.aichattest.ui.components.*
 import com.samanramezani.aichattest.ui.diagnostics.DiagnosticsPage
 import com.samanramezani.aichattest.ui.navigation.AppDestination
