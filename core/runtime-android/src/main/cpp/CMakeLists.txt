@@ -127,7 +127,7 @@ target_include_directories(ggml-opencl PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
 # discarding the backend registration object and makes a missing OpenCL target
 # a build-time error instead of a silent CPU-only runtime.
 if (NOT TARGET ggml-opencl)
-    message(FATAL_ERROR "GPU-only runtime requires the statically linked ggml-opencl target")
+    message(FATAL_ERROR "OpenCL-preferred runtime requires the statically linked ggml-opencl target")
 endif()
 if (TARGET ggml)
     target_compile_definitions(ggml PUBLIC GGML_USE_OPENCL=1)
