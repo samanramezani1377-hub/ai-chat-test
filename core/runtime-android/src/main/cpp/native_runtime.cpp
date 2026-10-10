@@ -518,7 +518,6 @@ static void probe_android_opencl_driver() {
             cl_ulong global_memory_bytes = 0;
             cl_ulong local_memory_bytes = 0;
             size_t max_work_group_size = 0;
-            cl_device_fp_config half_fp_config = 0;
             const cl_int available_status = clGetDeviceInfo(
                 devices[d], CL_DEVICE_AVAILABLE, sizeof(device_available), &device_available, nullptr);
             const cl_int compiler_status = clGetDeviceInfo(
@@ -531,8 +530,10 @@ static void probe_android_opencl_driver() {
                 devices[d], CL_DEVICE_LOCAL_MEM_SIZE, sizeof(local_memory_bytes), &local_memory_bytes, nullptr);
             const cl_int work_group_status = clGetDeviceInfo(
                 devices[d], CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(max_work_group_size), &max_work_group_size, nullptr);
-            const cl_int half_fp_status = clGetDeviceInfo(
-                devices[d], CL_DEVICE_HALF_FP_CONFIG, sizeof(half_fp_config), &half_fp_config, nullptr);
+            // FP16 capability is reported through the standard extension string;
+            // CL_DEVICE_HALF_FP_CONFIG is not exposed by all portable OpenCL headers.
+            const bool has_fp16_extension =
+                device_extensions.find("cl_khr_fp16") != std::string::npos;
             const bool has_subgroup_extension =
                 device_extensions.find("cl_khr_subgroups") != std::string::npos ||
                 device_extensions.find("cl_intel_subgroups") != std::string::npos;
@@ -548,8 +549,7 @@ static void probe_android_opencl_driver() {
                 " globalMemoryBytes=" + (global_mem_status == CL_SUCCESS ? std::to_string(global_memory_bytes) : "unknown") +
                 " localMemoryBytes=" + (local_mem_status == CL_SUCCESS ? std::to_string(local_memory_bytes) : "unknown") +
                 " maxWorkGroupSize=" + (work_group_status == CL_SUCCESS ? std::to_string(max_work_group_size) : "unknown") +
-                " fp16=" + (half_fp_status == CL_SUCCESS && half_fp_config != 0 ? "1" : "0") +
-                " fp16Query=" + std::to_string((int)half_fp_status) +
+                " fp16Extension=" + (has_fp16_extension ? "1" : "0") +
                 " subgroupExtension=" + (has_subgroup_extension ? "1" : "0") +
                 " selectionPolicy=UPSTREAM_KERNEL_CAPABILITY_GATE").c_str());
         }
