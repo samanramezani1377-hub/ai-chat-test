@@ -57,6 +57,8 @@ dependencies {
     implementation(project(":core:agent"))
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // Local-only ASR/TTS engines; no network inference or cloud API.
+    implementation("com.github.k2-fsa:sherpa-onnx:v1.13.8")
 
     // Keep all Compose artifacts on Google's stable BOM so Gradle cannot resolve
     // unversioned Compose modules to an incompatible alpha release.
