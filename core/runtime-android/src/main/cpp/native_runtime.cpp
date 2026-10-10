@@ -127,12 +127,13 @@ static bool validate_gpu_model_residency() {
         std::to_string(cpu_tensors) + " otherBytes=" + std::to_string(other_bytes) +
         " otherTensors=" + std::to_string(other_tensors)).c_str());
 
-    // Mixed residency is expected: unsupported operations/tensors may remain on CPU.
-    // This is diagnostic only and must never reject a model that can run correctly.
+    // A GPU-only activation is accepted only when the loaded model has actual GPU
+    // weight buffers. CPU-side tokenization/sampling and scheduler-required operators
+    // are separate from silently loading the entire model on CPU.
     const bool has_gpu_weights = gpu_bytes > 0;
     append_native_trace((std::string("OPENCL_MODEL_RESIDENCY_POLICY mode=") +
-        (has_gpu_weights ? "GPU_PREFERRED_MIXED_ALLOWED" : "CPU_FALLBACK") +
-        " cpuFallbackAllowed=1").c_str());
+        (has_gpu_weights ? "OPENCL_GPU_RESIDENT" : "GPU_ONLY_REJECTED_NO_GPU_WEIGHTS") +
+        " wholeModelCpuFallback=disabled").c_str());
     return has_gpu_weights;
 }
 
