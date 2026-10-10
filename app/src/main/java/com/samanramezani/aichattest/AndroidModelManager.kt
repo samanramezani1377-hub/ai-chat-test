@@ -2,6 +2,7 @@ package com.samanramezani.aichattest
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.provider.OpenableColumns
 import com.woogit.aicore.domain.ChatMessage
 import com.woogit.aicore.domain.GenerationRequest
 import com.woogit.aicore.domain.GenerationResult
@@ -14,6 +15,7 @@ import com.woogit.aicore.runtime.FileModelRepository
 import com.woogit.aicore.runtime.LocalModelService
 import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
 import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
+import com.woogit.aicore.runtime.RuntimeAdapter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.nio.file.Files
@@ -25,6 +27,7 @@ class AndroidModelManager(
     private val appContext: android.content.Context,
     modelDirectory: Path,
     private val runtime: LlamaCppAndroidRuntimeAdapter,
+    private val dispatchRuntime: RuntimeAdapter,
 ) {
     private val root = modelDirectory
     private val repository = FileModelRepository(root.resolve("models.properties"))
@@ -32,9 +35,20 @@ class AndroidModelManager(
     private val draftRoot = root.resolve("drafts")
     private val draftRepository = FileModelRepository(root.resolve("drafts.properties"))
     private val draftImporter = FileModelImporter(draftRoot)
-    private val service = LocalModelService(importer, repository, runtime)
+    private val mnnRoot = modelDirectory.resolve("mnn")
+    private val mnnRepository = FileModelRepository(modelDirectory.resolve("mnn-models.properties"))
+    private val mnnPackImporter = MnnModelPackImporter()
+    private val service = LocalModelService(importer, repository, dispatchRuntime)
 
     suspend fun import(uri: Uri): ModelResult<ModelDescriptor> = withContext(Dispatchers.IO) {
+        val displayName = runCatching {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        }.getOrNull().orEmpty()
+        if (displayName.endsWith(".zip", ignoreCase = true) || displayName.endsWith(".mnnpack", ignoreCase = true)) {
+            return@withContext importMnnPack(uri)
+        }
         try {
             Files.createDirectories(root)
             val staged = Files.createTempFile(root, "import-", ".gguf")
@@ -52,7 +66,37 @@ class AndroidModelManager(
         }
     }
 
-    suspend fun models(): ModelResult<List<ModelDescriptor>> = service.listModels()
+    suspend fun models(): ModelResult<List<ModelDescriptor>> {
+        val gguf = service.listModels()
+        if (gguf is ModelResult.Failure) return gguf
+        val mnn = mnnRepository.list()
+        if (mnn is ModelResult.Failure) return mnn
+        return ModelResult.Success((gguf as ModelResult.Success).value + (mnn as ModelResult.Success).value)
+    }
+
+    private fun importMnnPack(uri: Uri): ModelResult<ModelDescriptor> {
+        var extracted: ModelDescriptor? = null
+        return try {
+            Files.createDirectories(mnnRoot)
+            val input = contentResolver.openInputStream(uri)
+                ?: return ModelResult.Failure(ModelError.FileAccess("Unable to open the selected MNN model archive"))
+            input.use { stream -> extracted = mnnPackImporter.unpack(stream, mnnRoot) }
+            val model = requireNotNull(extracted)
+            when (val registered = mnnRepository.register(model)) {
+                is ModelResult.Success -> {
+                    RuntimeDiagnosticsStore.recordNativeEvent("MNN_MODEL_PACK_IMPORTED id=${model.id} sizeBytes=${model.sizeBytes}")
+                    ModelResult.Success(model)
+                }
+                is ModelResult.Failure -> {
+                    runCatching { mnnPackImporter.deleteRecursively(model.path.parent) }
+                    registered
+                }
+            }
+        } catch (t: Throwable) {
+            extracted?.let { runCatching { mnnPackImporter.deleteRecursively(it.path.parent) } }
+            ModelResult.Failure(ModelError.InvalidModel("Invalid MNN model ZIP: ${t.message}"))
+        }
+    }
 
     suspend fun draftModels(): ModelResult<List<ModelDescriptor>> = withContext(Dispatchers.IO) {
         draftRepository.list()
@@ -157,9 +201,26 @@ class AndroidModelManager(
         }
     }
 
-    suspend fun activeModel(): ModelResult<ModelDescriptor?> = service.activeModel()
+    suspend fun activeModel(): ModelResult<ModelDescriptor?> {
+        return when (val activeMnn = mnnRepository.getActive()) {
+            is ModelResult.Failure -> activeMnn
+            is ModelResult.Success -> if (activeMnn.value != null) activeMnn else service.activeModel()
+        }
+    }
 
     suspend fun restoreActive(): ModelResult<ModelDescriptor?> = withContext(Dispatchers.IO) {
+        val activeMnn = (mnnRepository.getActive() as? ModelResult.Success)?.value
+        if (activeMnn != null) {
+            return@withContext try {
+                runtime.setDraftPath(null)
+                dispatchRuntime.load(activeMnn)
+                ModelRuntimeForegroundService.start(appContext)
+                ModelResult.Success(activeMnn)
+            } catch (t: Throwable) {
+                RuntimeDiagnosticsStore.recordNativeEvent("MNN_RESTORE_FAILED error=${t.message}")
+                ModelResult.Failure(ModelError.LoadFailed("Unable to restore MNN model: ${t.message}", t))
+            }
+        }
         // Target activation is deliberately independent from speculative decoding.
         // Never let a persisted/broken draft participate in target model load.
         runtime.setDraftPath(null)
@@ -175,6 +236,23 @@ class AndroidModelManager(
     }
 
     suspend fun activate(id: String): ModelResult<ModelDescriptor> = withContext(Dispatchers.IO) {
+        val mnnModel = (mnnRepository.get(id) as? ModelResult.Success)?.value
+        if (mnnModel != null) {
+            runtime.setDraftPath(null)
+            service.deactivate()
+            mnnRepository.setActive(id)
+            return@withContext try {
+                dispatchRuntime.load(mnnModel)
+                RuntimeDiagnosticsStore.recordNativeEvent("MNN_MODEL_ACTIVE id=${mnnModel.id} backend=${dispatchRuntime.runtimeInfo().backend}")
+                ModelRuntimeForegroundService.start(appContext)
+                ModelResult.Success(mnnModel)
+            } catch (t: Throwable) {
+                mnnRepository.setActive(null)
+                runCatching { dispatchRuntime.unload() }
+                ModelResult.Failure(ModelError.LoadFailed("Unable to activate MNN model: ${t.message}", t))
+            }
+        }
+        mnnRepository.setActive(null)
         // The target must always load with speculative decoding disabled. Draft state
         // is connected only after the target runtime has reported a successful load.
         runtime.setDraftPath(null)
@@ -206,6 +284,7 @@ class AndroidModelManager(
 
     suspend fun deactivate(): ModelResult<Unit> = withContext(Dispatchers.IO) {
         runtime.setDraftPath(null)
+        mnnRepository.setActive(null)
         val result = service.deactivate()
         if (result is ModelResult.Success) {
             ModelRuntimeForegroundService.stop(appContext)
@@ -219,11 +298,25 @@ class AndroidModelManager(
         messages: List<ChatMessage>,
         settings: InferenceSettings,
         onToken: suspend (String) -> Unit = {}
-    ): ModelResult<GenerationResult> = service.generate(messages, settings, onToken)
+    ): ModelResult<GenerationResult> {
+        val activeMnn = (mnnRepository.getActive() as? ModelResult.Success)?.value
+        return if (activeMnn != null) {
+            try {
+                ModelResult.Success(dispatchRuntime.generate(GenerationRequest(messages, settings), onToken))
+            } catch (t: Throwable) {
+                ModelResult.Failure(ModelError.Inference("MNN generation failed: ${t.message}", t))
+            }
+        } else service.generate(messages, settings, onToken)
+    }
 
-    suspend fun stopGeneration() = service.stopGeneration()
+    suspend fun stopGeneration() = dispatchRuntime.stopGeneration()
 
     suspend fun delete(id: String): ModelResult<Unit> = withContext(Dispatchers.IO) {
-        service.deleteModel(id)
+        val mnnModel = (mnnRepository.get(id) as? ModelResult.Success)?.value
+        if (mnnModel != null) {
+            if ((mnnRepository.getActive() as? ModelResult.Success)?.value?.id == id) deactivate()
+            runCatching { mnnPackImporter.deleteRecursively(mnnModel.path.parent) }
+            mnnRepository.unregister(id)
+        } else service.deleteModel(id)
     }
 }
