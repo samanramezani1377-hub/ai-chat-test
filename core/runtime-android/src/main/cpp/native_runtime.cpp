@@ -1032,10 +1032,9 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
     mp.check_tensors = false;
     mp.no_host = gpu;
 
-    // GPU-only policy: require an available OpenCL GPU before this helper is called.
-    // llama.cpp may still place individual unsupported operators on CPU only where its
-    // scheduler requires it, but this runtime never retries the whole model on CPU.
-    checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_OPENCL_GPU_ONLY" : "ANDROID_MODEL_LOAD_POLICY_REJECTED_NO_GPU");
+    // Prefer OpenCL when requested; if it fails, the caller retries with n_gpu_layers=0.
+    // CPU loading is a supported recovery path, not an activation error.
+    checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_OPENCL_PREFERRED" : "ANDROID_MODEL_LOAD_POLICY_CPU_FALLBACK");
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
     return llama_model_load_from_file(path, mp);
@@ -1058,60 +1057,104 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     // allocate a second context during activation. Draft/speculative setup
     // happens only after the target runtime is fully ready.
     append_native_trace("SPECULATIVE_AUTO_DETECTION_DISABLED_DURING_TARGET_LOAD");
-    bool gpu_available = g_gpu_backend_loaded && has_opencl_gpu_device() && gpu_layers > 0;
-    append_native_trace((std::string("NATIVE_EXECUTION_POLICY mode=OPENCL_GPU_ONLY gpuRequested=1 openclAvailable=") +
-        (gpu_available ? "1" : "0") +
-        " wholeModelCpuFallback=disabled unsupportedOpPolicy=ggml_scheduler").c_str());
-    if (!gpu_available) {
-        checkpoint("GPU_ONLY_REJECTED_NO_OPENCL_GPU_DEVICE");
-        env->ReleaseStringUTFChars(jpath, path);
-        g_gpu = false;
-        return 4;
-    }
-    llama_model_params mp = llama_model_default_params();
-    mp.n_gpu_layers = 999;
-    mp.load_mode = LLAMA_LOAD_MODE_NONE;
-    mp.check_tensors = false;
-    checkpoint("MODEL_LOAD_STARTED_OPENCL_GPU_ONLY");
-    append_native_trace((std::string("MODEL_LOAD_PARAMS requestedGpuLayers=") +
-        std::to_string((int)gpu_layers) + " effectiveGpuLayers=" +
-        std::to_string((int)mp.n_gpu_layers) + " load_mode=" +
-        llama_load_mode_name(mp.load_mode) + " no_host=1").c_str());
-    g_model = load_model_android(stable_model_path.c_str(), mp, true);
-    checkpoint(g_model ? "MODEL_LOAD_RETURNED_SUCCESS" : "MODEL_LOAD_RETURNED_FAILED");
-    if (!g_model) {
-        checkpoint("GPU_ONLY_MODEL_LOAD_FAILED");
-        env->ReleaseStringUTFChars(jpath, path);
-        g_gpu = false;
-        return 1;
-    }
-    append_weight_residency_trace();
-    if (!validate_gpu_model_residency()) {
-        append_native_trace("GPU_ONLY_REJECTED_MODEL_HAS_NO_GPU_WEIGHT_BUFFERS");
-        llama_model_free(g_model);
-        g_model = nullptr;
-        env->ReleaseStringUTFChars(jpath, path);
-        g_gpu = false;
-        return 5;
-    }
-    append_native_trace("GPU_ONLY_MODEL_RESIDENCY_VALIDATED");
-    g_gpu = gpu_available;
-    const int trained = llama_model_n_ctx_train(g_model);
+    const bool gpu_available = g_gpu_backend_loaded && has_opencl_gpu_device() && gpu_layers > 0;
+    append_native_trace((std::string("NATIVE_EXECUTION_POLICY mode=OPENCL_GPU_PREFERRED gpuRequested=") +
+        (gpu_layers > 0 ? "1" : "0") +
+        " openclAvailable=" + (gpu_available ? "1" : "0") +
+        " wholeModelCpuFallback=enabled unsupportedOpPolicy=ggml_scheduler").c_str());
+
     const int requested = ctx_len > 0 ? ctx_len : 4096;
-    const int effective = std::max(1, std::min(requested, trained));
-    checkpoint((std::string("MODEL_READY trained_ctx=") + std::to_string(trained) + " effective_ctx=" + std::to_string(effective) +
-        " execution=OPENCL_GPU_ONLY").c_str());
-    g_context_length = (uint32_t)effective;
-    checkpoint("CONTEXT_INIT_STARTED");
-    bool context_ready = init_generation_context();
-    checkpoint(context_ready ? "CONTEXT_INIT_RETURNED_SUCCESS" : "CONTEXT_INIT_RETURNED_FAILED");
-    if (!context_ready) {
-        checkpoint("GPU_ONLY_CONTEXT_INIT_FAILED");
-        append_native_trace("GPU_ONLY_CONTEXT_INIT_FAILED_NO_CPU_RETRY");
-        free_all();
-        return 2;
+    bool runtime_ready = false;
+    bool gpu_attempted = false;
+    std::string gpu_failure_reason = "gpu_not_requested_or_unavailable";
+
+    // Prefer OpenCL when a usable GPU device is present, but GPU is an optimization,
+    // not a requirement for activating a valid model. Any recoverable GPU model-load,
+    // residency-validation, or context-init failure releases partial state and retries
+    // the same model with the CPU backend.
+    if (gpu_available) {
+        gpu_attempted = true;
+        llama_model_params gpu_params = llama_model_default_params();
+        gpu_params.n_gpu_layers = 999;
+        gpu_params.load_mode = LLAMA_LOAD_MODE_NONE;
+        gpu_params.check_tensors = false;
+        append_native_trace("MODEL_LOAD_STARTED_OPENCL_PREFERRED");
+        append_native_trace((std::string("MODEL_LOAD_PARAMS requestedGpuLayers=") +
+            std::to_string((int)gpu_layers) + " effectiveGpuLayers=999 load_mode=" +
+            llama_load_mode_name(gpu_params.load_mode) + " no_host=1").c_str());
+        g_model = load_model_android(stable_model_path.c_str(), gpu_params, true);
+        checkpoint(g_model ? "OPENCL_MODEL_LOAD_RETURNED_SUCCESS" : "OPENCL_MODEL_LOAD_RETURNED_FAILED");
+
+        if (g_model) {
+            append_weight_residency_trace();
+            if (validate_gpu_model_residency()) {
+                append_native_trace("OPENCL_MODEL_RESIDENCY_VALIDATED");
+                const int trained = llama_model_n_ctx_train(g_model);
+                const int effective = std::max(1, std::min(requested, trained));
+                g_context_length = (uint32_t)effective;
+                checkpoint((std::string("OPENCL_CONTEXT_INIT_STARTED effective_ctx=") +
+                    std::to_string(effective)).c_str());
+                runtime_ready = init_generation_context();
+                checkpoint(runtime_ready ? "OPENCL_CONTEXT_INIT_RETURNED_SUCCESS" : "OPENCL_CONTEXT_INIT_RETURNED_FAILED");
+                if (runtime_ready) {
+                    g_gpu = true;
+                    checkpoint((std::string("MODEL_READY execution=OPENCL_PREFERRED ctx=") +
+                        std::to_string(effective)).c_str());
+                } else {
+                    gpu_failure_reason = "opencl_context_init_failed";
+                }
+            } else {
+                gpu_failure_reason = "opencl_model_has_no_gpu_weight_buffers";
+            }
+        } else {
+            gpu_failure_reason = "opencl_model_load_failed";
+        }
+
+        if (!runtime_ready) {
+            append_native_trace((std::string("OPENCL_ATTEMPT_FAILED reason=") + gpu_failure_reason +
+                " action=release_partial_state_and_retry_cpu").c_str());
+            free_all();
+        }
+    } else {
+        append_native_trace("OPENCL_ATTEMPT_SKIPPED reason=gpu_not_requested_or_device_unavailable");
     }
-    append_native_trace("TARGET_RUNTIME_READY_BEFORE_SPECULATIVE");
+
+    if (!runtime_ready) {
+        append_native_trace((std::string("CPU_FALLBACK_STARTED gpuAttempted=") +
+            (gpu_attempted ? "1" : "0") + " gpuFailureReason=" + gpu_failure_reason).c_str());
+        llama_model_params cpu_params = llama_model_default_params();
+        cpu_params.n_gpu_layers = 0;
+        cpu_params.load_mode = LLAMA_LOAD_MODE_NONE;
+        cpu_params.check_tensors = false;
+        g_model = load_model_android(stable_model_path.c_str(), cpu_params, false);
+        checkpoint(g_model ? "CPU_MODEL_LOAD_RETURNED_SUCCESS" : "CPU_MODEL_LOAD_RETURNED_FAILED");
+        if (!g_model) {
+            append_native_trace("CPU_FALLBACK_FAILED reason=model_load_failed");
+            env->ReleaseStringUTFChars(jpath, path);
+            g_gpu = false;
+            return 1;
+        }
+
+        const int trained = llama_model_n_ctx_train(g_model);
+        const int effective = std::max(1, std::min(requested, trained));
+        g_context_length = (uint32_t)effective;
+        checkpoint((std::string("CPU_CONTEXT_INIT_STARTED effective_ctx=") +
+            std::to_string(effective)).c_str());
+        runtime_ready = init_generation_context();
+        checkpoint(runtime_ready ? "CPU_CONTEXT_INIT_RETURNED_SUCCESS" : "CPU_CONTEXT_INIT_RETURNED_FAILED");
+        if (!runtime_ready) {
+            append_native_trace("CPU_FALLBACK_FAILED reason=context_init_failed");
+            free_all();
+            env->ReleaseStringUTFChars(jpath, path);
+            return 2;
+        }
+        g_gpu = false;
+        checkpoint((std::string("MODEL_READY execution=CPU_FALLBACK ctx=") +
+            std::to_string(effective)).c_str());
+    } else {
+        append_native_trace("CPU_FALLBACK_NOT_NEEDED");
+    }
+    append_native_trace((std::string("TARGET_RUNTIME_READY_BEFORE_SPECULATIVE execution=") + (g_gpu ? "OPENCL_GPU" : "CPU_FALLBACK")).c_str());
     if (g_spec_requested) {
         append_native_trace("SPECULATIVE_ATTACH_AFTER_TARGET_READY");
         const bool spec_ready = init_speculative_runtime();
@@ -1127,8 +1170,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeUnload(JNIEnv *, jcl
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeRuntimeInfo(JNIEnv *env, jclass) {
     const std::string value = std::string(g_gpu && g_gpu_backend_loaded
-        ? "OpenCL-GPU-ONLY"
-        : "GPU_UNAVAILABLE") + "; llama.cpp=" + AI_CHAT_LLAMA_CPP_SHA;
+        ? "OpenCL-GPU"
+        : (g_model && g_context ? "CPU-FALLBACK" : "GPU_UNAVAILABLE")) + "; llama.cpp=" + AI_CHAT_LLAMA_CPP_SHA;
     return env->NewStringUTF(value.c_str());
 }
 
