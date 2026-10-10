@@ -55,10 +55,13 @@ internal class MnnModelPackImporter {
             val modelDir = config.parent
             val bytes = Files.walk(modelDir).use { paths -> paths.filter(Files::isRegularFile).mapToLong { Files.size(it) }.sum() }
             val name = modelDir.fileName?.toString()?.takeIf { it.isNotBlank() } ?: "MNN model"
+            val finalDir = root.resolve("model-${UUID.randomUUID()}")
+            Files.move(modelDir, finalDir)
+            deleteRecursively(staging)
             return ModelDescriptor(
                 id = "mnn-${UUID.randomUUID()}",
                 displayName = name,
-                path = config,
+                path = finalDir.resolve("config.json"),
                 format = ModelFormat.MNN,
                 quantization = Quantization.UNKNOWN,
                 sizeBytes = bytes,
