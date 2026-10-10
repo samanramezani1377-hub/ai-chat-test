@@ -105,7 +105,7 @@ internal data class RuntimeDiagnostic(
 
     private fun nativeValue(key: String): String? {
         val text = nativeDiagnostics ?: return null
-        val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("$key=") } ?: return null
+        val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("$key=") && !it.contains("NATIVE_PERF_PROFILE") } ?: return null
         return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
     }
 

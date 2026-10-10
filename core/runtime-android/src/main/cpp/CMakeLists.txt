@@ -157,7 +157,7 @@ if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1")
             if (!ai_chat_cpu_op_summary.empty()) ai_chat_cpu_op_summary += ",";
             ai_chat_cpu_op_summary += ai_chat_entry.first + ":" + std::to_string(ai_chat_entry.second);
         }
-        GGML_LOG_INFO("AI_CHAT_BACKEND_GRAPH_ASSIGNMENT nodes=%d splits=%d gpuNodes=%d cpuNodes=%d otherNodes=%d unassignedNodes=%d cpuOpTypes=%s\n",
+        GGML_LOG_DEBUG("AI_CHAT_BACKEND_GRAPH_ASSIGNMENT nodes=%d splits=%d gpuNodes=%d cpuNodes=%d otherNodes=%d unassignedNodes=%d cpuOpTypes=%s\n",
             graph->n_nodes, sched->n_splits, ai_chat_gpu_nodes, ai_chat_cpu_nodes,
             ai_chat_other_nodes, ai_chat_unassigned_nodes,
             ai_chat_cpu_op_summary.empty() ? "none" : ai_chat_cpu_op_summary.c_str());
