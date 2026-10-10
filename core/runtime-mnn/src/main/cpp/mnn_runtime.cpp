@@ -2,6 +2,7 @@
 #include <android/log.h>
 #include <algorithm>
 #include <atomic>
+#include <exception>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -93,7 +94,17 @@ Java_com_woogit_aicore_runtime_mnn_MnnNative_nativeGenerate(JNIEnv* env, jclass,
     auto run = [&](Llm* llm, std::string& output) -> bool {
         g_stop.store(false);
         std::ostringstream stream;
-        llm->response(messages, &stream, nullptr, std::max(1, static_cast<int>(maxTokens)));
+        try {
+            llm->response(messages, &stream, nullptr, std::max(1, static_cast<int>(maxTokens)));
+        } catch (const std::exception& error) {
+            output = stream.str();
+            LOGE("MNN_RESPONSE_EXCEPTION backend=%s message=%s", g_backend.c_str(), error.what());
+            return false;
+        } catch (...) {
+            output = stream.str();
+            LOGE("MNN_RESPONSE_EXCEPTION backend=%s message=unknown", g_backend.c_str());
+            return false;
+        }
         output = stream.str();
         const auto* context = llm->getContext();
         return context && context->status != LlmStatus::INTERNAL_ERROR && context->status != LlmStatus::TIMEOUT && context->status != LlmStatus::USER_CANCEL && !output.empty();
