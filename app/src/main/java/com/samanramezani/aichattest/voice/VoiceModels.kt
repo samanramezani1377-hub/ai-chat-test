@@ -312,10 +312,12 @@ class VoiceModelStore(
             "sample_rate" to sampleRate.toString(),
         ))
 
-        val id = "tts-${model.nameWithoutExtension}-${System.currentTimeMillis()}"
+        val languageName = json.optJSONObject("language")?.optString("name_english").orEmpty().ifBlank { "Persian" }
+        val voiceName = json.optJSONObject("espeak")?.optString("voice").orEmpty().ifBlank { "fa" }
+        val id = "tts-${voiceName.replace(Regex("[^A-Za-z0-9_-]"), "_")}-${System.currentTimeMillis()}"
         val destination = File(root, id)
         check(staging.renameTo(destination)) { "VOICE-PIPER-007: ذخیره نهایی مدل Piper ناموفق بود." }
-        return validateDirectory(destination, VoiceModelKind.TTS)
+        return validateDirectory(destination, VoiceModelKind.TTS)?.copy(title = "Piper · $languageName · $voiceName")
             ?: run { destination.deleteRecursively(); error("VOICE-PIPER-008: اعتبارسنجی مدل Piper پس از تبدیل ناموفق بود.") }
     }
 
@@ -367,29 +369,34 @@ class VoiceModelStore(
      */
     private fun normalizeEspeakDirectory(staging: File) {
         val expected = File(staging, "espeak-ng-data")
-        if (expected.isDirectory && expected.list()?.isNotEmpty() == true) return
+        // Do not treat any non-empty folder as complete: some archives wrap the real
+        // espeak-ng-data directory one or two levels deep, leaving the four runtime files
+        // missing at the path sherpa-onnx actually consumes.
+        if (hasRequiredEspeakData(expected)) return
         val nested = staging.walkTopDown().firstOrNull {
-            it.isDirectory && it != staging && it.name.equals("espeak-ng-data", true) &&
-                it.list()?.isNotEmpty() == true
+            it.isDirectory && it != staging && it != expected &&
+                it.name.equals("espeak-ng-data", true) && hasRequiredEspeakData(it)
         }
-        if (nested != null && nested != expected) {
-            // Move the nested directory out first: it may live inside the current expected
-            // directory, so deleting expected before moving it would delete the source itself.
+        if (nested != null) {
+            // Move the valid nested directory out first; it may be inside the current
+            // expected directory, so deleting expected before moving would delete the source.
             val normalized = File(staging, ".espeak-ng-data-normalized")
             normalized.deleteRecursively()
             check(nested.renameTo(normalized)) {
-                "VOICE-PIPER-012: نتوانستم پوشه espeak-ng-data را از ساختار بسته استخراج‌شده آماده کنم."
+                "VOICE-PIPER-012: نتوانستم پوشه معتبر espeak-ng-data را از ساختار بسته استخراج‌شده آماده کنم."
             }
             expected.deleteRecursively()
             check(normalized.renameTo(expected)) {
-                "VOICE-PIPER-016: نتوانستم پوشهٔ داده‌های آواشناسی را در محل نهایی قرار بدهم."
+                "VOICE-PIPER-016: نتوانستم پوشهٔ معتبر داده‌های آواشناسی را در محل نهایی قرار بدهم."
             }
             return
         }
         // Some bundles contain the contents at their archive root (phontab/phondata/...).
-        val rootHasData = listOf("phontab", "phondata", "phonindex").any { File(staging, it).exists() }
+        val rootHasData = listOf("phontab", "phondata", "phonindex", "intonations")
+            .any { File(staging, it).isFile && File(staging, it).length() > 0L }
         if (rootHasData) {
             val temp = File(staging, ".espeak-root")
+            temp.deleteRecursively()
             if (!temp.mkdirs()) error("VOICE-PIPER-013: ایجاد پوشهٔ داده‌های آواشناسی ناموفق بود.")
             staging.listFiles()?.filter {
                 it != temp && it != expected &&
