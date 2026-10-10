@@ -40,6 +40,7 @@ internal fun VoiceConversationPage(
     sttModels: List<VoiceModelEntry>,
     ttsModels: List<VoiceModelEntry>,
     missingSttComponents: List<String>,
+    missingKoochikComponents: List<String>,
     missingTtsComponents: List<String>,
     activeSttId: String?,
     activeTtsId: String?,
@@ -47,6 +48,8 @@ internal fun VoiceConversationPage(
     onImportStt: () -> Unit,
     onImportSmallSttModel: () -> Unit,
     onImportSmallSttTokens: () -> Unit,
+    onImportKoochikModel: () -> Unit,
+    onImportKoochikTokens: () -> Unit,
     onImportTts: () -> Unit,
     onImportTtsModel: () -> Unit,
     onImportTtsConfig: () -> Unit,
@@ -108,7 +111,27 @@ internal fun VoiceConversationPage(
                         sttSteps.forEach { step ->
                             Text("${if (step !in missingSttComponents) "✓" else "○"}  $step", style = MaterialTheme.typography.bodySmall)
                         }
-                        Text(if (sttDone == sttSteps.size) "هر دو فایل وارد شده‌اند؛ مدل آماده است." else "پیشرفت ورود مدل: $sttDone از ${sttSteps.size} فایل", style = MaterialTheme.typography.labelMedium)
+                        Text(if (sttDone == sttSteps.size) "هر دو فایل Shenava Rizeh-Pizeh وارد شده‌اند." else "پیشرفت ورود Rizeh-Pizeh: $sttDone از ${sttSteps.size} فایل", style = MaterialTheme.typography.labelMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text("Shenava Koochik · دقت بالاتر · حدود ۴۵۹ مگابایت", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text("این مدل بزرگ‌تر از Rizeh-Pizeh است و برای تشخیص دقیق‌تر فارسی در نظر گرفته شده. دو فایل زیر را جداگانه دریافت و وارد کن.", style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(
+                            onClick = { uriHandler.openUri("https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx/resolve/main/model.onnx") },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("دانلود مدل Koochik · model.onnx") }
+                        OutlinedButton(
+                            onClick = { uriHandler.openUri("https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx/resolve/main/tokens.txt") },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("دانلود واژگان Koochik · tokens.txt") }
+                        OutlinedButton(onClick = onImportKoochikModel, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن مدل Koochik · model.onnx") }
+                        OutlinedButton(onClick = onImportKoochikTokens, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن واژگان Koochik · tokens.txt") }
+                        val koochikSteps = listOf("model.onnx", "tokens.txt")
+                        val koochikDone = koochikSteps.size - missingKoochikComponents.size
+                        LinearProgressIndicator(progress = { koochikDone.toFloat() / koochikSteps.size }, modifier = Modifier.fillMaxWidth())
+                        koochikSteps.forEach { step ->
+                            Text("${if (step !in missingKoochikComponents) "✓" else "○"}  $step", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(if (koochikDone == koochikSteps.size) "هر دو فایل Koochik وارد شده‌اند؛ مدل آماده است." else "پیشرفت ورود Koochik: $koochikDone از ${koochikSteps.size} فایل", style = MaterialTheme.typography.labelMedium)
                         if (sttModels.isEmpty()) Text("مدل تشخیص گفتار واردشده و آماده‌ای وجود ندارد.", color = MaterialTheme.colorScheme.error)
                         sttModels.forEach { model ->
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -117,7 +140,7 @@ internal fun VoiceConversationPage(
                                     Text(model.title, fontWeight = FontWeight.Medium)
                                     Text(when (model.asrMode) {
                                         "qwen3-asr" -> "Qwen3-ASR · محلی"
-                                        "nemo-ctc" -> "Shenava CTC · فارسی · 6.9M"
+                                        "nemo-ctc" -> if (model.title.contains("Koochik", true)) "Shenava Koochik CTC · فارسی · 114M" else "Shenava Rizeh-Pizeh CTC · فارسی · 6.9M"
                                         else -> "Streaming Transducer · محلی"
                                     }, style = MaterialTheme.typography.bodySmall)
                                 }
