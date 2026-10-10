@@ -21,6 +21,33 @@ static std::string g_backend = "unloaded";
 static std::string g_backend_reason = "not_loaded";
 static int g_cpu_threads = 4;
 static std::atomic_bool g_stop{false};
+
+class StopAwareBuffer final : public std::stringbuf {
+public:
+    explicit StopAwareBuffer(Llm* llm) : llm_(llm) {}
+protected:
+    std::streamsize xsputn(const char* text, std::streamsize count) override {
+        mark_cancel_if_requested();
+        return std::stringbuf::xsputn(text, count);
+    }
+    int overflow(int character = traits_type::eof()) override {
+        mark_cancel_if_requested();
+        return std::stringbuf::overflow(character);
+    }
+    int sync() override {
+        mark_cancel_if_requested();
+        return std::stringbuf::sync();
+    }
+private:
+    void mark_cancel_if_requested() {
+        if (g_stop.load() && llm_) {
+            auto* context = const_cast<MNN::Transformer::LlmContext*>(llm_->getContext());
+            if (context) context->status = LlmStatus::USER_CANCEL;
+        }
+    }
+    Llm* llm_;
+};
+
 static std::string from_jstring(JNIEnv* env, jstring value) {
     if (!value) return {};
     const char* chars = env->GetStringUTFChars(value, nullptr);
@@ -97,19 +124,20 @@ Java_com_woogit_aicore_runtime_mnn_MnnNative_nativeGenerate(JNIEnv* env, jclass,
     }
     auto run = [&](Llm* llm, std::string& output) -> bool {
         g_stop.store(false);
-        std::ostringstream stream;
+        StopAwareBuffer buffer(llm);
+        std::ostream stream(&buffer);
         try {
             llm->response(messages, &stream, nullptr, std::max(1, static_cast<int>(maxTokens)));
         } catch (const std::exception& error) {
-            output = stream.str();
+            output = buffer.str();
             LOGE("MNN_RESPONSE_EXCEPTION backend=%s message=%s", g_backend.c_str(), error.what());
             return false;
         } catch (...) {
-            output = stream.str();
+            output = buffer.str();
             LOGE("MNN_RESPONSE_EXCEPTION backend=%s message=unknown", g_backend.c_str());
             return false;
         }
-        output = stream.str();
+        output = buffer.str();
         const auto* context = llm->getContext();
         return context && context->status != LlmStatus::INTERNAL_ERROR && context->status != LlmStatus::TIMEOUT && context->status != LlmStatus::USER_CANCEL && !output.empty();
     };
@@ -132,15 +160,9 @@ Java_com_woogit_aicore_runtime_mnn_MnnNative_nativeGenerate(JNIEnv* env, jclass,
 }
 extern "C" JNIEXPORT void JNICALL
 Java_com_woogit_aicore_runtime_mnn_MnnNative_nativeStop(JNIEnv*, jclass) {
-    // Do not acquire g_mutex here: nativeGenerate owns it while decoding. MNN checks
-    // LlmContext status during generation, so request cancellation without blocking on
-    // the generation lock. This pointer remains valid until the serialized unload.
+    // The generation thread applies USER_CANCEL from StopAwareBuffer while streaming
+    // output. This avoids racing on MNN's non-atomic context status from the UI thread.
     g_stop.store(true);
-    Llm* active = g_llm;
-    if (active) {
-        auto* context = const_cast<MNN::Transformer::LlmContext*>(active->getContext());
-        if (context) context->status = LlmStatus::USER_CANCEL;
-    }
 }
 extern "C" JNIEXPORT void JNICALL
 Java_com_woogit_aicore_runtime_mnn_MnnNative_nativeUnload(JNIEnv*, jclass) {
