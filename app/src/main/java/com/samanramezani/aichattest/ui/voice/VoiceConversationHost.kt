@@ -365,7 +365,25 @@ private class VoiceConversationController(
                 enqueueCompleteSentences("", flush = true)
                 queue.close()
                 activeSpeechJob.join()
-                val answer = result.generation.text
+                val generation = result.generation
+                val outputTokens = generation.outputTokens
+                val generationMs = generation.generationTimeMs
+                val firstTokenMs = generation.firstTokenTimeMs
+                val totalTps = if (outputTokens != null && generationMs != null && generationMs > 0) {
+                    outputTokens * 1000.0 / generationMs
+                } else null
+                val decodeWindowMs = if (generationMs != null && firstTokenMs != null) generationMs - firstTokenMs else null
+                val postFirstTokenTps = if (outputTokens != null && decodeWindowMs != null && decodeWindowMs > 0) {
+                    outputTokens * 1000.0 / decodeWindowMs
+                } else null
+                onDiagnostic(
+                    "VOICE-PERF: outputTokens=${outputTokens ?: "n/a"} " +
+                        "TTFTMs=${firstTokenMs ?: "n/a"} generationMs=${generationMs ?: "n/a"} " +
+                        "totalTokensPerSec=${totalTps?.let { "%.2f".format(java.util.Locale.US, it) } ?: "n/a"} " +
+                        "postFirstTokenEstimateTokensPerSec=${postFirstTokenTps?.let { "%.2f".format(java.util.Locale.US, it) } ?: "n/a"} " +
+                        "enableThinking=false recentMessages=12 maxNewTokens=384"
+                )
+                val answer = generation.text
                 if (answer.isNotBlank()) {
                     onLine("دستیار", answer)
                     onStatus(if (speaking.get()) "در حال پخش پاسخ…" else "پاسخ آماده است؛ می‌توانید صحبت کنید.")
