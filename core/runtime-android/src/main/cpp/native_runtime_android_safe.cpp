@@ -1238,7 +1238,12 @@ if (hybrid_memory) {
     const auto decode_ms = std::chrono::duration_cast<std::chrono::milliseconds>(generation_finished_at - prefill_finished_at).count();
     const double decode_tokens_per_sec = generated > 0 && decode_ms > 0 ? (1000.0 * static_cast<double>(generated) / static_cast<double>(decode_ms)) : 0.0;
     if (cpu_thread_trial > 0) {
-        record_cpu_thread_trial(cpu_thread_trial, generated, decode_ms, decode_tokens_per_sec, result);
+        const double cpu_decode_tokens_per_sec = generated > 0 && g_decode_profile.decode_ms > 0
+            ? (1000.0 * static_cast<double>(generated) /
+               static_cast<double>(g_decode_profile.decode_ms))
+            : 0.0;
+        record_cpu_thread_trial(cpu_thread_trial, generated, g_decode_profile.decode_ms,
+                               cpu_decode_tokens_per_sec, result);
     }
     const auto profile_prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(prefill_finished_at - generation_started_at).count();
     append_decode_profile_trace(generation_ms, profile_prefill_ms);
