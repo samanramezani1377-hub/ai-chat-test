@@ -44,6 +44,8 @@ data class InferenceSettings(
     val contextLength: Int? = 8192,
     /** Number of recent conversation messages included in generated context. */
     val recentMessages: Int = 10,
+    /** Disable reasoning-mode prefixes for chat templates that support a no-thinking mode. */
+    val enableThinking: Boolean = true,
     /** Maximum number of real Action steps the Agent may execute for one request. */
     val maxActionSteps: Int = 4,
 ) {
