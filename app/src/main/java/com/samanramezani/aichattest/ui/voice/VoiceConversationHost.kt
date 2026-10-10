@@ -58,6 +58,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     val controller = remember(container, context) {
         VoiceConversationController(context, container,
             onStatus = { value -> uiScope.launch(Dispatchers.Main.immediate) { updateVoiceStatus(value) } },
+            onDiagnostic = { value -> uiScope.launch(Dispatchers.Main.immediate) { diagnosticLogs = (diagnosticLogs + "[${System.currentTimeMillis()}] $value").takeLast(200) } },
             onListening = { value -> uiScope.launch(Dispatchers.Main.immediate) { listening = value; busy = false } },
             onLine = { speaker, text -> uiScope.launch(Dispatchers.Main.immediate) {
                 if (text.isNotBlank()) lines = lines + VoiceLine(System.nanoTime(), speaker, text)
@@ -185,6 +186,7 @@ private class VoiceConversationController(
     private val context: Context,
     private val container: AppContainer,
     private val onStatus: (String) -> Unit,
+    private val onDiagnostic: (String) -> Unit,
     private val onListening: (Boolean) -> Unit,
     private val onLine: (String, String) -> Unit,
 ) {
@@ -238,7 +240,8 @@ private class VoiceConversationController(
                     onStatus("در حال گوش‌دادن؛ گفتار و پردازش کاملاً روی دستگاه است.")
                     for (frame in frames) {
                         val update = try { recognizer?.accept(frame.samples, 16000, frame.speech) } catch (t: Throwable) {
-                            onStatus("VOICE-STT-002: خطا در تشخیص گفتار: ${t.message ?: "نامشخص"}")
+                            onDiagnostic("VOICE-STT-002\n${t.stackTraceToString()}")
+                            onStatus("VOICE-STT-002: خطا در تشخیص گفتار: ${t.message ?: t.javaClass.simpleName}")
                             null
                         } ?: continue
                         if (update.text.isNotBlank()) onStatus("در حال شنیدن: ${update.text}")
@@ -252,6 +255,7 @@ private class VoiceConversationController(
                     }
                 }
             } catch (t: Throwable) {
+                onDiagnostic("VOICE-START-001\n${t.stackTraceToString()}")
                 onStatus("VOICE-START-001: شروع مکالمه ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
                 cleanupEngines()
                 onListening(false)
@@ -282,7 +286,8 @@ private class VoiceConversationController(
                 speaking.set(false)
             } catch (t: Throwable) {
                 speaking.set(false)
-                onStatus("VOICE-TTS-005: تولید یا پخش گفتار ناموفق بود: ${t.message ?: "نامشخص"}")
+                onDiagnostic("VOICE-TTS-005\n${t.stackTraceToString()}")
+                onStatus("VOICE-TTS-005: تولید یا پخش گفتار ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
             }
         }
         speechJob = activeSpeechJob
@@ -308,7 +313,7 @@ private class VoiceConversationController(
             val id = conversationId ?: error("VOICE-CHAT-001: شناسه مکالمه ایجاد نشده است.")
             val session = container.createAgentSession(id) { event ->
                 if (event is AgentEvent.Token && !turnCancel.get()) enqueueCompleteSentences(event.value)
-                if (event is AgentEvent.Failed) onStatus("VOICE-LLM-001: ${event.message}")
+                if (event is AgentEvent.Failed) { onDiagnostic("VOICE-LLM-001: ${event.message}"); onStatus("VOICE-LLM-001: ${event.message}") }
             } ?: error("VOICE-CHAT-002: نشست مدل محلی در دسترس نیست.")
             val result = session.send(utterance, InferenceSettings(maxNewTokens = 1024), requestedRecentMessages = Int.MAX_VALUE)
             if (!turnCancel.get()) {
@@ -327,6 +332,7 @@ private class VoiceConversationController(
         } catch (t: Throwable) {
             queue.close()
             activeSpeechJob.cancel()
+            onDiagnostic("VOICE-CHAT-003\n${t.stackTraceToString()}")
             onStatus("VOICE-CHAT-003: اجرای مکالمه ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
         } finally {
             speaking.set(false)
