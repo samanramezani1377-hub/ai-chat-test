@@ -60,7 +60,7 @@ class VoiceModelStore(
             fun extract(nameValue: String, isDirectory: Boolean, entryStream: InputStream) {
                 count++
                 require(count <= MAX_ENTRIES) { "VOICE-IMPORT-003: تعداد فایل‌های بسته مدل بیش از حد مجاز است." }
-                val name = nameValue.replace('\\\\', '/')
+                val name = nameValue.replace('\\', '/')
                 require(!name.startsWith("/") && name.split('/').none { it == ".." }) {
                     "VOICE-IMPORT-004: مسیر نامعتبر داخل بسته مدل وجود دارد."
                 }
