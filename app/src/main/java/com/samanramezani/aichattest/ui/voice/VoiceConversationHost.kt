@@ -47,7 +47,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     val controller = remember(container, context) {
         VoiceConversationController(context, container,
             onStatus = { value -> uiScope.launch(Dispatchers.Main.immediate) { status = value } },
-            onListening = { value -> uiScope.launch(Dispatchers.Main.immediate) { listening = value; if (!value) busy = false } },
+            onListening = { value -> uiScope.launch(Dispatchers.Main.immediate) { listening = value; busy = false } },
             onLine = { speaker, text -> uiScope.launch(Dispatchers.Main.immediate) {
                 if (text.isNotBlank()) lines = lines + VoiceLine(System.nanoTime(), speaker, text)
             } },
