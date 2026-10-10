@@ -78,6 +78,8 @@ data class ActionSchema(
 
 interface Action<in I, out O> {
     val id: String
+    /** Human-readable capability description exposed to the local agent prompt. */
+    val description: String get() = id
     val risk: RiskLevel
     val schema: ActionSchema get() = ActionSchema()
     val permission: String get() = "action:$id"
@@ -93,6 +95,8 @@ enum class RiskLevel { LOW, NORMAL, SENSITIVE }
 interface ActionRegistry {
     fun register(category: String, action: Action<Any, Any>)
     fun find(actionId: String): Action<Any, Any>?
+    /** Registered actions available to the agent; default keeps third-party implementations source-compatible. */
+    fun all(): List<Action<Any, Any>> = emptyList()
     fun categories(): Set<String>
 }
 
