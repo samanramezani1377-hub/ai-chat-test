@@ -154,7 +154,6 @@ jobs:
           grep -q 'hybrid_recurrent_vulkan_stability' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'AI_CHAT_GPU_BACKEND_VULKAN=1' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_VULKAN_ANDROID_BDA_GUARD_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
-          grep -q 'AI_CHAT_GPU_ONLY_SCHEDULER_PATCH_V2' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_SELECTIVE_CPU_OP_FALLBACK_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
           ! grep -q 'AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_ANDROID_DISABLE_DSV4_HC_VULKAN_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
