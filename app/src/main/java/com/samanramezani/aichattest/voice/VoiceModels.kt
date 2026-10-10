@@ -55,6 +55,7 @@ class VoiceModelStore(
 
     /** Human-readable progress for a multi-file Piper import; never reports a partial model as ready. */
     fun missingPiperComponents(): List<String> {
+        if (list(VoiceModelKind.TTS).any { it.tokensFile != null && it.dataDirectory != null }) return emptyList()
         val staging = File(root, ".piper-import")
         val model = staging.listFiles()?.any { it.isFile && it.extension.equals("onnx", true) && it.length() > 1024 } == true
         val config = File(staging, "model.onnx.json").isFile ||
@@ -69,6 +70,7 @@ class VoiceModelStore(
 
     /** Human-readable progress for the two-file Shenava import. */
     fun missingSmallSttComponents(): List<String> {
+        if (list(VoiceModelKind.STT).any { it.asrMode == "nemo-ctc" }) return emptyList()
         val staging = File(root, ".shenava-rizeh-import")
         val model = File(staging, "model.onnx").let { it.isFile && it.length() >= 1024 }
         val tokens = File(staging, "tokens.txt").let { it.isFile && it.length() > 0 }
