@@ -28,7 +28,7 @@ import com.woogit.aicore.domain.ChatMessage
 internal fun ChatPage(
     messages: List<UiMessage>, composer: String, generating: Boolean, approvalBusy: Boolean,
     onComposer: (String) -> Unit, onSend: () -> Unit, onStop: () -> Unit,
-    execution: ExecutionState?, onApprove: () -> Unit, onReject: () -> Unit, onWorkspace: () -> Unit, onCopy: (String) -> Unit,
+    execution: ExecutionState?, onApprove: () -> Unit, onReject: () -> Unit, onWorkspace: () -> Unit, onCopy: (String) -> Unit, onVoice: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
