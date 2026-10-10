@@ -127,13 +127,13 @@ static bool validate_gpu_model_residency() {
         std::to_string(cpu_tensors) + " otherBytes=" + std::to_string(other_bytes) +
         " otherTensors=" + std::to_string(other_tensors)).c_str());
 
-    // A tiny CPU-side tensor is not useful for inference, but a substantial CPU
-    // weight allocation means the GPU-only contract has been violated.
-    constexpr size_t kCpuWeightToleranceBytes = 64 * 1024;
-    const bool ok = gpu_bytes > 0 && cpu_bytes <= kCpuWeightToleranceBytes && other_bytes == 0;
-    append_native_trace(ok ? "OPENCL_MODEL_RESIDENCY_GPU_ONLY_OK"
-                           : "OPENCL_MODEL_RESIDENCY_GPU_ONLY_REJECTED");
-    return ok;
+    // Mixed residency is expected: unsupported operations/tensors may remain on CPU.
+    // This is diagnostic only and must never reject a model that can run correctly.
+    const bool has_gpu_weights = gpu_bytes > 0;
+    append_native_trace((std::string("OPENCL_MODEL_RESIDENCY_POLICY mode=") +
+        (has_gpu_weights ? "GPU_PREFERRED_MIXED_ALLOWED" : "CPU_FALLBACK") +
+        " cpuFallbackAllowed=1").c_str());
+    return has_gpu_weights;
 }
 
 
@@ -1049,7 +1049,21 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     }
     if (g_model) {
         append_weight_residency_trace();
-        append_native_trace("NATIVE_WEIGHT_RESIDENCY_IS_DIAGNOSTIC_NOT_A_LOAD_GATE");
+        if (gpu_available && !validate_gpu_model_residency()) {
+            append_native_trace("NATIVE_GPU_MODEL_HAS_NO_GPU_WEIGHT_BUFFERS_RETRYING_CPU");
+            llama_model_free(g_model);
+            g_model = nullptr;
+            gpu_available = false;
+            mp = llama_model_default_params();
+            mp.n_gpu_layers = 0;
+            mp.load_mode = LLAMA_LOAD_MODE_NONE;
+            mp.check_tensors = false;
+            mp.no_host = false;
+            g_model = load_model_android(stable_model_path.c_str(), mp, false);
+            checkpoint(g_model ? "CPU_FALLBACK_MODEL_LOAD_SUCCESS" : "CPU_FALLBACK_MODEL_LOAD_FAILED");
+        } else {
+            append_native_trace("NATIVE_WEIGHT_RESIDENCY_IS_DIAGNOSTIC_NOT_A_LOAD_GATE");
+        }
     }
     env->ReleaseStringUTFChars(jpath, path);
     if (!g_model) {
