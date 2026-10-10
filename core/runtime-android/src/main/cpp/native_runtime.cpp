@@ -16,7 +16,10 @@
 #include <dlfcn.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/auxv.h>
 #include <ucontext.h>
+#include <limits>
+#include <climits>
 #include "llama.h"
 #include "gguf.h"
 #include "llama-model.h"
@@ -57,6 +60,86 @@ static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxe
 static void append_native_trace(const char *text);
 static bool init_generation_context();
 static bool init_speculative_runtime();
+
+#ifndef AI_CHAT_CPU_BASELINE_ARM_ARCH
+#define AI_CHAT_CPU_BASELINE_ARM_ARCH "armv8-a"
+#endif
+#ifndef AI_CHAT_CPU_DOTPROD_KERNELS
+#define AI_CHAT_CPU_DOTPROD_KERNELS 0
+#endif
+#ifndef AI_CHAT_CPU_I8MM_KERNELS
+#define AI_CHAT_CPU_I8MM_KERNELS 0
+#endif
+#ifndef AI_CHAT_CPU_REPACK
+#define AI_CHAT_CPU_REPACK 0
+#endif
+#ifndef AI_CHAT_CPU_NEON_KERNELS
+#define AI_CHAT_CPU_NEON_KERNELS 0
+#endif
+#ifndef AI_CHAT_CPU_Q6K_ARM_KERNELS
+#define AI_CHAT_CPU_Q6K_ARM_KERNELS 0
+#endif
+#ifndef AI_CHAT_CPU_KLEIDIAI
+#define AI_CHAT_CPU_KLEIDIAI 0
+#endif
+#ifndef AT_HWCAP2
+#define AT_HWCAP2 26
+#endif
+
+static void trace_cpu_hardware_profile() {
+    static bool traced = false;
+    if (traced) return;
+    traced = true;
+    const unsigned hardware_threads = std::max(1u, std::thread::hardware_concurrency());
+    const long online_raw = sysconf(_SC_NPROCESSORS_ONLN);
+    const unsigned online_threads = online_raw > 0 ? static_cast<unsigned>(online_raw) : hardware_threads;
+    unsigned long hwcap = 0, hwcap2 = 0;
+#if defined(__aarch64__)
+    hwcap = getauxval(AT_HWCAP);
+    hwcap2 = getauxval(AT_HWCAP2);
+#endif
+    // Linux arm64 HWCAP bit assignments. Hardware support is distinct from compiled kernels.
+    const bool neon = (hwcap & (1UL << 1)) != 0;
+    const bool dotprod = (hwcap & (1UL << 20)) != 0;
+    const bool sve = (hwcap & (1UL << 22)) != 0;
+    const bool i8mm = (hwcap2 & (1UL << 13)) != 0;
+    const bool sve2 = (hwcap2 & (1UL << 1)) != 0;
+    const bool sme = (hwcap2 & (1UL << 23)) != 0;
+    long min_freq_khz = LONG_MAX, max_freq_khz = 0;
+    unsigned freq_cores = 0;
+    for (unsigned cpu = 0; cpu < online_threads; ++cpu) {
+        std::ifstream freq_file("/sys/devices/system/cpu/cpu" + std::to_string(cpu) +
+                                "/cpufreq/cpuinfo_max_freq");
+        long freq = 0;
+        if (freq_file >> freq && freq > 0) {
+            min_freq_khz = std::min(min_freq_khz, freq);
+            max_freq_khz = std::max(max_freq_khz, freq);
+            ++freq_cores;
+        }
+    }
+    if (freq_cores == 0) min_freq_khz = 0;
+    append_native_trace((std::string("NATIVE_CPU_HARDWARE arch=") +
+        (sizeof(void *) == 8 ? "64bit" : "32bit") +
+        " hardwareThreads=" + std::to_string(hardware_threads) +
+        " onlineThreads=" + std::to_string(online_threads) +
+        " hwcap=" + std::to_string(hwcap) + " hwcap2=" + std::to_string(hwcap2) +
+        " neon=" + (neon ? "1" : "0") + " dotprod=" + (dotprod ? "1" : "0") +
+        " i8mm=" + (i8mm ? "1" : "0") + " sve=" + (sve ? "1" : "0") +
+        " sve2=" + (sve2 ? "1" : "0") + " sme=" + (sme ? "1" : "0") +
+        " minCpuMaxFreqKHz=" + std::to_string(min_freq_khz) +
+        " maxCpuMaxFreqKHz=" + std::to_string(max_freq_khz) +
+        " frequencyReadableCores=" + std::to_string(freq_cores)).c_str());
+    append_native_trace((std::string("NATIVE_CPU_KERNEL_POLICY baseline=") +
+        AI_CHAT_CPU_BASELINE_ARM_ARCH +
+        " repack=" + std::to_string(AI_CHAT_CPU_REPACK) +
+        " neonKernelsCompiled=" + std::to_string(AI_CHAT_CPU_NEON_KERNELS) +
+        " q6kArmKernelCompiled=" + std::to_string(AI_CHAT_CPU_Q6K_ARM_KERNELS) +
+        " kleidiai=" + std::to_string(AI_CHAT_CPU_KLEIDIAI) +
+        " dotprodKernelCompiled=" + std::to_string(AI_CHAT_CPU_DOTPROD_KERNELS) +
+        " i8mmKernelCompiled=" + std::to_string(AI_CHAT_CPU_I8MM_KERNELS) +
+        " q6kDispatch=" + (AI_CHAT_CPU_Q6K_ARM_KERNELS ? "ARM_NEON_BASELINE" : "UPSTREAM_GENERIC") +
+        " policy=NO_UNSAFE_GLOBAL_ISA").c_str());
+}
 static int generation_threads() {
     const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
     // Decode is memory-bandwidth bound; keep a bounded number of workers and
@@ -73,6 +156,7 @@ static int batch_threads() {
 
 static bool init_generation_context() {
     if (!g_model || g_context_length == 0) return false;
+    trace_cpu_hardware_profile();
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx = g_context_length;
     cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);

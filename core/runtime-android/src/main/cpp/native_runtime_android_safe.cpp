@@ -31,6 +31,12 @@ static void clear_android_generation_cache() {
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <map>
+#include <thread>
+#include <algorithm>
+#include <cmath>
+#include <sched.h>
+#include <cstdio>
 
 static std::mutex g_native_runtime_mutex;
 static bool g_spec_requested=false;
@@ -93,6 +99,194 @@ static void append_speculative_stats_trace(int draft_tokens, int accepted_tokens
 #define install_native_fatal_handlers install_native_fatal_handlers_legacy
 #include "native_runtime.cpp"
 #undef install_native_fatal_handlers
+
+// Adapt CPU workers from measured inference on this device. OpenCL-selected and
+// speculative generations keep their existing threading policy.
+struct CpuThreadTuningState { int attempts = 0; int samples = 0; double ema_tokens_per_sec = 0.0; };
+static std::map<int, CpuThreadTuningState> g_cpu_thread_tuning;
+static int g_cpu_thread_trial_count = 0;
+static int g_cpu_default_threads = 0;
+static llama_context * g_cpu_tuned_context = nullptr;
+static std::string g_cpu_tuning_key;
+static std::string g_cpu_tuning_path;
+static unsigned cpu_threads_available_to_process();
+
+// Use a deterministic key so learned settings survive process restarts but never
+// leak from one model/context/device configuration to another.
+static uint64_t cpu_tuning_hash(const std::string &value) {
+    uint64_t hash = 14695981039346656037ULL;
+    for (unsigned char ch : value) { hash ^= ch; hash *= 1099511628211ULL; }
+    return hash;
+}
+static std::string cpu_tuning_identity(llama_context *ctx) {
+    const std::string model = g_target_model_path.empty() ? "<unknown-model>" : g_target_model_path;
+    struct stat model_stat{};
+    const bool model_stat_ok = !g_target_model_path.empty() &&
+        stat(g_target_model_path.c_str(), &model_stat) == 0;
+    const uint64_t hwcap = static_cast<uint64_t>(getauxval(AT_HWCAP));
+    const uint64_t hwcap2 = static_cast<uint64_t>(getauxval(AT_HWCAP2));
+    const unsigned allowed_cores = cpu_threads_available_to_process();
+    return model + "|size=" + std::to_string(model_stat_ok ? model_stat.st_size : -1) +
+        "|mtime=" + std::to_string(model_stat_ok ? model_stat.st_mtime : 0) +
+        "|ctx=" + std::to_string(llama_n_ctx(ctx)) +
+        "|allowedCores=" + std::to_string(allowed_cores) +
+        "|hwcap=" + std::to_string(hwcap) + "|hwcap2=" + std::to_string(hwcap2) +
+        "|runtime=" + AI_CHAT_LLAMA_CPP_SHA;
+}
+static std::string cpu_tuning_store_path() {
+    if (!g_cpu_tuning_path.empty()) return g_cpu_tuning_path;
+    return g_native_trace_file.empty() ? std::string() : g_native_trace_file + ".cpu-autotune";
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeSetCpuTuningPath(
+        JNIEnv *env, jclass, jstring jpath) {
+    if (!jpath) { g_cpu_tuning_path.clear(); return; }
+    const char *path = env->GetStringUTFChars(jpath, nullptr);
+    if (!path) return;
+    g_cpu_tuning_path.assign(path);
+    env->ReleaseStringUTFChars(jpath, path);
+    append_native_trace("NATIVE_CPU_AUTOTUNE_STORE path_configured=1 location=app_files");
+}
+static void load_cpu_tuning_state(const std::string &identity) {
+    g_cpu_thread_tuning.clear();
+    g_cpu_thread_trial_count = 0;
+    const std::string path = cpu_tuning_store_path();
+    std::ifstream input(path);
+    uint64_t stored_key = 0;
+    if (path.empty() || !(input >> stored_key) || stored_key != cpu_tuning_hash(identity)) {
+        append_native_trace("NATIVE_CPU_AUTOTUNE_STORE status=miss reason=identity_or_file");
+        return;
+    }
+    int threads = 0, attempts = 0, samples = 0;
+    double ema = 0.0;
+    while (input >> threads >> attempts >> samples >> ema) {
+        if (threads < 1 || threads > 64 || attempts < 0 || samples < 0 ||
+            !std::isfinite(ema) || ema < 0.0) continue;
+        g_cpu_thread_tuning[threads] = {attempts, samples, ema};
+        g_cpu_thread_trial_count += attempts;
+    }
+    append_native_trace((std::string("NATIVE_CPU_AUTOTUNE_STORE status=loaded configurations=") +
+        std::to_string(g_cpu_thread_tuning.size()) + " trials=" +
+        std::to_string(g_cpu_thread_trial_count)).c_str());
+}
+static void save_cpu_tuning_state(const std::string &identity) {
+    const std::string path = cpu_tuning_store_path();
+    if (path.empty()) return;
+    const std::string temp_path = path + ".tmp";
+    {
+        std::ofstream output(temp_path, std::ios::trunc);
+        if (!output.is_open()) {
+            append_native_trace("NATIVE_CPU_AUTOTUNE_STORE status=write_failed");
+            return;
+        }
+        output << cpu_tuning_hash(identity) << '\n';
+        for (const auto &entry : g_cpu_thread_tuning) {
+            output << entry.first << ' ' << entry.second.attempts << ' '
+                   << entry.second.samples << ' ' << entry.second.ema_tokens_per_sec << '\n';
+        }
+        output.flush();
+        if (!output.good()) {
+            output.close();
+            unlink(temp_path.c_str());
+            append_native_trace("NATIVE_CPU_AUTOTUNE_STORE status=write_failed");
+            return;
+        }
+    }
+    if (rename(temp_path.c_str(), path.c_str()) != 0) {
+        unlink(temp_path.c_str());
+        append_native_trace("NATIVE_CPU_AUTOTUNE_STORE status=rename_failed");
+        return;
+    }
+    append_native_trace("NATIVE_CPU_AUTOTUNE_STORE status=saved");
+}
+
+static unsigned cpu_threads_available_to_process() {
+    unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+    const long online = sysconf(_SC_NPROCESSORS_ONLN);
+    if (online > 0) cores = std::min(cores, static_cast<unsigned>(online));
+#if defined(__linux__)
+    cpu_set_t allowed;
+    CPU_ZERO(&allowed);
+    if (sched_getaffinity(0, sizeof(allowed), &allowed) == 0) {
+        const int allowed_count = CPU_COUNT(&allowed);
+        if (allowed_count > 0) cores = std::min(cores, static_cast<unsigned>(allowed_count));
+    }
+#endif
+    return std::max(1u, cores);
+}
+static std::vector<int> cpu_thread_candidates() {
+    const unsigned cores = cpu_threads_available_to_process();
+    const int max_threads = std::max(1, std::min(8, static_cast<int>(cores)));
+    std::vector<int> candidates;
+    for (int n = 1; n <= max_threads; ++n) candidates.push_back(n);
+    return candidates;
+}
+static int best_measured_cpu_threads() {
+    int best_threads = 0; double best_speed = -1.0;
+    for (const auto &entry : g_cpu_thread_tuning) {
+        if (entry.second.samples > 0 && entry.second.ema_tokens_per_sec > best_speed) {
+            best_speed = entry.second.ema_tokens_per_sec; best_threads = entry.first;
+        }
+    }
+    return best_threads;
+}
+static int choose_cpu_thread_trial() {
+    if (!g_context || g_gpu || g_spec_requested || g_spec) return 0;
+    const int current = std::max(1, (int) llama_n_threads(g_context));
+    const std::string identity = cpu_tuning_identity(g_context);
+    if (g_cpu_tuned_context != g_context || g_cpu_tuning_key != identity) {
+        g_cpu_tuned_context = g_context;
+        g_cpu_default_threads = current;
+        g_cpu_tuning_key = identity;
+        load_cpu_tuning_state(g_cpu_tuning_key);
+    } else if (g_cpu_default_threads == 0) {
+        g_cpu_default_threads = current;
+    }
+    const auto candidates = cpu_thread_candidates();
+    const int best = best_measured_cpu_threads();
+
+    // Never discard a valid measured winner just because the configured default
+    // thread count has not yet been trialed in this process. The old ordering
+    // could repeatedly pick the default (e.g. 2 threads) even when persisted
+    // measurements showed a faster candidate (e.g. 4 threads).
+    if (best > 0) return best;
+
+    // No valid decode sample exists yet: collect a baseline, then move to an
+    // untested candidate on subsequent generations. Do not use wall-clock or
+    // prefill timings as a proxy for decode throughput.
+    if (g_cpu_thread_tuning[current].attempts == 0 &&
+        std::find(candidates.begin(), candidates.end(), current) != candidates.end()) return current;
+    for (int candidate : candidates)
+        if (g_cpu_thread_tuning[candidate].attempts == 0) return candidate;
+
+    return g_cpu_default_threads;
+}
+static void record_cpu_thread_trial(int threads, int generated, int64_t decode_ms,
+                                    double tokens_per_sec, int result) {
+    auto &state = g_cpu_thread_tuning[threads];
+    ++state.attempts;
+    const bool valid_sample = result == 0 && generated >= 8 && decode_ms >= 500 &&
+        std::isfinite(tokens_per_sec) && tokens_per_sec > 0.0;
+    if (valid_sample) {
+        state.ema_tokens_per_sec = state.samples == 0 ? tokens_per_sec
+            : (0.65 * state.ema_tokens_per_sec + 0.35 * tokens_per_sec);
+        ++state.samples;
+    }
+    ++g_cpu_thread_trial_count;
+    save_cpu_tuning_state(g_cpu_tuning_key);
+    const int best = best_measured_cpu_threads();
+    append_native_trace((std::string("NATIVE_CPU_AUTOTUNE_RESULT trial=") +
+        std::to_string(g_cpu_thread_trial_count) + " threads=" + std::to_string(threads) +
+        " generatedTokens=" + std::to_string(generated) + " decodeMs=" + std::to_string(decode_ms) +
+        " measuredTokensPerSec=" + std::to_string(tokens_per_sec) +
+        " validSample=" + (valid_sample ? "1" : "0") +
+        " samplesForThreads=" + std::to_string(state.samples) +
+        " bestMeasuredThreads=" + std::to_string(best) +
+        " bestMeasuredTokensPerSec=" +
+        std::to_string(best > 0 ? g_cpu_thread_tuning[best].ema_tokens_per_sec : 0.0) +
+        " policy=REAL_GENERATION_MEASUREMENT").c_str());
+}
 
 static void disable_speculative_runtime(const char * reason) {
     set_spec_phase("DISABLE_BEGIN");
@@ -742,6 +936,25 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     std::lock_guard<std::mutex> runtime_lock(g_native_runtime_mutex);
     checkpoint("NATIVE_GENERATE_ENTERED");
     if (!g_context || !g_model) { checkpoint("NATIVE_GENERATE_NO_MODEL"); return 2; }
+    int cpu_thread_trial = 0;
+    if (!g_gpu && !g_spec_requested && !g_spec) {
+        cpu_thread_trial = choose_cpu_thread_trial();
+        if (cpu_thread_trial > 0) {
+            // Decode throughput is the score being optimized. Keep the separately
+            // configured batch/prefill worker count fixed so prompt length and
+            // prefill scheduling do not masquerade as a decode-thread improvement.
+            const int batch_threads = std::max(1, (int) llama_n_threads_batch(g_context));
+            llama_set_n_threads(g_context, cpu_thread_trial, batch_threads);
+            append_native_trace((std::string("NATIVE_CPU_AUTOTUNE_SELECTED decodeThreads=") +
+                std::to_string(cpu_thread_trial) + " batchThreads=" +
+                std::to_string(batch_threads) + " allowedCpuThreads=" +
+                std::to_string(cpu_threads_available_to_process()) + " trial=" +
+                std::to_string(g_cpu_thread_trial_count + 1) + " candidateCount=" +
+                std::to_string(cpu_thread_candidates().size()) +
+                " mode=" + (best_measured_cpu_threads() > 0 ? "explore_then_best" : "exploration") +
+                " reason=CPU_FALLBACK").c_str());
+        }
+    }
     if (!jprompt || !listener) { checkpoint("NATIVE_GENERATE_INVALID_ARGUMENT"); return 3; }
     const char * prompt = env->GetStringUTFChars(jprompt, nullptr);
     if (!prompt) { checkpoint("NATIVE_GENERATE_PROMPT_UTF8_FAILED"); return 3; }
@@ -1145,6 +1358,14 @@ if (hybrid_memory) {
     const auto generation_ms = std::chrono::duration_cast<std::chrono::milliseconds>(generation_finished_at - generation_started_at).count();
     const auto decode_ms = std::chrono::duration_cast<std::chrono::milliseconds>(generation_finished_at - prefill_finished_at).count();
     const double decode_tokens_per_sec = generated > 0 && decode_ms > 0 ? (1000.0 * static_cast<double>(generated) / static_cast<double>(decode_ms)) : 0.0;
+    if (cpu_thread_trial > 0) {
+        const double cpu_decode_tokens_per_sec = generated > 0 && g_decode_profile.decode_ms > 0
+            ? (1000.0 * static_cast<double>(generated) /
+               static_cast<double>(g_decode_profile.decode_ms))
+            : 0.0;
+        record_cpu_thread_trial(cpu_thread_trial, generated, g_decode_profile.decode_ms,
+                               cpu_decode_tokens_per_sec, result);
+    }
     const auto profile_prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(prefill_finished_at - generation_started_at).count();
     append_decode_profile_trace(generation_ms, profile_prefill_ms);
     append_native_trace((std::string("NATIVE_EXECUTION_PROFILE mode=") +

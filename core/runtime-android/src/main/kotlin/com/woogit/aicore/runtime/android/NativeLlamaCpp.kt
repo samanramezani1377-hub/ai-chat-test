@@ -28,6 +28,10 @@ internal object NativeLlamaCpp {
     private fun ensureNativeInitialized() {
         synchronized(this) {
             Log.i(TAG, "ACTIVATION_NATIVE_INIT_REQUESTED backend=OpenCL previously_initialized=$nativeInitialized")
+            val appContext = currentApplicationContext()
+            if (appContext != null) {
+                nativeSetCpuTuningPath(File(appContext.filesDir, "ai-chat-cpu-autotune.txt").absolutePath)
+            }
             nativeInit(true)
             nativeInstallFatalHandlers()
             nativeInitialized = true
@@ -63,15 +67,17 @@ internal object NativeLlamaCpp {
         Log.i(TAG, "ACTIVATION_UNLOAD_END")
     }
 
+    private fun currentApplicationContext(): Context? = try {
+        Class.forName("android.app.ActivityThread")
+            .getMethod("currentApplication")
+            .invoke(null) as? Context
+    } catch (_: Throwable) { null }
+
     private fun persistModelLoadPreflight(path: String, contextLength: Int, gpuLayers: Int) {
         runCatching {
             val file = File(path)
             val memoryInfo = ActivityManager.MemoryInfo()
-            val activityManager = try {
-                Class.forName("android.app.ActivityThread")
-                    .getMethod("currentApplication")
-                    .invoke(null) as? Context
-            } catch (_: Throwable) { null }
+            val activityManager = currentApplicationContext()
             activityManager?.getSystemService(ActivityManager::class.java)?.getMemoryInfo(memoryInfo)
             val processMemory = Debug.MemoryInfo()
             Debug.getMemoryInfo(processMemory)
@@ -129,6 +135,7 @@ internal object NativeLlamaCpp {
     fun contextLength(): Int = nativeContextLength()
 
     private interface TokenListener { fun onToken(token: String) }
+    @JvmStatic private external fun nativeSetCpuTuningPath(path: String)
     @JvmStatic private external fun nativeInit(enableGpu: Boolean)
     @JvmStatic private external fun nativeInstallFatalHandlers()
     @JvmStatic private external fun nativeLoad(path: String, contextLength: Int, gpuLayers: Int, draftPath: String?): Int
