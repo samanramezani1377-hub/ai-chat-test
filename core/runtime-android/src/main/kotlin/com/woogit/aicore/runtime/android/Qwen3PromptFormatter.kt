@@ -14,7 +14,7 @@ internal object Qwen3PromptFormatter {
     private const val IM_START = "<|im_start|>"
     private const val IM_END = "<|im_end|>"
 
-    fun format(messages: List<ChatMessage>): String {
+    fun format(messages: List<ChatMessage>, enableThinking: Boolean = true): String {
         require(messages.isNotEmpty()) { "Conversation must contain at least one message" }
 
         return buildString {
@@ -47,7 +47,7 @@ internal object Qwen3PromptFormatter {
                 }
             }
             append(IM_START).append("assistant\n")
-            append("<think>\n")
+            if (enableThinking) append("<think>\n")
         }
     }
 

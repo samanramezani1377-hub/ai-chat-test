@@ -78,11 +78,20 @@ static bool init_generation_context() {
     cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
     cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 128);
     cp.n_rs_seq = 0;
-    // Let llama.cpp select the backend-safe attention implementation. The previous
-    // forced-disabled path expanded attention work and was a major mobile decode
-    // cost at 8K context. AUTO preserves the normal attention math while allowing
-    // OpenCL to use its optimized path when supported.
-    cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
+    // Keep optimized flash attention on a real OpenCL GPU, but disable it for
+    // CPU fallback on Android. The pinned llama.cpp revision can fail during
+    // repeated hybrid/recurrent prompt batches on the CPU FLASH_ATTN_EXT path
+    // (ggml_backend_sched_graph_compute_async -> GGML_STATUS_FAILED); this leaves
+    // generation with zero tokens after spending tens of seconds in prefill.
+    // Disabling the fused kernel changes the execution path, not model weights,
+    // quantization, sampling, or answer quality.
+    const bool use_opencl_attention = g_gpu && g_gpu_backend_loaded;
+    cp.flash_attn_type = use_opencl_attention
+        ? LLAMA_FLASH_ATTN_TYPE_AUTO
+        : LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    append_native_trace((std::string("NATIVE_ATTENTION_POLICY backend=") +
+        (use_opencl_attention ? "OPENCL_AUTO" : "CPU_FLASH_ATTN_DISABLED") +
+        " reason=" + (use_opencl_attention ? "gpu_backend_available" : "android_cpu_fallback_stability")).c_str());
     cp.type_k = GGML_TYPE_F16;
     cp.type_v = GGML_TYPE_F16;
     cp.offload_kqv = true;
@@ -96,7 +105,33 @@ static bool init_generation_context() {
         std::to_string(cp.n_threads_batch) + " nBatch=" +
         std::to_string(cp.n_batch) + " nUbatch=" +
         std::to_string(cp.n_ubatch) + " flashAttn=auto").c_str());
+    // Hybrid/recurrent architectures (including Qwen3.5-family models) carry
+    // recurrent state across prompt batches. On Android, graph reuse in the pinned
+    // llama.cpp build can fail on the second otherwise-identical prefill batch
+    // (ggml_backend_sched_graph_compute_async -> GGML_STATUS_FAILED), leaving the
+    // request with zero generated tokens. Disable graph reuse only while creating
+    // hybrid/recurrent contexts; llama.cpp snapshots this environment setting into
+    // the context, so restore the process environment immediately afterwards.
+    const bool hybrid_or_recurrent =
+        llama_model_is_hybrid(g_model) || llama_model_is_recurrent(g_model);
+    const char * previous_graph_reuse = std::getenv("LLAMA_GRAPH_REUSE_DISABLE");
+    const bool had_previous_graph_reuse = previous_graph_reuse != nullptr;
+    const std::string previous_graph_reuse_value =
+        previous_graph_reuse ? previous_graph_reuse : "";
+    if (hybrid_or_recurrent) {
+        setenv("LLAMA_GRAPH_REUSE_DISABLE", "1", 1);
+        append_native_trace("NATIVE_GRAPH_REUSE_POLICY hybridOrRecurrent=1 disabled=1 reason=android_recurrent_prefill_stability");
+    } else {
+        append_native_trace("NATIVE_GRAPH_REUSE_POLICY hybridOrRecurrent=0 disabled=0");
+    }
     g_context = llama_init_from_model(g_model, cp);
+    if (hybrid_or_recurrent) {
+        if (had_previous_graph_reuse) {
+            setenv("LLAMA_GRAPH_REUSE_DISABLE", previous_graph_reuse_value.c_str(), 1);
+        } else {
+            unsetenv("LLAMA_GRAPH_REUSE_DISABLE");
+        }
+    }
     if (!g_context) return false;
     llama_set_abort_callback(g_context, abort_callback, nullptr);
     return true;

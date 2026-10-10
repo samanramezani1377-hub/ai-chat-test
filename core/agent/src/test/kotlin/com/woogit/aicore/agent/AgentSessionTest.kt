@@ -30,6 +30,28 @@ class AgentSessionTest {
     }
 
     @Test
+    fun sendPreservesPersianResponseWithoutAddingDuplicateLeadingCharacters() = kotlinx.coroutines.test.runTest {
+        val expected = "سلام، چطور می‌توانم کمک کنم؟"
+        val store = TestStore()
+        val runtime = TestRuntime(response = expected)
+        val provider = DefaultContextProvider(store, { "system" }, { "task" }, { "workspace" })
+        val streamedTokens = mutableListOf<String>()
+        val session = AgentSession(
+            orchestrator = AgentOrchestrator(provider, runtime),
+            conversationStore = store,
+            eventSink = { event -> if (event is AgentEvent.Token) streamedTokens += event.value },
+        )
+
+        val reply = session.send("سلام", InferenceSettings())
+
+        assertEquals(expected, reply.generation.text)
+        assertEquals(listOf(expected), streamedTokens)
+        assertEquals(expected, store.messages.single { it.role == ConversationMessage.Role.ASSISTANT }.content)
+        assertTrue(!reply.generation.text.startsWith("nn"))
+        assertTrue(!store.messages.single { it.role == ConversationMessage.Role.ASSISTANT }.content.startsWith("nn"))
+    }
+
+    @Test
     fun sendUsesSuppliedInferenceSettingsInsteadOfGlobalSnapshot() = kotlinx.coroutines.test.runTest {
         val store = TestStore()
         val runtime = TestRuntime()
@@ -52,14 +74,14 @@ class AgentSessionTest {
         override suspend fun replaceSummary(summary: String) { summaryValue = summary }
     }
 
-    private class TestRuntime : ModelRuntime {
+    private class TestRuntime(private val response: String = "answer") : ModelRuntime {
         var lastRequest: GenerationRequest? = null
         override suspend fun load(model: com.woogit.aicore.domain.ModelDescriptor) = Unit
         override suspend fun unload() = Unit
         override suspend fun generate(request: GenerationRequest, onToken: suspend (String) -> Unit): GenerationResult {
             lastRequest = request
-            onToken("answer")
-            return GenerationResult("answer")
+            onToken(response)
+            return GenerationResult(response)
         }
         override suspend fun stopGeneration() = Unit
         override fun runtimeInfo() = RuntimeInfo("test", "1", "test")

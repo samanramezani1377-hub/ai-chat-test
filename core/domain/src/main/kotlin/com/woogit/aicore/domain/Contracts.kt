@@ -46,6 +46,8 @@ data class InferenceSettings(
     val recentMessages: Int = 10,
     /** Maximum number of real Action steps the Agent may execute for one request. */
     val maxActionSteps: Int = 4,
+    /** Disable reasoning-mode prefixes for chat templates that support a no-thinking mode. */
+    val enableThinking: Boolean = true,
 ) {
     init {
         require(recentMessages >= 0) { "recentMessages must be non-negative" }

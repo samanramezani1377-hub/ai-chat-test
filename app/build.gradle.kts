@@ -14,6 +14,13 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        // The native inference runtime is built only for arm64-v8a. Restrict the
+        // app package too, otherwise sherpa-onnx contributes four ABI copies
+        // (arm64, 32-bit ARM, x86, x86_64) and bloats the APK without adding
+        // runnable support for those extra ABIs.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildFeatures {
@@ -34,11 +41,17 @@ android {
         getByName("release") {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 
     packagingOptions {
+        resources {
+            // sherpa-onnx's AAR also ships macOS and Windows runtime binaries as
+            // Java resources. They are never loaded by Android and add tens of
+            // megabytes to the APK; keep the Android JNI libraries untouched.
+            excludes += setOf("sherpa-onnx/native/**")
+        }
         jniLibs {
             // Keep native libraries uncompressed and avoid a second extracted copy on disk.
             useLegacyPackaging = false
@@ -57,6 +70,13 @@ dependencies {
     implementation(project(":core:agent"))
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // Local-only ASR/TTS engines; no network inference or cloud API.
+    implementation("com.github.k2-fsa:sherpa-onnx:v1.13.8") {
+        // The Android AAR already bundles the sherpa Kotlin/JVM API classes.
+        // Exclude the duplicate JVM jar published as a transitive dependency.
+        exclude(group = "com.github.k2-fsa.sherpa-onnx", module = "sherpa-onnx-jvm")
+    }
+    implementation("org.apache.commons:commons-compress:1.28.0")
 
     // Keep all Compose artifacts on Google's stable BOM so Gradle cannot resolve
     // unversioned Compose modules to an incompatible alpha release.
