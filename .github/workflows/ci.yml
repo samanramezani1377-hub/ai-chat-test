@@ -114,7 +114,8 @@ jobs:
           grep -q 'OPENCL_MODEL_RESIDENCY_POLICY mode=' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'CPU_FALLBACK_CONTEXT_INIT_SUCCESS' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'NATIVE_EXECUTION_PROFILE mode=' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          grep -q 'AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V2' core/runtime-android/src/main/cpp/cmake/patch_backend_assignment_trace.cmake
+          grep -q 'AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V3' core/runtime-android/src/main/cpp/cmake/patch_backend_assignment_trace.cmake
+          grep -q 'AI_CHAT_BACKEND_SPLIT_TIMING' core/runtime-android/src/main/cpp/cmake/patch_backend_assignment_trace.cmake
           grep -q 'AI_CHAT_OPENCL_PROFILING=ON' core/runtime-android/build.gradle.kts
           grep -q 'resident_max + 1' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
           echo "Mixed CPU/GPU fallback, backend assignment, OpenCL profiling, and KV-cache invariants verified"
