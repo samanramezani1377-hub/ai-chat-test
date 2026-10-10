@@ -346,14 +346,14 @@ private class VoiceConversationController(
             onStatus("در حال پردازش گفتار و تولید پاسخ محلی…")
             val id = conversationId ?: error("VOICE-CHAT-001: شناسه مکالمه ایجاد نشده است.")
             val modelFailure = AtomicReference<String?>(null)
-            val session = container.createAgentSession(id, includeAgentTools = false) { event ->
+            val session = container.createAgentSession(id, eventSink = { event ->
                 if (event is AgentEvent.Token && !turnCancel.get()) enqueueCompleteSentences(event.value)
                 if (event is AgentEvent.Failed) {
                     modelFailure.compareAndSet(null, event.message)
                     onDiagnostic("VOICE-LLM-001: ${event.message}")
                     onStatus("VOICE-LLM-001: ${event.message}")
                 }
-            } ?: error("VOICE-CHAT-002: نشست مدل محلی در دسترس نیست.")
+            }, includeAgentTools = false) ?: error("VOICE-CHAT-002: نشست مدل محلی در دسترس نیست.")
             // Voice is latency-sensitive: skip Qwen reasoning, cap response length, and keep
             // a short rolling history so each decode step attends to less accumulated KV state.
             val result = session.send(
