@@ -35,6 +35,7 @@ static void clear_android_generation_cache() {
 #include <thread>
 #include <algorithm>
 #include <cmath>
+#include <sched.h>
 
 static std::mutex g_native_runtime_mutex;
 static bool g_spec_requested=false;
@@ -179,10 +180,22 @@ static void save_cpu_tuning_state(const std::string &identity) {
     append_native_trace("NATIVE_CPU_AUTOTUNE_STORE status=saved");
 }
 
-static std::vector<int> cpu_thread_candidates() {
+static unsigned cpu_threads_available_to_process() {
     unsigned cores = std::max(1u, std::thread::hardware_concurrency());
     const long online = sysconf(_SC_NPROCESSORS_ONLN);
     if (online > 0) cores = std::min(cores, static_cast<unsigned>(online));
+#if defined(__linux__)
+    cpu_set_t allowed;
+    CPU_ZERO(&allowed);
+    if (sched_getaffinity(0, sizeof(allowed), &allowed) == 0) {
+        const int allowed_count = CPU_COUNT(&allowed);
+        if (allowed_count > 0) cores = std::min(cores, static_cast<unsigned>(allowed_count));
+    }
+#endif
+    return std::max(1u, cores);
+}
+static std::vector<int> cpu_thread_candidates() {
+    const unsigned cores = cpu_threads_available_to_process();
     const int max_threads = std::max(1, std::min(8, static_cast<int>(cores)));
     std::vector<int> candidates;
     for (int n = 1; n <= max_threads; ++n) candidates.push_back(n);
@@ -200,10 +213,11 @@ static int best_measured_cpu_threads() {
 static int choose_cpu_thread_trial() {
     if (!g_context || g_gpu || g_spec_requested || g_spec) return 0;
     const int current = std::max(1, (int) llama_n_threads(g_context));
-    if (g_cpu_tuned_context != g_context) {
+    const std::string identity = cpu_tuning_identity(g_context);
+    if (g_cpu_tuned_context != g_context || g_cpu_tuning_key != identity) {
         g_cpu_tuned_context = g_context;
         g_cpu_default_threads = current;
-        g_cpu_tuning_key = cpu_tuning_identity(g_context);
+        g_cpu_tuning_key = identity;
         load_cpu_tuning_state(g_cpu_tuning_key);
     } else if (g_cpu_default_threads == 0) {
         g_cpu_default_threads = current;
@@ -899,9 +913,15 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     if (!g_gpu && !g_spec_requested && !g_spec) {
         cpu_thread_trial = choose_cpu_thread_trial();
         if (cpu_thread_trial > 0) {
-            llama_set_n_threads(g_context, cpu_thread_trial, cpu_thread_trial);
-            append_native_trace((std::string("NATIVE_CPU_AUTOTUNE_SELECTED threads=") +
-                std::to_string(cpu_thread_trial) + " trial=" +
+            // Decode throughput is the score being optimized. Keep the separately
+            // configured batch/prefill worker count fixed so prompt length and
+            // prefill scheduling do not masquerade as a decode-thread improvement.
+            const int batch_threads = std::max(1, (int) llama_n_threads_batch(g_context));
+            llama_set_n_threads(g_context, cpu_thread_trial, batch_threads);
+            append_native_trace((std::string("NATIVE_CPU_AUTOTUNE_SELECTED decodeThreads=") +
+                std::to_string(cpu_thread_trial) + " batchThreads=" +
+                std::to_string(batch_threads) + " allowedCpuThreads=" +
+                std::to_string(cpu_threads_available_to_process()) + " trial=" +
                 std::to_string(g_cpu_thread_trial_count + 1) + " candidateCount=" +
                 std::to_string(cpu_thread_candidates().size()) +
                 " mode=" + (best_measured_cpu_threads() > 0 ? "explore_then_best" : "exploration") +
