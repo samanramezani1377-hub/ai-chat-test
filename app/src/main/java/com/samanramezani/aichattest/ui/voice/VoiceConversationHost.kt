@@ -43,6 +43,8 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     val store = remember(context) { VoiceModelStore(context.contentResolver, File(context.filesDir, "voice-models")) }
     var sttModels by remember { mutableStateOf(store.list(VoiceModelKind.STT)) }
     var ttsModels by remember { mutableStateOf(store.list(VoiceModelKind.TTS)) }
+    var missingSttComponents by remember { mutableStateOf(store.missingSmallSttComponents()) }
+    var missingTtsComponents by remember { mutableStateOf(store.missingPiperComponents()) }
     var activeSttId by remember { mutableStateOf(sttModels.firstOrNull()?.id) }
     var activeTtsId by remember { mutableStateOf(ttsModels.firstOrNull()?.id) }
     var lines by remember { mutableStateOf(emptyList<VoiceLine>()) }
@@ -74,6 +76,11 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         if (activeTtsId !in ttsModels.map { it.id }) activeTtsId = ttsModels.firstOrNull()?.id
     }
 
+    fun refreshImportProgress() {
+        missingSttComponents = store.missingSmallSttComponents()
+        missingTtsComponents = store.missingPiperComponents()
+    }
+
     fun importSmallSttComponent(uri: Uri, component: SmallSttComponent, label: String) {
         uiScope.launch {
             busy = true
@@ -81,13 +88,14 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             try {
                 val ready = withContext(Dispatchers.IO) { store.importSmallPersianSttComponent(uri, component) }
                 refreshModels()
+                refreshImportProgress()
                 if (ready != null) activeSttId = ready.id
                 val missing = if (ready == null) store.missingSmallSttComponents() else emptyList()
                 updateVoiceStatus(if (ready != null) "مدل کوچک Shenava Rizeh-Pizeh آماده و انتخاب شد؛ تشخیص نهایی پس از مکث کوتاه گفتار انجام می‌شود."
                     else "فایل ${label} ذخیره شد؛ برای تکمیل مدل Shenava هنوز وارد کنید: ${missing.joinToString(" و ")}.")
             } catch (t: Throwable) {
                 updateVoiceStatus("VOICE-STT-IMPORT: ${t.message ?: t.javaClass.simpleName}")
-            } finally { busy = false }
+            } finally { refreshImportProgress(); busy = false }
         }
     }
 
@@ -118,13 +126,14 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             try {
                 val ready = withContext(Dispatchers.IO) { store.importPiperComponent(uri, component) }
                 refreshModels()
+                refreshImportProgress()
                 if (ready != null) activeTtsId = ready.id
                 val missing = if (ready == null) store.missingPiperComponents() else emptyList()
                 updateVoiceStatus(if (ready != null) "مدل گفتار ${ready.title} آماده و انتخاب شد."
                     else "فایل ${label} ذخیره شد؛ برای تکمیل مدل Piper هنوز لازم است: ${missing.joinToString(" و ")}.")
             } catch (t: Throwable) {
                 updateVoiceStatus("VOICE-PIPER-IMPORT: ${t.message ?: t.javaClass.simpleName}")
-            } finally { busy = false }
+            } finally { refreshImportProgress(); busy = false }
         }
     }
 
@@ -160,6 +169,8 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         busy = busy,
         sttModels = sttModels,
         ttsModels = ttsModels,
+        missingSttComponents = missingSttComponents,
+        missingTtsComponents = missingTtsComponents,
         activeSttId = activeSttId,
         activeTtsId = activeTtsId,
         onBack = onBack,
