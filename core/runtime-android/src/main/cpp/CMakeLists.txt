@@ -72,6 +72,13 @@ set(LLAMA_BUILD_UI OFF CACHE BOOL "" FORCE)
 set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+# Keep a universally safe ARM baseline and explicitly retain CPU weight-repack support.
+# Feature-specific kernels must not be forced globally onto devices that lack their ISA.
+set(GGML_CPU_ARM_ARCH "armv8-a" CACHE STRING "Portable Android ARM64 CPU baseline" FORCE)
+set(GGML_CPU_REPACK ON CACHE BOOL "Enable supported CPU weight repacking" FORCE)
+# KleidiAI does not provide the Q6_K decode kernel that dominates the target model.
+# Leave it off until a measured compatible path exists for this pinned llama.cpp revision.
+set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "Enable KleidiAI only when useful for supported model kernels" FORCE)
 set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
@@ -171,6 +178,11 @@ target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"
     AI_CHAT_GPU_BACKEND_OPENCL=1
     AI_CHAT_GPU_BACKEND_VULKAN=0
+    AI_CHAT_CPU_BASELINE_ARM_ARCH="${GGML_CPU_ARM_ARCH}"
+    AI_CHAT_CPU_REPACK=1
+    AI_CHAT_CPU_KLEIDIAI=0
+    AI_CHAT_CPU_DOTPROD_KERNELS=0
+    AI_CHAT_CPU_I8MM_KERNELS=0
 )
 
 if (ANDROID)
