@@ -105,6 +105,79 @@ static std::map<int, CpuThreadTuningState> g_cpu_thread_tuning;
 static int g_cpu_thread_trial_count = 0;
 static int g_cpu_default_threads = 0;
 static llama_context * g_cpu_tuned_context = nullptr;
+static std::string g_cpu_tuning_key;
+
+// Use a deterministic key so learned settings survive process restarts but never
+// leak from one model/context/device configuration to another.
+static uint64_t cpu_tuning_hash(const std::string &value) {
+    uint64_t hash = 14695981039346656037ULL;
+    for (unsigned char ch : value) { hash ^= ch; hash *= 1099511628211ULL; }
+    return hash;
+}
+static std::string cpu_tuning_identity(llama_context *ctx) {
+    const std::string model = g_target_model_path.empty() ? "<unknown-model>" : g_target_model_path;
+    const uint64_t hwcap = static_cast<uint64_t>(getauxval(AT_HWCAP));
+    const uint64_t hwcap2 = static_cast<uint64_t>(getauxval(AT_HWCAP2));
+    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+    return model + "|ctx=" + std::to_string(llama_n_ctx(ctx)) +
+        "|cores=" + std::to_string(cores) + "|hwcap=" + std::to_string(hwcap) +
+        "|hwcap2=" + std::to_string(hwcap2) + "|runtime=" + AI_CHAT_LLAMA_CPP_SHA;
+}
+static std::string cpu_tuning_store_path() {
+    return g_native_trace_file.empty() ? std::string() : g_native_trace_file + ".cpu-autotune";
+}
+static void load_cpu_tuning_state(const std::string &identity) {
+    g_cpu_thread_tuning.clear();
+    g_cpu_thread_trial_count = 0;
+    const std::string path = cpu_tuning_store_path();
+    std::ifstream input(path);
+    uint64_t stored_key = 0;
+    if (path.empty() || !(input >> stored_key) || stored_key != cpu_tuning_hash(identity)) {
+        append_native_trace("NATIVE_CPU_AUTOTUNE_STORE status=miss reason=identity_or_file");
+        return;
+    }
+    int threads = 0, attempts = 0, samples = 0;
+    double ema = 0.0;
+    while (input >> threads >> attempts >> samples >> ema) {
+        if (threads < 1 || threads > 64 || attempts < 0 || samples < 0 ||
+            !std::isfinite(ema) || ema < 0.0) continue;
+        g_cpu_thread_tuning[threads] = {attempts, samples, ema};
+        g_cpu_thread_trial_count += attempts;
+    }
+    append_native_trace((std::string("NATIVE_CPU_AUTOTUNE_STORE status=loaded configurations=") +
+        std::to_string(g_cpu_thread_tuning.size()) + " trials=" +
+        std::to_string(g_cpu_thread_trial_count)).c_str());
+}
+static void save_cpu_tuning_state(const std::string &identity) {
+    const std::string path = cpu_tuning_store_path();
+    if (path.empty()) return;
+    const std::string temp_path = path + ".tmp";
+    {
+        std::ofstream output(temp_path, std::ios::trunc);
+        if (!output.is_open()) {
+            append_native_trace("NATIVE_CPU_AUTOTUNE_STORE status=write_failed");
+            return;
+        }
+        output << cpu_tuning_hash(identity) << '\\n';
+        for (const auto &entry : g_cpu_thread_tuning) {
+            output << entry.first << ' ' << entry.second.attempts << ' '
+                   << entry.second.samples << ' ' << entry.second.ema_tokens_per_sec << '\\n';
+        }
+        output.flush();
+        if (!output.good()) {
+            output.close();
+            unlink(temp_path.c_str());
+            append_native_trace("NATIVE_CPU_AUTOTUNE_STORE status=write_failed");
+            return;
+        }
+    }
+    if (rename(temp_path.c_str(), path.c_str()) != 0) {
+        unlink(temp_path.c_str());
+        append_native_trace("NATIVE_CPU_AUTOTUNE_STORE status=rename_failed");
+        return;
+    }
+    append_native_trace("NATIVE_CPU_AUTOTUNE_STORE status=saved");
+}
 
 static std::vector<int> cpu_thread_candidates() {
     unsigned cores = std::max(1u, std::thread::hardware_concurrency());
@@ -129,9 +202,9 @@ static int choose_cpu_thread_trial() {
     const int current = std::max(1, (int) llama_n_threads(g_context));
     if (g_cpu_tuned_context != g_context) {
         g_cpu_tuned_context = g_context;
-        g_cpu_thread_tuning.clear();
-        g_cpu_thread_trial_count = 0;
         g_cpu_default_threads = current;
+        g_cpu_tuning_key = cpu_tuning_identity(g_context);
+        load_cpu_tuning_state(g_cpu_tuning_key);
     } else if (g_cpu_default_threads == 0) {
         g_cpu_default_threads = current;
     }
@@ -160,6 +233,7 @@ static void record_cpu_thread_trial(int threads, int generated, int64_t decode_m
         ++state.samples;
     }
     ++g_cpu_thread_trial_count;
+    save_cpu_tuning_state(g_cpu_tuning_key);
     const int best = best_measured_cpu_threads();
     append_native_trace((std::string("NATIVE_CPU_AUTOTUNE_RESULT trial=") +
         std::to_string(g_cpu_thread_trial_count) + " threads=" + std::to_string(threads) +
