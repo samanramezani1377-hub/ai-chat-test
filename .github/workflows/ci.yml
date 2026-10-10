@@ -172,78 +172,15 @@ jobs:
       - name: Verify APK ABI and size budget
         run: |
           set -euo pipefail
-          apk="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          apk="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name "*.apk" -print -quit)"
           test -n "$apk"
-          size_bytes="$(stat -c '%s' "$apk")"
+          size_bytes="$(stat -c "%s" "$apk")"
           size_mib="$((size_bytes / 1024 / 1024))"
           echo "APK: $apk"
           echo "APK size: ${size_mib} MiB (${size_bytes} bytes)"
           echo "Largest packaged entries:"
           unzip -l "$apk" | sort -nr | head -n 18 || true
-          unexpected_abis="$(unzip -Z1 "$apk" | grep -E '^lib/[^/]+/' | cut -d/ -f2 | sort -u | grep -v '^arm64-v8a        uses: actions/upload-artifact@v4
-        with:
-          name: ai-chat-test-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 7
-
-  android-lint:
-    name: Android lint
-    runs-on: ubuntu-22.04
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Set up JDK
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.GRADLE_VERSION }}
-
-      - name: Cache exact native build state
-        uses: actions/cache@v4
-        with:
-          path: |
-            core/runtime-android/.cxx
-            core/runtime-android/src/.cxx
-          key: >-
-            native-lint-${{ runner.os }}-
-            ${{ hashFiles(
-              'gradle.properties',
-              'settings.gradle.kts',
-              'build.gradle.kts',
-              'gradle/libs.versions.toml',
-              'core/runtime-android/build.gradle.kts',
-              'core/runtime-android/src/main/cpp/**',
-              'core/runtime-android/src/main/cpp/cmake/**',
-              '.github/workflows/ci.yml'
-            ) }}
-
-      - name: Run Android lint
-        run: >-
-          gradle
-          :app:lintDebug
-          --stacktrace
-          --console=plain
-          --configuration-cache
-
-      - name: Upload lint report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-lint-report
-          path: |
-            app/build/reports/lint-results-debug.html
-            app/build/reports/lint-results-debug.xml
-          if-no-files-found: ignore
-          retention-days: 7
- || true)"
+          unexpected_abis="$(unzip -Z1 "$apk" | grep -E "^lib/[^/]+/" | cut -d/ -f2 | sort -u | grep -v "^arm64-v8a$" || true)"
           if [ -n "$unexpected_abis" ]; then
             echo "::error::Unexpected native ABIs packaged: $unexpected_abis"
             exit 1
@@ -260,7 +197,6 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
-
   android-lint:
     name: Android lint
     runs-on: ubuntu-22.04
@@ -317,3 +253,4 @@ jobs:
             app/build/reports/lint-results-debug.xml
           if-no-files-found: ignore
           retention-days: 7
+
