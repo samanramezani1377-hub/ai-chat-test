@@ -14,6 +14,13 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        // The native inference runtime is built only for arm64-v8a. Restrict the
+        // app package too, otherwise sherpa-onnx contributes four ABI copies
+        // (arm64, 32-bit ARM, x86, x86_64) and bloats the APK without adding
+        // runnable support for those extra ABIs.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildFeatures {
