@@ -16,6 +16,10 @@ import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
+import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineQwen3AsrModelConfig
+import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -88,7 +92,12 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
 /** Streaming local ASR for sherpa-onnx online transducer packages. */
 data class AsrUpdate(val text: String, val endpoint: Boolean)
 
-class LocalStreamingAsr(private val entry: VoiceModelEntry) {
+interface LocalAsr {
+    fun accept(samples: FloatArray, sampleRate: Int = 16000, speech: Boolean = true): AsrUpdate
+    fun close()
+}
+
+class LocalStreamingAsr(private val entry: VoiceModelEntry) : LocalAsr {
     private val recognizer: OnlineRecognizer
     private val stream: OnlineStream
 
@@ -112,7 +121,7 @@ class LocalStreamingAsr(private val entry: VoiceModelEntry) {
         stream = recognizer.createStream()
     }
 
-    fun accept(samples: FloatArray, sampleRate: Int = 16000): AsrUpdate {
+    override fun accept(samples: FloatArray, sampleRate: Int, speech: Boolean): AsrUpdate {
         stream.acceptWaveform(samples, sampleRate)
         while (recognizer.isReady(stream)) recognizer.decode(stream)
         val text = recognizer.getResult(stream).text
@@ -121,8 +130,77 @@ class LocalStreamingAsr(private val entry: VoiceModelEntry) {
         return AsrUpdate(text, endpoint)
     }
 
-    fun close() {
+    override fun close() {
         runCatching { stream.release() }
+        recognizer.release()
+    }
+}
+
+/**
+ * Offline Qwen3-ASR adapter for multilingual Persian speech. It accumulates the current
+ * utterance while microphone capture stays live, then decodes after 600 ms of silence.
+ * VAD-based barge-in remains immediate even though transcript finalization is offline.
+ */
+class LocalQwen3Asr(private val entry: VoiceModelEntry) : LocalAsr {
+    private val recognizer: OfflineRecognizer
+    private val utterance = ArrayList<Float>(16000 * 8)
+    private var hasSpeech = false
+    private var silenceSamples = 0
+    private val maxUtteranceSamples = 16000 * 30
+    private val endSilenceSamples = 16000 * 3 / 5
+
+    init {
+        val qwen = OfflineQwen3AsrModelConfig().apply {
+            convFrontend = requireNotNull(entry.convFrontend).absolutePath
+            encoder = requireNotNull(entry.encoder).absolutePath
+            decoder = requireNotNull(entry.decoder).absolutePath
+            tokenizer = requireNotNull(entry.tokenizerDirectory).absolutePath
+            maxTotalLen = 512
+            maxNewTokens = 256
+            temperature = 1e-6f
+            topP = 0.8f
+        }
+        recognizer = OfflineRecognizer(config = OfflineRecognizerConfig().apply {
+            featConfig = FeatureConfig().apply { sampleRate = 16000; featureDim = 80 }
+            modelConfig = OfflineModelConfig().apply {
+                qwen3Asr = qwen
+                numThreads = 2
+                debug = false
+                provider = "cpu"
+            }
+        })
+    }
+
+    override fun accept(samples: FloatArray, sampleRate: Int, speech: Boolean): AsrUpdate {
+        if (speech) {
+            hasSpeech = true
+            silenceSamples = 0
+        } else if (hasSpeech) {
+            silenceSamples += samples.size
+        }
+        if (hasSpeech) {
+            for (sample in samples) utterance.add(sample)
+        }
+        if (!hasSpeech || (silenceSamples < endSilenceSamples && utterance.size < maxUtteranceSamples)) {
+            return AsrUpdate("", false)
+        }
+        val audio = FloatArray(utterance.size) { utterance[it] }
+        utterance.clear()
+        hasSpeech = false
+        silenceSamples = 0
+        val stream = recognizer.createStream()
+        return try {
+            stream.acceptWaveform(audio, sampleRate)
+            stream.inputFinished()
+            recognizer.decode(stream)
+            AsrUpdate(recognizer.getResult(stream).text.trim(), true)
+        } finally {
+            stream.release()
+        }
+    }
+
+    override fun close() {
+        utterance.clear()
         recognizer.release()
     }
 }
