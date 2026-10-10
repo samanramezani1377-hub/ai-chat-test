@@ -61,27 +61,41 @@ static void destroy_llm_locked() {
 }
 static bool create_and_load_locked(const std::string& config, const char* backend, int threads) {
     destroy_llm_locked();
-    Llm* candidate = Llm::createLLM(config);
-    if (!candidate) { LOGE("MNN_CREATE_FAILED backend=%s", backend); return false; }
-    const std::string overrideConfig = std::string("{\"backend_type\":\"") + backend +
-        "\",\"thread_num\":" + std::to_string(threads) +
-        ",\"precision\":\"low\",\"memory\":\"low\",\"use_mmap\":true}";
-    if (!candidate->set_config(overrideConfig)) {
-        LOGE("MNN_SET_CONFIG_REJECTED backend=%s; refusing to misreport the selected backend", backend);
-        Llm::destroy(candidate);
+    Llm* candidate = nullptr;
+    try {
+        candidate = Llm::createLLM(config);
+        if (!candidate) {
+            LOGE("MNN_CREATE_FAILED backend=%s", backend);
+            return false;
+        }
+        const std::string overrideConfig = std::string("{\\"backend_type\\":\\"") + backend +
+            "\\",\\"thread_num\\":" + std::to_string(threads) +
+            ",\\"precision\\":\\"low\\",\\"memory\\":\\"low\\",\\"use_mmap\\":true}";
+        if (!candidate->set_config(overrideConfig)) {
+            LOGE("MNN_SET_CONFIG_REJECTED backend=%s; refusing to misreport the selected backend", backend);
+            Llm::destroy(candidate);
+            return false;
+        }
+        const bool loaded = candidate->load();
+        const auto* context = candidate->getContext();
+        const int status = context ? static_cast<int>(context->status) : -999;
+        LOGI("MNN_LOAD_RESULT backend=%s loaded=%d status=%d", backend, loaded ? 1 : 0, status);
+        if (!loaded || !context || context->status == LlmStatus::NOT_LOADED || context->status == LlmStatus::INTERNAL_ERROR) {
+            Llm::destroy(candidate);
+            return false;
+        }
+        g_llm = candidate;
+        g_backend = backend;
+        return true;
+    } catch (const std::exception& error) {
+        if (candidate) Llm::destroy(candidate);
+        LOGE("MNN_LOAD_EXCEPTION backend=%s message=%s", backend, error.what());
+        return false;
+    } catch (...) {
+        if (candidate) Llm::destroy(candidate);
+        LOGE("MNN_LOAD_EXCEPTION backend=%s message=unknown", backend);
         return false;
     }
-    const bool loaded = candidate->load();
-    const auto* context = candidate->getContext();
-    const int status = context ? static_cast<int>(context->status) : -999;
-    LOGI("MNN_LOAD_RESULT backend=%s loaded=%d status=%d", backend, loaded ? 1 : 0, status);
-    if (!loaded || !context || context->status == LlmStatus::NOT_LOADED || context->status == LlmStatus::INTERNAL_ERROR) {
-        Llm::destroy(candidate);
-        return false;
-    }
-    g_llm = candidate;
-    g_backend = backend;
-    return true;
 }
 static bool load_with_fallback_locked(const std::string& config, int threads) {
     g_config_path = config;
