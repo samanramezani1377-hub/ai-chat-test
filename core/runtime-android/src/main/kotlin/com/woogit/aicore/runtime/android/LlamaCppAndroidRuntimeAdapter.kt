@@ -89,11 +89,11 @@ class LlamaCppAndroidRuntimeAdapter(
         val file = model.path.toFile()
         if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
         val startedAt = System.nanoTime()
-        val requestedGpuPercent = 100
+        val requestedGpuPercent = if (gpuLayersMode > 0) 100 else 0
         val totalBlocks = model.metadata.blockCount?.toInt()?.takeIf { it > 0 }
-        val requestedGpuLayers = when {
+        val requestedGpuLayers = if (gpuLayersMode <= 0) 0 else when {
             totalBlocks != null -> totalBlocks
-            else -> 99
+            else -> GPU_LAYERS_MAX
         }
         return try {
             // Use a larger working context so a long user prompt does not immediately
@@ -122,7 +122,7 @@ class LlamaCppAndroidRuntimeAdapter(
             loadedDraftPath = draftFile?.absolutePath
             latestGeneration = null
             latestLoadTimeMs = (System.nanoTime() - startedAt) / 1_000_000
-            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_RUNTIME_READY backend=$selectedBackend gpuPercent=$requestedGpuPercent gpuLayers=$selectedGpuLayers context=$loadedContextLength")
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_RUNTIME_READY backend=$selectedBackend gpuPercent=$requestedGpuPercent requestedGpuLayers=$requestedGpuLayers context=$loadedContextLength cpuFallbackAllowed=true")
             RuntimeDiagnosticsStore.recordLoaded(model, latestLoadTimeMs, runtimeInfo())
             ModelResult.Success(Unit)
         } catch (t: Throwable) {
