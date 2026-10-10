@@ -81,8 +81,10 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             try {
                 val ready = withContext(Dispatchers.IO) { store.importSmallPersianSttComponent(uri, component) }
                 refreshModels()
-                updateVoiceStatus(if (ready != null) "مدل کوچک Shenava Rizeh-Pizeh آماده است؛ تشخیص نهایی پس از مکث کوتاه گفتار انجام می‌شود."
-                    else "فایل وارد شد؛ برای آماده‌شدن مدل Shenava باید model.onnx و tokens.txt هر دو وارد شوند.")
+                if (ready != null) activeSttId = ready.id
+                val missing = if (ready == null) store.missingSmallSttComponents() else emptyList()
+                updateVoiceStatus(if (ready != null) "مدل کوچک Shenava Rizeh-Pizeh آماده و انتخاب شد؛ تشخیص نهایی پس از مکث کوتاه گفتار انجام می‌شود."
+                    else "فایل ${label} ذخیره شد؛ برای تکمیل مدل Shenava هنوز وارد کنید: ${missing.joinToString(" و ")}.")
             } catch (t: Throwable) {
                 updateVoiceStatus("VOICE-STT-IMPORT: ${t.message ?: t.javaClass.simpleName}")
             } finally { busy = false }
@@ -116,8 +118,10 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             try {
                 val ready = withContext(Dispatchers.IO) { store.importPiperComponent(uri, component) }
                 refreshModels()
-                updateVoiceStatus(if (ready != null) "مدل fa_IR-amir-medium آمادهٔ استفاده است."
-                    else "فایل وارد شد. برای آماده‌شدن مدل Amir، هر سه مورد ONNX، JSON و espeak-ng-data باید وارد شوند.")
+                if (ready != null) activeTtsId = ready.id
+                val missing = if (ready == null) store.missingPiperComponents() else emptyList()
+                updateVoiceStatus(if (ready != null) "مدل گفتار ${ready.title} آماده و انتخاب شد."
+                    else "فایل ${label} ذخیره شد؛ برای تکمیل مدل Piper هنوز لازم است: ${missing.joinToString(" و ")}.")
             } catch (t: Throwable) {
                 updateVoiceStatus("VOICE-PIPER-IMPORT: ${t.message ?: t.javaClass.simpleName}")
             } finally { busy = false }
