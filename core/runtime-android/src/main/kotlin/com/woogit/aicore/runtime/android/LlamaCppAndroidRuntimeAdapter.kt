@@ -22,7 +22,7 @@ import kotlin.math.roundToInt
 
 /** Direct llama.cpp Android runtime. Vulkan is the only supported inference backend. */
 class LlamaCppAndroidRuntimeAdapter(
-    private val defaultContextLength: Int = 8192,
+    private val defaultContextLength: Int = 4096,
     gpuLayers: Int = GPU_LAYERS_MAX,
 ) : RuntimeAdapter, RuntimeMetrics {
     companion object {
@@ -96,9 +96,9 @@ class LlamaCppAndroidRuntimeAdapter(
             else -> 99
         }
         return try {
-            // Use a larger working context so a long user prompt does not immediately
-            // consume the entire generation window. We still never exceed the model's
-            // trained context; prompt trimming below reserves output capacity.
+            // Use a conservative 4K working context by default on mobile Vulkan.
+            // Prompt trimming below reserves output capacity; the native runtime may
+            // further cap hybrid/recurrent architectures for device stability.
             val modelContext = model.metadata.contextLength?.toInt()?.takeIf { it > 0 } ?: defaultContextLength
             val requested = minOf(modelContext, defaultContextLength)
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_STARTED file=${file.name} sizeBytes=${file.length()} context=$requested gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers totalBlocks=${totalBlocks ?: "unknown"}")

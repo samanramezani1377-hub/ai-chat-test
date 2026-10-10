@@ -46,13 +46,17 @@ static void append_native_trace(const char *text);
 static void append_weight_residency_trace();
 
 struct NativeDecodeProfile {
-    int64_t decode_ms = 0;
-    int64_t logits_sync_ms = 0;
-    int64_t sampling_ms = 0;
-    int64_t callback_ms = 0;
+    // Microsecond precision avoids truncating sub-millisecond mobile decode calls to zero.
+    int64_t decode_us = 0;
+    int64_t logits_sync_us = 0;
+    int64_t sampling_us = 0;
+    int64_t callback_us = 0;
     int64_t token_steps = 0;
     int64_t logits_accesses = 0;
     int64_t callback_calls = 0;
+    int64_t decode_calls = 0;
+    int64_t decode_call_min_us = std::numeric_limits<int64_t>::max();
+    int64_t decode_call_max_us = 0;
 };
 static NativeDecodeProfile g_decode_profile;
 static void reset_decode_profile() { g_decode_profile = {}; }
@@ -60,21 +64,40 @@ static int64_t elapsed_ms(const std::chrono::steady_clock::time_point &a,
                           const std::chrono::steady_clock::time_point &b) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count();
 }
+static int64_t elapsed_us(const std::chrono::steady_clock::time_point &a,
+                          const std::chrono::steady_clock::time_point &b) {
+    return std::chrono::duration_cast<std::chrono::microseconds>(b - a).count();
+}
 static void append_decode_profile_trace(int64_t generation_ms, int64_t prefill_ms) {
-    const int64_t accounted = g_decode_profile.decode_ms + g_decode_profile.logits_sync_ms +
-        g_decode_profile.sampling_ms + g_decode_profile.callback_ms;
-    const int64_t decode_window = std::max<int64_t>(0, generation_ms - prefill_ms);
-    const int64_t unaccounted = std::max<int64_t>(0, decode_window - accounted);
+    const int64_t accounted_us = g_decode_profile.decode_us + g_decode_profile.logits_sync_us +
+        g_decode_profile.sampling_us + g_decode_profile.callback_us;
+    const int64_t decode_window_us = std::max<int64_t>(0, (generation_ms - prefill_ms) * 1000);
+    const int64_t unaccounted_us = std::max<int64_t>(0, decode_window_us - accounted_us);
+    const int64_t min_us = g_decode_profile.decode_calls > 0 ? g_decode_profile.decode_call_min_us : 0;
+    const int64_t avg_us = g_decode_profile.decode_calls > 0
+        ? g_decode_profile.decode_us / g_decode_profile.decode_calls : 0;
     append_native_trace((std::string("NATIVE_PERF_PROFILE decodeMs=") +
-        std::to_string(g_decode_profile.decode_ms) + " logitsSyncMs=" +
-        std::to_string(g_decode_profile.logits_sync_ms) + " samplingMs=" +
-        std::to_string(g_decode_profile.sampling_ms) + " callbackMs=" +
-        std::to_string(g_decode_profile.callback_ms) + " tokenSteps=" +
+        std::to_string(g_decode_profile.decode_us / 1000) + " decodeUs=" +
+        std::to_string(g_decode_profile.decode_us) + " logitsSyncMs=" +
+        std::to_string(g_decode_profile.logits_sync_us / 1000) + " logitsSyncUs=" +
+        std::to_string(g_decode_profile.logits_sync_us) + " samplingMs=" +
+        std::to_string(g_decode_profile.sampling_us / 1000) + " samplingUs=" +
+        std::to_string(g_decode_profile.sampling_us) + " callbackMs=" +
+        std::to_string(g_decode_profile.callback_us / 1000) + " callbackUs=" +
+        std::to_string(g_decode_profile.callback_us) + " tokenSteps=" +
         std::to_string(g_decode_profile.token_steps) + " logitsAccesses=" +
         std::to_string(g_decode_profile.logits_accesses) + " callbackCalls=" +
-        std::to_string(g_decode_profile.callback_calls) + " accountedMs=" +
-        std::to_string(accounted) + " unaccountedMs=" + std::to_string(unaccounted) +
-        " decodeWindowMs=" + std::to_string(decode_window)).c_str());
+        std::to_string(g_decode_profile.callback_calls) + " decodeCalls=" +
+        std::to_string(g_decode_profile.decode_calls) + " decodeCallMinUs=" +
+        std::to_string(min_us) + " decodeCallMaxUs=" +
+        std::to_string(g_decode_profile.decode_call_max_us) + " decodeCallAvgUs=" +
+        std::to_string(avg_us) + " accountedMs=" +
+        std::to_string(accounted_us / 1000) + " accountedUs=" +
+        std::to_string(accounted_us) + " unaccountedMs=" +
+        std::to_string(unaccounted_us / 1000) + " unaccountedUs=" +
+        std::to_string(unaccounted_us) + " decodeWindowMs=" +
+        std::to_string(decode_window_us / 1000) + " decodeWindowUs=" +
+        std::to_string(decode_window_us)).c_str());
 }
 
 static void append_speculative_stats_trace(int draft_tokens, int accepted_tokens, int steps) {
@@ -571,6 +594,14 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
         }
         native_write_text(g_native_fatal_fd, value, (size_t) n);
         native_write_text(g_native_fatal_fd, "\n", 1);
+        // This is the active Android fatal handler. The legacy handler in
+        // native_runtime.cpp is renamed by this wrapper, so log the phase here
+        // or an activation abort loses its native location.
+        const char phase_prefix[] = "NATIVE_FATAL_PHASE=";
+        const char * native_phase = g_native_phase ? g_native_phase : "UNKNOWN";
+        native_write_text(g_native_fatal_fd, phase_prefix, sizeof(phase_prefix) - 1);
+        native_write_text(g_native_fatal_fd, native_phase, std::strlen(native_phase));
+        native_write_text(g_native_fatal_fd, "\n", 1);
         uintptr_t pc = 0;
         uintptr_t lr = 0;
 #if defined(__aarch64__)
@@ -589,6 +620,12 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
     sigemptyset(&default_action.sa_mask);
     default_action.sa_handler = SIG_DFL;
     sigaction(signal_number, &default_action, nullptr);
+    // A signal is blocked while its own handler runs. Unblock it before re-raising;
+    // otherwise raise() queues it and the following _exit() can pre-empt debuggerd.
+    sigset_t unblocked_signal;
+    sigemptyset(&unblocked_signal);
+    sigaddset(&unblocked_signal, signal_number);
+    sigprocmask(SIG_UNBLOCK, &unblocked_signal, nullptr);
     raise(signal_number);
     _exit(128 + signal_number);
 }
@@ -693,7 +730,7 @@ static bool emit_complete_utf8(JNIEnv * env, jobject listener, jmethodID on_toke
     const auto callback_started = std::chrono::steady_clock::now();
     env->CallVoidMethod(listener, on_token, chunk);
     const auto callback_finished = std::chrono::steady_clock::now();
-    g_decode_profile.callback_ms += elapsed_ms(callback_started, callback_finished);
+    g_decode_profile.callback_us += elapsed_us(callback_started, callback_finished);
     ++g_decode_profile.callback_calls;
     env->DeleteLocalRef(chunk);
     if (env->ExceptionCheck()) {
@@ -1054,7 +1091,7 @@ if (hybrid_memory) {
             append_native_trace("NATIVE_LOGITS_SYNC_START");
             const float * logits_probe = llama_get_logits_ith(g_context, -1);
             const auto logits_sync_finished = std::chrono::steady_clock::now();
-            g_decode_profile.logits_sync_ms += elapsed_ms(logits_sync_started, logits_sync_finished);
+            g_decode_profile.logits_sync_us += elapsed_us(logits_sync_started, logits_sync_finished);
             ++g_decode_profile.logits_accesses;
             append_native_trace((std::string("NATIVE_LOGITS_SYNC_END elapsedMs=") + std::to_string(elapsed_ms(logits_sync_started, logits_sync_finished))).c_str());
             if (!logits_probe) append_native_trace("NATIVE_LOGITS_ACCESS_NULL");
@@ -1064,7 +1101,7 @@ if (hybrid_memory) {
             const llama_token token = llama_sampler_sample(sampler, g_context, -1);
             llama_sampler_accept(sampler, token);
             const auto sampling_finished = std::chrono::steady_clock::now();
-            g_decode_profile.sampling_ms += elapsed_ms(sampling_started, sampling_finished);
+            g_decode_profile.sampling_us += elapsed_us(sampling_started, sampling_finished);
             ++g_decode_profile.token_steps;
             append_native_trace((std::string("NATIVE_SAMPLING_END elapsedMs=") + std::to_string(elapsed_ms(sampling_started, sampling_finished))).c_str());
             append_native_trace((std::string("NATIVE_TOKEN_SELECTED token=") + std::to_string((int)token)).c_str());
@@ -1101,9 +1138,15 @@ if (hybrid_memory) {
             const auto decode_started = std::chrono::steady_clock::now();
             const int decode_result = llama_decode(g_context, batch);
             const auto decode_finished = std::chrono::steady_clock::now();
-            g_decode_profile.decode_ms += elapsed_ms(decode_started, decode_finished);
-            append_native_trace((std::string("NATIVE_DECODE_STEP_END elapsedMs=") + std::to_string(elapsed_ms(decode_started, decode_finished)) +
-                " result=" + std::to_string(decode_result)).c_str());
+            const int64_t decode_elapsed_us = elapsed_us(decode_started, decode_finished);
+            g_decode_profile.decode_us += decode_elapsed_us;
+            ++g_decode_profile.decode_calls;
+            g_decode_profile.decode_call_min_us = std::min(g_decode_profile.decode_call_min_us, decode_elapsed_us);
+            g_decode_profile.decode_call_max_us = std::max(g_decode_profile.decode_call_max_us, decode_elapsed_us);
+            append_native_trace((std::string("NATIVE_DECODE_STEP_END elapsedMs=") +
+                std::to_string(decode_elapsed_us / 1000) + " elapsedUs=" +
+                std::to_string(decode_elapsed_us) + " result=" +
+                std::to_string(decode_result)).c_str());
             if (decode_result != 0) {
                 append_native_trace((std::string("NATIVE_GENERATE_DECODE_FAILED code=") + std::to_string(decode_result) +
                     " generated=" + std::to_string(generated)).c_str());

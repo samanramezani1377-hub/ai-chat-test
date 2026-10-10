@@ -29,6 +29,11 @@ internal data class NativePerformance(
     val speculativeSteps: Int? = null,
     val speculativeMeanAcceptedPerStep: Double? = null,
     val profileDecodeMs: Long? = null,
+    val profileDecodeUs: Long? = null,
+    val profileDecodeCalls: Int? = null,
+    val profileDecodeCallMinUs: Long? = null,
+    val profileDecodeCallMaxUs: Long? = null,
+    val profileDecodeCallAvgUs: Long? = null,
     val profileLogitsSyncMs: Long? = null,
     val profileSamplingMs: Long? = null,
     val profileCallbackMs: Long? = null,
@@ -79,6 +84,11 @@ internal data class RuntimeDiagnostic(
             speculativeSteps = nativeValue("steps")?.toIntOrNull(),
             speculativeMeanAcceptedPerStep = nativeValue("meanAcceptedPerStep")?.toDoubleOrNull(),
             profileDecodeMs = nativeProfileValue("decodeMs")?.toLongOrNull(),
+            profileDecodeUs = nativeProfileValue("decodeUs")?.toLongOrNull(),
+            profileDecodeCalls = nativeProfileValue("decodeCalls")?.toIntOrNull(),
+            profileDecodeCallMinUs = nativeProfileValue("decodeCallMinUs")?.toLongOrNull(),
+            profileDecodeCallMaxUs = nativeProfileValue("decodeCallMaxUs")?.toLongOrNull(),
+            profileDecodeCallAvgUs = nativeProfileValue("decodeCallAvgUs")?.toLongOrNull(),
             profileLogitsSyncMs = nativeProfileValue("logitsSyncMs")?.toLongOrNull(),
             profileSamplingMs = nativeProfileValue("samplingMs")?.toLongOrNull(),
             profileCallbackMs = nativeProfileValue("callbackMs")?.toLongOrNull(),
@@ -95,7 +105,7 @@ internal data class RuntimeDiagnostic(
 
     private fun nativeValue(key: String): String? {
         val text = nativeDiagnostics ?: return null
-        val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("$key=") } ?: return null
+        val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("$key=") && !it.contains("NATIVE_PERF_PROFILE") } ?: return null
         return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
     }
 
@@ -119,21 +129,36 @@ internal data class RuntimeDiagnostic(
         val line = text.lineSequence().toList().asReversed().firstOrNull { it.contains("NATIVE_PERF_PROFILE") && it.contains("$key=") } ?: return null
         return Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
     }
+
+    fun preflightValue(key: String): String? {
+        val text = nativeDiagnostics ?: return null
+        val line = text.lineSequence().firstOrNull { it.startsWith("$key=") } ?: return null
+        return line.substringAfter('=', "").takeIf { it.isNotBlank() }
+    }
+
+    val attemptedModelName: String?
+        get() = preflightValue("path")?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+
+    val attemptedContext: String?
+        get() = preflightValue("requested_context")
+
+    val attemptedGpuLayers: String?
+        get() = preflightValue("gpu_layers")
 }
 
 internal fun RuntimeDiagnostic.report(): String = buildString {
     val perf = nativePerformance
     appendLine("AI Chat Test — Runtime Diagnostic Report")
     appendLine()
-    appendLine("Model: ${model?.displayName ?: "N/A"}")
+    appendLine("Model: ${model?.displayName ?: attemptedModelName ?: "N/A"}")
     appendLine("Format: ${model?.format ?: "N/A"}")
     appendLine("Quantization: ${model?.quantization ?: "N/A"}")
     appendLine("Runtime: ${runtime.name}")
     appendLine("Runtime Version: ${runtime.version}")
-    appendLine("Backend: ${runtime.backend ?: "N/A"}")
+    appendLine("Backend: ${runtime.backend ?: preflightValue("backend_mode") ?: "N/A"}")
     appendLine("Threads: ${runtime.threads ?: "N/A"}")
-    appendLine("GPU Layers: ${runtime.gpuLayers ?: "N/A"}")
-    appendLine("Context: ${runtime.contextLength ?: "N/A"}")
+    appendLine("GPU Layers: ${runtime.gpuLayers ?: attemptedGpuLayers ?: "N/A"}")
+    appendLine("Context: ${runtime.contextLength ?: attemptedContext ?: "N/A"}")
     appendLine()
     appendLine("Load Time: ${loadTimeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("TTFT: ${generation?.firstTokenTimeMs?.let { "$it ms" } ?: "N/A"}")
@@ -177,6 +202,17 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Accounted Decode Time: ${perf.profileAccountedMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Unaccounted Decode Time: ${perf.profileUnaccountedMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Decode Window: ${perf.profileDecodeWindowMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Decode Call Count: ${perf.profileDecodeCalls ?: "N/A"}")
+    appendLine("Decode Call Min / Avg / Max: ${perf.profileDecodeCallMinUs?.let { "$it us" } ?: "N/A"} / ${perf.profileDecodeCallAvgUs?.let { "$it us" } ?: "N/A"} / ${perf.profileDecodeCallMaxUs?.let { "$it us" } ?: "N/A"}")
+    appendLine("Decode Call Accumulated: ${perf.profileDecodeUs?.let { "$it us" } ?: "N/A"}")
+    appendLine()
+    appendLine("===== BACKEND OP ASSIGNMENTS =====")
+    val backendLines = nativeDiagnostics.orEmpty().lineSequence()
+        .filter { it.contains("AI_CHAT_BACKEND_GRAPH_ASSIGNMENT") }
+        .toList().takeLast(24)
+    if (backendLines.isEmpty()) appendLine("Backend assignment profiling: N/A (use a build with scheduler profiling)")
+    else backendLines.forEach { appendLine(it) }
+    appendLine("cpuOpTypes lists CPU-assigned operator types and counts for each graph. Assignment is not per-op duration; GPU execution may be asynchronous, while llama_decode timing is wall-clock.")
     appendLine()
     appendLine("===== SPECULATIVE DECODING =====")
     appendLine("Draft Tokens: ${perf.speculativeDraftTokens ?: "N/A"}")

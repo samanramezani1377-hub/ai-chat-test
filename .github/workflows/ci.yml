@@ -148,8 +148,26 @@ jobs:
           grep -q 'GGML_OPENCL OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'ggml-vulkan' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'VULKAN_GPU_ONLY_NO_CPU_FALLBACK' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'LLAMA_FLASH_ATTN_TYPE_DISABLED' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 32)' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'NATIVE_FATAL_PHASE=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'hybrid_recurrent_vulkan_stability' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'AI_CHAT_GPU_BACKEND_VULKAN=1' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_VULKAN_ANDROID_BDA_GUARD_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_SELECTIVE_CPU_OP_FALLBACK_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_UNASSIGNED_NODE_DIAGNOSTICS_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_UNSUPPORTED_GRAPH_OP' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'throw std::runtime_error(ai_chat_support)' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q '#include <stdexcept>' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'GGML_LOG_DEBUG("%s' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'ai_chat_append_native_trace' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'extern "C" void ai_chat_append_native_trace' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q '!it.contains("NATIVE_PERF_PROFILE")' app/src/main/java/com/samanramezani/aichattest/ui/diagnostics/RuntimeDiagnostic.kt
+          grep -q 'NATIVE_PERF_PROFILE' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'decodeCallMinUs' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          ! grep -q 'AI_CHAT_GPU_ONLY_NO_CPU_COMPUTE_FALLBACK' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_ANDROID_DISABLE_DSV4_HC_VULKAN_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
           ! grep -R 'OPENCL_GPU_ONLY\|NATIVE_OPENCL_DEVICE\|cl_profiling.csv\|OpenClGpuProfile' -n app core/runtime core/runtime-android
           ! grep -R 'GGML_OPENCL=ON\|GGML_OPENCL ON\|AI_CHAT_OPENCL_PROFILING\|ggml-opencl.h\|android_opencl_dispatch' -n core/runtime-android/src/main/cpp core/runtime-android/build.gradle.kts
           echo "Vulkan GPU-only/no-OpenCL invariants verified"
