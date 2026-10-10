@@ -24,7 +24,7 @@ internal object NativeLlamaCpp {
         Log.i(TAG, "ACTIVATION_NATIVE_LIBRARY_LOAD_RETURNED")
     }
 
-    /** OpenCL is the only native backend; every model load requests full GPU offload. */
+    /** Prefer OpenCL where supported; native llama.cpp may place unsupported work on CPU. */
     private fun ensureNativeInitialized() {
         synchronized(this) {
             Log.i(TAG, "ACTIVATION_NATIVE_INIT_REQUESTED backend=OpenCL previously_initialized=$nativeInitialized")
@@ -38,7 +38,7 @@ internal object NativeLlamaCpp {
     /** One serialized native activation transaction. Native side owns model/context lifetime. */
     @Synchronized
     fun load(path: String, contextLength: Int, gpuLayers: Int, draftPath: String? = null): Int {
-        require(gpuLayers > 0) { "OpenCL GPU-only runtime requires at least one GPU layer" }
+        require(gpuLayers in 0..GPU_LAYERS_MAX) { "GPU layer preference must be between 0 and $GPU_LAYERS_MAX" }
         require(path.isNotBlank()) { "Model path must not be blank" }
         val file = File(path)
         require(file.isFile && file.canRead()) { "Model file is not readable: $path" }
@@ -83,7 +83,7 @@ internal object NativeLlamaCpp {
                 appendLine("file_size_mib=${if (file.isFile) file.length() / 1048576.0 else -1.0}")
                 appendLine("requested_context=$contextLength")
                 appendLine("gpu_layers=$gpuLayers")
-                appendLine("backend_mode=OpenCL_GPU_ONLY")
+                appendLine("backend_mode=OpenCL_GPU_PREFERRED_CPU_FALLBACK_ALLOWED")
                 appendLine("device_mem_total_bytes=${memoryInfo.totalMem}")
                 appendLine("device_mem_available_bytes=${memoryInfo.availMem}")
                 appendLine("device_mem_available_mib=${memoryInfo.availMem / 1048576.0}")
