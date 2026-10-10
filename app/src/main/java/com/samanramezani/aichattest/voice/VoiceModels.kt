@@ -276,7 +276,7 @@ class VoiceModelStore(
         fun writeEntry(nameValue: String, isDirectory: Boolean, stream: InputStream) {
             count++
             require(count <= MAX_ENTRIES) { "VOICE-PIPER-009: تعداد فایل‌های بسته آواشناسی بیش از حد مجاز است." }
-            val name = nameValue.replace('\\\\', '/')
+            val name = nameValue.replace('\\', '/')
             require(!name.startsWith("/") && name.split('/').none { it == ".." }) { "VOICE-PIPER-010: مسیر نامعتبر در بسته آواشناسی وجود دارد." }
             val target = File(destination, name).canonicalFile
             require(target.toPath().startsWith(destination.canonicalFile.toPath())) { "VOICE-PIPER-010: مسیر نامعتبر در بسته آواشناسی وجود دارد." }
@@ -320,7 +320,7 @@ class VoiceModelStore(
                 val entry = ByteArrayOutputStream()
                 writeProtoString(entry, 1, key)
                 writeProtoString(entry, 2, value)
-                writeVarint(out, (14 shl 3) or 2)
+                writeVarint(out, ((14 shl 3) or 2).toLong())
                 writeVarint(out, entry.size().toLong())
                 entry.writeTo(out)
             }
