@@ -1,0 +1,52 @@
+# Emit one bounded graph assignment trace so diagnostics can distinguish CPU and GPU ops.
+if (NOT DEFINED llama_cpp_SOURCE_DIR)
+    message(FATAL_ERROR "llama_cpp_SOURCE_DIR is required")
+endif()
+
+set(_sched_file "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-backend.cpp")
+if (NOT EXISTS "${_sched_file}")
+    message(FATAL_ERROR "ggml backend scheduler source not found: ${_sched_file}")
+endif()
+
+file(READ "${_sched_file}" _sched)
+if (_sched MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V1")
+    return()
+endif()
+
+set(_print_anchor "static void ggml_backend_sched_print_assignments(ggml_backend_sched_t sched, struct ggml_cgraph * graph) {")
+string(FIND "${_sched}" "${_print_anchor}" _print_pos)
+if (_print_pos LESS 0)
+    message(FATAL_ERROR "AI Chat backend trace: scheduler print function anchor not found")
+endif()
+string(REPLACE "${_print_anchor}"
+    "static bool ai_chat_backend_assignment_trace_emitted = false;\n// AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V1\n${_print_anchor}"
+    _sched "${_sched}")
+
+set(_dispatch_anchor "    if (sched->debug) {\n        ggml_backend_sched_print_assignments(sched, graph);\n    }")
+string(FIND "${_sched}" "${_dispatch_anchor}" _dispatch_pos)
+if (_dispatch_pos LESS 0)
+    message(FATAL_ERROR "AI Chat backend trace: scheduler dispatch anchor not found")
+endif()
+string(REPLACE "${_dispatch_anchor}"
+    "    if (sched->debug || (getenv(\"AI_CHAT_BACKEND_TRACE\") != nullptr && !ai_chat_backend_assignment_trace_emitted)) {\n        if (!sched->debug) ai_chat_backend_assignment_trace_emitted = true;\n        ggml_backend_sched_print_assignments(sched, graph);\n    }"
+    _sched "${_sched}")
+
+# Promote only the bounded assignment report to INFO; leave all other backend debug
+# output untouched. The environment gate above emits this report once per process.
+string(FIND "${_sched}" "${_print_anchor}" _print_start)
+string(FIND "${_sched}" "static bool ggml_backend_sched_buffer_supported" _print_end)
+if (_print_start LESS 0 OR _print_end LESS 0 OR _print_end LESS _print_start)
+    message(FATAL_ERROR "AI Chat backend trace: assignment report boundaries not found")
+endif()
+math(EXPR _print_len "${_print_end} - ${_print_start}")
+string(SUBSTRING "${_sched}" ${_print_start} ${_print_len} _print_block)
+string(REPLACE "GGML_LOG_DEBUG(" "GGML_LOG_INFO(" _print_block "${_print_block}")
+string(SUBSTRING "${_sched}" 0 ${_print_start} _before_print)
+string(LENGTH "${_sched}" _sched_len)
+math(EXPR _after_pos "${_print_start} + ${_print_len}")
+math(EXPR _after_len "${_sched_len} - ${_after_pos}")
+string(SUBSTRING "${_sched}" ${_after_pos} ${_after_len} _after_print)
+set(_sched "${_before_print}${_print_block}${_after_print}")
+
+file(WRITE "${_sched_file}" "${_sched}")
+message(STATUS "AI Chat: enabled one-shot CPU/GPU graph assignment diagnostics")
