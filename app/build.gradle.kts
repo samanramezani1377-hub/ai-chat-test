@@ -46,6 +46,12 @@ android {
     }
 
     packagingOptions {
+        resources {
+            // sherpa-onnx's AAR also ships macOS and Windows runtime binaries as
+            // Java resources. They are never loaded by Android and add tens of
+            // megabytes to the APK; keep the Android JNI libraries untouched.
+            excludes += setOf("sherpa-onnx/native/**")
+        }
         jniLibs {
             // Keep native libraries uncompressed and avoid a second extracted copy on disk.
             useLegacyPackaging = false
