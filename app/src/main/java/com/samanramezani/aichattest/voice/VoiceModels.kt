@@ -356,9 +356,16 @@ class VoiceModelStore(
                 it.list()?.isNotEmpty() == true
         }
         if (nested != null && nested != expected) {
-            expected.deleteRecursively()
-            check(nested.renameTo(expected)) {
+            // Move the nested directory out first: it may live inside the current expected
+            // directory, so deleting expected before moving it would delete the source itself.
+            val normalized = File(staging, ".espeak-ng-data-normalized")
+            normalized.deleteRecursively()
+            check(nested.renameTo(normalized)) {
                 "VOICE-PIPER-012: نتوانستم پوشه espeak-ng-data را از ساختار بسته استخراج‌شده آماده کنم."
+            }
+            expected.deleteRecursively()
+            check(normalized.renameTo(expected)) {
+                "VOICE-PIPER-016: نتوانستم پوشهٔ داده‌های آواشناسی را در محل نهایی قرار بدهم."
             }
             return
         }
