@@ -180,6 +180,8 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("OpenCL Backend Registered: ${nativeExecutionValue("gpuBackendRegistered") ?: "N/A"}")
     appendLine("CPU Measured Subtotal (sampling + logits + callbacks): ${nativeExecutionValue("cpuMeasuredSubtotalMs")?.let { "$it ms" } ?: "N/A"}")
     appendLine("GPU Kernel Timings: measured separately by OpenCL events below; do not equate with decode wall time.")
+    appendLine("Per-operation CPU/OpenCL assignment: see native trace lines from ggml scheduler.")
+    appendLine("Sampled CPU/OpenCL split wall time: see AI_CHAT_BACKEND_SPLIT_TIMING (one sample per 8 splits per backend).")
     appendLine()
     appendLine("===== GPU / OPENCL KERNEL PROFILE =====")
     openClProfile?.reportLines()?.forEach(::appendLine)
