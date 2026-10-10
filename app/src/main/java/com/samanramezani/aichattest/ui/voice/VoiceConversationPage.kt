@@ -65,14 +65,14 @@ internal fun VoiceConversationPage(
         Card {
             Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("مدل تشخیص گفتار (STT)", style = MaterialTheme.typography.titleMedium)
-                Text("برای گفت‌وگوی زنده، بستهٔ سازگار با sherpa-onnx و مدل Transducer لازم است.", style = MaterialTheme.typography.bodySmall)
+                Text("برای فارسی می‌توانید بستهٔ Qwen3-ASR را وارد کنید؛ مدل‌های Streaming Transducer نیز پشتیبانی می‌شوند.", style = MaterialTheme.typography.bodySmall)
                 if (sttModels.isEmpty()) Text("هنوز مدل STT وارد نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 sttModels.forEach { model ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(selected = model.id == activeSttId, onClick = { onSelectStt(model.id) })
                         Column(Modifier.weight(1f)) {
                             Text(model.title)
-                            Text("محلی · Transducer", style = MaterialTheme.typography.labelSmall)
+                            Text(if (model.asrMode == "qwen3-asr") "محلی · Qwen3-ASR · پشتیبانی فارسی" else "محلی · Streaming Transducer", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
