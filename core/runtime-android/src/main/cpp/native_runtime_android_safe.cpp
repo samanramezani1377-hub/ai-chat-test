@@ -1147,6 +1147,18 @@ if (hybrid_memory) {
     const double decode_tokens_per_sec = generated > 0 && decode_ms > 0 ? (1000.0 * static_cast<double>(generated) / static_cast<double>(decode_ms)) : 0.0;
     const auto profile_prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(prefill_finished_at - generation_started_at).count();
     append_decode_profile_trace(generation_ms, profile_prefill_ms);
+    append_native_trace((std::string("NATIVE_EXECUTION_PROFILE mode=") +
+        (g_gpu && g_gpu_backend_loaded ? "OPENCL_GPU_PREFERRED_MIXED_CPU_OPS" : "CPU_FALLBACK") +
+        " gpuBackendRegistered=" + (g_gpu_backend_loaded ? "1" : "0") +
+        " fallbackPolicy=ggml_scheduler" +
+        " decodeSteps=" + std::to_string(g_decode_profile.token_steps) +
+        " decodeWallMs=" + std::to_string(g_decode_profile.decode_ms) +
+        " cpuLogitsSyncMs=" + std::to_string(g_decode_profile.logits_sync_ms) +
+        " cpuSamplingMs=" + std::to_string(g_decode_profile.sampling_ms) +
+        " cpuCallbackMs=" + std::to_string(g_decode_profile.callback_ms) +
+        " cpuMeasuredSubtotalMs=" + std::to_string(g_decode_profile.logits_sync_ms +
+            g_decode_profile.sampling_ms + g_decode_profile.callback_ms) +
+        " gpuKernelTiming=cl_profiling.csv").c_str());
     if (prefill_recorded && (result == 0 || result == 9)) {
         // Publish only the token sequence that is actually resident in the live
         // context. The next request can then reuse the largest exact prefix.
