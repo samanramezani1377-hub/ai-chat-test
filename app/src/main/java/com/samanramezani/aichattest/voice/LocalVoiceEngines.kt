@@ -32,10 +32,33 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
     private val engine: OfflineTts
 
     init {
+        val tokensFile = entry.tokensFile
+            ?: error("VOICE-TTS-006: مدل Piper فاقد tokens.txt است.")
+        val dataDirectory = entry.dataDirectory
+            ?: error("VOICE-TTS-006: مدل Piper فاقد پوشه espeak-ng-data است.")
+        require(entry.modelFile.isFile && entry.modelFile.length() > 1024L) {
+            "VOICE-TTS-006: فایل مدل ONNX وجود ندارد یا ناقص است: ${entry.modelFile.name}."
+        }
+        require(tokensFile.isFile && tokensFile.length() > 0L) {
+            "VOICE-TTS-006: فایل tokens.txt وجود ندارد یا خالی است."
+        }
+        val requiredEspeakFiles = listOf("phontab", "phonindex", "phondata", "intonations")
+        val missingEspeakFiles = requiredEspeakFiles.filter {
+            val file = File(dataDirectory, it)
+            !file.isFile || file.length() == 0L
+        }
+        require(missingEspeakFiles.isEmpty()) {
+            "VOICE-TTS-006: داده‌های espeak-ng ناقص‌اند (${missingEspeakFiles.joinToString()})؛ مدل را با بستهٔ رسمی espeak-ng-data.tar.bz2 دوباره وارد کنید."
+        }
+        val tokenLines = tokensFile.useLines { lines -> lines.count { it.isNotBlank() } }
+        require(tokenLines >= 2) {
+            "VOICE-TTS-006: tokens.txt قالب معتبر Piper ندارد (تعداد ردیف‌ها: $tokenLines)."
+        }
+
         val vits = OfflineTtsVitsModelConfig().apply {
             model = entry.modelFile.absolutePath
-            tokens = requireNotNull(entry.tokensFile).absolutePath
-            dataDir = requireNotNull(entry.dataDirectory).absolutePath
+            tokens = tokensFile.absolutePath
+            dataDir = dataDirectory.absolutePath
         }
         val modelConfig = OfflineTtsModelConfig().apply {
             this.vits = vits
@@ -43,11 +66,21 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
             debug = false
             provider = "cpu"
         }
-        engine = OfflineTts(config = OfflineTtsConfig().apply {
-            model = modelConfig
-            maxNumSentences = 1
-            silenceScale = 0.15f
-        })
+        engine = try {
+            OfflineTts(config = OfflineTtsConfig().apply {
+                model = modelConfig
+                maxNumSentences = 1
+                silenceScale = 0.15f
+            })
+        } catch (t: Throwable) {
+            throw IllegalArgumentException(
+                "VOICE-TTS-007: ساخت موتور sherpa-onnx برای مدل «${entry.title}» ناموفق بود. " +
+                    "مدل=${entry.modelFile.name} (${entry.modelFile.length()} بایت)، " +
+                    "توکن‌ها=$tokenLines ردیف، espeak=${dataDirectory.absolutePath}. " +
+                    "فایل‌های مدل یا metadata ممکن است با Piper/VITS سازگار نباشند. علت بومی: ${t.message ?: t.javaClass.simpleName}",
+                t,
+            )
+        }
     }
 
     suspend fun speak(text: String, cancelled: AtomicBoolean, onStarted: () -> Unit = {}) = withContext(Dispatchers.Default) {
