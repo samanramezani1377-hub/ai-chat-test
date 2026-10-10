@@ -86,6 +86,8 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
 }
 
 /** Streaming local ASR for sherpa-onnx online transducer packages. */
+data class AsrUpdate(val text: String, val endpoint: Boolean)
+
 class LocalStreamingAsr(private val entry: VoiceModelEntry) {
     private val recognizer: OnlineRecognizer
     private val stream: OnlineStream
@@ -110,12 +112,13 @@ class LocalStreamingAsr(private val entry: VoiceModelEntry) {
         stream = recognizer.createStream()
     }
 
-    fun accept(samples: FloatArray, sampleRate: Int = 16000): String {
+    fun accept(samples: FloatArray, sampleRate: Int = 16000): AsrUpdate {
         stream.acceptWaveform(samples, sampleRate)
         while (recognizer.isReady(stream)) recognizer.decode(stream)
         val text = recognizer.getResult(stream).text
-        if (recognizer.isEndpoint(stream)) recognizer.reset(stream)
-        return text
+        val endpoint = recognizer.isEndpoint(stream)
+        if (endpoint) recognizer.reset(stream)
+        return AsrUpdate(text, endpoint)
     }
 
     fun close() {
