@@ -21,7 +21,7 @@ import kotlinx.coroutines.withContext
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** Android model façade: SAF import -> GGUF validation -> durable registry -> llama.cpp/OpenCL. */
+/** Android model façade for GGUF files and exported MNN ZIP packs. */
 class AndroidModelManager(
     private val contentResolver: ContentResolver,
     private val appContext: android.content.Context,
