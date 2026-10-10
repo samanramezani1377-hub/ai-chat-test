@@ -62,7 +62,7 @@ class AppContainer(context: Context? = null) {
     val modelRuntime: RuntimeAdapter = CompositeModelRuntimeAdapter(llamaRuntime, mnnRuntime)
     val conversationHistory: ConversationHistoryRepository = appContext?.let { AndroidConversationHistoryRepository(it) } ?: InMemoryConversationHistoryRepository()
     val modelManager: AndroidModelManager? = appContext?.let {
-        AndroidModelManager(it.contentResolver, it, it.filesDir.toPath().resolve("models"), llamaRuntime, mnnRuntime, modelRuntime)
+        AndroidModelManager(it.contentResolver, it, it.filesDir.toPath().resolve("models"), llamaRuntime, modelRuntime)
     }
 
     val actionRegistry: ActionRegistry = DefaultActionRegistry().also { registry ->
