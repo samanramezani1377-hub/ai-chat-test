@@ -62,7 +62,7 @@ static bool init_generation_context();
 static bool init_speculative_runtime();
 
 #ifndef AI_CHAT_CPU_BASELINE_ARM_ARCH
-#define AI_CHAT_CPU_BASELINE_ARM_ARCH "unknown"
+#define AI_CHAT_CPU_BASELINE_ARM_ARCH "armv8-a"
 #endif
 #ifndef AI_CHAT_CPU_DOTPROD_KERNELS
 #define AI_CHAT_CPU_DOTPROD_KERNELS 0
