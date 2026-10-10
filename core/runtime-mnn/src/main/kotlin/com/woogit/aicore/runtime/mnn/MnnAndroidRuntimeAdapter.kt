@@ -76,6 +76,7 @@ class MnnAndroidRuntimeAdapter(private val cpuThreads: Int = 4) : RuntimeAdapter
         val started = System.nanoTime()
         val text = MnnNative.nativeGenerate(roles, contents, request.settings.maxNewTokens)
         val elapsed = (System.nanoTime() - started) / 1_000_000
+        backend = runCatching { MnnNative.nativeBackend() }.getOrDefault(backend)
         if (text.startsWith("ERROR:")) {
             backend = runCatching { MnnNative.nativeBackend() }.getOrDefault("failed")
             throw IllegalStateException("MNN generation failed: ${text.removePrefix("ERROR:")}")
