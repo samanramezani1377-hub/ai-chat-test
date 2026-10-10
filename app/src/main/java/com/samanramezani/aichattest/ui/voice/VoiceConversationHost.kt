@@ -326,17 +326,30 @@ private class VoiceConversationController(
         try {
             onStatus("در حال پردازش گفتار و تولید پاسخ محلی…")
             val id = conversationId ?: error("VOICE-CHAT-001: شناسه مکالمه ایجاد نشده است.")
+            val modelFailure = AtomicReference<String?>(null)
             val session = container.createAgentSession(id) { event ->
                 if (event is AgentEvent.Token && !turnCancel.get()) enqueueCompleteSentences(event.value)
-                if (event is AgentEvent.Failed) { onDiagnostic("VOICE-LLM-001: ${event.message}"); onStatus("VOICE-LLM-001: ${event.message}") }
+                if (event is AgentEvent.Failed) {
+                    modelFailure.compareAndSet(null, event.message)
+                    onDiagnostic("VOICE-LLM-001: ${event.message}")
+                    onStatus("VOICE-LLM-001: ${event.message}")
+                }
             } ?: error("VOICE-CHAT-002: نشست مدل محلی در دسترس نیست.")
             val result = session.send(utterance, InferenceSettings(maxNewTokens = 1024), requestedRecentMessages = Int.MAX_VALUE)
             if (!turnCancel.get()) {
                 enqueueCompleteSentences("", flush = true)
                 queue.close()
                 activeSpeechJob.join()
-                if (result.generation.text.isNotBlank()) onLine("دستیار", result.generation.text)
-                onStatus(if (speaking.get()) "در حال پخش پاسخ…" else "پاسخ آماده است؛ می‌توانید صحبت کنید.")
+                val answer = result.generation.text
+                if (answer.isNotBlank()) {
+                    onLine("دستیار", answer)
+                    onStatus(if (speaking.get()) "در حال پخش پاسخ…" else "پاسخ آماده است؛ می‌توانید صحبت کنید.")
+                } else {
+                    val failure = modelFailure.get()
+                    val detail = failure ?: "موتور مدل خروجی متنی تولید نکرد؛ گزارش اجرای مدل را بررسی کنید."
+                    onDiagnostic("VOICE-LLM-002: empty_response outputTokens=${result.generation.outputTokens ?: "n/a"} generationMs=${result.generation.generationTimeMs ?: "n/a"} detail=$detail")
+                    onStatus(if (failure != null) "VOICE-LLM-001: $failure" else "VOICE-LLM-002: پاسخ خالی دریافت شد؛ تولید متن مدل ناموفق بود.")
+                }
             } else {
                 queue.close()
                 activeSpeechJob.cancel()
