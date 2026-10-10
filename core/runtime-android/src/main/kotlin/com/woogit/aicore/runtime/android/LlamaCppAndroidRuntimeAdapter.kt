@@ -279,40 +279,57 @@ class LlamaCppAndroidRuntimeAdapter(
         val budget = context - reserve
         if (messages.isEmpty() || budget <= 0) return messages.takeLast(1)
 
+        // System instructions (including the runtime-generated action catalog) are
+        // mandatory context, not expendable old chat history. Preserve them first,
+        // then fill the remaining token budget with the newest conversation turns.
+        val systemMessages = messages.filter { it.role == com.woogit.aicore.domain.ChatMessage.Role.SYSTEM }
+        val conversationMessages = messages.filter { it.role != com.woogit.aicore.domain.ChatMessage.Role.SYSTEM }
+        fun tokenCount(candidate: List<com.woogit.aicore.domain.ChatMessage>): Int =
+            if (candidate.isEmpty()) 0 else NativeLlamaCpp.countTokens(formatMessages(candidate))
+
+        var retainedSystem = systemMessages
+        if (tokenCount(retainedSystem) > budget) {
+            val primarySystem = systemMessages.firstOrNull()
+            retainedSystem = if (primarySystem == null) emptyList()
+            else listOf(fitMessageToBudget(primarySystem, (budget / 2).coerceAtLeast(1)))
+        }
+
         val selected = ArrayDeque<com.woogit.aicore.domain.ChatMessage>()
         var truncatedLatest = false
 
-        for (index in messages.lastIndex downTo 0) {
-            val message = messages[index]
+        for (index in conversationMessages.lastIndex downTo 0) {
+            val message = conversationMessages[index]
             val candidate = buildList {
+                addAll(retainedSystem)
                 add(message)
                 addAll(selected)
             }
-            val tokenCount = NativeLlamaCpp.countTokens(formatMessages(candidate))
-            if (tokenCount in 0..budget) {
+            val count = tokenCount(candidate)
+            if (count in 0..budget) {
                 selected.addFirst(message)
                 continue
             }
 
-            // If the newest message itself is larger than the whole prompt budget,
-            // never fall back to the unbounded message (the previous implementation
-            // did exactly that and nativeGenerate correctly rejected it as overflow).
-            if (selected.isEmpty() && index == messages.lastIndex) {
-                val fitted = fitMessageToBudget(message, budget)
+            // If the newest turn alone is too large, fit it while accounting for
+            // the system prompt already reserved above. Never drop the system prompt
+            // and never pass an unbounded latest message to native generation.
+            if (selected.isEmpty() && index == conversationMessages.lastIndex) {
+                val fitted = fitMessageToBudget(message, budget, retainedSystem)
                 selected.addFirst(fitted)
                 truncatedLatest = fitted.content != message.content
             }
             break
         }
 
-        val result = selected.toList()
-        val finalTokenCount = if (result.isEmpty()) 0 else NativeLlamaCpp.countTokens(formatMessages(result))
+        val result = retainedSystem + selected.toList()
+        val finalTokenCount = tokenCount(result)
         RuntimeDiagnosticsStore.recordNativeEvent(
             "NATIVE_PROMPT_BUDGET context=" + context +
                 " reserve=" + reserve +
                 " budget=" + budget +
                 " selectedMessages=" + result.size +
                 " originalMessages=" + messages.size +
+                " systemMessages=" + retainedSystem.size +
                 " promptTokens=" + finalTokenCount +
                 " truncatedLatest=" + truncatedLatest
         )
@@ -334,6 +351,7 @@ class LlamaCppAndroidRuntimeAdapter(
     private fun fitMessageToBudget(
         message: com.woogit.aicore.domain.ChatMessage,
         budget: Int,
+        prefixMessages: List<com.woogit.aicore.domain.ChatMessage> = emptyList(),
     ): com.woogit.aicore.domain.ChatMessage {
         if (budget <= 0) return message.copy(content = "")
 
@@ -358,7 +376,7 @@ class LlamaCppAndroidRuntimeAdapter(
         while (low <= high) {
             val mid = low + (high - low) / 2
             val candidateMessage = candidate(mid)
-            val tokens = NativeLlamaCpp.countTokens(formatMessages(listOf(candidateMessage)))
+            val tokens = NativeLlamaCpp.countTokens(formatMessages(prefixMessages + candidateMessage))
             if (tokens in 0..budget) {
                 best = candidateMessage
                 low = mid + 1
