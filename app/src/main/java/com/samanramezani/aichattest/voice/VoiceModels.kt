@@ -23,6 +23,7 @@ data class VoiceModelEntry(
     val encoder: File? = null,
     val decoder: File? = null,
     val joiner: File? = null,
+    val modelType: String = "zipformer",
 )
 
 /**
@@ -144,7 +145,13 @@ class VoiceModelStore(
                 val encoder = files.firstOrNull { it.name.contains("encoder", true) && it.extension.equals("onnx", true) } ?: return null
                 val decoder = files.firstOrNull { it.name.contains("decoder", true) && it.extension.equals("onnx", true) } ?: return null
                 val joiner = files.firstOrNull { it.name.contains("joiner", true) && it.extension.equals("onnx", true) } ?: return null
-                VoiceModelEntry(directory.name, directory.name, kind, directory, encoder, tokensFile = tokens, encoder = encoder, decoder = decoder, joiner = joiner)
+                val path = encoder.absolutePath.lowercase()
+                val modelType = when {
+                    path.contains("lstm") -> "lstm"
+                    path.contains("zipformer2") || path.contains("chunk-16-left") -> "zipformer2"
+                    else -> "zipformer"
+                }
+                VoiceModelEntry(directory.name, directory.name, kind, directory, encoder, tokensFile = tokens, encoder = encoder, decoder = decoder, joiner = joiner, modelType = modelType)
             }
         }
     }
