@@ -3,6 +3,9 @@ package com.samanramezani.aichattest.voice
 import android.content.ContentResolver
 import android.net.Uri
 import android.provider.OpenableColumns
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.FileInputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -11,6 +14,7 @@ import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 
 enum class VoiceModelKind { STT, TTS }
+enum class PiperComponent { MODEL, CONFIG, ESPEAK_DATA }
 
 data class VoiceModelEntry(
     val id: String,
@@ -120,6 +124,153 @@ class VoiceModelStore(
             staging.deleteRecursively()
             throw t
         }
+    }
+
+    /**
+     * Import one component of the original Piper voice downloaded from rhasspy/piper-voices.
+     * The user can select the .onnx, its .onnx.json companion, and espeak-ng-data.tar.bz2
+     * separately. Once all components exist, create sherpa-onnx tokens and ONNX metadata locally.
+     */
+    fun importPiperComponent(uri: Uri, component: PiperComponent): VoiceModelEntry? {
+        root.mkdirs()
+        val staging = File(root, ".piper-import")
+        staging.mkdirs()
+        val displayName = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0).orEmpty() else "" }.orEmpty()
+        require(displayName.isNotBlank()) { "VOICE-PIPER-001: نام فایل انتخاب‌شده قابل خواندن نیست." }
+        val source = resolver.openInputStream(uri)
+            ?: error("VOICE-PIPER-002: فایل انتخاب‌شده قابل خواندن نیست.")
+        source.use { input ->
+            when (component) {
+                PiperComponent.MODEL -> {
+                    require(displayName.endsWith(".onnx", true)) { "VOICE-PIPER-003: برای مدل Piper یک فایل .onnx انتخاب کنید." }
+                    File(staging, displayName).outputStream().use(input::copyTo)
+                }
+                PiperComponent.CONFIG -> {
+                    require(displayName.endsWith(".onnx.json", true) || displayName.endsWith(".json", true)) {
+                        "VOICE-PIPER-004: فایل پیکربندی Piper با پسوند JSON انتخاب کنید."
+                    }
+                    File(staging, displayName).outputStream().use(input::copyTo)
+                }
+                PiperComponent.ESPEAK_DATA -> {
+                    val archive = displayName.lowercase()
+                    require(archive.endsWith(".tar.bz2") || archive.endsWith(".tbz2") || archive.endsWith(".zip")) {
+                        "VOICE-PIPER-005: پوشهٔ آواشناسی باید به‌صورت .tar.bz2 یا .zip باشد."
+                    }
+                    extractEspeakArchive(input, archive, staging)
+                }
+            }
+        }
+        val model = staging.listFiles()?.firstOrNull { it.isFile && it.name.endsWith(".onnx", true) } ?: return null
+        val config = File(staging, model.name + ".json")
+        if (!config.isFile) return null
+        val espeak = File(staging, "espeak-ng-data")
+        if (!espeak.isDirectory || espeak.list()?.isEmpty() != false) return null
+
+        val json = JSONObject(config.readText(Charsets.UTF_8))
+        val phonemeMap = json.getJSONObject("phoneme_id_map")
+        val tokens = mutableListOf<Pair<Int, String>>()
+        val keys = phonemeMap.keys()
+        while (keys.hasNext()) {
+            val symbol = keys.next()
+            val ids = phonemeMap.getJSONArray(symbol)
+            if (ids.length() > 0) tokens += ids.getInt(0) to symbol
+        }
+        require(tokens.isNotEmpty()) { "VOICE-PIPER-006: نگاشت واج‌های مدل خالی است." }
+        File(staging, "tokens.txt").writeText(tokens.sortedBy { it.first }.joinToString("\n") { "${it.second} ${it.first}" } + "\n", Charsets.UTF_8)
+
+        val language = json.optJSONObject("language")?.optString("name_english", "Persian") ?: "Persian"
+        val voice = json.optJSONObject("espeak")?.optString("voice", "fa") ?: "fa"
+        val speakers = json.optInt("num_speakers", 1)
+        val sampleRate = json.optJSONObject("audio")?.optInt("sample_rate", 22050) ?: 22050
+        appendOnnxMetadata(model, mapOf(
+            "model_type" to "vits",
+            "comment" to "piper",
+            "language" to language,
+            "voice" to voice,
+            "has_espeak" to "1",
+            "n_speakers" to speakers.toString(),
+            "sample_rate" to sampleRate.toString(),
+        ))
+
+        val id = "tts-${model.nameWithoutExtension}-${System.currentTimeMillis()}"
+        val destination = File(root, id)
+        check(staging.renameTo(destination)) { "VOICE-PIPER-007: ذخیره نهایی مدل Piper ناموفق بود." }
+        return validateDirectory(destination, VoiceModelKind.TTS)
+            ?: run { destination.deleteRecursively(); error("VOICE-PIPER-008: اعتبارسنجی مدل Piper پس از تبدیل ناموفق بود.") }
+    }
+
+    private fun extractEspeakArchive(input: InputStream, archiveName: String, destination: File) {
+        var count = 0
+        var total = 0L
+        fun writeEntry(nameValue: String, isDirectory: Boolean, stream: InputStream) {
+            count++
+            require(count <= MAX_ENTRIES) { "VOICE-PIPER-009: تعداد فایل‌های بسته آواشناسی بیش از حد مجاز است." }
+            val name = nameValue.replace('\\\\', '/')
+            require(!name.startsWith("/") && name.split('/').none { it == ".." }) { "VOICE-PIPER-010: مسیر نامعتبر در بسته آواشناسی وجود دارد." }
+            val target = File(destination, name).canonicalFile
+            require(target.toPath().startsWith(destination.canonicalFile.toPath())) { "VOICE-PIPER-010: مسیر نامعتبر در بسته آواشناسی وجود دارد." }
+            if (isDirectory) target.mkdirs() else {
+                target.parentFile?.mkdirs()
+                FileOutputStream(target).use { out ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = stream.read(buffer)
+                        if (n < 0) break
+                        total += n
+                        require(total <= MAX_EXPANDED_BYTES) { "VOICE-PIPER-011: حجم بسته آواشناسی بیش از حد مجاز است." }
+                        out.write(buffer, 0, n)
+                    }
+                }
+            }
+        }
+        if (archiveName.endsWith(".zip")) {
+            ZipInputStream(input).use { zip ->
+                while (true) {
+                    val item = zip.nextEntry ?: break
+                    writeEntry(item.name, item.isDirectory, zip)
+                    zip.closeEntry()
+                }
+            }
+        } else {
+            TarArchiveInputStream(BZip2CompressorInputStream(input)).use { tar ->
+                while (true) {
+                    val item = tar.nextTarEntry ?: break
+                    writeEntry(item.name, item.isDirectory, tar)
+                }
+            }
+        }
+    }
+
+    private fun appendOnnxMetadata(model: File, values: Map<String, String>) {
+        // ONNX ModelProto metadata_props is field 14 (wire type 2). Appending protobuf
+        // fields is valid because field order is not significant and preserves the graph bytes.
+        FileOutputStream(model, true).use { out ->
+            values.forEach { (key, value) ->
+                val entry = ByteArrayOutputStream()
+                writeProtoString(entry, 1, key)
+                writeProtoString(entry, 2, value)
+                writeVarint(out, (14 shl 3) or 2)
+                writeVarint(out, entry.size().toLong())
+                entry.writeTo(out)
+            }
+        }
+    }
+
+    private fun writeProtoString(out: ByteArrayOutputStream, field: Int, value: String) {
+        val bytes = value.toByteArray(Charsets.UTF_8)
+        writeVarint(out, (field shl 3) or 2)
+        writeVarint(out, bytes.size.toLong())
+        out.write(bytes)
+    }
+
+    private fun writeVarint(out: java.io.OutputStream, raw: Long) {
+        var value = raw
+        while ((value and 0x7f.inv().toLong()) != 0L) {
+            out.write(((value and 0x7f) or 0x80).toInt())
+            value = value ushr 7
+        }
+        out.write(value.toInt())
     }
 
     private fun findCandidateRoot(staging: File, kind: VoiceModelKind): File? =
