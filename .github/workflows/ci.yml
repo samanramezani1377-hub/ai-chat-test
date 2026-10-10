@@ -1,12 +1,15 @@
 name: CI
 
 on:
+  # Run CI for every branch, not only main. This keeps feature branches honest
+  # and makes a new branch's first push trigger validation automatically.
   push:
     branches:
-      - main
+      - '**'
+  # Validate pull requests targeting any branch, including non-main integration branches.
   pull_request:
     branches:
-      - main
+      - '**'
   workflow_dispatch:
 
 permissions:
