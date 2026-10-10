@@ -41,7 +41,7 @@ data class InferenceSettings(
     /** No forced stop strings by default; the model/runtime decides when generation naturally ends. */
     val stopSequences: List<String> = emptyList(),
     /** Conservative local default; runtime capability may further constrain this value. */
-    val contextLength: Int? = 8192,
+    val contextLength: Int? = 4096,
     /** Number of recent conversation messages included in generated context. */
     val recentMessages: Int = 10,
     /** Maximum number of real Action steps the Agent may execute for one request. */
