@@ -96,7 +96,33 @@ static bool init_generation_context() {
         std::to_string(cp.n_threads_batch) + " nBatch=" +
         std::to_string(cp.n_batch) + " nUbatch=" +
         std::to_string(cp.n_ubatch) + " flashAttn=auto").c_str());
+    // Hybrid/recurrent architectures (including Qwen3.5-family models) carry
+    // recurrent state across prompt batches. On Android, graph reuse in the pinned
+    // llama.cpp build can fail on the second otherwise-identical prefill batch
+    // (ggml_backend_sched_graph_compute_async -> GGML_STATUS_FAILED), leaving the
+    // request with zero generated tokens. Disable graph reuse only while creating
+    // hybrid/recurrent contexts; llama.cpp snapshots this environment setting into
+    // the context, so restore the process environment immediately afterwards.
+    const bool hybrid_or_recurrent =
+        llama_model_is_hybrid(g_model) || llama_model_is_recurrent(g_model);
+    const char * previous_graph_reuse = std::getenv("LLAMA_GRAPH_REUSE_DISABLE");
+    const bool had_previous_graph_reuse = previous_graph_reuse != nullptr;
+    const std::string previous_graph_reuse_value =
+        previous_graph_reuse ? previous_graph_reuse : "";
+    if (hybrid_or_recurrent) {
+        setenv("LLAMA_GRAPH_REUSE_DISABLE", "1", 1);
+        append_native_trace("NATIVE_GRAPH_REUSE_POLICY hybridOrRecurrent=1 disabled=1 reason=android_recurrent_prefill_stability");
+    } else {
+        append_native_trace("NATIVE_GRAPH_REUSE_POLICY hybridOrRecurrent=0 disabled=0");
+    }
     g_context = llama_init_from_model(g_model, cp);
+    if (hybrid_or_recurrent) {
+        if (had_previous_graph_reuse) {
+            setenv("LLAMA_GRAPH_REUSE_DISABLE", previous_graph_reuse_value.c_str(), 1);
+        } else {
+            unsetenv("LLAMA_GRAPH_REUSE_DISABLE");
+        }
+    }
     if (!g_context) return false;
     llama_set_abort_callback(g_context, abort_callback, nullptr);
     return true;
