@@ -506,12 +506,52 @@ static void probe_android_opencl_driver() {
                 if (!value.empty() && value.back() == '\0') value.pop_back();
                 return value;
             };
+            const std::string device_name = device_info(CL_DEVICE_NAME);
+            const std::string device_vendor = device_info(CL_DEVICE_VENDOR);
+            const std::string driver_version = device_info(CL_DRIVER_VERSION);
+            const std::string device_version = device_info(CL_DEVICE_VERSION);
+            const std::string opencl_c_version = device_info(CL_DEVICE_OPENCL_C_VERSION);
+            const std::string device_extensions = device_info(CL_DEVICE_EXTENSIONS);
+            cl_bool device_available = CL_FALSE;
+            cl_bool compiler_available = CL_FALSE;
+            cl_uint compute_units = 0;
+            cl_ulong global_memory_bytes = 0;
+            cl_ulong local_memory_bytes = 0;
+            size_t max_work_group_size = 0;
+            cl_device_fp_config half_fp_config = 0;
+            const cl_int available_status = clGetDeviceInfo(
+                devices[d], CL_DEVICE_AVAILABLE, sizeof(device_available), &device_available, nullptr);
+            const cl_int compiler_status = clGetDeviceInfo(
+                devices[d], CL_DEVICE_COMPILER_AVAILABLE, sizeof(compiler_available), &compiler_available, nullptr);
+            const cl_int compute_status = clGetDeviceInfo(
+                devices[d], CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(compute_units), &compute_units, nullptr);
+            const cl_int global_mem_status = clGetDeviceInfo(
+                devices[d], CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(global_memory_bytes), &global_memory_bytes, nullptr);
+            const cl_int local_mem_status = clGetDeviceInfo(
+                devices[d], CL_DEVICE_LOCAL_MEM_SIZE, sizeof(local_memory_bytes), &local_memory_bytes, nullptr);
+            const cl_int work_group_status = clGetDeviceInfo(
+                devices[d], CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(max_work_group_size), &max_work_group_size, nullptr);
+            const cl_int half_fp_status = clGetDeviceInfo(
+                devices[d], CL_DEVICE_HALF_FP_CONFIG, sizeof(half_fp_config), &half_fp_config, nullptr);
+            const bool has_subgroup_extension =
+                device_extensions.find("cl_khr_subgroups") != std::string::npos ||
+                device_extensions.find("cl_intel_subgroups") != std::string::npos;
             append_native_trace((std::string("OPENCL_GPU_DEVICE index=") + std::to_string(i) +
-                "." + std::to_string(d) + " name=" +
-                device_info(CL_DEVICE_NAME) + " vendor=" +
-                device_info(CL_DEVICE_VENDOR) + " driver=" +
-                device_info(CL_DRIVER_VERSION) + " version=" +
-                device_info(CL_DEVICE_VERSION)).c_str());
+                "." + std::to_string(d) + " name=" + device_name +
+                " vendor=" + device_vendor + " driver=" + driver_version +
+                " version=" + device_version + " openclC=" + opencl_c_version).c_str());
+            append_native_trace((std::string("OPENCL_DEVICE_CAPABILITIES index=") +
+                std::to_string(i) + "." + std::to_string(d) +
+                " available=" + (available_status == CL_SUCCESS && device_available == CL_TRUE ? "1" : "0") +
+                " compilerAvailable=" + (compiler_status == CL_SUCCESS && compiler_available == CL_TRUE ? "1" : "0") +
+                " computeUnits=" + (compute_status == CL_SUCCESS ? std::to_string(compute_units) : "unknown") +
+                " globalMemoryBytes=" + (global_mem_status == CL_SUCCESS ? std::to_string(global_memory_bytes) : "unknown") +
+                " localMemoryBytes=" + (local_mem_status == CL_SUCCESS ? std::to_string(local_memory_bytes) : "unknown") +
+                " maxWorkGroupSize=" + (work_group_status == CL_SUCCESS ? std::to_string(max_work_group_size) : "unknown") +
+                " fp16=" + (half_fp_status == CL_SUCCESS && half_fp_config != 0 ? "1" : "0") +
+                " fp16Query=" + std::to_string((int)half_fp_status) +
+                " subgroupExtension=" + (has_subgroup_extension ? "1" : "0") +
+                " selectionPolicy=UPSTREAM_KERNEL_CAPABILITY_GATE").c_str());
         }
     }
     append_native_trace("OPENCL_DRIVER_PROBE_COMPLETED");
