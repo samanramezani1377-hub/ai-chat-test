@@ -329,7 +329,7 @@ class VoiceModelStore(
 
     private fun writeProtoString(out: ByteArrayOutputStream, field: Int, value: String) {
         val bytes = value.toByteArray(Charsets.UTF_8)
-        writeVarint(out, (field shl 3) or 2)
+        writeVarint(out, ((field shl 3) or 2).toLong())
         writeVarint(out, bytes.size.toLong())
         out.write(bytes)
     }
