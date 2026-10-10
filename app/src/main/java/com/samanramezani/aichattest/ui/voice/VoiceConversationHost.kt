@@ -14,6 +14,7 @@ import com.samanramezani.aichattest.voice.LocalStreamingAsr
 import com.samanramezani.aichattest.voice.VoiceModelEntry
 import com.samanramezani.aichattest.voice.VoiceModelKind
 import com.samanramezani.aichattest.voice.VoiceModelStore
+import com.samanramezani.aichattest.voice.PiperComponent
 import com.samanramezani.aichattest.voice.AsrUpdate
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.domain.InferenceSettings
@@ -75,6 +76,31 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             } finally { busy = false }
         }
     }
+    fun importPiperComponent(uri: Uri, component: PiperComponent, label: String) {
+        uiScope.launch {
+            busy = true
+            status = "در حال وارد کردن ${label} و آماده‌سازی مدل محلی…"
+            try {
+                val ready = withContext(Dispatchers.IO) { store.importPiperComponent(uri, component) }
+                refreshModels()
+                status = if (ready != null) "مدل fa_IR-amir-medium آمادهٔ استفاده است."
+                    else "فایل وارد شد. برای آماده‌شدن مدل Amir، هر سه مورد ONNX، JSON و espeak-ng-data باید وارد شوند."
+            } catch (t: Throwable) {
+                status = t.message ?: "VOICE-PIPER-IMPORT: وارد کردن جزء مدل Piper ناموفق بود."
+            } finally { busy = false }
+        }
+    }
+
+    val ttsModelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importPiperComponent(uri, PiperComponent.MODEL, "مدل ONNX")
+    }
+    val ttsConfigPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importPiperComponent(uri, PiperComponent.CONFIG, "تنظیمات Piper")
+    }
+    val espeakPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importPiperComponent(uri, PiperComponent.ESPEAK_DATA, "داده‌های آواشناسی")
+    }
+
     val ttsPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) uiScope.launch {
             busy = true
