@@ -109,6 +109,7 @@ static int g_cpu_default_threads = 0;
 static llama_context * g_cpu_tuned_context = nullptr;
 static std::string g_cpu_tuning_key;
 static std::string g_cpu_tuning_path;
+static unsigned cpu_threads_available_to_process();
 
 // Use a deterministic key so learned settings survive process restarts but never
 // leak from one model/context/device configuration to another.
@@ -119,12 +120,18 @@ static uint64_t cpu_tuning_hash(const std::string &value) {
 }
 static std::string cpu_tuning_identity(llama_context *ctx) {
     const std::string model = g_target_model_path.empty() ? "<unknown-model>" : g_target_model_path;
+    struct stat model_stat{};
+    const bool model_stat_ok = !g_target_model_path.empty() &&
+        stat(g_target_model_path.c_str(), &model_stat) == 0;
     const uint64_t hwcap = static_cast<uint64_t>(getauxval(AT_HWCAP));
     const uint64_t hwcap2 = static_cast<uint64_t>(getauxval(AT_HWCAP2));
-    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
-    return model + "|ctx=" + std::to_string(llama_n_ctx(ctx)) +
-        "|cores=" + std::to_string(cores) + "|hwcap=" + std::to_string(hwcap) +
-        "|hwcap2=" + std::to_string(hwcap2) + "|runtime=" + AI_CHAT_LLAMA_CPP_SHA;
+    const unsigned allowed_cores = cpu_threads_available_to_process();
+    return model + "|size=" + std::to_string(model_stat_ok ? model_stat.st_size : -1) +
+        "|mtime=" + std::to_string(model_stat_ok ? model_stat.st_mtime : 0) +
+        "|ctx=" + std::to_string(llama_n_ctx(ctx)) +
+        "|allowedCores=" + std::to_string(allowed_cores) +
+        "|hwcap=" + std::to_string(hwcap) + "|hwcap2=" + std::to_string(hwcap2) +
+        "|runtime=" + AI_CHAT_LLAMA_CPP_SHA;
 }
 static std::string cpu_tuning_store_path() {
     if (!g_cpu_tuning_path.empty()) return g_cpu_tuning_path;
