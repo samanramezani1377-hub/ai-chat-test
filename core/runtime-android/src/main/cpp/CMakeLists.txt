@@ -166,8 +166,9 @@ if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_UNASSIGNED_NODE_DIAGNOSTICS_V1")
     file(WRITE "${_ai_chat_backend_cpp}" "${_ai_chat_backend_source}")
 endif()
 file(READ "${_ai_chat_backend_cpp}" _ai_chat_unassigned_verify)
+string(FIND "${_ai_chat_backend_verify}" "GGML_ASSERT(*cur_backend_id != -1);" _ai_chat_stale_assert_location)
 if(NOT _ai_chat_unassigned_verify MATCHES "AI_CHAT_UNASSIGNED_NODE_DIAGNOSTICS_V1" OR
-   _ai_chat_unassigned_verify MATCHES "GGML_ASSERT\\(\\*cur_backend_id != -1\\);")
+   NOT _ai_chat_stale_assert_location EQUAL -1)
     message(FATAL_ERROR "Safe scheduler handling for unassigned graph nodes was not applied")
 endif()
 
@@ -237,6 +238,14 @@ extern "C" void ai_chat_append_native_trace(const char *) __attribute__((weak));
     endif()
     string(REPLACE "${_ai_chat_assignment_needle}" "${_ai_chat_assignment_replacement}" _ai_chat_backend_source "${_ai_chat_backend_source}")
     file(WRITE "${_ai_chat_backend_cpp}" "${_ai_chat_backend_source}")
+endif()
+# Ensure the scheduler's controlled error path has its required standard exception declaration,
+# including when CMake reconfigures an already-patched FetchContent checkout.
+file(READ "${_ai_chat_backend_cpp}" _ai_chat_backend_include_source)
+if(NOT _ai_chat_backend_include_source MATCHES "#include <stdexcept>")
+    string(REPLACE "#include <string>" "#include <string>\\n#include <stdexcept>"
+        _ai_chat_backend_include_source "${_ai_chat_backend_include_source}")
+    file(WRITE "${_ai_chat_backend_cpp}" "${_ai_chat_backend_include_source}")
 endif()
 file(READ "${_ai_chat_backend_cpp}" _ai_chat_backend_profile_verify)
 if(NOT _ai_chat_backend_profile_verify MATCHES "AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1")

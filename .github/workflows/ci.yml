@@ -158,7 +158,8 @@ jobs:
           grep -q 'AI_CHAT_BACKEND_ASSIGNMENT_PROFILE_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_UNASSIGNED_NODE_DIAGNOSTICS_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_UNSUPPORTED_GRAPH_OP' core/runtime-android/src/main/cpp/CMakeLists.txt
-          ! grep -q 'GGML_ASSERT(\\*cur_backend_id != -1);' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'throw std::runtime_error(ai_chat_support)' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q '#include <stdexcept>' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'GGML_LOG_DEBUG("%s' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'ai_chat_append_native_trace' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'extern "C" void ai_chat_append_native_trace' core/runtime-android/src/main/cpp/native_runtime.cpp
