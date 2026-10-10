@@ -34,6 +34,8 @@ internal fun VoiceConversationPage(
     activeTtsId: String?,
     onBack: () -> Unit,
     onImportStt: () -> Unit,
+    onImportSmallSttModel: () -> Unit,
+    onImportSmallSttTokens: () -> Unit,
     onImportTts: () -> Unit,
     onImportTtsModel: () -> Unit,
     onImportTtsConfig: () -> Unit,
@@ -65,14 +67,21 @@ internal fun VoiceConversationPage(
         Card {
             Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("مدل تشخیص گفتار (STT)", style = MaterialTheme.typography.titleMedium)
-                Text("برای فارسی می‌توانید بستهٔ Qwen3-ASR را وارد کنید؛ مدل‌های Streaming Transducer نیز پشتیبانی می‌شوند.", style = MaterialTheme.typography.bodySmall)
+                Text("مدل سبک فارسی Shenava Rizeh-Pizeh فقط ۶٫۹ میلیون پارامتر دارد. فایل model.onnx و tokens.txt را از صفحهٔ مدل دریافت و جداگانه وارد کنید؛ تشخیص نهایی پس از مکث کوتاه انجام می‌شود.", style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = onImportSmallSttModel, modifier = Modifier.fillMaxWidth()) { Text("۱. وارد کردن مدل سبک فارسی (.onnx)") }
+                OutlinedButton(onClick = onImportSmallSttTokens, modifier = Modifier.fillMaxWidth()) { Text("۲. وارد کردن واژگان مدل (tokens.txt)") }
+                Text("همچنین می‌توانید بسته‌های Qwen3-ASR یا Streaming Transducer را وارد کنید.", style = MaterialTheme.typography.bodySmall)
                 if (sttModels.isEmpty()) Text("هنوز مدل STT وارد نشده است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 sttModels.forEach { model ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(selected = model.id == activeSttId, onClick = { onSelectStt(model.id) })
                         Column(Modifier.weight(1f)) {
                             Text(model.title)
-                            Text(if (model.asrMode == "qwen3-asr") "محلی · Qwen3-ASR · پشتیبانی فارسی" else "محلی · Streaming Transducer", style = MaterialTheme.typography.labelSmall)
+                            Text(when (model.asrMode) {
+                                "qwen3-asr" -> "محلی · Qwen3-ASR"
+                                "nemo-ctc" -> "محلی · CTC سبک فارسی · 6.9M"
+                                else -> "محلی · Streaming Transducer"
+                            }, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
