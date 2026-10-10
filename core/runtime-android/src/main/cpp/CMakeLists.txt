@@ -56,6 +56,44 @@ set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
 
+# Android Vulkan stability mitigation: the pinned runtime auto-enables fused
+# DeepSeek V4 hyper-connection ops before backend support is known. Disable only
+# these optional fused variants on Android so unsupported fused graph nodes do not
+# reach the GPU-only scheduler with no eligible backend. This does not enable CPU
+# compute fallback; ordinary unfused graph ops still must be supported by Vulkan.
+set(_ai_chat_dsv4_context_cpp "${llama_cpp_SOURCE_DIR}/src/llama-context.cpp")
+file(READ "${_ai_chat_dsv4_context_cpp}" _ai_chat_dsv4_context_source)
+if(NOT _ai_chat_dsv4_context_source MATCHES "AI_CHAT_ANDROID_DISABLE_DSV4_HC_VULKAN_V1")
+    foreach(_ai_chat_dsv4_setting
+            "cparams.fused_dsv4_hc_pre  = true;"
+            "cparams.fused_dsv4_hc_comb = true;"
+            "cparams.fused_dsv4_hc_post = true;"
+            "cparams.auto_fhc           = true;")
+        string(FIND "${_ai_chat_dsv4_context_source}" "${_ai_chat_dsv4_setting}" _ai_chat_dsv4_location)
+        if(_ai_chat_dsv4_location EQUAL -1)
+            message(FATAL_ERROR "Could not locate pinned llama.cpp DSV4 HC setting: ${_ai_chat_dsv4_setting}")
+        endif()
+        string(REPLACE "${_ai_chat_dsv4_setting}"
+            "${_ai_chat_dsv4_setting}\n    // AI_CHAT_ANDROID_DISABLE_DSV4_HC_VULKAN_V1: unsupported fused ops disabled for Android Vulkan."
+            _ai_chat_dsv4_context_source "${_ai_chat_dsv4_context_source}")
+    endforeach()
+    # Replace the true setting itself, not merely annotate it.
+    string(REPLACE "cparams.fused_dsv4_hc_pre  = true;" "cparams.fused_dsv4_hc_pre  = false;"
+        _ai_chat_dsv4_context_source "${_ai_chat_dsv4_context_source}")
+    string(REPLACE "cparams.fused_dsv4_hc_comb = true;" "cparams.fused_dsv4_hc_comb = false;"
+        _ai_chat_dsv4_context_source "${_ai_chat_dsv4_context_source}")
+    string(REPLACE "cparams.fused_dsv4_hc_post = true;" "cparams.fused_dsv4_hc_post = false;"
+        _ai_chat_dsv4_context_source "${_ai_chat_dsv4_context_source}")
+    string(REPLACE "cparams.auto_fhc           = true;" "cparams.auto_fhc           = false;"
+        _ai_chat_dsv4_context_source "${_ai_chat_dsv4_context_source}")
+    file(WRITE "${_ai_chat_dsv4_context_cpp}" "${_ai_chat_dsv4_context_source}")
+endif()
+file(READ "${_ai_chat_dsv4_context_cpp}" _ai_chat_dsv4_context_verify)
+if(NOT _ai_chat_dsv4_context_verify MATCHES "AI_CHAT_ANDROID_DISABLE_DSV4_HC_VULKAN_V1" OR
+   _ai_chat_dsv4_context_verify MATCHES "cparams.auto_fhc[ ]*= true;")
+    message(FATAL_ERROR "Android Vulkan DSV4 HC stability mitigation was not applied")
+endif()
+
 # GPU-only scheduler contract for recurrent/hybrid models.
 # Keep llama.cpp's CPU backend registered for CPU-resident metadata/control
 # tensors (e.g. rs_seq, GGML_OP_NONE), but forbid CPU execution of computation
