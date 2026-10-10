@@ -620,6 +620,12 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
     sigemptyset(&default_action.sa_mask);
     default_action.sa_handler = SIG_DFL;
     sigaction(signal_number, &default_action, nullptr);
+    // A signal is blocked while its own handler runs. Unblock it before re-raising;
+    // otherwise raise() queues it and the following _exit() can pre-empt debuggerd.
+    sigset_t unblocked_signal;
+    sigemptyset(&unblocked_signal);
+    sigaddset(&unblocked_signal, signal_number);
+    sigprocmask(SIG_UNBLOCK, &unblocked_signal, nullptr);
     raise(signal_number);
     _exit(128 + signal_number);
 }
