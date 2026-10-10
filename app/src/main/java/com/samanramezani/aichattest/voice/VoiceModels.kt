@@ -373,9 +373,11 @@ class VoiceModelStore(
         // espeak-ng-data directory one or two levels deep, leaving the four runtime files
         // missing at the path sherpa-onnx actually consumes.
         if (hasRequiredEspeakData(expected)) return
+        // Archives are not consistent about the wrapper directory name: common variants
+        // include espeak-ng-data, espeak-ng-data-master, and versioned package folders.
+        // Identify the directory by its required runtime files, not by its name.
         val nested = staging.walkTopDown().firstOrNull {
-            it.isDirectory && it != staging && it != expected &&
-                it.name.equals("espeak-ng-data", true) && hasRequiredEspeakData(it)
+            it.isDirectory && it != staging && it != expected && hasRequiredEspeakData(it)
         }
         if (nested != null) {
             // Move the valid nested directory out first; it may be inside the current
