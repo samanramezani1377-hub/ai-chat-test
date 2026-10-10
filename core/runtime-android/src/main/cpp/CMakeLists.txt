@@ -76,6 +76,9 @@ set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
 
+# Add one-shot per-node CPU/OpenCL backend assignment logs for performance diagnostics.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_backend_assignment_trace.cmake")
+
 # Android OpenCL vendor libraries are often complete OpenCL implementations but
 # not ICDs. Patch only the pinned ggml OpenCL call sites to use our direct API
 # dispatcher; the Khronos loader remains linked for ABI compatibility but is not
