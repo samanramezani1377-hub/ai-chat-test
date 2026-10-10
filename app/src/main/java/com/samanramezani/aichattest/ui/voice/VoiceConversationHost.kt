@@ -17,6 +17,8 @@ import com.samanramezani.aichattest.voice.VoiceModelEntry
 import com.samanramezani.aichattest.voice.VoiceModelKind
 import com.samanramezani.aichattest.voice.VoiceModelStore
 import com.samanramezani.aichattest.voice.PiperComponent
+import com.samanramezani.aichattest.voice.SmallSttComponent
+import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.domain.InferenceSettings
 import kotlinx.coroutines.CancellationException
@@ -64,6 +66,28 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         ttsModels = store.list(VoiceModelKind.TTS)
         if (activeSttId !in sttModels.map { it.id }) activeSttId = sttModels.firstOrNull()?.id
         if (activeTtsId !in ttsModels.map { it.id }) activeTtsId = ttsModels.firstOrNull()?.id
+    }
+
+    fun importSmallSttComponent(uri: Uri, component: SmallSttComponent, label: String) {
+        uiScope.launch {
+            busy = true
+            status = "در حال وارد کردن ${label} مدل فارسی کوچک…"
+            try {
+                val ready = withContext(Dispatchers.IO) { store.importSmallPersianSttComponent(uri, component) }
+                refreshModels()
+                status = if (ready != null) "مدل کوچک Shenava Rizeh-Pizeh آماده است؛ تشخیص نهایی پس از مکث کوتاه گفتار انجام می‌شود."
+                    else "فایل وارد شد؛ برای آماده‌شدن مدل Shenava باید model.onnx و tokens.txt هر دو وارد شوند."
+            } catch (t: Throwable) {
+                status = t.message ?: "VOICE-STT-IMPORT: وارد کردن مدل کوچک فارسی ناموفق بود."
+            } finally { busy = false }
+        }
+    }
+
+    val smallSttModelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importSmallSttComponent(uri, SmallSttComponent.MODEL, "model.onnx")
+    }
+    val smallSttTokensPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importSmallSttComponent(uri, SmallSttComponent.TOKENS, "tokens.txt")
     }
 
     val sttPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -129,6 +153,8 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         activeTtsId = activeTtsId,
         onBack = onBack,
         onImportStt = { sttPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-bzip2", "application/octet-stream")) },
+        onImportSmallSttModel = { smallSttModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
+        onImportSmallSttTokens = { smallSttTokensPicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
         onImportTts = { ttsPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-bzip2", "application/octet-stream")) },
         onImportTtsModel = { ttsModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
         onImportTtsConfig = { ttsConfigPicker.launch(arrayOf("application/json", "text/json", "text/plain", "*/*")) },
@@ -175,7 +201,11 @@ private class VoiceConversationController(
             try {
                 onStatus("در حال آماده‌سازی موتورهای محلی صوت…")
                 val engines = withContext(Dispatchers.IO) {
-                    (if (stt.asrMode == "qwen3-asr") LocalQwen3Asr(stt) else LocalStreamingAsr(stt)) to LocalPiperTts(ttsModel)
+                    (when (stt.asrMode) {
+                        "qwen3-asr" -> LocalQwen3Asr(stt)
+                        "nemo-ctc" -> LocalNemoCtcAsr(stt)
+                        else -> LocalStreamingAsr(stt)
+                    }) to LocalPiperTts(ttsModel)
                 }
                 recognizer = engines.first
                 tts = engines.second
