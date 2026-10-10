@@ -52,6 +52,7 @@ jobs:
           :core:observability:test
           :core:runtime:test
           :core:runtime-android:test
+          :core:runtime-mnn:test
           :core:settings:test
           :app:testDebugUnitTest
           --stacktrace
@@ -88,6 +89,10 @@ jobs:
           path: |
             core/runtime-android/.cxx
             core/runtime-android/src/.cxx
+            core/runtime-mnn/.cxx
+            core/runtime-mnn/src/.cxx
+            core/runtime-mnn/.cxx
+            core/runtime-mnn/src/.cxx
           key: >-
             native-${{ runner.os }}-
             ${{ hashFiles(
@@ -98,6 +103,10 @@ jobs:
               'core/runtime-android/build.gradle.kts',
               'core/runtime-android/src/main/cpp/**',
               'core/runtime-android/src/main/cpp/cmake/**',
+              'core/runtime-mnn/build.gradle.kts',
+              'core/runtime-mnn/src/main/cpp/**',
+              'core/runtime-mnn/build.gradle.kts',
+              'core/runtime-mnn/src/main/cpp/**',
               '.github/workflows/ci.yml'
             ) }}
 
@@ -132,10 +141,20 @@ jobs:
           ! grep -q 'NATIVE_KV_CACHE_HYBRID_DISABLED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
           echo "OpenCL-first fallback policy, backend assignment, profiling, and KV-cache invariants verified"
 
+      - name: Verify MNN OpenCL-first fallback policy
+        run: |
+          set -euo pipefail
+          grep -q 'MNN_OPENCL_LOAD_FAILED fallback=cpu' core/runtime-mnn/src/main/cpp/mnn_runtime.cpp
+          grep -q 'MNN_OPENCL_GENERATION_FAILED retry=cpu' core/runtime-mnn/src/main/cpp/mnn_runtime.cpp
+          grep -q 'ModelFormat.MNN' app/src/main/java/com/samanramezani/aichattest/CompositeModelRuntimeAdapter.kt
+          grep -q 'MAX_UNPACKED_BYTES' app/src/main/java/com/samanramezani/aichattest/MnnModelPackImporter.kt
+          echo "MNN OpenCL-first load/generation fallback and safe model-pack import verified"
+
       - name: Assemble debug APK
         run: >-
           gradle
           :core:runtime-android:assembleDebug
+          :core:runtime-mnn:assembleDebug
           :app:assembleDebug
           --stacktrace
           --console=plain
