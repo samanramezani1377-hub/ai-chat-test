@@ -60,7 +60,7 @@ class VoiceModelStore(
         val model = staging.listFiles()?.any { it.isFile && it.extension.equals("onnx", true) && it.length() > 1024 } == true
         val config = File(staging, "model.onnx.json").isFile ||
             staging.listFiles()?.any { it.isFile && it.name.endsWith(".onnx.json", true) } == true
-        val espeak = File(staging, "espeak-ng-data").let { it.isDirectory && it.list()?.isNotEmpty() == true }
+        val espeak = hasRequiredEspeakData(File(staging, "espeak-ng-data"))
         return buildList {
             if (!model) add("فایل ONNX")
             if (!config) add("فایل JSON کنار مدل (معمولاً model.onnx.json)")
