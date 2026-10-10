@@ -217,7 +217,7 @@ private class VoiceConversationController(
     private suspend fun processTurn(utterance: String) {
         // A cancelled native TTS call may finish its current ONNX inference before returning.
         // Never enter the same native TTS object concurrently for a barge-in replacement turn.
-        speechJob?.takeIf { it.isActive }?.join()
+        speechJob?.takeIf { !it.isCompleted }?.join()
         val turnCancel = AtomicBoolean(false)
         cancelledSpeech.set(turnCancel)
         val queue = Channel<String>(Channel.UNLIMITED)
@@ -281,7 +281,7 @@ private class VoiceConversationController(
             activeSpeechJob.cancel()
         } catch (t: Throwable) {
             queue.close()
-            speechJob.cancel()
+            activeSpeechJob.cancel()
             onStatus("VOICE-CHAT-003: اجرای مکالمه ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
         } finally {
             speaking.set(false)
