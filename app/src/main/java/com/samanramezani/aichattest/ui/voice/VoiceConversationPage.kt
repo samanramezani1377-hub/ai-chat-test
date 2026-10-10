@@ -73,7 +73,7 @@ internal fun VoiceConversationPage(
                         }
                     }
                 }
-                OutlinedButton(onClick = onImportStt, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن بستهٔ STT (.zip)") }
+                OutlinedButton(onClick = onImportStt, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن بستهٔ STT (.zip یا .tar.bz2)") }
             }
         }
         Card {
@@ -89,7 +89,7 @@ internal fun VoiceConversationPage(
                         }
                     }
                 }
-                OutlinedButton(onClick = onImportTts, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن بستهٔ TTS (.zip)") }
+                OutlinedButton(onClick = onImportTts, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن بستهٔ TTS (.zip یا .tar.bz2)") }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
