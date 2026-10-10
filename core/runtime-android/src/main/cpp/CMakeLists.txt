@@ -166,7 +166,7 @@ if(NOT _ai_chat_backend_source MATCHES "AI_CHAT_UNASSIGNED_NODE_DIAGNOSTICS_V1")
     file(WRITE "${_ai_chat_backend_cpp}" "${_ai_chat_backend_source}")
 endif()
 file(READ "${_ai_chat_backend_cpp}" _ai_chat_unassigned_verify)
-string(FIND "${_ai_chat_backend_verify}" "GGML_ASSERT(*cur_backend_id != -1);" _ai_chat_stale_assert_location)
+string(FIND "${_ai_chat_unassigned_verify}" "GGML_ASSERT(*cur_backend_id != -1);" _ai_chat_stale_assert_location)
 if(NOT _ai_chat_unassigned_verify MATCHES "AI_CHAT_UNASSIGNED_NODE_DIAGNOSTICS_V1" OR
    NOT _ai_chat_stale_assert_location EQUAL -1)
     message(FATAL_ERROR "Safe scheduler handling for unassigned graph nodes was not applied")
