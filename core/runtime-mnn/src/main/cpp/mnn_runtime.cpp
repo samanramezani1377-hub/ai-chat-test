@@ -100,6 +100,7 @@ Java_com_woogit_aicore_runtime_mnn_MnnNative_nativeGenerate(JNIEnv* env, jclass,
     };
     std::string output;
     if (run(g_llm, output)) return env->NewStringUTF(output.c_str());
+    if (g_stop.load()) return env->NewStringUTF(output.c_str());
     if (g_backend == "opencl") {
         LOGW("MNN_OPENCL_GENERATION_FAILED retry=cpu partial_chars=%zu", output.size());
         if (create_and_load_locked(g_config_path, "cpu", g_cpu_threads)) {
