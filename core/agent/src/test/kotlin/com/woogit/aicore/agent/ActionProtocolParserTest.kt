@@ -29,6 +29,25 @@ class ActionProtocolParserTest {
     }
 
     @Test
+    fun parsesActionRequestAfterClosedQwenReasoningBlock() {
+        val intent = ActionProtocolParser().parse(
+            "Let me calculate this carefully.\\n</think>\\n{\\\"version\\\":1,\\\"actionId\\\":\\\"calc-2\\\",\\\"action\\\":\\\"calculate\\\",\\\"arguments\\\":{\\\"expression\\\":\\\"2+2\\\"}}"
+        )
+        requireNotNull(intent)
+        assertEquals("calculate", intent.actionId)
+        assertEquals("calc-2", intent.requestId)
+    }
+
+    @Test
+    fun stillRejectsOrdinaryProseWrappedAroundActionRequest() {
+        assertNull(
+            ActionProtocolParser().parse(
+                "Please run this: {\\\"version\\\":1,\\\"actionId\\\":\\\"req\\\",\\\"action\\\":\\\"calculate\\\",\\\"arguments\\\":{}}"
+            )
+        )
+    }
+
+    @Test
     fun rejectsWrongVersion() {
         assertNull(ActionProtocolParser().parse("{\"version\":2,\"actionId\":\"req\",\"action\":\"calculate\",\"arguments\":{}}"))
     }
