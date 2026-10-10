@@ -78,11 +78,20 @@ static bool init_generation_context() {
     cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
     cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 128);
     cp.n_rs_seq = 0;
-    // Let llama.cpp select the backend-safe attention implementation. The previous
-    // forced-disabled path expanded attention work and was a major mobile decode
-    // cost at 8K context. AUTO preserves the normal attention math while allowing
-    // OpenCL to use its optimized path when supported.
-    cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
+    // Keep optimized flash attention on a real OpenCL GPU, but disable it for
+    // CPU fallback on Android. The pinned llama.cpp revision can fail during
+    // repeated hybrid/recurrent prompt batches on the CPU FLASH_ATTN_EXT path
+    // (ggml_backend_sched_graph_compute_async -> GGML_STATUS_FAILED); this leaves
+    // generation with zero tokens after spending tens of seconds in prefill.
+    // Disabling the fused kernel changes the execution path, not model weights,
+    // quantization, sampling, or answer quality.
+    const bool use_opencl_attention = g_gpu && g_gpu_backend_loaded;
+    cp.flash_attn_type = use_opencl_attention
+        ? LLAMA_FLASH_ATTN_TYPE_AUTO
+        : LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    append_native_trace((std::string("NATIVE_ATTENTION_POLICY backend=") +
+        (use_opencl_attention ? "OPENCL_AUTO" : "CPU_FLASH_ATTN_DISABLED") +
+        " reason=" + (use_opencl_attention ? "gpu_backend_available" : "android_cpu_fallback_stability")).c_str());
     cp.type_k = GGML_TYPE_F16;
     cp.type_v = GGML_TYPE_F16;
     cp.offload_kqv = true;
