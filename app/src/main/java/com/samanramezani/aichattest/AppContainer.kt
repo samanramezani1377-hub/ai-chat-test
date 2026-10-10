@@ -34,6 +34,7 @@ import com.woogit.aicore.observability.CentralObservability
 import com.woogit.aicore.observability.ErrorReport
 import com.woogit.aicore.observability.ExecutionTraceEvent
 import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
+import com.woogit.aicore.runtime.mnn.MnnAndroidRuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
 import java.nio.file.Files
@@ -56,10 +57,12 @@ class AppContainer(context: Context? = null) {
         traceStore = appContext?.let { AndroidExecutionTraceStore(it) } ?: com.woogit.aicore.observability.InMemoryExecutionTraceStore(),
     )
 
-    val modelRuntime: RuntimeAdapter = LlamaCppAndroidRuntimeAdapter()
+    private val llamaRuntime = LlamaCppAndroidRuntimeAdapter()
+    private val mnnRuntime = MnnAndroidRuntimeAdapter()
+    val modelRuntime: RuntimeAdapter = CompositeModelRuntimeAdapter(llamaRuntime, mnnRuntime)
     val conversationHistory: ConversationHistoryRepository = appContext?.let { AndroidConversationHistoryRepository(it) } ?: InMemoryConversationHistoryRepository()
     val modelManager: AndroidModelManager? = appContext?.let {
-        AndroidModelManager(it.contentResolver, it, it.filesDir.toPath().resolve("models"), modelRuntime as LlamaCppAndroidRuntimeAdapter)
+        AndroidModelManager(it.contentResolver, it, it.filesDir.toPath().resolve("models"), llamaRuntime, mnnRuntime, modelRuntime)
     }
 
     val actionRegistry: ActionRegistry = DefaultActionRegistry().also { registry ->
