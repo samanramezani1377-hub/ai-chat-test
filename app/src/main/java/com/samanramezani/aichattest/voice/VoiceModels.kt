@@ -267,18 +267,29 @@ class VoiceModelStore(
         val config = File(staging, "model.onnx.json")
         if (!config.isFile || config.length() == 0L) return null
         val espeak = File(staging, "espeak-ng-data")
-        if (!espeak.isDirectory || espeak.list()?.isEmpty() != false) return null
+        requireEspeakData(espeak, "VOICE-PIPER-017")
 
-        val json = JSONObject(config.readText(Charsets.UTF_8))
+        val json = try {
+            JSONObject(config.readText(Charsets.UTF_8))
+        } catch (t: Throwable) {
+            error("VOICE-PIPER-006: فایل JSON مدل Piper خراب یا نامعتبر است: ${t.message ?: t.javaClass.simpleName}")
+        }
+        require(json.has("phoneme_id_map") && json.has("audio") && json.has("language") && json.has("espeak")) {
+            "VOICE-PIPER-006: پیکربندی Piper فاقد phoneme_id_map یا اطلاعات زبان/صدا است."
+        }
         val phonemeMap = json.getJSONObject("phoneme_id_map")
         val tokens = mutableListOf<Pair<Int, String>>()
         val keys = phonemeMap.keys()
         while (keys.hasNext()) {
             val symbol = keys.next()
             val ids = phonemeMap.getJSONArray(symbol)
+            // Match sherpa-onnx's official Piper conversion: one token entry per
+            // phoneme, using the first ID in Piper's phoneme_id_map array.
             if (ids.length() > 0) tokens += ids.getInt(0) to symbol
         }
-        require(tokens.isNotEmpty()) { "VOICE-PIPER-006: نگاشت واج‌های مدل خالی است." }
+        require(tokens.isNotEmpty() && tokens.any { it.first == 0 }) {
+            "VOICE-PIPER-006: نگاشت واج‌های مدل خالی است یا شناسهٔ صفر ندارد."
+        }
         File(staging, "tokens.txt").writeText(tokens.sortedBy { it.first }.joinToString("\n") { "${it.second} ${it.first}" } + "\n", Charsets.UTF_8)
 
         val language = json.optJSONObject("language")?.optString("name_english", "Persian") ?: "Persian"
@@ -417,6 +428,18 @@ class VoiceModelStore(
         out.write(value.toInt())
     }
 
+    private fun hasRequiredEspeakData(directory: File): Boolean =
+        directory.isDirectory && listOf("phontab", "phonindex", "phondata", "intonations")
+            .all { File(directory, it).isFile && File(directory, it).length() > 0L }
+
+    private fun requireEspeakData(directory: File, code: String) {
+        val missing = listOf("phontab", "phonindex", "phondata", "intonations")
+            .filter { !File(directory, it).let { file -> file.isFile && file.length() > 0L } }
+        require(missing.isEmpty()) {
+            "$code: داده‌های espeak-ng ناقص است؛ فایل‌های مفقود/خالی: ${missing.joinToString()}. بستهٔ رسمی espeak-ng-data.tar.bz2 را دوباره وارد کنید."
+        }
+    }
+
     private fun findCandidateRoot(staging: File, kind: VoiceModelKind): File? =
         staging.walkTopDown().filter { it.isDirectory }.firstOrNull { validateDirectory(it, kind) != null }
 
@@ -433,7 +456,8 @@ class VoiceModelStore(
                 } ?: return null
                 val data = directory.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }
                     ?: return null
-                if (data.list()?.isEmpty() != false) return null
+                if (!hasRequiredEspeakData(data)) return null
+                if (model.length() <= 1024 || tokens.length() == 0L) return null
                 VoiceModelEntry(directory.name, model.nameWithoutExtension, kind, directory, model, tokensFile = tokens, dataDirectory = data)
             }
             VoiceModelKind.STT -> {
