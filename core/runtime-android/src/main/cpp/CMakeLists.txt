@@ -1,1 +1,1 @@
-cmake content truncated
+RESTORE_FROM_GOOD
