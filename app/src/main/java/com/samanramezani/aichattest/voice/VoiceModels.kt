@@ -28,6 +28,9 @@ data class VoiceModelEntry(
     val decoder: File? = null,
     val joiner: File? = null,
     val modelType: String = "zipformer",
+    val asrMode: String = "online-transducer",
+    val convFrontend: File? = null,
+    val tokenizerDirectory: File? = null,
 )
 
 /**
@@ -278,9 +281,9 @@ class VoiceModelStore(
 
     private fun validateDirectory(directory: File, kind: VoiceModelKind): VoiceModelEntry? {
         val files = directory.walkTopDown().filter { it.isFile }.toList()
-        val tokens = files.firstOrNull { it.name.equals("tokens.txt", true) } ?: return null
         return when (kind) {
             VoiceModelKind.TTS -> {
+                val tokens = files.firstOrNull { it.name.equals("tokens.txt", true) } ?: return null
                 val model = files.firstOrNull {
                     it.extension.equals("onnx", true) &&
                         !it.name.contains("encoder", true) &&
@@ -293,16 +296,30 @@ class VoiceModelStore(
                 VoiceModelEntry(directory.name, model.nameWithoutExtension, kind, directory, model, tokensFile = tokens, dataDirectory = data)
             }
             VoiceModelKind.STT -> {
+                val convFrontend = files.firstOrNull { it.name.equals("conv_frontend.onnx", true) }
+                val tokenizer = directory.walkTopDown().firstOrNull { it.isDirectory && it.name.equals("tokenizer", true) }
                 val encoder = files.firstOrNull { it.name.contains("encoder", true) && it.extension.equals("onnx", true) } ?: return null
                 val decoder = files.firstOrNull { it.name.contains("decoder", true) && it.extension.equals("onnx", true) } ?: return null
+                if (convFrontend != null && tokenizer != null) {
+                    return VoiceModelEntry(
+                        directory.name, "Qwen3-ASR · فارسی", kind, directory, convFrontend,
+                        encoder = encoder, decoder = decoder, modelType = "qwen3-asr",
+                        asrMode = "qwen3-asr", convFrontend = convFrontend, tokenizerDirectory = tokenizer,
+                    )
+                }
                 val joiner = files.firstOrNull { it.name.contains("joiner", true) && it.extension.equals("onnx", true) } ?: return null
-                val path = encoder.absolutePath.lowercase()
+                val tokens = files.firstOrNull { it.name.equals("tokens.txt", true) } ?: return null
+                val modelPath = encoder.absolutePath.lowercase()
                 val modelType = when {
-                    path.contains("lstm") -> "lstm"
-                    path.contains("zipformer2") || path.contains("chunk-16-left") -> "zipformer2"
+                    modelPath.contains("lstm") -> "lstm"
+                    modelPath.contains("zipformer2") || modelPath.contains("chunk-16-left") -> "zipformer2"
                     else -> "zipformer"
                 }
-                VoiceModelEntry(directory.name, directory.name, kind, directory, encoder, tokensFile = tokens, encoder = encoder, decoder = decoder, joiner = joiner, modelType = modelType)
+                VoiceModelEntry(
+                    directory.name, directory.name, kind, directory, encoder, tokensFile = tokens,
+                    encoder = encoder, decoder = decoder, joiner = joiner, modelType = modelType,
+                    asrMode = "online-transducer",
+                )
             }
         }
     }
