@@ -273,7 +273,13 @@ class VoiceModelStore(
         val config = File(staging, "model.onnx.json")
         if (!config.isFile || config.length() == 0L) return null
         val espeak = File(staging, "espeak-ng-data")
-        requireEspeakData(espeak, "VOICE-PIPER-017")
+        if (!hasRequiredEspeakData(espeak)) {
+            // Import is intentionally multi-step. A missing espeak archive while importing
+            // the ONNX or JSON component is an incomplete import, not a fatal error.
+            // Validate strictly only after the user has actually supplied the archive.
+            if (component != PiperComponent.ESPEAK_DATA) return null
+            requireEspeakData(espeak, "VOICE-PIPER-017")
+        }
 
         val json = try {
             JSONObject(config.readText(Charsets.UTF_8))
