@@ -74,7 +74,7 @@ class AndroidModelManager(
         return ModelResult.Success((gguf as ModelResult.Success).value + (mnn as ModelResult.Success).value)
     }
 
-    private fun importMnnPack(uri: Uri): ModelResult<ModelDescriptor> {
+    private suspend fun importMnnPack(uri: Uri): ModelResult<ModelDescriptor> {
         var extracted: ModelDescriptor? = null
         return try {
             Files.createDirectories(mnnRoot)
