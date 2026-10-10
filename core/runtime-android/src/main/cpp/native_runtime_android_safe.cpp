@@ -104,6 +104,7 @@ struct CpuThreadTuningState { int attempts = 0; int samples = 0; double ema_toke
 static std::map<int, CpuThreadTuningState> g_cpu_thread_tuning;
 static int g_cpu_thread_trial_count = 0;
 static int g_cpu_default_threads = 0;
+static llama_context * g_cpu_tuned_context = nullptr;
 
 static std::vector<int> cpu_thread_candidates() {
     unsigned cores = std::max(1u, std::thread::hardware_concurrency());
@@ -126,7 +127,14 @@ static int best_measured_cpu_threads() {
 static int choose_cpu_thread_trial() {
     if (!g_context || g_gpu || g_spec_requested || g_spec) return 0;
     const int current = std::max(1, (int) llama_n_threads(g_context));
-    if (g_cpu_default_threads == 0) g_cpu_default_threads = current;
+    if (g_cpu_tuned_context != g_context) {
+        g_cpu_tuned_context = g_context;
+        g_cpu_thread_tuning.clear();
+        g_cpu_thread_trial_count = 0;
+        g_cpu_default_threads = current;
+    } else if (g_cpu_default_threads == 0) {
+        g_cpu_default_threads = current;
+    }
     const auto candidates = cpu_thread_candidates();
     int min_attempts = std::numeric_limits<int>::max();
     for (int candidate : candidates)
