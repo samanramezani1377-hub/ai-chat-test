@@ -232,8 +232,8 @@ private fun sanitizeAssistantVoiceText(raw: String): String {
         .replace(Regex("(?<!\\w)[*_~](?=\\S)|(?<=\\S)[*_~](?!\\w)"), "")
         .replace(Regex("(?is)<[^>]+>"), " ")
         .replace(Regex("[ \\t]+"), " ")
-        .replace(Regex(" *\\n *"), "\\n")
-        .replace(Regex("\\n{3,}"), "\\n\\n")
+        .replace(Regex(" *\\n *")) { "\n" }
+        .replace(Regex("\\n{3,}")) { "\n\n" }
         .trim()
     // Also discard orphaned reasoning markers from malformed model output.
     val marker = Regex("(?i)<think\\s*/?>")
