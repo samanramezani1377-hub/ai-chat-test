@@ -23,6 +23,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
@@ -160,6 +161,7 @@ private class VoiceConversationController(
     private var tts: LocalPiperTts? = null
     private var frameJob: Job? = null
     private var turnJob: Job? = null
+    private var speechJob: Job? = null
     private var conversationId: String? = null
     private var closed = false
 
@@ -174,7 +176,7 @@ private class VoiceConversationController(
                 recognizer = engines.first
                 tts = engines.second
                 if (conversationId == null) conversationId = container.conversationHistory.create("مکالمه صوتی").id
-                val frames = Channel<LocalMicrophone.Frame>(capacity = 16)
+                val frames = Channel<LocalMicrophone.Frame>(capacity = 64)
                 val mic = LocalMicrophone()
                 microphone = mic
                 mic.start { frame -> frames.trySend(frame) }
@@ -213,10 +215,13 @@ private class VoiceConversationController(
     }
 
     private suspend fun processTurn(utterance: String) {
+        // A cancelled native TTS call may finish its current ONNX inference before returning.
+        // Never enter the same native TTS object concurrently for a barge-in replacement turn.
+        speechJob?.takeIf { it.isActive }?.join()
         val turnCancel = AtomicBoolean(false)
         cancelledSpeech.set(turnCancel)
         val queue = Channel<String>(Channel.UNLIMITED)
-        val speechJob = scope.launch {
+        val activeSpeechJob = scope.launch {
             try {
                 for (segment in queue) {
                     if (turnCancel.get()) break
@@ -235,6 +240,7 @@ private class VoiceConversationController(
                 onStatus("VOICE-TTS-005: تولید یا پخش گفتار ناموفق بود: ${t.message ?: "نامشخص"}")
             }
         }
+        speechJob = activeSpeechJob
         val pending = StringBuilder()
         fun enqueueCompleteSentences(token: String, flush: Boolean = false) {
             for (char in token) {
@@ -263,16 +269,16 @@ private class VoiceConversationController(
             if (!turnCancel.get()) {
                 enqueueCompleteSentences("", flush = true)
                 queue.close()
-                speechJob.join()
+                activeSpeechJob.join()
                 if (result.generation.text.isNotBlank()) onLine("دستیار", result.generation.text)
                 onStatus(if (speaking.get()) "در حال پخش پاسخ…" else "پاسخ آماده است؛ می‌توانید صحبت کنید.")
             } else {
                 queue.close()
-                speechJob.cancel()
+                activeSpeechJob.cancel()
             }
         } catch (t: CancellationException) {
             queue.close()
-            speechJob.cancel()
+            activeSpeechJob.cancel()
         } catch (t: Throwable) {
             queue.close()
             speechJob.cancel()
@@ -280,6 +286,7 @@ private class VoiceConversationController(
         } finally {
             speaking.set(false)
             cancelledSpeech.compareAndSet(turnCancel, null)
+            if (speechJob === activeSpeechJob) speechJob = null
             turnRunning.set(false)
         }
     }
@@ -290,22 +297,31 @@ private class VoiceConversationController(
         scope.launch { container.modelManager?.stopGeneration() }
         turnJob?.cancel(CancellationException("barge-in"))
         turnJob = null
+        speechJob?.cancel()
         turnRunning.set(false)
         onStatus(message)
     }
 
-    fun stop() {
-        frameJob?.cancel()
+    fun stop(): Job {
+        val oldFrameJob = frameJob
         frameJob = null
-        turnJob?.cancel()
+        oldFrameJob?.cancel()
+        val oldTurnJob = turnJob
         turnJob = null
+        oldTurnJob?.cancel()
+        val oldSpeechJob = speechJob
+        oldSpeechJob?.cancel()
         cancelledSpeech.getAndSet(null)?.set(true)
         speaking.set(false)
-        microphone?.stop()
+        val oldMicrophone = microphone
         microphone = null
-        cleanupEngines()
-        onListening(false)
-        onStatus("مکالمه متوقف شد.")
+        oldMicrophone?.stop()
+        return scope.launch {
+            listOfNotNull(oldFrameJob, oldTurnJob, oldSpeechJob).joinAll()
+            cleanupEngines()
+            onListening(false)
+            onStatus("مکالمه متوقف شد.")
+        }
     }
 
     private fun cleanupEngines() {
@@ -315,7 +331,6 @@ private class VoiceConversationController(
 
     fun close() {
         closed = true
-        stop()
-        scope.cancel()
+        stop().invokeOnCompletion { scope.cancel() }
     }
 }
