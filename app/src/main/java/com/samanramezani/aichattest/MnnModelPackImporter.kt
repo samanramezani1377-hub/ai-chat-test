@@ -53,7 +53,7 @@ internal class MnnModelPackImporter {
                     .findFirst().orElseThrow { IllegalArgumentException("ZIP is not an exported MNN LLM pack: config.json, llm.mnn and llm.mnn.weight must be together") }
             }
             val modelDir = config.parent
-            val bytes = Files.walk(modelDir).use { paths -> paths.filter(Files::isRegularFile).mapToLong { Files.size(it) }.sum() }
+            val bytes = Files.walk(modelDir).use { paths -> paths.filter { Files.isRegularFile(it) }.mapToLong { Files.size(it) }.sum() }
             val name = modelDir.fileName?.toString()?.takeIf { it.isNotBlank() } ?: "MNN model"
             val finalDir = root.resolve("model-${UUID.randomUUID()}")
             Files.move(modelDir, finalDir)
