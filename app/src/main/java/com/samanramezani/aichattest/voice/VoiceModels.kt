@@ -2,9 +2,13 @@ package com.samanramezani.aichattest.voice
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.provider.OpenableColumns
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.util.zip.ZipInputStream
+import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 
 enum class VoiceModelKind { STT, TTS }
 
@@ -45,46 +49,65 @@ class VoiceModelStore(
         val staging = File(root, ".import-${System.currentTimeMillis()}")
         if (!staging.mkdirs()) error("VOICE-IMPORT-001: ایجاد پوشه موقت مدل ناموفق بود.")
         try {
-            val input = resolver.openInputStream(uri)
+            val archiveName = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0).orEmpty() else "" }.orEmpty()
+            val source = resolver.openInputStream(uri)
                 ?: error("VOICE-IMPORT-002: فایل انتخاب‌شده قابل خواندن نیست.")
             var count = 0
             var expandedBytes = 0L
-            input.use { source ->
-                ZipInputStream(source).use { zip ->
-                    while (true) {
-                        val item = zip.nextEntry ?: break
-                        count++
-                        require(count <= MAX_ENTRIES) { "VOICE-IMPORT-003: تعداد فایل‌های بسته مدل بیش از حد مجاز است." }
-                        val name = item.name.replace('\\', '/')
-                        require(!name.startsWith("/") && name.split('/').none { it == ".." }) {
-                            "VOICE-IMPORT-004: مسیر نامعتبر داخل بسته مدل وجود دارد."
-                        }
-                        val target = File(staging, name).canonicalFile
-                        require(target.toPath().startsWith(staging.canonicalFile.toPath())) {
-                            "VOICE-IMPORT-004: مسیر نامعتبر داخل بسته مدل وجود دارد."
-                        }
-                        if (item.isDirectory) target.mkdirs() else {
-                            target.parentFile?.mkdirs()
-                            FileOutputStream(target).use { out ->
-                                val buffer = ByteArray(64 * 1024)
-                                while (true) {
-                                    val n = zip.read(buffer)
-                                    if (n < 0) break
-                                    expandedBytes += n
-                                    require(expandedBytes <= MAX_EXPANDED_BYTES) {
-                                        "VOICE-IMPORT-005: حجم استخراج‌شده بسته از حد مجاز بیشتر است."
-                                    }
-                                    out.write(buffer, 0, n)
-                                }
+
+            fun extract(nameValue: String, isDirectory: Boolean, entryStream: InputStream) {
+                count++
+                require(count <= MAX_ENTRIES) { "VOICE-IMPORT-003: تعداد فایل‌های بسته مدل بیش از حد مجاز است." }
+                val name = nameValue.replace('\\\\', '/')
+                require(!name.startsWith("/") && name.split('/').none { it == ".." }) {
+                    "VOICE-IMPORT-004: مسیر نامعتبر داخل بسته مدل وجود دارد."
+                }
+                val target = File(staging, name).canonicalFile
+                require(target.toPath().startsWith(staging.canonicalFile.toPath())) {
+                    "VOICE-IMPORT-004: مسیر نامعتبر داخل بسته مدل وجود دارد."
+                }
+                if (isDirectory) {
+                    target.mkdirs()
+                } else {
+                    target.parentFile?.mkdirs()
+                    FileOutputStream(target).use { out ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val n = entryStream.read(buffer)
+                            if (n < 0) break
+                            expandedBytes += n
+                            require(expandedBytes <= MAX_EXPANDED_BYTES) {
+                                "VOICE-IMPORT-005: حجم استخراج‌شده بسته از حد مجاز بیشتر است."
                             }
+                            out.write(buffer, 0, n)
                         }
-                        zip.closeEntry()
                     }
                 }
             }
+
+            source.use { stream ->
+                if (archiveName.endsWith(".tar.bz2", ignoreCase = true) || archiveName.endsWith(".tbz2", ignoreCase = true)) {
+                    TarArchiveInputStream(BZip2CompressorInputStream(stream)).use { tar ->
+                        while (true) {
+                            val item = tar.nextTarEntry ?: break
+                            extract(item.name, item.isDirectory, tar)
+                        }
+                    }
+                } else {
+                    ZipInputStream(stream).use { zip ->
+                        while (true) {
+                            val item = zip.nextEntry ?: break
+                            extract(item.name, item.isDirectory, zip)
+                            zip.closeEntry()
+                        }
+                    }
+                }
+            }
+
             val candidate = findCandidateRoot(staging, kind)
                 ?: error(if (kind == VoiceModelKind.TTS)
-                    "VOICE-TTS-001: بسته TTS معتبر نیست. فایل مدل، tokens.txt و پوشه espeak-ng-data لازم است."
+                    "VOICE-TTS-001: بسته TTS معتبر نیست. بستهٔ تبدیل‌شدهٔ Piper/VITS همراه tokens.txt و پوشه espeak-ng-data لازم است."
                 else
                     "VOICE-STT-001: بسته STT معتبر نیست. فایل‌های encoder/decoder/joiner و tokens.txt لازم است.")
             val id = "${kind.name.lowercase()}-${candidate.name.replace(Regex("[^A-Za-z0-9._-]"), "_")}-${System.currentTimeMillis()}"
