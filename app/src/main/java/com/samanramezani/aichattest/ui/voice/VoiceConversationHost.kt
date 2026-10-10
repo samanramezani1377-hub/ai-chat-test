@@ -384,7 +384,9 @@ private class VoiceConversationController(
         } finally {
             speaking.set(false)
             cancelledSpeech.compareAndSet(turnCancel, null)
-            if (speechJob === activeSpeechJob) speechJob = null
+            // Keep a cancelled TTS job referenced until it actually completes; the next turn joins it
+            // before entering the same native Piper engine again.
+            if (speechJob === activeSpeechJob && activeSpeechJob.isCompleted) speechJob = null
             turnRunning.set(false)
             bargeInTriggered.set(false)
             val pending = pendingUtterance.getAndSet(null)
