@@ -4,7 +4,6 @@
 #include <atomic>
 #include <exception>
 #include <filesystem>
-#include <iomanip>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -116,9 +115,10 @@ static bool create_and_load_locked(const std::string& config, const char* backen
             else g_cpu_load_error = g_last_load_error;
             return false;
         }
+        // Match the upstream MNN app pattern: preserve model-pack settings and
+        // override only the backend selector and its documented thread/GPU mode.
         const std::string overrideConfig = std::string(R"({"backend_type":")") + backend +
-            R"(","thread_num":)" + std::to_string(threads) +
-            R"(,"precision":"low","memory":"low","use_mmap":true})";
+            R"(","thread_num":)" + std::to_string(threads) + "}";
         if (!candidate->set_config(overrideConfig)) {
             g_last_load_error = std::string("set_config rejected override; backend=") + backend +
                 "; override=" + overrideConfig + "; config=" + config +
