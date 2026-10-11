@@ -125,9 +125,9 @@ static bool load_with_fallback_locked(const std::string& config, int threads) {
     g_opencl_load_error = "not_attempted";
     g_cpu_load_error = "not_attempted";
     g_last_load_error = "not_attempted";
-    // OpenCL's thread_num is an MNN GPU-mode selector, not CPU threads.
-    // Use the documented buffer-mode setting rather than the previous value 68.
-    if (create_and_load_locked(config, "opencl", 4)) {
+    // MNN documents thread_num=68 for its OpenCL LLM backend. This is a
+    // backend mode selector, not a CPU thread count; CPU uses g_cpu_threads.
+    if (create_and_load_locked(config, "opencl", 68)) {
         LOGI("MNN_BACKEND_SELECTED backend=opencl policy=opencl-first");
         return true;
     }
