@@ -49,10 +49,10 @@ static std::string pack_diagnostics(const std::string& config) {
     std::ostringstream out;
     out << "config=" << file_probe(configPath)
         << "; llm_config=" << file_probe(dir / "llm_config.json")
-        << "; model=" << file_probe(dir / "llm.mnn")
-        << "; weight=" << file_probe(dir / "llm.mnn.weight")
-        << "; tokenizer_txt=" << file_probe(dir / "tokenizer.txt")
-        << "; tokenizer_mtok=" << file_probe(dir / "tokenizer.mtok")
+        << "; default_model_probe=" << file_probe(dir / "llm.mnn")
+        << "; default_weight_probe=" << file_probe(dir / "llm.mnn.weight")
+        << "; default_tokenizer_txt_probe=" << file_probe(dir / "tokenizer.txt")
+        << "; default_tokenizer_mtok_probe=" << file_probe(dir / "tokenizer.mtok")
         << "; context=" << file_probe(dir / "context.json");
     return out.str();
 }
