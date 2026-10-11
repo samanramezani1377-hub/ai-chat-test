@@ -37,6 +37,9 @@ class MnnAndroidRuntimeAdapter(private val cpuThreads: Int = 4) : RuntimeAdapter
         if (loadedConfig == config.absolutePath && backend != "unloaded") return@withLock
         runCatching { MnnNative.nativeUnload() }
         var loadError: Throwable? = null
+        RuntimeDiagnosticsStore.recordNativeEvent(
+            "MNN_LOAD_BEGIN config=${config.absolutePath} configBytes=${config.length()} cpuThreads=${cpuThreads.coerceIn(1, 8)} policy=opencl-first"
+        )
         val elapsed = measureTimeMillis {
             try {
                 val selection = MnnNative.nativeLoad(config.absolutePath, cpuThreads)
@@ -49,6 +52,11 @@ class MnnAndroidRuntimeAdapter(private val cpuThreads: Int = 4) : RuntimeAdapter
                 loadError = t
                 backend = "failed"
                 loadedConfig = null
+                // Preserve the concrete native/MNN failure in the diagnostic timeline.
+                // Do not let a later stop-request event hide the model-load root cause.
+                RuntimeDiagnosticsStore.recordNativeEvent(
+                    "MNN_LOAD_FAILED elapsedMs=${lastLoadMs ?: -1} error=${(t.message ?: t.javaClass.simpleName).take(10000)}"
+                )
             }
         }
         lastLoadMs = elapsed
