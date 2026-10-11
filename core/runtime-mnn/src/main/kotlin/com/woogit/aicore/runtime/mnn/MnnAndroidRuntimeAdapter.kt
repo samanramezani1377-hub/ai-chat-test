@@ -52,15 +52,17 @@ class MnnAndroidRuntimeAdapter(private val cpuThreads: Int = 4) : RuntimeAdapter
                 loadError = t
                 backend = "failed"
                 loadedConfig = null
-                // Preserve the concrete native/MNN failure in the diagnostic timeline.
-                // Do not let a later stop-request event hide the model-load root cause.
-                RuntimeDiagnosticsStore.recordNativeEvent(
-                    "MNN_LOAD_FAILED elapsedMs=${lastLoadMs ?: -1} error=${(t.message ?: t.javaClass.simpleName).take(10000)}"
-                )
             }
         }
         lastLoadMs = elapsed
-        loadError?.let { throw IllegalStateException("MNN could not load on OpenCL or CPU: ${it.message}", it) }
+        loadError?.let {
+            // Preserve the concrete native/MNN failure in the diagnostic timeline.
+            // Do not let a later stop-request event hide the model-load root cause.
+            RuntimeDiagnosticsStore.recordNativeEvent(
+                "MNN_LOAD_FAILED elapsedMs=$elapsed error=${(it.message ?: it.javaClass.simpleName).take(10000)}"
+            )
+            throw IllegalStateException("MNN could not load on OpenCL or CPU: ${it.message}", it)
+        }
         lastResult = null
     }
 
