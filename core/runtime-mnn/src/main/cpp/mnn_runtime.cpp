@@ -30,7 +30,7 @@ namespace fs = std::filesystem;
 static std::string bounded(std::string value, size_t limit = 12000) {
     if (value.size() > limit) {
         value.resize(limit);
-        value += "\\n[MNN_LOG_TRUNCATED]";
+        value += "\n[MNN_LOG_TRUNCATED]";
     }
     return value;
 }
