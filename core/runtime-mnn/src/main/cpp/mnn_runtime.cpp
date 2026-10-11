@@ -154,19 +154,21 @@ static bool create_and_load_locked(const std::string& config, const char* backen
         g_backend = backend;
         return true;
     } catch (const std::exception& error) {
-        if (candidate) Llm::destroy(candidate);
+        const std::string mnnLog = take_mnn_log(candidate);
+        if (candidate) { Llm::destroy(candidate); candidate = nullptr; }
         g_last_load_error = std::string("exception; backend=") + backend + "; message=" + error.what() +
             "; config=" + config + "; pack={" + pack_diagnostics(config) + "}" +
-            "; MNN_internal_log=" + take_mnn_log(candidate);
+            "; MNN_internal_log=" + mnnLog;
         if (std::string(backend) == "opencl") g_opencl_load_error = g_last_load_error;
         else g_cpu_load_error = g_last_load_error;
         LOGE("MNN_LOAD_EXCEPTION backend=%s message=%s", backend, error.what());
         return false;
     } catch (...) {
-        if (candidate) Llm::destroy(candidate);
+        const std::string mnnLog = take_mnn_log(candidate);
+        if (candidate) { Llm::destroy(candidate); candidate = nullptr; }
         g_last_load_error = std::string("unknown exception; backend=") + backend +
             "; config=" + config + "; pack={" + pack_diagnostics(config) + "}" +
-            "; MNN_internal_log=" + take_mnn_log(candidate);
+            "; MNN_internal_log=" + mnnLog;
         if (std::string(backend) == "opencl") g_opencl_load_error = g_last_load_error;
         else g_cpu_load_error = g_last_load_error;
         LOGE("MNN_LOAD_EXCEPTION backend=%s message=unknown", backend);
