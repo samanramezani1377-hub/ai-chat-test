@@ -62,6 +62,19 @@ class AndroidModelManager(
         if (displayName.endsWith(".zip", ignoreCase = true) || displayName.endsWith(".mnnpack", ignoreCase = true) || mimeType == "application/zip" || mimeType == "application/x-zip-compressed" || zipMagic) {
             return@withContext importMnnPack(uri)
         }
+
+        // Recognize individual MNN files in the standard model picker. Do not
+        // stage them as .gguf files: the GGUF importer rejects their format.
+        val mnnComponentNames = setOf("config.json", "llm.mnn", "llm.mnn.weight", "llm_config.json", "tokenizer.txt")
+        if (displayName.lowercase() in mnnComponentNames) {
+            return@withContext when (val result = importMnnComponent(uri, displayName.lowercase())) {
+                is ModelResult.Success -> result.value?.let { ModelResult.Success(it) }
+                    ?: ModelResult.Failure(ModelError.InvalidModel(
+                        "فایل $displayName ذخیره شد، اما بستهٔ MNN هنوز کامل نیست. فایل‌های باقی‌مانده را از بخش واردکردن فایل‌های MNN اضافه کن."
+                    ))
+                is ModelResult.Failure -> result
+            }
+        }
         try {
             Files.createDirectories(root)
             val staged = Files.createTempFile(root, "import-", ".gguf")
