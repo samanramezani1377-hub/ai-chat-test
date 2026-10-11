@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <atomic>
 #include <exception>
+#include <filesystem>
+#include <iomanip>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -24,6 +26,45 @@ static std::string g_cpu_load_error = "not_attempted";
 static std::string g_last_load_error = "not_attempted";
 static int g_cpu_threads = 4;
 static std::atomic_bool g_stop{false};
+
+namespace fs = std::filesystem;
+static std::string bounded(std::string value, size_t limit = 12000) {
+    if (value.size() > limit) {
+        value.resize(limit);
+        value += "\\n[MNN_LOG_TRUNCATED]";
+    }
+    return value;
+}
+static std::string file_probe(const fs::path& path) {
+    std::error_code ec;
+    const bool exists = fs::is_regular_file(path, ec);
+    if (ec) return path.string() + " [stat_error=" + ec.message() + "]";
+    if (!exists) return path.string() + " [MISSING]";
+    const auto size = fs::file_size(path, ec);
+    if (ec) return path.string() + " [exists,size_error=" + ec.message() + "]";
+    return path.string() + " [exists,size=" + std::to_string(size) + "]";
+}
+static std::string pack_diagnostics(const std::string& config) {
+    const fs::path configPath(config);
+    const fs::path dir = configPath.parent_path();
+    std::ostringstream out;
+    out << "config=" << file_probe(configPath)
+        << "; llm_config=" << file_probe(dir / "llm_config.json")
+        << "; model=" << file_probe(dir / "llm.mnn")
+        << "; weight=" << file_probe(dir / "llm.mnn.weight")
+        << "; tokenizer_txt=" << file_probe(dir / "tokenizer.txt")
+        << "; tokenizer_mtok=" << file_probe(dir / "tokenizer.mtok")
+        << "; context=" << file_probe(dir / "context.json");
+    return out.str();
+}
+static std::string take_mnn_log(Llm* llm) {
+    if (!llm) return {};
+    try {
+        return bounded(llm->getLog());
+    } catch (...) {
+        return "[MNN getLog() failed]";
+    }
+}
 
 class StopAwareBuffer final : public std::stringbuf {
 public:
@@ -68,7 +109,8 @@ static bool create_and_load_locked(const std::string& config, const char* backen
     try {
         candidate = Llm::createLLM(config);
         if (!candidate) {
-            g_last_load_error = std::string("createLLM returned null; backend=") + backend;
+            g_last_load_error = std::string("createLLM returned null; backend=") + backend +
+                "; config=" + config + "; pack={" + pack_diagnostics(config) + "}";
             LOGE("MNN_CREATE_FAILED backend=%s", backend);
             if (std::string(backend) == "opencl") g_opencl_load_error = g_last_load_error;
             else g_cpu_load_error = g_last_load_error;
@@ -78,20 +120,30 @@ static bool create_and_load_locked(const std::string& config, const char* backen
             R"(","thread_num":)" + std::to_string(threads) +
             R"(,"precision":"low","memory":"low","use_mmap":true})";
         if (!candidate->set_config(overrideConfig)) {
-            g_last_load_error = std::string("set_config rejected override; backend=") + backend;
+            g_last_load_error = std::string("set_config rejected override; backend=") + backend +
+                "; override=" + overrideConfig + "; config=" + config +
+                "; MNN_internal_log=" + take_mnn_log(candidate);
             LOGE("MNN_SET_CONFIG_REJECTED backend=%s; refusing to misreport the selected backend", backend);
             Llm::destroy(candidate);
             if (std::string(backend) == "opencl") g_opencl_load_error = g_last_load_error;
             else g_cpu_load_error = g_last_load_error;
             return false;
         }
+        LOGI("MNN_LOAD_BEGIN backend=%s config=%s pack={%s}", backend, config.c_str(), pack_diagnostics(config).c_str());
+        LOGI("MNN_EFFECTIVE_CONFIG backend=%s config_json=%s", backend, bounded(candidate->dump_config(), 6000).c_str());
         const bool loaded = candidate->load();
+        const std::string mnnLog = take_mnn_log(candidate);
+        if (!mnnLog.empty()) {
+            LOGE("MNN_INTERNAL_LOG backend=%s detail=%s", backend, mnnLog.c_str());
+        }
         const auto* context = candidate->getContext();
         const int status = context ? static_cast<int>(context->status) : -999;
         LOGI("MNN_LOAD_RESULT backend=%s loaded=%d status=%d", backend, loaded ? 1 : 0, status);
         if (!loaded || !context || context->status == LlmStatus::NOT_LOADED || context->status == LlmStatus::INTERNAL_ERROR) {
             g_last_load_error = std::string("load returned false or invalid status; backend=") + backend +
-                "; loaded=" + (loaded ? "1" : "0") + "; context_status=" + std::to_string(status);
+                "; loaded=" + (loaded ? "1" : "0") + "; context_status=" + std::to_string(status) +
+                "; config=" + config + "; pack={" + pack_diagnostics(config) + "}" +
+                (mnnLog.empty() ? "; MNN_internal_log=<empty; ensure LLM_LOG_TO_STRING is enabled>" : "; MNN_internal_log=" + mnnLog);
             LOGE("MNN_LOAD_REJECTED backend=%s loaded=%d context_status=%d", backend, loaded ? 1 : 0, status);
             Llm::destroy(candidate);
             if (std::string(backend) == "opencl") g_opencl_load_error = g_last_load_error;
@@ -103,14 +155,18 @@ static bool create_and_load_locked(const std::string& config, const char* backen
         return true;
     } catch (const std::exception& error) {
         if (candidate) Llm::destroy(candidate);
-        g_last_load_error = std::string("exception; backend=") + backend + "; message=" + error.what();
+        g_last_load_error = std::string("exception; backend=") + backend + "; message=" + error.what() +
+            "; config=" + config + "; pack={" + pack_diagnostics(config) + "}" +
+            "; MNN_internal_log=" + take_mnn_log(candidate);
         if (std::string(backend) == "opencl") g_opencl_load_error = g_last_load_error;
         else g_cpu_load_error = g_last_load_error;
         LOGE("MNN_LOAD_EXCEPTION backend=%s message=%s", backend, error.what());
         return false;
     } catch (...) {
         if (candidate) Llm::destroy(candidate);
-        g_last_load_error = std::string("unknown exception; backend=") + backend;
+        g_last_load_error = std::string("unknown exception; backend=") + backend +
+            "; config=" + config + "; pack={" + pack_diagnostics(config) + "}" +
+            "; MNN_internal_log=" + take_mnn_log(candidate);
         if (std::string(backend) == "opencl") g_opencl_load_error = g_last_load_error;
         else g_cpu_load_error = g_last_load_error;
         LOGE("MNN_LOAD_EXCEPTION backend=%s message=unknown", backend);
