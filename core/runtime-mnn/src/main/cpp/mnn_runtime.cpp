@@ -19,6 +19,9 @@ static Llm* g_llm = nullptr;
 static std::string g_config_path;
 static std::string g_backend = "unloaded";
 static std::string g_backend_reason = "not_loaded";
+static std::string g_opencl_load_error = "not_attempted";
+static std::string g_cpu_load_error = "not_attempted";
+static std::string g_last_load_error = "not_attempted";
 static int g_cpu_threads = 4;
 static std::atomic_bool g_stop{false};
 
@@ -65,15 +68,21 @@ static bool create_and_load_locked(const std::string& config, const char* backen
     try {
         candidate = Llm::createLLM(config);
         if (!candidate) {
+            g_last_load_error = std::string("createLLM returned null; backend=") + backend;
             LOGE("MNN_CREATE_FAILED backend=%s", backend);
+            if (std::string(backend) == "opencl") g_opencl_load_error = g_last_load_error;
+            else g_cpu_load_error = g_last_load_error;
             return false;
         }
         const std::string overrideConfig = std::string(R"({"backend_type":")") + backend +
             R"(","thread_num":)" + std::to_string(threads) +
             R"(,"precision":"low","memory":"low","use_mmap":true})";
         if (!candidate->set_config(overrideConfig)) {
+            g_last_load_error = std::string("set_config rejected override; backend=") + backend;
             LOGE("MNN_SET_CONFIG_REJECTED backend=%s; refusing to misreport the selected backend", backend);
             Llm::destroy(candidate);
+            if (std::string(backend) == "opencl") g_opencl_load_error = g_last_load_error;
+            else g_cpu_load_error = g_last_load_error;
             return false;
         }
         const bool loaded = candidate->load();
@@ -81,7 +90,12 @@ static bool create_and_load_locked(const std::string& config, const char* backen
         const int status = context ? static_cast<int>(context->status) : -999;
         LOGI("MNN_LOAD_RESULT backend=%s loaded=%d status=%d", backend, loaded ? 1 : 0, status);
         if (!loaded || !context || context->status == LlmStatus::NOT_LOADED || context->status == LlmStatus::INTERNAL_ERROR) {
+            g_last_load_error = std::string("load returned false or invalid status; backend=") + backend +
+                "; loaded=" + (loaded ? "1" : "0") + "; context_status=" + std::to_string(status);
+            LOGE("MNN_LOAD_REJECTED backend=%s loaded=%d context_status=%d", backend, loaded ? 1 : 0, status);
             Llm::destroy(candidate);
+            if (std::string(backend) == "opencl") g_opencl_load_error = g_last_load_error;
+            else g_cpu_load_error = g_last_load_error;
             return false;
         }
         g_llm = candidate;
@@ -89,10 +103,16 @@ static bool create_and_load_locked(const std::string& config, const char* backen
         return true;
     } catch (const std::exception& error) {
         if (candidate) Llm::destroy(candidate);
+        g_last_load_error = std::string("exception; backend=") + backend + "; message=" + error.what();
+        if (std::string(backend) == "opencl") g_opencl_load_error = g_last_load_error;
+        else g_cpu_load_error = g_last_load_error;
         LOGE("MNN_LOAD_EXCEPTION backend=%s message=%s", backend, error.what());
         return false;
     } catch (...) {
         if (candidate) Llm::destroy(candidate);
+        g_last_load_error = std::string("unknown exception; backend=") + backend;
+        if (std::string(backend) == "opencl") g_opencl_load_error = g_last_load_error;
+        else g_cpu_load_error = g_last_load_error;
         LOGE("MNN_LOAD_EXCEPTION backend=%s message=unknown", backend);
         return false;
     }
@@ -102,7 +122,12 @@ static bool load_with_fallback_locked(const std::string& config, int threads) {
     g_cpu_threads = std::max(1, std::min(threads, 8));
     g_stop.store(false);
     g_backend_reason = "none";
-    if (create_and_load_locked(config, "opencl", 68)) {
+    g_opencl_load_error = "not_attempted";
+    g_cpu_load_error = "not_attempted";
+    g_last_load_error = "not_attempted";
+    // OpenCL's thread_num is an MNN GPU-mode selector, not CPU threads.
+    // Use the documented buffer-mode setting rather than the previous value 68.
+    if (create_and_load_locked(config, "opencl", 4)) {
         LOGI("MNN_BACKEND_SELECTED backend=opencl policy=opencl-first");
         return true;
     }
@@ -114,7 +139,9 @@ static bool load_with_fallback_locked(const std::string& config, int threads) {
     }
     g_backend = "failed";
     g_backend_reason = "opencl_and_cpu_load_failed";
-    LOGE("MNN_BOTH_BACKENDS_FAILED config=%s", config.c_str());
+    g_last_load_error = "OpenCL attempt: " + g_opencl_load_error + " | CPU attempt: " + g_cpu_load_error;
+    LOGE("MNN_BOTH_BACKENDS_FAILED config=%s opencl_error=%s cpu_error=%s",
+         config.c_str(), g_opencl_load_error.c_str(), g_cpu_load_error.c_str());
     return false;
 }
 extern "C" JNIEXPORT jstring JNICALL
@@ -122,7 +149,10 @@ Java_com_woogit_aicore_runtime_mnn_MnnNative_nativeLoad(JNIEnv* env, jclass, jst
     std::lock_guard<std::mutex> lock(g_mutex);
     const std::string config = from_jstring(env, configPath);
     if (config.empty()) return env->NewStringUTF("ERROR:empty_config_path");
-    if (!load_with_fallback_locked(config, cpuThreads)) return env->NewStringUTF("ERROR:opencl_and_cpu_load_failed");
+    if (!load_with_fallback_locked(config, cpuThreads)) {
+        const std::string detail = "ERROR:opencl_and_cpu_load_failed; " + g_last_load_error;
+        return env->NewStringUTF(detail.c_str());
+    }
     return env->NewStringUTF((g_backend + ";" + g_backend_reason).c_str());
 }
 extern "C" JNIEXPORT jstring JNICALL

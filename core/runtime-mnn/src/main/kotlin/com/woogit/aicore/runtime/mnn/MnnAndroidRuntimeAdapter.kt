@@ -31,8 +31,13 @@ class MnnAndroidRuntimeAdapter(private val cpuThreads: Int = 4) : RuntimeAdapter
         require(config.isFile && config.name.equals("config.json", ignoreCase = true)) {
             "MNN model path must point to config.json inside an exported MNN model directory."
         }
-        require(File(config.parentFile, "llm.mnn").isFile && File(config.parentFile, "llm.mnn.weight").isFile) {
-            "MNN model pack is incomplete: expected llm.mnn and llm.mnn.weight beside config.json."
+        require(
+            File(config.parentFile, "llm.mnn").isFile &&
+                File(config.parentFile, "llm.mnn.weight").isFile &&
+                File(config.parentFile, "llm_config.json").isFile &&
+                File(config.parentFile, "tokenizer.txt").isFile
+        ) {
+            "MNN model pack is incomplete: expected llm.mnn, llm.mnn.weight, llm_config.json and tokenizer.txt beside config.json."
         }
         if (loadedConfig == config.absolutePath && backend != "unloaded") return@withLock
         runCatching { MnnNative.nativeUnload() }
