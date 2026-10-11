@@ -31,8 +31,11 @@ class MnnAndroidRuntimeAdapter(private val cpuThreads: Int = 4) : RuntimeAdapter
         require(config.isFile && config.name.equals("config.json", ignoreCase = true)) {
             "MNN model path must point to config.json inside an exported MNN model directory."
         }
-        require(File(config.parentFile, "llm.mnn").isFile && File(config.parentFile, "llm.mnn.weight").isFile) {
-            "MNN model pack is incomplete: expected llm.mnn and llm.mnn.weight beside config.json."
+        // Do not hard-code llm.mnn / llm.mnn.weight here. Upstream MNN resolves
+        // filenames from config.json and the merged llm_config.json; its own load()
+        // validates the effective model, weight and tokenizer paths and emits the reason.
+        require(config.parentFile?.isDirectory == true) {
+            "MNN config parent directory does not exist: ${config.parentFile?.absolutePath}"
         }
         if (loadedConfig == config.absolutePath && backend != "unloaded") return@withLock
         runCatching { MnnNative.nativeUnload() }
