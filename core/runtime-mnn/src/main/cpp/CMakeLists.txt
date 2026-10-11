@@ -26,6 +26,9 @@ FetchContent_MakeAvailable(mnn)
 if (NOT TARGET llm)
     message(FATAL_ERROR "Pinned MNN source did not expose the LLM target. Check MNN_BUILD_LLM and upstream target names.")
 endif()
+# The upstream LLM engine only accumulates Llm::getLog() when this is defined
+# while compiling llm.cpp. This turns model-load failures into actionable diagnostics.
+target_compile_definitions(llm PRIVATE LLM_LOG_TO_STRING)
 add_library(ai_chat_mnn_runtime SHARED mnn_runtime.cpp)
 target_include_directories(ai_chat_mnn_runtime PRIVATE "${mnn_SOURCE_DIR}/include" "${mnn_SOURCE_DIR}/transformers/llm/engine/include")
 target_compile_options(ai_chat_mnn_runtime PRIVATE -fexceptions -frtti)
