@@ -126,6 +126,11 @@ class AgentSession(
                 result = generateTurn(effectiveSettings, effectiveRecentMessages, nextContext)
                 resultPersisted = false
             }
+            if (plan == null && actionPlanCoordinator?.requiresAction(contextProvider.build(Int.MAX_VALUE)) == true) {
+                result = result.copy(text = "نتوانستم درخواست اجرایی را با ابزار معتبر انجام بدهم؛ هیچ عملیاتی اجرا نشد.")
+                eventSink(AgentEvent.Token(result.text))
+                resultPersisted = false
+            }
             if (!resultPersisted) conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
             eventSink(AgentEvent.Completed)
             val userFacingResult = if (plan?.prepared?.risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE) {
