@@ -148,6 +148,11 @@ class WakeWordForegroundService : Service() {
             }
         } catch (t: Throwable) {
             prefs.edit().putBoolean(PREF_ENABLED, false).putBoolean(PREF_ARMED, false).apply()
+            prefs.edit()
+                .putString(PREF_CONVERSATION_STATE, "LISTENER_START_FAILED")
+                .putString(PREF_LAST_STATUS, "VOICE-KWS-018: شروع سرویس میکروفون ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
+                .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("FOREGROUND_SERVICE_START_FAILED", t.stackTraceToString()))
+                .apply()
             Log.e(TAG, "Could not start microphone foreground service", t)
             stopSelfResult(startId)
             return START_NOT_STICKY
@@ -210,9 +215,17 @@ class WakeWordForegroundService : Service() {
             check(recorder.state == AudioRecord.STATE_INITIALIZED) { "VOICE-KWS-003: راه‌اندازی میکروفون ناموفق بود." }
             audioRecord = recorder
             recorder.startRecording()
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putString(PREF_CONVERSATION_STATE, "WAKE_WORD_LISTENING")
+                .putString(PREF_LAST_STATUS, "شنوندهٔ محلی دینا فعال است.")
+                .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("LISTENER_STARTED", "model=${entry.directory.name}; audioRecordState=${recorder.state}; wakeLockHeld=${wakeLock?.isHeld == true}"))
+                .apply()
             val pcm = ShortArray(SAMPLES_PER_CHUNK)
             while (running.get()) {
                 val count = recorder.read(pcm, 0, pcm.size)
+                if (count == AudioRecord.ERROR_DEAD_OBJECT || count == AudioRecord.ERROR_INVALID_OPERATION) {
+                    error("VOICE-KWS-019: ضبط صوت از کار افتاد؛ AudioRecord.read=$count")
+                }
                 if (count <= 0) continue
                 val samples = FloatArray(count) { pcm[it] / 32768.0f }
                 val activeStream = stream ?: break
@@ -232,8 +245,14 @@ class WakeWordForegroundService : Service() {
             }
         } catch (t: Throwable) {
             Log.e(TAG, "Wake-word listener stopped", t)
+            val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+            prefs.edit()
+                .putString(PREF_CONVERSATION_STATE, if (pauseRequested) "LISTENER_PAUSED" else "LISTENER_ERROR")
+                .putString(PREF_LAST_STATUS, "VOICE-KWS-020: شنونده متوقف شد: ${t.message ?: t.javaClass.simpleName}")
+                .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic(if (pauseRequested) "LISTENER_PAUSED" else "LISTENER_EXCEPTION", t.stackTraceToString()))
+                .apply()
             if (!pauseRequested && running.get()) {
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, false).putBoolean(PREF_ARMED, false).apply()
+                prefs.edit().putBoolean(PREF_ENABLED, false).putBoolean(PREF_ARMED, false).apply()
                 postWakeNotification("شنود بیدارباش متوقف شد؛ برای جزئیات، گزارش برنامه را بررسی کن.", openVoice = false)
             }
         } finally {
@@ -386,6 +405,7 @@ class WakeWordForegroundService : Service() {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             putExtra(EXTRA_OPEN_VOICE_FROM_WAKE, openVoice)
+            putExtra(EXTRA_CONVERSATION_STARTED_IN_SERVICE, voiceController != null)
         }
         val pending = PendingIntent.getActivity(
             this, if (openVoice) 4202 else 4203, intent,
