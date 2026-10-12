@@ -325,7 +325,12 @@ class LocalMicrophone {
     fun start(onFrame: (Frame) -> Unit) {
         check(running.compareAndSet(false, true)) { "VOICE-MIC-001: میکروفون از قبل فعال است." }
         val sampleRate = 16000
-        val min = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val min = try {
+            AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        } catch (t: Throwable) {
+            running.set(false)
+            throw IllegalStateException("VOICE-MIC-002: بررسی بافر میکروفون ناموفق بود: ${t.message ?: t.javaClass.simpleName}", t)
+        }
         if (min <= 0) {
             running.set(false)
             error("VOICE-MIC-002: اندازه بافر میکروفون نامعتبر است.")
@@ -352,12 +357,16 @@ class LocalMicrophone {
         recorder = record
         // Audio effects are optional and OEM implementations can throw despite isAvailable().
         // Never fail microphone startup solely because an effect could not be instantiated.
-        if (AcousticEchoCanceler.isAvailable()) {
-            echoCanceler = runCatching { AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true } }.getOrNull()
-        }
-        if (NoiseSuppressor.isAvailable()) {
-            noiseSuppressor = runCatching { NoiseSuppressor.create(record.audioSessionId)?.apply { enabled = true } }.getOrNull()
-        }
+        echoCanceler = runCatching {
+            if (AcousticEchoCanceler.isAvailable()) {
+                AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true }
+            } else null
+        }.getOrNull()
+        noiseSuppressor = runCatching {
+            if (NoiseSuppressor.isAvailable()) {
+                NoiseSuppressor.create(record.audioSessionId)?.apply { enabled = true }
+            } else null
+        }.getOrNull()
         try {
             record.startRecording()
         } catch (t: Throwable) {
