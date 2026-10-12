@@ -1,5 +1,6 @@
 package com.samanramezani.aichattest.voice
 
+import android.annotation.SuppressLint
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -330,6 +331,9 @@ class LocalMicrophone {
     private val running = AtomicBoolean(false)
     @Volatile private var captureThread: Thread? = null
 
+    // AudioRecord construction/startRecording are permission-gated by Android. Both calls below
+    // explicitly translate SecurityException into VOICE-MIC-004, including permission revocation races.
+    @SuppressLint("MissingPermission")
     fun start(onFrame: (Frame) -> Unit) {
         check(running.compareAndSet(false, true)) { "VOICE-MIC-001: میکروفون از قبل فعال است." }
         val sampleRate = 16000
