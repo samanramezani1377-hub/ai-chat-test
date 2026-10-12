@@ -73,6 +73,8 @@ class WakeWordForegroundService : Service() {
                 .putString(PREF_MODEL_DIRECTORY, modelDirectory)
                 .putBoolean(PREF_ENABLED, true)
                 .putBoolean(PREF_ARMED, true)
+                .putString(PREF_WAKE_STATE, "ARMED")
+                .putString(PREF_UI_STATE, "NOT_OPENED")
                 .apply()
             ContextCompat.startForegroundService(
                 context,
@@ -166,6 +168,7 @@ class WakeWordForegroundService : Service() {
             prefs.edit().putBoolean(PREF_ENABLED, false).putBoolean(PREF_ARMED, false).apply()
             prefs.edit()
                 .putString(PREF_CONVERSATION_STATE, "LISTENER_START_FAILED")
+                .putString(PREF_WAKE_STATE, "ERROR")
                 .putString(PREF_LAST_STATUS, "VOICE-KWS-018: شروع سرویس میکروفون ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
                 .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("FOREGROUND_SERVICE_START_FAILED", t.stackTraceToString()))
                 .apply()
