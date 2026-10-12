@@ -57,6 +57,8 @@ class WakeWordForegroundService : Service() {
         const val PREF_STT_MODEL_ID = "voice_stt_model_id"
         const val PREF_TTS_MODEL_ID = "voice_tts_model_id"
         const val PREF_CONVERSATION_STATE = "conversation_state"
+        const val PREF_WAKE_STATE = "wake_detection_state"
+        const val PREF_UI_STATE = "conversation_ui_state"
         const val PREF_LAST_STATUS = "conversation_last_status"
         const val PREF_LAST_DIAGNOSTIC = "conversation_last_diagnostic"
         const val PREFS = "dina_wake_word"
@@ -251,6 +253,7 @@ class WakeWordForegroundService : Service() {
             recorder.startRecording()
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString(PREF_CONVERSATION_STATE, "WAKE_WORD_LISTENING")
+                .putString(PREF_WAKE_STATE, "LISTENING")
                 .putString(PREF_LAST_STATUS, "شنوندهٔ محلی دینا فعال است.")
                 .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("LISTENER_STARTED", "model=${entry.directory.name}; audioRecordState=${recorder.state}; wakeLockHeld=${wakeLock?.isHeld == true}"))
                 .apply()
@@ -297,6 +300,7 @@ class WakeWordForegroundService : Service() {
             val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
             prefs.edit()
                 .putString(PREF_CONVERSATION_STATE, if (pauseRequested) "LISTENER_PAUSED" else "LISTENER_ERROR")
+                .putString(PREF_WAKE_STATE, if (pauseRequested) "PAUSED" else "ERROR")
                 .putString(PREF_LAST_STATUS, "VOICE-KWS-020: شنونده متوقف شد: ${t.message ?: t.javaClass.simpleName}")
                 .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic(if (pauseRequested) "LISTENER_PAUSED" else "LISTENER_EXCEPTION", t.stackTraceToString()))
                 .apply()
@@ -317,6 +321,7 @@ class WakeWordForegroundService : Service() {
                 val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
                 prefs.edit()
                     .putBoolean(PREF_ENABLED, false)
+                    .putString(PREF_WAKE_STATE, "DETECTED")
                     .putString(PREF_CONVERSATION_STATE, "WAKE_WORD_DETECTED")
                     .putString(PREF_LAST_STATUS, "عبارت «دینا» تشخیص داده شد؛ صدای تأیید پخش می‌شود و میکروفون مکالمه فعال خواهد شد.")
                     .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("DETECTED", "keyword=$detectedKeyword; audioChunks=$audioChunksProcessed; rejectedCandidates=$rejectedKeywordCandidates; Activity launch is optional"))
@@ -337,13 +342,13 @@ class WakeWordForegroundService : Service() {
                         putExtra(EXTRA_CONVERSATION_STARTED_IN_SERVICE, conversationStarted)
                     })
                     prefs.edit()
-                        .putString(PREF_CONVERSATION_STATE, if (conversationStarted) "ACTIVITY_LAUNCH_ATTEMPTED_AUDIO_RUNNING" else "ACTIVITY_LAUNCH_ATTEMPTED_NO_MODELS")
+                        .putString(PREF_UI_STATE, if (conversationStarted) "ACTIVITY_LAUNCH_ATTEMPTED_AUDIO_RUNNING" else "ACTIVITY_LAUNCH_ATTEMPTED_NO_MODELS")
                         .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("ACTIVITY_LAUNCH_ATTEMPTED", "conversationStartedInService=$conversationStarted"))
                         .apply()
                 }.onFailure {
                     Log.w(TAG, "Automatic activity launch blocked; audio conversation remains service-owned", it)
                     prefs.edit()
-                        .putString(PREF_CONVERSATION_STATE, if (conversationStarted) "AUDIO_RUNNING_UI_UNAVAILABLE" else "UI_UNAVAILABLE_NO_MODELS")
+                        .putString(PREF_UI_STATE, if (conversationStarted) "AUDIO_RUNNING_UI_UNAVAILABLE" else "UI_UNAVAILABLE_NO_MODELS")
                         .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("ACTIVITY_LAUNCH_EXCEPTION", it.javaClass.simpleName + ": " + (it.message ?: "")))
                         .apply()
                 }
@@ -482,6 +487,9 @@ class WakeWordForegroundService : Service() {
             "event=$event\n" +
             "screenInteractive=${getSystemService(PowerManager::class.java)?.isInteractive}\n" +
             "listenerRunning=${running.get()}\n" +
+            "wakeState=${getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_WAKE_STATE, "UNKNOWN")}\n" +
+            "conversationState=${getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_CONVERSATION_STATE, "UNKNOWN")}\n" +
+            "uiState=${getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_UI_STATE, "UNKNOWN")}\n" +
             "voiceControllerActive=${voiceController != null}\n" +
             "detail=$detail"
 
