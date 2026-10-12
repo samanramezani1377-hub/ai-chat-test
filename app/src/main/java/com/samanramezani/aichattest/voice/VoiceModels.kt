@@ -258,7 +258,7 @@ class VoiceModelStore(
      * The user can select the .onnx, its .onnx.json companion, and espeak-ng-data.tar.bz2
      * separately. Once all components exist, create sherpa-onnx tokens and ONNX metadata locally.
      */
-    fun importPiperComponent(uri: Uri, component: PiperComponent): VoiceModelEntry? {
+    fun importPiperComponent(uri: Uri, component: PiperComponent, onProgress: (String) -> Unit = {}): VoiceModelEntry? {
         root.mkdirs()
         val staging = File(root, ".piper-import")
         staging.mkdirs()
@@ -293,7 +293,7 @@ class VoiceModelStore(
                     espeakStaging.deleteRecursively()
                     check(espeakStaging.mkdirs()) { "VOICE-PIPER-020: پوشه موقت داده‌های آواشناسی ساخته نشد." }
                     try {
-                        extractEspeakArchive(input, archive, espeakStaging)
+                        extractEspeakArchive(input, archive, espeakStaging, onProgress)
                         normalizeEspeakDirectory(espeakStaging)
                         val normalizedData = File(espeakStaging, "espeak-ng-data")
                         requireEspeakData(normalizedData, "VOICE-PIPER-017")
@@ -367,9 +367,10 @@ class VoiceModelStore(
             ?: run { destination.deleteRecursively(); error("VOICE-PIPER-008: اعتبارسنجی مدل Piper پس از تبدیل ناموفق بود.") }
     }
 
-    private fun extractEspeakArchive(input: InputStream, archiveName: String, destination: File) {
+    private fun extractEspeakArchive(input: InputStream, archiveName: String, destination: File, onProgress: (String) -> Unit) {
         var count = 0
         var total = 0L
+        var nextProgressBytes = 4L * 1024L * 1024L
         fun writeEntry(nameValue: String, isDirectory: Boolean, stream: InputStream) {
             count++
             require(count <= MAX_ENTRIES) { "VOICE-PIPER-009: تعداد فایل‌های بسته آواشناسی بیش از حد مجاز است." }
@@ -379,18 +380,23 @@ class VoiceModelStore(
             require(target.toPath().startsWith(destination.canonicalFile.toPath())) { "VOICE-PIPER-010: مسیر نامعتبر در بسته آواشناسی وجود دارد." }
             if (isDirectory) target.mkdirs() else {
                 target.parentFile?.mkdirs()
-                FileOutputStream(target).use { out ->
-                    val buffer = ByteArray(64 * 1024)
+                FileOutputStream(target).buffered(256 * 1024).use { out ->
+                    val buffer = ByteArray(256 * 1024)
                     while (true) {
                         val n = stream.read(buffer)
                         if (n < 0) break
                         total += n
                         require(total <= MAX_EXPANDED_BYTES) { "VOICE-PIPER-011: حجم بسته آواشناسی بیش از حد مجاز است." }
                         out.write(buffer, 0, n)
+                        if (total >= nextProgressBytes) {
+                            onProgress("در حال استخراج داده‌های آواشناسی Piper… ${total / (1024 * 1024)} مگابایت")
+                            nextProgressBytes = ((total / (4L * 1024L * 1024L)) + 1L) * 4L * 1024L * 1024L
+                        }
                     }
                 }
             }
         }
+        onProgress("شروع استخراج داده‌های آواشناسی Piper…")
         if (archiveName.endsWith(".zip")) {
             ZipInputStream(input).use { zip ->
                 while (true) {
@@ -407,6 +413,7 @@ class VoiceModelStore(
                 }
             }
         }
+        onProgress("استخراج داده‌های آواشناسی کامل شد؛ در حال اعتبارسنجی فایل‌ها…")
     }
 
     /**
