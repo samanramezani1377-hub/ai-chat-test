@@ -264,7 +264,6 @@ private class VoiceConversationController(
     // Playback guard is also applied to ASR input, not only to barge-in detection.
     // Loudspeaker echo can remain in the microphone after AudioTrack stops.
     private val lastTtsPlaybackAtMs = AtomicLong(0L)
-    private val playbackStartedAtMs = AtomicLong(0L)
     // Bounded queue preserves short consecutive user turns without unbounded memory growth.
     private val pendingUtterances = ConcurrentLinkedQueue<String>()
     private val startInProgress = AtomicBoolean(false)
@@ -462,7 +461,6 @@ private class VoiceConversationController(
                         engine.speak(segment, turnCancel) {
                             val playbackStart = SystemClock.elapsedRealtime()
                             segmentPlaybackStarted.set(true)
-                            playbackStartedAtMs.set(playbackStart)
                             lastTtsPlaybackAtMs.set(playbackStart)
                             speaking.set(true)
                         }
