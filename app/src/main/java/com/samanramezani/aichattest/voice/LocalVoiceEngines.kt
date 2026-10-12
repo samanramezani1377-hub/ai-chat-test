@@ -320,6 +320,7 @@ class LocalMicrophone {
     val isEchoCancellationActive: Boolean get() = runCatching { echoCanceler?.enabled == true }.getOrDefault(false)
     val isNoiseSuppressionActive: Boolean get() = runCatching { noiseSuppressor?.enabled == true }.getOrDefault(false)
     private val running = AtomicBoolean(false)
+    @Volatile private var captureThread: Thread? = null
 
     fun start(onFrame: (Frame) -> Unit) {
         check(running.compareAndSet(false, true)) { "VOICE-MIC-001: میکروفون از قبل فعال است." }
@@ -367,11 +368,18 @@ class LocalMicrophone {
             }
             throw IllegalStateException("VOICE-MIC-005: شروع ضبط میکروفون ناموفق بود: ${t.message ?: t.javaClass.simpleName}", t)
         }
-        Thread({
+        captureThread = Thread({
             val buffer = ShortArray(640) // 40 ms at 16 kHz
             while (running.get()) {
-                val n = record.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
-                if (n <= 0) continue
+                val n = try {
+                    record.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
+                } catch (_: Throwable) {
+                    if (running.get()) continue else break
+                }
+                if (n <= 0) {
+                    if (!running.get()) break
+                    continue
+                }
                 var energy = 0.0
                 val samples = FloatArray(n)
                 for (i in 0 until n) {
@@ -380,17 +388,23 @@ class LocalMicrophone {
                     energy += v * v
                 }
                 val rms = kotlin.math.sqrt(energy / n).toFloat()
-                onFrame(Frame(samples, rms, rms >= 0.018f))
+                runCatching { onFrame(Frame(samples, rms, rms >= 0.018f)) }
             }
         }, "local-voice-microphone").apply { isDaemon = true; start() }
     }
 
     fun stop() {
         running.set(false)
-        runCatching { recorder?.stop() }
-        recorder?.release()
+        val oldRecorder = recorder
+        runCatching { oldRecorder?.stop() }
+        val oldThread = captureThread
+        if (oldThread != null && oldThread !== Thread.currentThread()) {
+            runCatching { oldThread.join(400) }
+        }
+        runCatching { echoCanceler?.release() }; echoCanceler = null
+        runCatching { noiseSuppressor?.release() }; noiseSuppressor = null
+        runCatching { oldRecorder?.release() }
         recorder = null
-        echoCanceler?.release(); echoCanceler = null
-        noiseSuppressor?.release(); noiseSuppressor = null
+        captureThread = null
     }
 }
