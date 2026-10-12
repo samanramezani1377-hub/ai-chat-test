@@ -169,6 +169,26 @@ jobs:
           echo "Static OpenCL backend linkage verified: $opencl_target"
           echo "OpenCL profiling instrumentation is present in the compiled llama.cpp source: $source_file"
 
+      - name: Verify APK ABI and size budget
+        run: |
+          set -euo pipefail
+          apk="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name "*.apk" -print -quit)"
+          test -n "$apk"
+          size_bytes="$(stat -c "%s" "$apk")"
+          size_mib="$((size_bytes / 1024 / 1024))"
+          echo "APK: $apk"
+          echo "APK size: ${size_mib} MiB (${size_bytes} bytes)"
+          echo "Largest packaged entries:"
+          unzip -l "$apk" | sort -nr | head -n 18 || true
+          unexpected_abis="$(unzip -Z1 "$apk" | grep -E "^lib/[^/]+/" | cut -d/ -f2 | sort -u | grep -v "^arm64-v8a$" || true)"
+          if [ -n "$unexpected_abis" ]; then
+            echo "::error::Unexpected native ABIs packaged: $unexpected_abis"
+            exit 1
+          fi
+          if [ "$size_bytes" -gt $((100 * 1024 * 1024)) ]; then
+            echo "::warning::Debug APK exceeds 100 MiB; keep the build artifact and review the size breakdown above."
+          fi
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -176,7 +196,6 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
-
   android-lint:
     name: Android lint
     runs-on: ubuntu-22.04
@@ -233,3 +252,4 @@ jobs:
             app/build/reports/lint-results-debug.xml
           if-no-files-found: ignore
           retention-days: 7
+

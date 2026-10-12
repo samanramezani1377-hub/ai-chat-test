@@ -171,18 +171,18 @@ class LlamaCppAndroidRuntimeAdapter(
                 " roles=" + request.messages.joinToString(",") { it.role.name } +
                 " contentChars=" + request.messages.sumOf { it.content.length }
         )
-        val safeMessages = trimMessagesToContext(request.messages, settings.maxNewTokens.coerceAtLeast(1))
+        val safeMessages = trimMessagesToContext(request.messages, settings.maxNewTokens.coerceAtLeast(1), settings.enableThinking)
         val prompt = try {
             when (loadedArchitecture) {
                 "lfm2" -> Lfm2PromptFormatter.format(safeMessages)
                 "llama" -> MiniCpm5PromptFormatter.format(safeMessages)
-                else -> Qwen3PromptFormatter.format(safeMessages)
+                else -> Qwen3PromptFormatter.format(safeMessages, enableThinking = settings.enableThinking)
             }
         } catch (t: Throwable) {
             return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation"))
         }
         stopRequested.set(false)
-        RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_STARTED context=$loadedContextLength backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
+        RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_STARTED context=$loadedContextLength backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads enableThinking=${settings.enableThinking} maxNewTokens=${settings.maxNewTokens} recentMessages=${settings.recentMessages}")
         RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "context=${loadedContextLength} backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
         val promptTokens = NativeLlamaCpp.countTokens(prompt).takeIf { it >= 0 }
         // Generation is explicitly bounded by the remaining context capacity. This removes
@@ -273,6 +273,7 @@ class LlamaCppAndroidRuntimeAdapter(
     private suspend fun trimMessagesToContext(
         messages: List<com.woogit.aicore.domain.ChatMessage>,
         maxNewTokens: Int,
+        enableThinking: Boolean,
     ): List<com.woogit.aicore.domain.ChatMessage> {
         val context = loadedContextLength ?: return messages
         val reserve = maxNewTokens + 32
@@ -285,13 +286,13 @@ class LlamaCppAndroidRuntimeAdapter(
         val systemMessages = messages.filter { it.role == com.woogit.aicore.domain.ChatMessage.Role.SYSTEM }
         val conversationMessages = messages.filter { it.role != com.woogit.aicore.domain.ChatMessage.Role.SYSTEM }
         fun tokenCount(candidate: List<com.woogit.aicore.domain.ChatMessage>): Int =
-            if (candidate.isEmpty()) 0 else NativeLlamaCpp.countTokens(formatMessages(candidate))
+            if (candidate.isEmpty()) 0 else NativeLlamaCpp.countTokens(formatMessages(candidate, enableThinking))
 
         var retainedSystem = systemMessages
         if (tokenCount(retainedSystem) > budget) {
             val primarySystem = systemMessages.firstOrNull()
             retainedSystem = if (primarySystem == null) emptyList()
-            else listOf(fitMessageToBudget(primarySystem, (budget / 2).coerceAtLeast(1)))
+            else listOf(fitMessageToBudget(primarySystem, (budget / 2).coerceAtLeast(1), enableThinking = enableThinking))
         }
 
         val selected = ArrayDeque<com.woogit.aicore.domain.ChatMessage>()
@@ -314,7 +315,7 @@ class LlamaCppAndroidRuntimeAdapter(
             // the system prompt already reserved above. Never drop the system prompt
             // and never pass an unbounded latest message to native generation.
             if (selected.isEmpty() && index == conversationMessages.lastIndex) {
-                val fitted = fitMessageToBudget(message, budget, retainedSystem)
+                val fitted = fitMessageToBudget(message, budget, retainedSystem, enableThinking)
                 selected.addFirst(fitted)
                 truncatedLatest = fitted.content != message.content
             }
@@ -336,11 +337,14 @@ class LlamaCppAndroidRuntimeAdapter(
         return result
     }
 
-    private fun formatMessages(messages: List<com.woogit.aicore.domain.ChatMessage>): String =
+    private fun formatMessages(
+        messages: List<com.woogit.aicore.domain.ChatMessage>,
+        enableThinking: Boolean = true,
+    ): String =
         when (loadedArchitecture) {
             "lfm2" -> Lfm2PromptFormatter.format(messages)
             "llama" -> MiniCpm5PromptFormatter.format(messages)
-            else -> Qwen3PromptFormatter.format(messages)
+            else -> Qwen3PromptFormatter.format(messages, enableThinking = enableThinking)
         }
 
     /**
@@ -352,6 +356,7 @@ class LlamaCppAndroidRuntimeAdapter(
         message: com.woogit.aicore.domain.ChatMessage,
         budget: Int,
         prefixMessages: List<com.woogit.aicore.domain.ChatMessage> = emptyList(),
+        enableThinking: Boolean = true,
     ): com.woogit.aicore.domain.ChatMessage {
         if (budget <= 0) return message.copy(content = "")
 
@@ -376,7 +381,7 @@ class LlamaCppAndroidRuntimeAdapter(
         while (low <= high) {
             val mid = low + (high - low) / 2
             val candidateMessage = candidate(mid)
-            val tokens = NativeLlamaCpp.countTokens(formatMessages(prefixMessages + candidateMessage))
+            val tokens = NativeLlamaCpp.countTokens(formatMessages(prefixMessages + candidateMessage, enableThinking))
             if (tokens in 0..budget) {
                 best = candidateMessage
                 low = mid + 1
