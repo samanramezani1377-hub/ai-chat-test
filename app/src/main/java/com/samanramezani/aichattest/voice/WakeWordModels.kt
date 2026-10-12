@@ -152,6 +152,25 @@ class WakeWordModelStore(
                 }
             }
         }
+        fun hasOfficialRuntimeSet(): Boolean {
+            if (!isOfficialZhEnArchive) return false
+            return staging.walkTopDown().filter { it.isDirectory }.any { directory ->
+                val files = directory.listFiles()?.filter { it.isFile }.orEmpty()
+                fun hasOnnx(role: String, int8: Boolean): Boolean = files.any { file ->
+                    val name = file.name.lowercase()
+                    name.endsWith(".onnx") &&
+                        name.contains(role) &&
+                        name.contains("chunk-16-left-64") &&
+                        name.contains("int8") == int8
+                }
+                hasOnnx("encoder", int8 = true) &&
+                    hasOnnx("decoder", int8 = false) &&
+                    hasOnnx("joiner", int8 = true) &&
+                    files.any { it.name.equals("tokens.txt", true) } &&
+                    files.any { it.name.equals("en.phone", true) }
+            }
+        }
+
         try {
             val input = resolver.openInputStream(uri)
                 ?: error("VOICE-KWS-IMPORT-003: فایل انتخاب‌شده قابل خواندن نیست.")
@@ -163,6 +182,10 @@ class WakeWordModelStore(
                             val item = zip.nextEntry ?: break
                             extract(item.name, item.isDirectory, zip)
                             zip.closeEntry()
+                            // The upstream archive bundles large test WAVs and duplicate graphs.
+                            // Once the exact runtime graph and its vocabulary are present, do not
+                            // decompress unrelated trailing entries just to reach archive EOF.
+                            if (hasOfficialRuntimeSet()) break
                         }
                     }
                 } else {
@@ -170,6 +193,10 @@ class WakeWordModelStore(
                         while (true) {
                             val item = tar.nextTarEntry ?: break
                             extract(item.name, item.isDirectory, tar)
+                            // BZip2 is expensive to decode on mid-range Android devices. The
+                            // official archive stores test audio and duplicate models after the
+                            // runtime files; stop as soon as the complete compatible set is found.
+                            if (hasOfficialRuntimeSet()) break
                         }
                     }
                 }
