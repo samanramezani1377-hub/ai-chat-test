@@ -8,6 +8,7 @@ import android.app.Activity
 import android.media.AudioManager
 import android.net.Uri
 import android.os.SystemClock
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
@@ -86,6 +87,34 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     }
     var listening by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var pendingWakeEnable by remember { mutableStateOf(false) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (pendingWakeEnable) {
+            pendingWakeEnable = false
+            val selected = wakeWordModels.firstOrNull { it.directory.absolutePath == selectedWakeWordPath }
+            if (selected != null) {
+                try {
+                    WakeWordForegroundService.start(context, selected.directory.absolutePath)
+                    wakeWordEnabled = true
+                    wakeWordArmed = true
+                    updateVoiceStatus(
+                        if (granted) "بیدارباش «دینا» فعال شد؛ مجوز اعلان داده شد و وضعیت شنود در اعلان دائمی نمایش داده می‌شود."
+                        else "مجوز اعلان رد شد؛ بیدارباش فعال می‌شود، اما اندروید ممکن است اعلان تشخیص را در کشوی اعلان‌ها پنهان کند."
+                    )
+                } catch (t: Throwable) {
+                    wakeWordEnabled = false
+                    wakeWordArmed = false
+                    updateVoiceStatus("VOICE-KWS-012: شروع شنود ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
+                }
+            } else {
+                updateVoiceStatus("VOICE-KWS-010: ابتدا یک بستهٔ مدل بیدارباش سازگار با عبارت «دینا» وارد کن.")
+            }
+        } else if (!granted) {
+            updateVoiceStatus("مجوز اعلان داده نشد؛ اعلان‌های معمولی ممکن است در اندروید ۱۳ به بالا نمایش داده نشوند.")
+        }
+    }
 
     val controller = remember(container, context) {
         VoiceConversationController(context, container,
@@ -282,6 +311,11 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
                 updateVoiceStatus("VOICE-KWS-010: ابتدا یک بستهٔ مدل بیدارباش سازگار با عبارت «دینا» وارد کن.")
             } else if (enabled && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 updateVoiceStatus("VOICE-KWS-011: برای شنود بیدارباش، ابتدا مجوز میکروفون را با شروع یک‌بارهٔ مکالمه صوتی بده.")
+            } else if (enabled && Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                pendingWakeEnable = true
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             } else {
                 try {
                     if (enabled && selected != null) WakeWordForegroundService.start(context, selected.directory.absolutePath)
