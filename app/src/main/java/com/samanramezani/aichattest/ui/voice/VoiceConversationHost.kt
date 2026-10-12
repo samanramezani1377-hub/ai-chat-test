@@ -146,7 +146,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             activity?.intent?.removeExtra(WakeWordForegroundService.EXTRA_OPEN_VOICE_FROM_WAKE)
             activity?.intent?.removeExtra(WakeWordForegroundService.EXTRA_CONVERSATION_STARTED_IN_SERVICE)
             if (audioStartedInService) {
-                updateVoiceStatus("دینا تشخیص داده شد؛ مکالمه در سرویس پس‌زمینه اجرا می‌شود. بازبودن این صفحه برای ادامهٔ صدا لازم نیست.")
+                updateVoiceStatus("دینا تشخیص داده شد؛ درخواست شروع مکالمه به سرویس پس‌زمینه داده شده است. فعال‌شدن واقعی پس از آماده‌شدن موتور و میکروفون در وضعیت تشخیص‌ها تأیید می‌شود.")
             } else {
                 val stt = sttModels.firstOrNull { it.id == activeSttId }
                 val ttsModel = ttsModels.firstOrNull { it.id == activeTtsId }
