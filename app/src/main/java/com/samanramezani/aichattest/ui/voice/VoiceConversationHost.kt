@@ -267,7 +267,7 @@ private class VoiceConversationController(
     private val pendingUtterances = ConcurrentLinkedQueue<String>()
     private val startInProgress = AtomicBoolean(false)
     private val lifecycleEpoch = AtomicLong(0L)
-    private var microphone: LocalMicrophone? = null
+    @Volatile private var microphone: LocalMicrophone? = null
     private var recognizer: LocalAsr? = null
     private var tts: LocalPiperTts? = null
     private var frameJob: Job? = null
@@ -275,7 +275,7 @@ private class VoiceConversationController(
     private var speechJob: Job? = null
     private var conversationId: String? = null
     private var previousAudioMode: Int? = null
-    private var closed = false
+    @Volatile private var closed = false
 
     private fun enterCommunicationAudioMode() {
         val manager = context.getSystemService(AudioManager::class.java) ?: return
@@ -561,8 +561,9 @@ private class VoiceConversationController(
     }
 
     fun interrupt(message: String) {
-        // Start the echo-tail window from the interruption instant, not from playback start.
-        lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
+        // Start the echo-tail window from interruption only if speaker output was actually active.
+        // Interrupting LLM generation before TTS must not mute the next user utterance.
+        if (speaking.get()) lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
         cancelledSpeech.get()?.set(true)
         speaking.set(false)
         scope.launch { container.modelManager?.stopGeneration() }
