@@ -198,7 +198,7 @@ class WakeWordModelStore(
                     keywordFile.readText(Charsets.UTF_8).contains("دینا")
                 }.getOrDefault(false)
                 if (hasKwsParts && supportsEnglishPhones && !alreadyHasDina) {
-                    keywordFile.writeText("D IY1 N AA1 @دینا\n", Charsets.UTF_8)
+                    keywordFile.writeText("D IY1 N AA1 @دینا :2.5 #0.15\n", Charsets.UTF_8)
                 }
             }
 
