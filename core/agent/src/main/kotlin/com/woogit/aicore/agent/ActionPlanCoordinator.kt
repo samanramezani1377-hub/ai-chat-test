@@ -27,12 +27,17 @@ data class ActionPlan(
 
 interface ActionIntentPlanner {
     suspend fun plan(context: ConversationContext): ActionIntent?
+
+    /** Advisory only: this must never be used as authorization to execute an action. */
+    fun requiresAction(context: ConversationContext): Boolean = false
 }
 
 class ActionPlanCoordinator(
     private val lifecycle: ActionLifecycle,
     private val planner: ActionIntentPlanner
 ) {
+    fun requiresAction(context: ConversationContext): Boolean = planner.requiresAction(context)
+
     suspend fun prepare(context: ConversationContext, conversationId: String? = null): ActionPlan? {
         val intent = planner.plan(context) ?: return null
         val prepared = lifecycle.prepare(intent.actionId, intent.input, conversationId)
