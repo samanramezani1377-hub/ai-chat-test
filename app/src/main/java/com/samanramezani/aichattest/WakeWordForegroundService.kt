@@ -29,6 +29,7 @@ import com.k2fsa.sherpa.onnx.OnlineStream
 import com.samanramezani.aichattest.voice.WakeWordModelEntry
 import com.samanramezani.aichattest.voice.WakeWordModelStore
 import com.samanramezani.aichattest.voice.isDinaWakeKeywordLabel
+import com.samanramezani.aichattest.voice.shouldKeepWakeServiceForConversation
 import com.samanramezani.aichattest.voice.VoiceModelStore
 import com.samanramezani.aichattest.voice.VoiceModelKind
 import com.samanramezani.aichattest.ui.voice.VoiceConversationController
@@ -348,8 +349,12 @@ class WakeWordForegroundService : Service() {
                 }
             }
             val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-            val keepForegroundForVoice = prefs.getBoolean(PREF_ARMED, false) &&
-                !prefs.getBoolean(PREF_ENABLED, false) && detected && voiceController != null
+            val keepForegroundForVoice = shouldKeepWakeServiceForConversation(
+                armed = prefs.getBoolean(PREF_ARMED, false),
+                listeningEnabled = prefs.getBoolean(PREF_ENABLED, false),
+                phraseDetected = detected,
+                controllerActive = voiceController != null,
+            )
             pauseRequested = false
             if (keepForegroundForVoice) {
                 val canPostNotification = Build.VERSION.SDK_INT < 33 ||
