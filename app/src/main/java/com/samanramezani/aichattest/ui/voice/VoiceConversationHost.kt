@@ -99,20 +99,33 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     LaunchedEffect(Unit) {
         val activity = context as? Activity
         val openedByWakeWord = activity?.intent?.getBooleanExtra(WakeWordForegroundService.EXTRA_OPEN_VOICE_FROM_WAKE, false) == true
+        val audioStartedInService = activity?.intent?.getBooleanExtra(WakeWordForegroundService.EXTRA_CONVERSATION_STARTED_IN_SERVICE, false) == true
         if (openedByWakeWord) {
             activity?.intent?.removeExtra(WakeWordForegroundService.EXTRA_OPEN_VOICE_FROM_WAKE)
-            val stt = sttModels.firstOrNull { it.id == activeSttId }
-            val ttsModel = ttsModels.firstOrNull { it.id == activeTtsId }
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                updateVoiceStatus("VOICE-KWS-013: دینا تشخیص داده شد، اما مجوز میکروفون برای شروع مکالمه در دسترس نیست.")
-            } else if (stt == null || ttsModel == null) {
-                updateVoiceStatus("VOICE-KWS-014: دینا تشخیص داده شد؛ برای شروع مکالمه ابتدا مدل اصلی Shenava Koochik و مدل TTS را وارد و انتخاب کن.")
+            activity?.intent?.removeExtra(WakeWordForegroundService.EXTRA_CONVERSATION_STARTED_IN_SERVICE)
+            if (audioStartedInService) {
+                updateVoiceStatus("دینا تشخیص داده شد؛ مکالمه در سرویس پس‌زمینه اجرا می‌شود. بازبودن این صفحه برای ادامهٔ صدا لازم نیست.")
             } else {
-                busy = true
-                updateVoiceStatus("عبارت «دینا» تشخیص داده شد؛ در حال شروع مکالمهٔ صوتی…")
-                controller.start(stt, ttsModel)
+                val stt = sttModels.firstOrNull { it.id == activeSttId }
+                val ttsModel = ttsModels.firstOrNull { it.id == activeTtsId }
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                    updateVoiceStatus("VOICE-KWS-013: دینا تشخیص داده شد، اما مجوز میکروفون برای شروع مکالمه در دسترس نیست.")
+                } else if (stt == null || ttsModel == null) {
+                    updateVoiceStatus("VOICE-KWS-014: دینا تشخیص داده شد؛ برای شروع مکالمه ابتدا مدل اصلی Shenava Koochik و مدل TTS را وارد و انتخاب کن.")
+                } else {
+                    busy = true
+                    updateVoiceStatus("عبارت «دینا» تشخیص داده شد؛ در حال شروع مکالمهٔ صوتی…")
+                    controller.start(stt, ttsModel)
+                }
             }
         }
+    }
+
+    LaunchedEffect(activeSttId, activeTtsId) {
+        wakePrefs.edit()
+            .putString(WakeWordForegroundService.PREF_STT_MODEL_ID, activeSttId)
+            .putString(WakeWordForegroundService.PREF_TTS_MODEL_ID, activeTtsId)
+            .apply()
     }
 
     fun refreshModels() {
@@ -269,13 +282,17 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         onImportTtsModel = { ttsModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
         onImportTtsConfig = { ttsConfigPicker.launch(arrayOf("application/json", "text/json", "text/plain", "*/*")) },
         onImportEspeakData = { espeakPicker.launch(arrayOf("application/x-bzip2", "application/zip", "application/octet-stream", "*/*")) },
-        onSelectStt = { activeSttId = it },
-        onSelectTts = { activeTtsId = it },
+        onSelectStt = { activeSttId = it; wakePrefs.edit().putString(WakeWordForegroundService.PREF_STT_MODEL_ID, it).apply() },
+        onSelectTts = { activeTtsId = it; wakePrefs.edit().putString(WakeWordForegroundService.PREF_TTS_MODEL_ID, it).apply() },
         onStart = {
             val stt = sttModels.firstOrNull { it.id == activeSttId }
             val tts = ttsModels.firstOrNull { it.id == activeTtsId }
             if (stt == null || tts == null) updateVoiceStatus("VOICE-MODEL-001: ابتدا مدل‌های STT و TTS را وارد و انتخاب کنید.")
             else {
+                wakePrefs.edit()
+                    .putString(WakeWordForegroundService.PREF_STT_MODEL_ID, stt.id)
+                    .putString(WakeWordForegroundService.PREF_TTS_MODEL_ID, tts.id)
+                    .apply()
                 if (wakeWordEnabled) { WakeWordForegroundService.pause(context); wakeWordEnabled = false }
                 busy = true
                 controller.start(stt, tts)
@@ -283,6 +300,13 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         },
         onStop = {
             controller.stop()
+            val serviceOwnedState = wakePrefs.getString(WakeWordForegroundService.PREF_CONVERSATION_STATE, "")
+                ?.let { it == "LISTENING_SCREEN_OFF_CAPABLE" || it == "CONVERSATION_ACTIVE" || it == "CONVERSATION_STARTING" || it == "CONVERSATION_START_REQUESTED" || it == "ACTIVITY_LAUNCH_ATTEMPTED_AUDIO_RUNNING" || it == "AUDIO_RUNNING_UI_UNAVAILABLE" } == true
+            if (serviceOwnedState) {
+                runCatching {
+                    context.startService(Intent(context, WakeWordForegroundService::class.java).setAction(WakeWordForegroundService.ACTION_STOP_CONVERSATION))
+                }
+            }
             val armed = wakePrefs.getBoolean(WakeWordForegroundService.PREF_ARMED, false)
             val path = wakePrefs.getString(WakeWordForegroundService.PREF_MODEL_DIRECTORY, null)
             if (armed && !path.isNullOrBlank()) {
@@ -327,7 +351,7 @@ private fun sanitizeAssistantVoiceText(raw: String): String {
     return text
 }
 
-private class VoiceConversationController(
+internal class VoiceConversationController(
     private val context: Context,
     private val container: AppContainer,
     private val onStatus: (String) -> Unit,
