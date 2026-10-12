@@ -41,20 +41,31 @@ class WakeWordModelStore(
         root.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") }
             ?.mapNotNull(::validateDirectory)?.sortedBy { it.title } ?: emptyList()
 
-    fun importArchive(uri: Uri): WakeWordModelEntry {
+    fun importArchive(uri: Uri, onProgress: (String) -> Unit = {}): WakeWordModelEntry {
         root.mkdirs()
+        onProgress("در حال بررسی فایل انتخاب‌شده برای بیدارباش…")
         val displayName = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0).orEmpty() else "" }.orEmpty()
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0).orEmpty() else "" }
+            .orEmpty()
+            .ifBlank { uri.lastPathSegment.orEmpty().substringAfterLast('/') }
         val archive = displayName.lowercase()
-        require(archive.endsWith(".zip") || archive.endsWith(".tar.bz2") || archive.endsWith(".tbz2")) {
-            "VOICE-KWS-IMPORT-001: بستهٔ مدل باید ZIP یا TAR.BZ2 باشد."
+        val mime = resolver.getType(uri).orEmpty().lowercase()
+        val isZip = archive.endsWith(".zip") || mime.contains("zip")
+        val isTarBz2 = archive.endsWith(".tar.bz2") || archive.endsWith(".tbz2") ||
+            mime.contains("bzip2") || mime.contains("x-bzip")
+        require(isZip || isTarBz2) {
+            "VOICE-KWS-IMPORT-001: بستهٔ مدل باید ZIP یا TAR.BZ2 باشد؛ فایل شناسایی‌شده: ${displayName.ifBlank { "نامشخص" }}."
         }
         val staging = File(root, ".import-${System.currentTimeMillis()}")
         check(staging.mkdirs()) { "VOICE-KWS-IMPORT-002: پوشهٔ موقت مدل بیدارباش ساخته نشد." }
         var count = 0
         var expanded = 0L
+        var lastReportedBytes = 0L
         fun extract(nameValue: String, isDirectory: Boolean, entryStream: java.io.InputStream) {
             count++
+            if (count == 1 || count % 8 == 0) {
+                onProgress("در حال استخراج بستهٔ بیدارباش… فایل $count")
+            }
             require(count <= MAX_ENTRIES) { "VOICE-KWS-IMPORT-004: تعداد فایل‌های بسته بیش از حد مجاز است." }
             val name = nameValue.replace('\\', '/')
             require(!name.startsWith("/") && name.split('/').none { it == ".." }) {
@@ -74,6 +85,10 @@ class WakeWordModelStore(
                         val n = entryStream.read(buffer)
                         if (n < 0) break
                         expanded += n
+                        if (expanded - lastReportedBytes >= 2L * 1024 * 1024) {
+                            lastReportedBytes = expanded
+                            onProgress("در حال استخراج مدل بیدارباش… ${expanded / (1024 * 1024)} مگابایت")
+                        }
                         require(expanded <= MAX_EXPANDED_BYTES) {
                             "VOICE-KWS-IMPORT-006: حجم استخراج‌شدهٔ مدل از حد مجاز بیشتر است."
                         }
@@ -85,8 +100,9 @@ class WakeWordModelStore(
         try {
             val input = resolver.openInputStream(uri)
                 ?: error("VOICE-KWS-IMPORT-003: فایل انتخاب‌شده قابل خواندن نیست.")
+            onProgress("در حال بازکردن و استخراج بستهٔ بیدارباش…")
             input.use { source ->
-                if (archive.endsWith(".zip")) {
+                if (isZip) {
                     ZipInputStream(source).use { zip ->
                         while (true) {
                             val item = zip.nextEntry ?: break
@@ -104,6 +120,7 @@ class WakeWordModelStore(
                 }
             }
 
+            onProgress("در حال بررسی فایل‌های مدل و آماده‌سازی عبارت «دینا»…")
             // The official tiny zh-en KWS model has an English phoneme inventory but no Persian
             // keyword file. For that specific model family, seed a phonetic approximation of
             // Persian "دینا" (DEE-NAA); custom-trained Persian packages should ship their own
@@ -125,6 +142,7 @@ class WakeWordModelStore(
                 }
             }
 
+            onProgress("در حال اعتبارسنجی encoder، decoder، joiner و واژگان…")
             val candidate = staging.walkTopDown().filter { it.isDirectory }
                 .firstOrNull { validateDirectory(it) != null }
                 ?: error("VOICE-KWS-IMPORT-007: بسته معتبر نیست. encoder/decoder/joiner، tokens.txt و keywords.txt برای «دینا» لازم‌اند.")
@@ -139,6 +157,7 @@ class WakeWordModelStore(
             } else {
                 check(candidate.renameTo(destination)) { "VOICE-KWS-IMPORT-008: ذخیرهٔ مدل بیدارباش ناموفق بود." }
             }
+            onProgress("در حال ذخیره نهایی مدل بیدارباش…")
             staging.deleteRecursively()
             return validateDirectory(destination)
                 ?: run {
