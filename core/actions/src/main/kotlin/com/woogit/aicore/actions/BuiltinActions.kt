@@ -231,11 +231,14 @@ class CreateFileAction(private val workspace: WorkspacePathResolver) : Action<An
     override val stateChanging = true
     override val idempotent = true
     override suspend fun execute(input: Any): Any {
-        val path = workspace.resolve(ActionArguments.string(input, "file_name"))
+        val relativeName = ActionArguments.string(input, "file_name")
+        var path = workspace.resolve(relativeName)
         val content = ActionArguments.string(input, "content")
         val bytes = content.toByteArray(StandardCharsets.UTF_8)
         require(bytes.size <= MAX_FILE_BYTES) { "File content exceeds 1 MiB" }
         Files.createDirectories(path.parent)
+        // Re-check after parent creation so a newly introduced symlink is rejected.
+        path = workspace.resolve(relativeName)
         require(!Files.isSymbolicLink(path)) { "Symbolic links cannot be modified" }
 
         if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
