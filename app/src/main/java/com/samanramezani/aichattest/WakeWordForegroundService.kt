@@ -44,6 +44,7 @@ class WakeWordForegroundService : Service() {
         const val PREFS = "dina_wake_word"
         const val PREF_MODEL_DIRECTORY = "model_directory"
         const val PREF_ENABLED = "enabled"
+        const val PREF_ARMED = "armed"
         private const val SAMPLE_RATE = 16000
         private const val SAMPLES_PER_CHUNK = 1600
 
@@ -51,6 +52,7 @@ class WakeWordForegroundService : Service() {
             context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).edit()
                 .putString(PREF_MODEL_DIRECTORY, modelDirectory)
                 .putBoolean(PREF_ENABLED, true)
+                .putBoolean(PREF_ARMED, true)
                 .apply()
             ContextCompat.startForegroundService(
                 context,
@@ -58,8 +60,14 @@ class WakeWordForegroundService : Service() {
             )
         }
 
-        fun stop(context: android.content.Context) {
+        fun pause(context: android.content.Context) {
             context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, false).apply()
+            context.stopService(Intent(context, WakeWordForegroundService::class.java).setAction(ACTION_STOP))
+        }
+
+        fun stop(context: android.content.Context) {
+            context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).edit()
+                .putBoolean(PREF_ENABLED, false).putBoolean(PREF_ARMED, false).apply()
             context.stopService(Intent(context, WakeWordForegroundService::class.java).setAction(ACTION_STOP))
             context.getSystemService(NotificationManager::class.java).cancel(DETECTED_NOTIFICATION_ID)
         }
@@ -99,7 +107,7 @@ class WakeWordForegroundService : Service() {
                 startForeground(LISTENING_NOTIFICATION_ID, buildListeningNotification())
             }
         } catch (t: Throwable) {
-            prefs.edit().putBoolean(PREF_ENABLED, false).apply()
+            prefs.edit().putBoolean(PREF_ENABLED, false).putBoolean(PREF_ARMED, false).apply()
             Log.e(TAG, "Could not start microphone foreground service", t)
             stopSelfResult(startId)
             return START_NOT_STICKY
@@ -175,7 +183,7 @@ class WakeWordForegroundService : Service() {
             }
         } catch (t: Throwable) {
             Log.e(TAG, "Wake-word listener stopped", t)
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, false).apply()
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, false).putBoolean(PREF_ARMED, false).apply()
             postWakeNotification("شنود بیدارباش متوقف شد؛ برای جزئیات، گزارش برنامه را بررسی کن.", openVoice = false)
         } finally {
             running.set(false)
