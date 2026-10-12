@@ -64,10 +64,7 @@ class WakeWordForegroundService : Service() {
 
         fun pause(context: android.content.Context) {
             context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, false).apply()
-            ContextCompat.startForegroundService(
-                context,
-                Intent(context, WakeWordForegroundService::class.java).setAction(ACTION_PAUSE),
-            )
+            context.startService(Intent(context, WakeWordForegroundService::class.java).setAction(ACTION_PAUSE))
         }
 
         fun stop(context: android.content.Context) {
@@ -98,6 +95,10 @@ class WakeWordForegroundService : Service() {
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_PAUSE) {
+            if (worker == null) {
+                stopSelfResult(startId)
+                return START_NOT_STICKY
+            }
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, false).apply()
             pauseRequested = true
             running.set(false)
