@@ -12,6 +12,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -78,6 +79,7 @@ class WakeWordForegroundService : Service() {
     @Volatile private var audioRecord: AudioRecord? = null
     @Volatile private var spotter: KeywordSpotter? = null
     @Volatile private var stream: OnlineStream? = null
+    @Volatile private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -113,6 +115,13 @@ class WakeWordForegroundService : Service() {
             return START_NOT_STICKY
         }
         if (running.compareAndSet(false, true)) {
+            runCatching {
+                wakeLock = getSystemService(PowerManager::class.java)
+                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:DinaWakeWord").apply {
+                        setReferenceCounted(false)
+                        acquire()
+                    }
+            }.onFailure { Log.w(TAG, "Could not acquire partial wake lock; screen-off listening may be interrupted", it) }
             worker = Thread({ listen(modelPath) }, "DinaWakeWord-KWS").apply { start() }
         }
         return START_NOT_STICKY
@@ -204,6 +213,8 @@ class WakeWordForegroundService : Service() {
                     })
                 }.onFailure { Log.w(TAG, "Automatic activity launch blocked; notification remains available", it) }
             }
+            runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
+            wakeLock = null
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
@@ -256,6 +267,8 @@ class WakeWordForegroundService : Service() {
         running.set(false)
         // Stop capture to unblock the worker; the worker owns and releases all native handles.
         runCatching { audioRecord?.stop() }
+        runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
+        wakeLock = null
         worker?.interrupt()
         super.onDestroy()
     }
