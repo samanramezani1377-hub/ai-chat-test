@@ -408,8 +408,6 @@ class WakeWordForegroundService : Service() {
     }
 
     private fun startVoiceConversationInService(): Boolean {
-        if (voiceController != null) return true
-        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val currentState = prefs.getString(PREF_CONVERSATION_STATE, "").orEmpty()
         if (voiceController != null) {
