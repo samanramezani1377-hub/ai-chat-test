@@ -248,7 +248,11 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             busy = true
             updateVoiceStatus("در حال وارد کردن ${label} و آماده‌سازی مدل محلی…")
             try {
-                val ready = withContext(Dispatchers.IO) { store.importPiperComponent(uri, component) }
+                val ready = withContext(Dispatchers.IO) {
+                    store.importPiperComponent(uri, component) { progress ->
+                        uiScope.launch { updateVoiceStatus(progress) }
+                    }
+                }
                 refreshModels()
                 refreshImportProgress()
                 if (ready != null) activeTtsId = ready.id
