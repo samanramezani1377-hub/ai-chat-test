@@ -201,7 +201,7 @@ class WakeWordForegroundService : Service() {
                 it.isFile && it.name.equals("en.phone", ignoreCase = true)
             } && entry.encoder.name.contains("epoch-13-avg-2", ignoreCase = true)
             if (isKnownZhEnPhoneModel) {
-                val correctedKeywords = "D IY1 N AA1 @دینا\nD IY1 N AH0 @دینا\n"
+                val correctedKeywords = "D IY1 N AA1 @دینا\nD IY1 N AH0 @دینا\nD IY0 N AA1 @دینا\nD IH1 N AA1 @دینا\nD IH1 N AH0 @دینا\n"
                 if (runCatching { entry.keywords.readText(Charsets.UTF_8) }.getOrNull() != correctedKeywords) {
                     entry.keywords.writeText(correctedKeywords, Charsets.UTF_8)
                     Log.i(TAG, "Migrated existing zh-en wake keywords to canonical phone tokens")
