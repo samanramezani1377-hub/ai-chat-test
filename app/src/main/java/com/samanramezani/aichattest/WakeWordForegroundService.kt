@@ -1,6 +1,7 @@
 package com.samanramezani.aichattest
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -525,6 +526,8 @@ class WakeWordForegroundService : Service() {
      * Android 13+ requires runtime notification permission for ordinary notification updates.
      * Keep the microphone foreground service alive even when the user has denied that permission.
      */
+    // Both notification permission checks below are intentional; lint does not infer the guarded API call.
+    @SuppressLint("MissingPermission", "NotificationPermission")
     private fun notifyIfPermitted(id: Int, notification: Notification) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
