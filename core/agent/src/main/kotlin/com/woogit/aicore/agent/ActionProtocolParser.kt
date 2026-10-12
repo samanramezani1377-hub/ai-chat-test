@@ -242,10 +242,10 @@ class ProtocolActionIntentPlanner(
         val user = messages[lastUserIndex].content.lowercase()
         val indicators = listOf(
             "create_file", "read_file", "list_files", "delete_file", "calculate",
-            "فایل", "فضای کار", "بساز", "ایجاد کن", "بنویس", "ذخیره کن",
-            "پاک کن", "حذف کن", "بخون", "بخوان", "فهرست", "محاسبه کن",
-            "درست کن", "بساز برام", "ذخیره‌اش", "ذخیره اش", "تو فضای کار",
-            "متن خام", "اسمشو بزار", "اسمش را بگذار"
+            "create a file", "make a file", "write to a file", "save this file", "delete the file",
+            "بساز", "ایجاد کن", "بنویس", "ذخیره کن", "پاک کن", "حذف کن",
+            "بخون", "بخوان", "فهرست کن", "محاسبه کن", "درست کن",
+            "بساز برام", "ذخیره‌اش", "ذخیره اش", "اسمشو بزار", "اسمش را بگذار"
         )
         return indicators.any(user::contains)
     }
