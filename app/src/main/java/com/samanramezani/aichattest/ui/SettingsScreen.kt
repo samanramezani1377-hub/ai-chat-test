@@ -13,6 +13,10 @@ import com.samanramezani.aichattest.providers.CloudflareConfig
 import com.samanramezani.aichattest.providers.CloudflareProvider
 import com.samanramezani.aichattest.providers.CloudflareProviderStore
 import com.samanramezani.aichattest.providers.InferenceProviderMode
+import com.samanramezani.aichattest.providers.ProviderModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -129,6 +133,10 @@ private fun CloudflareProviderSettings(onProviderChanged: () -> Unit) {
     var modelMenu by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf(false) }
+    var remoteModels by remember { mutableStateOf(emptyList<ProviderModel>()) }
+    var loadingModels by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val modelChoices = remember(remoteModels) { (remoteModels + CloudflareProvider.suggestedModels).distinctBy { it.id } }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("مدل ابری و API", style = MaterialTheme.typography.titleLarge)
@@ -152,14 +160,38 @@ private fun CloudflareProviderSettings(onProviderChanged: () -> Unit) {
             trailingIcon = { TextButton(onClick = { modelMenu = true }) { Text("مدل‌ها") } },
         )
         DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
-            CloudflareProvider.suggestedModels.forEach { item ->
+            modelChoices.forEach { item ->
                 DropdownMenuItem(
                     text = { Text(item.label) },
                     onClick = { model = item.id; modelMenu = false },
                 )
             }
         }
-        Text("می‌توانی از فهرست مدل‌های پیشنهادی انتخاب کنی یا شناسه هر مدل پشتیبانی‌شده Cloudflare را دستی وارد کنی.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("می‌توانی مدل‌های موجود حساب را از Cloudflare بارگیری کنی یا شناسه هر مدل را دستی وارد کنی.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedButton(
+            onClick = {
+                loadingModels = true
+                message = null
+                scope.launch {
+                    try {
+                        val fetched = withContext(Dispatchers.IO) {
+                            CloudflareProvider().listModels(CloudflareConfig(accountId, apiToken, model, mode))
+                        }
+                        remoteModels = fetched
+                        message = if (fetched.isEmpty()) "مدل قابل‌استفاده‌ای از حساب دریافت نشد؛ شناسه مدل را می‌توانی دستی وارد کنی." else "${fetched.size} مدل متنی از حساب Cloudflare دریافت شد."
+                        failed = false
+                        modelMenu = true
+                    } catch (t: Throwable) {
+                        message = t.message ?: "دریافت فهرست مدل‌ها ناموفق بود."
+                        failed = true
+                    } finally {
+                        loadingModels = false
+                    }
+                }
+            },
+            enabled = !loadingModels && accountId.isNotBlank() && apiToken.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(if (loadingModels) "در حال دریافت فهرست مدل‌ها…" else "بارگیری مدل‌های حساب Cloudflare") }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 modifier = Modifier.weight(1f),
