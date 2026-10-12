@@ -249,11 +249,9 @@ class WakeWordForegroundService : Service() {
 
     override fun onDestroy() {
         running.set(false)
-        worker?.interrupt()
+        // Stop capture to unblock the worker; the worker owns and releases all native handles.
         runCatching { audioRecord?.stop() }
-        runCatching { audioRecord?.release() }
-        runCatching { stream?.release() }
-        runCatching { spotter?.release() }
+        worker?.interrupt()
         super.onDestroy()
     }
 
