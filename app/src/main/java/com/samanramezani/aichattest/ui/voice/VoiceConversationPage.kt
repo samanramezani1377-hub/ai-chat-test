@@ -39,17 +39,19 @@ internal fun VoiceConversationPage(
     busy: Boolean,
     sttModels: List<VoiceModelEntry>,
     ttsModels: List<VoiceModelEntry>,
-    missingSttComponents: List<String>,
     missingKoochikComponents: List<String>,
     missingTtsComponents: List<String>,
     activeSttId: String?,
     activeTtsId: String?,
     onBack: () -> Unit,
     onImportStt: () -> Unit,
-    onImportSmallSttModel: () -> Unit,
-    onImportSmallSttTokens: () -> Unit,
     onImportKoochikModel: () -> Unit,
     onImportKoochikTokens: () -> Unit,
+    wakeWordModel: com.samanramezani.aichattest.voice.WakeWordModelEntry?,
+    wakeWordEnabled: Boolean,
+    wakeWordArmed: Boolean,
+    onImportWakeWord: () -> Unit,
+    onToggleWakeWord: (Boolean) -> Unit,
     onImportTts: () -> Unit,
     onImportTtsModel: () -> Unit,
     onImportTtsConfig: () -> Unit,
@@ -67,9 +69,17 @@ internal fun VoiceConversationPage(
     var permissionGranted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
     }
+    var pendingWakeEnable by remember { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         permissionGranted = granted
-        if (granted) onStart()
+        if (granted) {
+            if (pendingWakeEnable) {
+                pendingWakeEnable = false
+                onToggleWakeWord(true)
+            } else onStart()
+        } else {
+            pendingWakeEnable = false
+        }
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -96,25 +106,7 @@ internal fun VoiceConversationPage(
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("۱. تشخیص گفتار · STT", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text("مدل STT صدای شما را به متن تبدیل می‌کند. برای Shenava هر دو فایل model.onnx و tokens.txt لازم‌اند.", style = MaterialTheme.typography.bodySmall)
-                        OutlinedButton(
-                            onClick = { uriHandler.openUri("https://huggingface.co/Reza2kn/Shenava-Rizeh-Pizeh-v1.0-sherpa-onnx") },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("صفحه دریافت مدل سبک فارسی Shenava") }
-                        OutlinedButton(onClick = onImportSmallSttModel, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن مدل فارسی · model.onnx") }
-                        OutlinedButton(onClick = onImportSmallSttTokens, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن واژگان · tokens.txt") }
-                        OutlinedButton(onClick = onImportStt, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("یا وارد کردن بسته کامل STT · ZIP / TAR.BZ2") }
-                        Text("فایل‌ها را یکی‌یکی وارد کن؛ برنامه آن‌ها را نگه می‌دارد و پس از کامل‌شدن، یک مدل واحد می‌سازد.", style = MaterialTheme.typography.bodySmall)
-                        val sttSteps = listOf("model.onnx", "tokens.txt")
-                        val sttDone = sttSteps.size - missingSttComponents.size
-                        LinearProgressIndicator(progress = { sttDone.toFloat() / sttSteps.size }, modifier = Modifier.fillMaxWidth())
-                        sttSteps.forEach { step ->
-                            Text("${if (step !in missingSttComponents) "✓" else "○"}  $step", style = MaterialTheme.typography.bodySmall)
-                        }
-                        Text(if (sttDone == sttSteps.size) "هر دو فایل Shenava Rizeh-Pizeh وارد شده‌اند." else "پیشرفت ورود Rizeh-Pizeh: $sttDone از ${sttSteps.size} فایل", style = MaterialTheme.typography.labelMedium)
-                        Spacer(Modifier.height(8.dp))
-                        Text("Shenava Koochik · دقت بالاتر · حدود ۴۵۹ مگابایت", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        Text("این مدل بزرگ‌تر از Rizeh-Pizeh است و برای تشخیص دقیق‌تر فارسی در نظر گرفته شده. دو فایل زیر را جداگانه دریافت و وارد کن.", style = MaterialTheme.typography.bodySmall)
+                        Text("مدل اصلی STT گفتار فارسی را به متن تبدیل می‌کند. در این برنامه Shenava Koochik مدل اصلی این مسیر است؛ فایل‌های model.onnx و tokens.txt لازم‌اند.", style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(
                             onClick = { uriHandler.openUri("https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx/resolve/main/model.onnx") },
                             modifier = Modifier.fillMaxWidth(),
@@ -140,7 +132,7 @@ internal fun VoiceConversationPage(
                                     Text(model.title, fontWeight = FontWeight.Medium)
                                     Text(when (model.asrMode) {
                                         "qwen3-asr" -> "Qwen3-ASR · محلی"
-                                        "nemo-ctc" -> if (model.title.contains("Koochik", true)) "Shenava Koochik CTC · فارسی · 114M" else "Shenava Rizeh-Pizeh CTC · فارسی · 6.9M"
+                                        "nemo-ctc" -> "Shenava Koochik CTC · فارسی · 114M"
                                         else -> "Streaming Transducer · محلی"
                                     }, style = MaterialTheme.typography.bodySmall)
                                 }
@@ -150,7 +142,43 @@ internal fun VoiceConversationPage(
                 }
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("۲. تولید گفتار · TTS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("۲. بیدارباش صوتی · «دینا»", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("بستهٔ کامل sherpa-onnx KWS را با ZIP یا TAR.BZ2 وارد کن. بسته باید encoder/decoder/joiner مدل ONNX و tokens.txt داشته باشد. برای مدل رسمی کوچک zh-en، برنامه keywords.txt را با تقریب آوایی «دینا» می‌سازد؛ چون مدل اصلی چینی/انگلیسی است، دقت فارسی تضمین نیست. مدل آموزش‌دیدهٔ فارسی می‌تواند keywords.txt اختصاصی خود را داشته باشد.", style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(
+                            onClick = { uriHandler.openUri("https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models") },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("دریافت مدل‌های کوچک آمادهٔ بیدارباش") }
+                        OutlinedButton(onClick = onImportWakeWord, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (wakeWordModel == null) "انتخاب و وارد کردن مدل بیدارباش · ZIP / TAR.BZ2" else "انتخاب مدل بیدارباش دیگر · ZIP / TAR.BZ2")
+                        }
+                        Text(
+                            wakeWordModel?.let { "مدل انتخاب‌شده: ${it.title}" } ?: "هنوز مدل بیدارباشی وارد نشده است.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (wakeWordModel == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                        )
+                        Button(
+                            onClick = {
+                                if (!wakeWordEnabled && !permissionGranted) {
+                                    pendingWakeEnable = true
+                                    permission.launch(Manifest.permission.RECORD_AUDIO)
+                                } else onToggleWakeWord(!wakeWordEnabled)
+                            },
+                            enabled = !busy && !listening && (wakeWordModel != null || wakeWordEnabled),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(if (wakeWordEnabled) "خاموش کردن بیدارباش «دینا»" else "روشن کردن بیدارباش «دینا»")
+                        }
+                        Text(
+                            if (wakeWordEnabled) "شنود محلی فعال است و اعلان دائمی اندروید نمایش داده می‌شود."
+                            else if (wakeWordArmed && listening) "بیدارباش مسلح است؛ هنگام مکالمه موقتاً متوقف می‌شود و پس از توقف مکالمه دوباره فعال خواهد شد."
+                            else "برای کارکرد در پس‌زمینه، بیدارباش را روشن کن. فعال‌سازی خودکار صفحه به محدودیت‌های نسخهٔ اندروید و سازندهٔ گوشی وابسته است.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("۳. تولید گفتار · TTS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text("مدل TTS پاسخ دستیار را به صدا تبدیل می‌کند. مدل Piper آماده‌شده باید فایل مدل، تنظیمات و داده‌های آواشناسی را داشته باشد.", style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(onClick = onImportTtsModel, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن مدل صوتی · ONNX") }
                         OutlinedButton(onClick = onImportTtsConfig, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن تنظیمات Piper · JSON") }
@@ -180,7 +208,7 @@ internal fun VoiceConversationPage(
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text("۳. عیب‌یابی مکالمه صوتی", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Text("۴. عیب‌یابی مکالمه صوتی", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                 Text("وضعیت فعلی، کد خطا و رخدادهای اخیر برای گزارش مشکل.", style = MaterialTheme.typography.bodySmall)
                             }
                             IconButton(onClick = {

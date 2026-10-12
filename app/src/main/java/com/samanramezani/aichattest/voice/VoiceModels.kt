@@ -16,7 +16,6 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 enum class VoiceModelKind { STT, TTS }
 enum class PiperComponent { MODEL, CONFIG, ESPEAK_DATA }
 enum class SmallSttComponent { MODEL, TOKENS }
-enum class SmallSttModel { RIZEH_PIZEH, KOOCHIK }
 
 data class VoiceModelEntry(
     val id: String,
@@ -48,7 +47,13 @@ class VoiceModelStore(
     private val resolver: ContentResolver,
     private val root: File,
 ) {
-    init { root.mkdirs() }
+    init {
+        root.mkdirs()
+        // Remove the retired Rizeh-Pizeh model and its partial import from older installs.
+        root.listFiles()?.filter {
+            it.name == ".shenava-rizeh-import" || it.name.startsWith("stt-shenava-rizeh-pizeh-")
+        }?.forEach { it.deleteRecursively() }
+    }
 
     fun list(kind: VoiceModelKind): List<VoiceModelEntry> =
         root.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") }
@@ -69,11 +74,10 @@ class VoiceModelStore(
         }
     }
 
-    /** Human-readable progress for the two-file Shenava import. */
-    fun missingSmallSttComponents(modelType: SmallSttModel = SmallSttModel.RIZEH_PIZEH): List<String> {
-        val idPrefix = if (modelType == SmallSttModel.KOOCHIK) "stt-shenava-koochik-" else "stt-shenava-rizeh-pizeh-"
-        if (list(VoiceModelKind.STT).any { it.asrMode == "nemo-ctc" && it.id.startsWith(idPrefix) }) return emptyList()
-        val staging = File(root, if (modelType == SmallSttModel.KOOCHIK) ".shenava-koochik-import" else ".shenava-rizeh-import")
+    /** Human-readable progress for the two-file Shenava Koochik import. */
+    fun missingKoochikComponents(): List<String> {
+        if (list(VoiceModelKind.STT).any { it.asrMode == "nemo-ctc" && it.id.startsWith("stt-shenava-koochik-") }) return emptyList()
+        val staging = File(root, ".shenava-koochik-import")
         val model = File(staging, "model.onnx").let { it.isFile && it.length() >= 1024 }
         val tokens = File(staging, "tokens.txt").let { it.isFile && it.length() > 0 }
         return buildList {
@@ -82,10 +86,6 @@ class VoiceModelStore(
         }
     }
 
-    /**
-     * Import the tiny Persian Shenava Rizeh-Pizeh NeMo-CTC model in two steps.
-     * Model and tokens can be selected in either order; incomplete imports stay hidden.
-     */
     private fun copyBoundedInput(input: InputStream, target: File, maxBytes: Long, errorCode: String) {
         target.parentFile?.mkdirs()
         val temporary = File(target.parentFile, "${target.name}.part")
@@ -130,15 +130,12 @@ class VoiceModelStore(
         return output.toByteArray()
     }
 
-    fun importSmallPersianSttComponent(
-        uri: Uri,
-        component: SmallSttComponent,
-        modelType: SmallSttModel = SmallSttModel.RIZEH_PIZEH,
-    ): VoiceModelEntry? {
+    /** Import the main Persian Shenava Koochik CTC model in two steps. */
+    fun importKoochikComponent(uri: Uri, component: SmallSttComponent): VoiceModelEntry? {
         root.mkdirs()
-        val staging = File(root, if (modelType == SmallSttModel.KOOCHIK) ".shenava-koochik-import" else ".shenava-rizeh-import")
+        val staging = File(root, ".shenava-koochik-import")
         if (!staging.exists() && !staging.mkdirs()) {
-            error("VOICE-STT-IMPORT-001: ایجاد پوشه موقت مدل فارسی ناموفق بود.")
+            error("VOICE-STT-IMPORT-001: ایجاد پوشه موقت مدل Koochik ناموفق بود.")
         }
         val displayName = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0).orEmpty() else "" }.orEmpty()
@@ -149,10 +146,9 @@ class VoiceModelStore(
             when (component) {
                 SmallSttComponent.MODEL -> {
                     require(displayName.endsWith(".onnx", true)) {
-                        "VOICE-STT-IMPORT-004: فایل مدل Shenava باید با پسوند .onnx باشد."
+                        "VOICE-STT-IMPORT-004: فایل مدل Shenava Koochik باید با پسوند .onnx باشد."
                     }
-                    val target = File(staging, "model.onnx")
-                    copyBoundedInput(input, target, MAX_STT_MODEL_BYTES, "VOICE-STT-IMPORT-005")
+                    copyBoundedInput(input, File(staging, "model.onnx"), MAX_STT_MODEL_BYTES, "VOICE-STT-IMPORT-005")
                 }
                 SmallSttComponent.TOKENS -> {
                     require(displayName.equals("tokens.txt", true) || displayName.endsWith(".txt", true)) {
@@ -160,8 +156,7 @@ class VoiceModelStore(
                     }
                     val bytes = readBoundedBytes(input, 4 * 1024 * 1024, "VOICE-STT-IMPORT-007")
                     val text = bytes.toString(Charsets.UTF_8)
-                    val nonEmptyLines = text.lineSequence().count { it.isNotBlank() }
-                    require(nonEmptyLines >= 100 && text.contains("0")) {
+                    require(text.lineSequence().count { it.isNotBlank() } >= 100 && text.contains("0")) {
                         "VOICE-STT-IMPORT-008: فایل tokens.txt معتبر به نظر نمی‌رسد."
                     }
                     File(staging, "tokens.txt").writeBytes(bytes)
@@ -171,13 +166,13 @@ class VoiceModelStore(
         val model = File(staging, "model.onnx")
         val tokens = File(staging, "tokens.txt")
         if (!model.isFile || model.length() < 1024 || !tokens.isFile) return null
-        val id = "stt-shenava-${if (modelType == SmallSttModel.KOOCHIK) "koochik" else "rizeh-pizeh"}-${System.currentTimeMillis()}"
+        val id = "stt-shenava-koochik-${System.currentTimeMillis()}"
         val destination = File(root, id)
-        check(staging.renameTo(destination)) { "VOICE-STT-IMPORT-009: ذخیره نهایی مدل فارسی ناموفق بود." }
+        check(staging.renameTo(destination)) { "VOICE-STT-IMPORT-009: ذخیره نهایی مدل Koochik ناموفق بود." }
         return validateDirectory(destination, VoiceModelKind.STT)
             ?: run {
                 destination.deleteRecursively()
-                error("VOICE-STT-IMPORT-010: فایل‌های مدل Shenava با ساختار مورد انتظار سازگار نیستند.")
+                error("VOICE-STT-IMPORT-010: فایل‌های مدل Koochik با ساختار مورد انتظار سازگار نیستند.")
             }
     }
 
@@ -534,7 +529,7 @@ class VoiceModelStore(
                 if (simpleCtcModel != null && simpleCtcTokens != null && !hasTransducerParts &&
                     simpleCtcModel.length() >= 1024 && simpleCtcTokens.length() > 0L) {
                     return VoiceModelEntry(
-                        directory.name, if (directory.name.startsWith("stt-shenava-koochik-")) "Shenava Koochik · فارسی · 114M" else "Shenava Rizeh-Pizeh · فارسی · 6.9M",
+                        directory.name, if (directory.name.startsWith("stt-shenava-koochik-")) "Shenava Koochik · فارسی · 114M" else directory.name,
                         kind, directory, simpleCtcModel, tokensFile = simpleCtcTokens,
                         modelType = "nemo-ctc", asrMode = "nemo-ctc",
                     )
