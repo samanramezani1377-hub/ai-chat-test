@@ -85,6 +85,25 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     }
     DisposableEffect(controller) { onDispose { controller.close() } }
 
+    LaunchedEffect(Unit) {
+        val activity = context as? Activity
+        val openedByWakeWord = activity?.intent?.getBooleanExtra(WakeWordForegroundService.EXTRA_OPEN_VOICE_FROM_WAKE, false) == true
+        if (openedByWakeWord) {
+            activity?.intent?.removeExtra(WakeWordForegroundService.EXTRA_OPEN_VOICE_FROM_WAKE)
+            val stt = sttModels.firstOrNull { it.id == activeSttId }
+            val ttsModel = ttsModels.firstOrNull { it.id == activeTtsId }
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                updateVoiceStatus("VOICE-KWS-013: دینا تشخیص داده شد، اما مجوز میکروفون برای شروع مکالمه در دسترس نیست.")
+            } else if (stt == null || ttsModel == null) {
+                updateVoiceStatus("VOICE-KWS-014: دینا تشخیص داده شد؛ برای شروع مکالمه ابتدا مدل اصلی Shenava Koochik و مدل TTS را وارد و انتخاب کن.")
+            } else {
+                busy = true
+                updateVoiceStatus("عبارت «دینا» تشخیص داده شد؛ در حال شروع مکالمهٔ صوتی…")
+                controller.start(stt, ttsModel)
+            }
+        }
+    }
+
     fun refreshModels() {
         sttModels = store.list(VoiceModelKind.STT)
         ttsModels = store.list(VoiceModelKind.TTS)
