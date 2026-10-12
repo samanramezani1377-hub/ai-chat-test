@@ -259,6 +259,7 @@ private class VoiceConversationController(
     private val speaking = AtomicBoolean(false)
     private val turnRunning = AtomicBoolean(false)
     private val bargeInTriggered = AtomicBoolean(false)
+    private val bargeInCapturePending = AtomicBoolean(false)
     // Playback guard is also applied to ASR input, not only to barge-in detection.
     // Loudspeaker echo can remain in the microphone after AudioTrack stops.
     private val lastTtsPlaybackAtMs = AtomicLong(0L)
@@ -348,6 +349,7 @@ private class VoiceConversationController(
                     if (candidate) {
                         if (loudSpeechFrames.incrementAndGet() >= requiredFrames &&
                             bargeInTriggered.compareAndSet(false, true)) {
+                            bargeInCapturePending.set(aecActive)
                             interrupt("صدای کاربر تشخیص داده شد؛ تولید یا پخش پاسخ قبلی متوقف شد.")
                             loudSpeechFrames.set(0)
                             if (aecActive) frames.trySend(frame)
@@ -358,7 +360,9 @@ private class VoiceConversationController(
 
                     // Never let assistant output or its acoustic tail enter the recognizer.
                     // If AEC is unavailable, barge-in during playback is disabled by design.
-                    if (speaking.get() || (assistantAudioActive && !bargeInTriggered.get())) {
+                    val preserveUserAudio = bargeInCapturePending.get() && aecActive
+                    if ((speaking.get() && !preserveUserAudio) ||
+                        (assistantAudioActive && !bargeInCapturePending.get())) {
                         if (echoSuppressionReported.compareAndSet(false, true)) {
                             scope.launch {
                                 onDiagnostic("VOICE-ECHO-001: ورودی ASR هنگام پخش و تا ۱۲۰۰ms پس از آن مسدود شد؛ AEC=" +
@@ -396,11 +400,13 @@ private class VoiceConversationController(
                             null
                         } ?: continue
                         if (update.text.isNotBlank()) onStatus("در حال شنیدن: ${update.text}")
+                        if (update.endpoint) bargeInCapturePending.set(false)
                         if (update.endpoint && update.text.isNotBlank()) {
                             val utterance = update.text.trim()
                             if (utterance.isNotBlank()) {
                                 if (turnRunning.compareAndSet(false, true)) {
                                     bargeInTriggered.set(false)
+                                    bargeInCapturePending.set(false)
                                     onLine("شما", utterance)
                                     turnJob = scope.launch { processTurn(utterance) }
                                 } else {
@@ -590,6 +596,7 @@ private class VoiceConversationController(
         val oldSpeechJob = speechJob
         oldSpeechJob?.cancel()
         cancelledSpeech.getAndSet(null)?.set(true)
+        bargeInCapturePending.set(false)
         speaking.set(false)
         val oldMicrophone = microphone
         microphone = null
