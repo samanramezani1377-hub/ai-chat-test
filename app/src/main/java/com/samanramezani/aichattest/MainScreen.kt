@@ -36,11 +36,11 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 
 @Composable
-internal fun MainScreen(container: AppContainer) {
+internal fun MainScreen(container: AppContainer, openVoiceInitially: Boolean = false) {
     val history = remember { container.conversationHistory }
     val manager = remember { container.modelManager }
     val scope = rememberCoroutineScope()
-    var destination by remember { mutableStateOf(AppDestination.CHAT) }
+    var destination by remember { mutableStateOf(if (openVoiceInitially) AppDestination.VOICE else AppDestination.CHAT) }
     var current by remember { mutableStateOf<ConversationRecord?>(null) }
     var conversations by remember { mutableStateOf(emptyList<ConversationRecord>()) }
     var messages by remember { mutableStateOf(emptyList<UiMessage>()) }
