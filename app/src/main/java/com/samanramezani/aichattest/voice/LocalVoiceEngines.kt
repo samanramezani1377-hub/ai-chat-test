@@ -101,7 +101,7 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
         val minBuffer = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         require(minBuffer > 0) { "VOICE-TTS-003: پیکربندی خروجی صوتی پشتیبانی نمی‌شود." }
         val track = AudioTrack.Builder()
-            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             .setAudioFormat(AudioFormat.Builder().setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
             .setBufferSizeInBytes(maxOf(minBuffer, rate / 5 * 2))
             .setTransferMode(AudioTrack.MODE_STREAM)
@@ -431,4 +431,17 @@ class LocalMicrophone {
         recorder = null
         captureThread = null
     }
+}
+
+
+/** Briefly suppresses microphone frames after Android volume-key presses to avoid treating key feedback as speech. */
+object VoiceAudioInputGuard {
+    private val suppressUntilMs = java.util.concurrent.atomic.AtomicLong(0L)
+
+    fun suppressAfterVolumeKey() {
+        suppressUntilMs.set(android.os.SystemClock.elapsedRealtime() + 900L)
+    }
+
+    fun shouldSuppress(nowMs: Long = android.os.SystemClock.elapsedRealtime()): Boolean =
+        nowMs < suppressUntilMs.get()
 }
