@@ -2,6 +2,7 @@ package com.samanramezani.aichattest.ui.voice
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.app.Activity
 import android.media.AudioManager
@@ -66,7 +67,16 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     var activeTtsId by remember { mutableStateOf(ttsModels.firstOrNull()?.id) }
     var lines by remember { mutableStateOf(emptyList<VoiceLine>()) }
     var status by remember { mutableStateOf("برای شروع، مدل‌های محلی STT و TTS را انتخاب یا وارد کنید.") }
-    var diagnosticLogs by remember { mutableStateOf(listOf("[${System.currentTimeMillis()}] صفحه مکالمه صوتی باز شد.")) }
+    var diagnosticLogs by remember {
+        mutableStateOf(
+            buildList {
+                add("[${System.currentTimeMillis()}] صفحه مکالمه صوتی باز شد.")
+                wakePrefs.getString(WakeWordForegroundService.PREF_CONVERSATION_STATE, null)?.let { add("DINA STATE: $it") }
+                wakePrefs.getString(WakeWordForegroundService.PREF_LAST_STATUS, null)?.let { add("DINA LAST STATUS: $it") }
+                wakePrefs.getString(WakeWordForegroundService.PREF_LAST_DIAGNOSTIC, null)?.let { add(it) }
+            }.takeLast(200)
+        )
+    }
     fun updateVoiceStatus(value: String) {
         status = value
         diagnosticLogs = (diagnosticLogs + "[${System.currentTimeMillis()}] $value").takeLast(200)
