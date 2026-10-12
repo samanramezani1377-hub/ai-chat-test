@@ -156,7 +156,7 @@ class AppContainer(context: Context? = null) {
         val path = com.woogit.aicore.actions.WorkspacePathResolver(root).resolve(relativePath)
         require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) { "File not found" }
         require(Files.size(path) <= 1_048_576L) { "File exceeds 1 MiB preview limit" }
-        return Files.readString(path, StandardCharsets.UTF_8)
+        return path.toFile().readText(Charsets.UTF_8)
     }
 
     fun actionTraces() = actionTraceSink.snapshot()
