@@ -221,7 +221,73 @@ class ProtocolActionIntentPlanner(
             .asReversed()
             .firstOrNull { it.role == ConversationMessage.Role.ASSISTANT }
             ?: return null
-        return parser.parse(assistant.content)
+        parser.parse(assistant.content)?.let { return it }
+
+        // One deterministic recovery path for an explicit, quoted file-creation request.
+        // It is enabled only after the model has already received a repair instruction.
+        val wasAskedToRepair = context.recentMessages.any {
+            it.role == ConversationMessage.Role.TOOL && it.content.startsWith("ACTION_PROTOCOL_REPAIR:")
+        }
+        if (!wasAskedToRepair) return null
+        return explicitFileCreationFallback(context)
+    }
+
+    private fun explicitFileCreationFallback(context: ConversationContext): ActionIntent? {
+        val user = context.recentMessages.asReversed()
+            .firstOrNull { it.role == ConversationMessage.Role.USER }
+            ?.content ?: return null
+        val normalized = user.lowercase()
+        val creationRequested = listOf("بساز", "ایجاد کن", "درست کن", "create a file", "make a file")
+            .any(normalized::contains)
+        val textFileRequested = listOf("فایل", "تکست", "متنی", "text file")
+            .any(normalized::contains)
+        val contentRequested = listOf("داخلش بنویس", "داخل آن بنویس", "محتوا بنویس", "write in it", "containing")
+            .any(normalized::contains)
+        if (!creationRequested || !textFileRequested || !contentRequested) return null
+
+        val nameMarker = listOf("اسمشو بزار", "اسمش را بگذار", "نامش را بگذار", "اسم فایل را بگذار")
+            .map { it to normalized.indexOf(it) }
+            .filter { it.second >= 0 }
+            .minByOrNull { it.second } ?: return null
+        val contentMarker = listOf("داخلش بنویس", "داخل آن بنویس", "محتوا بنویس", "write in it", "containing")
+            .map { it to normalized.indexOf(it) }
+            .filter { it.second >= 0 }
+            .minByOrNull { it.second } ?: return null
+
+        val quoted = Regex("«([^»]+)»").findAll(user).toList()
+        val nameMatch = quoted.firstOrNull { it.range.first > nameMarker.second } ?: return null
+        val contentMatch = quoted.firstOrNull { it.range.first > contentMarker.second } ?: return null
+        var fileName = nameMatch.groupValues[1].trim()
+        val content = contentMatch.groupValues[1]
+        if (fileName.isBlank() || content.isEmpty()) return null
+        if (!fileName.contains('.') && (normalized.contains("تکست") || normalized.contains("متنی") || normalized.contains("text file"))) {
+            fileName += ".txt"
+        }
+
+        val arguments = """{"file_name":${jsonString(fileName)},"content":${jsonString(content)}}"""
+        return ActionIntent(
+            actionId = "create_file",
+            requestId = "fallback-create-" + Integer.toHexString(user.hashCode()),
+            input = arguments,
+            explanation = "Recovered explicit file creation after invalid model tool output",
+        )
+    }
+
+    private fun jsonString(value: String): String = buildString {
+        append('"')
+        value.forEach { char ->
+            when (char) {
+                '"' -> append("\\\"")
+                '\\' -> append("\\\\")
+                '\b' -> append("\\b")
+                '\u000C' -> append("\\f")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> if (char.code < 0x20) append("\\u%04x".format(char.code)) else append(char)
+            }
+        }
+        append('"')
     }
 
     override fun requiresAction(context: ConversationContext): Boolean {
