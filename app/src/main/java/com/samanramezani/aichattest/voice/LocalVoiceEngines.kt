@@ -5,6 +5,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.os.SystemClock
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
 import com.k2fsa.sherpa.onnx.FeatureConfig
@@ -83,9 +84,16 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
         }
     }
 
-    suspend fun speak(text: String, cancelled: AtomicBoolean, onStarted: () -> Unit = {}) = withContext(Dispatchers.Default) {
+    suspend fun speak(
+        text: String,
+        cancelled: AtomicBoolean,
+        onStarted: () -> Unit = {},
+        onSynthesisComplete: (Long) -> Unit = {},
+    ) = withContext(Dispatchers.Default) {
         require(text.isNotBlank()) { "VOICE-TTS-002: متن گفتار خالی است." }
+        val synthesisStartedAtMs = SystemClock.elapsedRealtime()
         val audio = engine.generate(text = text, sid = 0, speed = 1.0f)
+        onSynthesisComplete(SystemClock.elapsedRealtime() - synthesisStartedAtMs)
         if (cancelled.get()) throw CancellationException("TTS interrupted")
         val samples = audio.samples
         val rate = audio.sampleRate
