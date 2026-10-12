@@ -99,7 +99,8 @@ class CloudflareProvider : ChatCompletionProvider {
             val responseText = stream?.bufferedReader(Charsets.UTF_8)?.use { reader ->
                 val fallback = StringBuilder()
                 var sawSse = false
-                reader.forEachLine { line ->
+                while (true) {
+                    val line = reader.readLine() ?: break
                     if (line.startsWith("data:")) {
                         sawSse = true
                         val payload = line.removePrefix("data:").trim()
@@ -115,8 +116,6 @@ class CloudflareProvider : ChatCompletionProvider {
                             }
                             val apiError = json?.optJSONObject("error")
                             if (apiError != null) throw IllegalStateException("Cloudflare API: ${apiError.optString("message", payload)}")
-                        } else if (payload == "[DONE]") {
-                            // Continue reading to allow the connection to close cleanly.
                         }
                     } else if (!sawSse && line.isNotBlank()) {
                         fallback.append(line)
