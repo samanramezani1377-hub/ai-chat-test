@@ -329,6 +329,7 @@ private class VoiceConversationController(
                 if (closed || lifecycleEpoch.get() != startEpoch) {
                     runCatching { mic.stop() }
                     cleanupEngines()
+                    restoreAudioMode()
                     return@launch
                 }
                 microphone = mic
@@ -421,6 +422,8 @@ private class VoiceConversationController(
                 startInProgress.set(false)
                 onDiagnostic("VOICE-START-001\n${t.stackTraceToString()}")
                 onStatus("VOICE-START-001: شروع مکالمه ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
+                runCatching { microphone?.stop() }
+                microphone = null
                 cleanupEngines()
                 restoreAudioMode()
                 onListening(false)
@@ -444,15 +447,17 @@ private class VoiceConversationController(
                     val engine = tts ?: break
                     try {
                         // Mark speaking only when audio playback actually starts, not during synthesis.
+                        val segmentPlaybackStarted = AtomicBoolean(false)
                         engine.speak(segment, turnCancel) {
                             val playbackStart = SystemClock.elapsedRealtime()
+                            segmentPlaybackStarted.set(true)
                             playbackStartedAtMs.set(playbackStart)
                             lastTtsPlaybackAtMs.set(playbackStart)
                             speaking.set(true)
                         }
+                        if (segmentPlaybackStarted.get()) lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
                     } finally {
                         speaking.set(false)
-                        lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
                     }
                 }
             } catch (_: CancellationException) {
