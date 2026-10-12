@@ -356,13 +356,16 @@ class LocalMicrophone {
         }
         try {
             record.startRecording()
-        } catch (e: SecurityException) {
+        } catch (t: Throwable) {
             running.set(false)
             recorder = null
             runCatching { noiseSuppressor?.release() }; noiseSuppressor = null
             runCatching { echoCanceler?.release() }; echoCanceler = null
-            record.release()
-            throw IllegalStateException("VOICE-MIC-004: مجوز ضبط صدا داده نشده است.", e)
+            runCatching { record.release() }
+            if (t is SecurityException) {
+                throw IllegalStateException("VOICE-MIC-004: مجوز ضبط صدا داده نشده است.", t)
+            }
+            throw IllegalStateException("VOICE-MIC-005: شروع ضبط میکروفون ناموفق بود: ${t.message ?: t.javaClass.simpleName}", t)
         }
         Thread({
             val buffer = ShortArray(640) // 40 ms at 16 kHz
