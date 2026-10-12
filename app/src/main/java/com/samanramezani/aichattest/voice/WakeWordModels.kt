@@ -49,6 +49,7 @@ class WakeWordModelStore(
             .orEmpty()
             .ifBlank { uri.lastPathSegment.orEmpty().substringAfterLast('/') }
         val archive = displayName.lowercase()
+        val isOfficialZhEnArchive = archive.contains("zh-en-3m")
         val mime = resolver.getType(uri).orEmpty().lowercase()
         val isZip = archive.endsWith(".zip") || mime.contains("zip")
         val isTarBz2 = archive.endsWith(".tar.bz2") || archive.endsWith(".tbz2") ||
@@ -74,6 +75,42 @@ class WakeWordModelStore(
             val target = File(staging, name).canonicalFile
             require(target.toPath().startsWith(staging.canonicalFile.toPath())) {
                 "VOICE-KWS-IMPORT-005: مسیر نامعتبر داخل بستهٔ مدل وجود دارد."
+            }
+            // The official 38 MB release includes test WAVs and duplicate chunk-8/FP32 graphs.
+            // They are not needed for the app's chunk-16 INT8 KWS runtime. Consume skipped
+            // entries to keep the archive stream valid, but do not write them to internal storage.
+            val lowerName = name.lowercase()
+            val inTestWavs = lowerName.split('/').any { it == "test_wavs" }
+            val keepOfficialEntry = when {
+                isDirectory -> !inTestWavs
+                inTestWavs -> false
+                lowerName.endsWith(".onnx") -> when {
+                    lowerName.contains("encoder") -> lowerName.contains("chunk-16-left-64") && lowerName.contains("int8")
+                    lowerName.contains("decoder") -> lowerName.contains("chunk-16-left-64") && !lowerName.contains("int8")
+                    lowerName.contains("joiner") -> lowerName.contains("chunk-16-left-64") && lowerName.contains("int8")
+                    else -> false
+                }
+                else -> lowerName.endsWith("/tokens.txt") || lowerName == "tokens.txt" ||
+                    lowerName.endsWith("/en.phone") || lowerName == "en.phone" ||
+                    lowerName.endsWith("/keywords.txt") || lowerName == "keywords.txt"
+            }
+            if (isOfficialZhEnArchive && !keepOfficialEntry) {
+                if (!isDirectory) {
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = entryStream.read(buffer)
+                        if (n < 0) break
+                        expanded += n
+                        if (expanded - lastReportedBytes >= 2L * 1024 * 1024) {
+                            lastReportedBytes = expanded
+                            onProgress("در حال بازکردن بستهٔ بیدارباش… ${expanded / (1024 * 1024)} مگابایت")
+                        }
+                        require(expanded <= MAX_EXPANDED_BYTES) {
+                            "VOICE-KWS-IMPORT-006: حجم استخراج‌شدهٔ مدل از حد مجاز بیشتر است."
+                        }
+                    }
+                }
+                return
             }
             if (isDirectory) {
                 target.mkdirs()
@@ -124,7 +161,7 @@ class WakeWordModelStore(
             // The official zh-en KWS archive ships redundant chunk-8/chunk-16 graphs and
             // test audio that are not needed at runtime. Prune those only for this known archive;
             // leave arbitrary user-provided model packages unchanged.
-            val isOfficialZhEn = archive.contains("zh-en-3m")
+            val isOfficialZhEn = isOfficialZhEnArchive
             if (isOfficialZhEn) {
                 staging.walkTopDown().filter { it.isDirectory }.forEach { directory ->
                     directory.listFiles()?.filter { it.isDirectory && it.name.equals("test_wavs", true) }?.forEach {
