@@ -129,13 +129,15 @@ class WakeWordForegroundService : Service() {
             return START_NOT_STICKY
         }
         if (running.compareAndSet(false, true)) {
-            runCatching {
-                wakeLock = getSystemService(PowerManager::class.java)
-                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:DinaWakeWord").apply {
-                        setReferenceCounted(false)
-                        acquire()
-                    }
-            }.onFailure { Log.w(TAG, "Could not acquire partial wake lock; screen-off listening may be interrupted", it) }
+            if (wakeLock?.isHeld != true) {
+                runCatching {
+                    wakeLock = getSystemService(PowerManager::class.java)
+                        .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:DinaWakeWord").apply {
+                            setReferenceCounted(false)
+                            acquire()
+                        }
+                }.onFailure { Log.w(TAG, "Could not acquire partial wake lock; screen-off listening may be interrupted", it) }
+            }
             worker = Thread({ listen(modelPath) }, "DinaWakeWord-KWS").apply { start() }
         }
         return START_NOT_STICKY
