@@ -184,9 +184,9 @@ class AppContainer(context: Context? = null) {
         return AgentSession(
             orchestrator = AgentOrchestrator(contextProvider = contextProvider, runtime = modelRuntime),
             conversationStore = store,
-            actionPlanCoordinator = coordinator,
-            actionExecutor = actionExecutor,
-            actionRetryExecutor = actionRetryExecutor,
+            actionPlanCoordinator = if (includeAgentTools) coordinator else null,
+            actionExecutor = if (includeAgentTools) actionExecutor else null,
+            actionRetryExecutor = if (includeAgentTools) actionRetryExecutor else null,
             eventSink = { event ->
                 when (event) {
                     AgentEvent.Started -> observability.trace("agent:$conversationId", ExecutionTraceEvent.Phase.PREPARED, taskId = conversationId, message = "Agent started")
