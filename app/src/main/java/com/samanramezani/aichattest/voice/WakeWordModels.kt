@@ -60,6 +60,7 @@ class WakeWordModelStore(
 
     fun importArchive(uri: Uri, onProgress: (String) -> Unit = {}): WakeWordModelEntry {
         root.mkdirs()
+        val importStartedAtNanos = System.nanoTime()
         onProgress("در حال بررسی فایل انتخاب‌شده برای بیدارباش…")
         val displayName = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0).orEmpty() else "" }
@@ -216,7 +217,9 @@ class WakeWordModelStore(
                     // (phone+ppinyin with en.phone), not hand-added per-line score syntax.
                     // Keep a small set of English-phone realizations of Persian /diːnɑː/.
                     keywordFile.writeText(
-                        "D IY1 N AA1 @دینا\nD IY1 N AH0 @دینا\n",
+                        // English-phone approximations for common Persian /dina/ realizations.
+                        // These aliases improve recall but cannot replace a Persian-trained KWS model.
+                        "D IY1 N AA1 @دینا\nD IY1 N AH0 @دینا\nD IY0 N AA1 @دینا\nD IH1 N AA1 @دینا\nD IH1 N AH0 @دینا\n",
                         Charsets.UTF_8,
                     )
                 }
@@ -239,11 +242,14 @@ class WakeWordModelStore(
             }
             onProgress("در حال ذخیره نهایی مدل بیدارباش…")
             staging.deleteRecursively()
-            return validateDirectory(destination)
+            val validated = validateDirectory(destination)
                 ?: run {
                     destination.deleteRecursively()
                     error("VOICE-KWS-IMPORT-009: اعتبارسنجی نهایی مدل بیدارباش ناموفق بود.")
                 }
+            val elapsedSeconds = (System.nanoTime() - importStartedAtNanos) / 1_000_000_000.0
+            onProgress("مدل بیدارباش آماده شد؛ زمان واردسازی: %.1f ثانیه".format(java.util.Locale.ROOT, elapsedSeconds))
+            return validated
         } catch (t: Throwable) {
             staging.deleteRecursively()
             throw t
