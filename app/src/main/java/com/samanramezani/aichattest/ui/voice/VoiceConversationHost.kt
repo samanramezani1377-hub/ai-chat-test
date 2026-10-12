@@ -260,6 +260,7 @@ private class VoiceConversationController(
     private val turnRunning = AtomicBoolean(false)
     private val bargeInTriggered = AtomicBoolean(false)
     private val bargeInCapturePending = AtomicBoolean(false)
+    private val bargeInCaptureStartedAtMs = AtomicLong(0L)
     // Playback guard is also applied to ASR input, not only to barge-in detection.
     // Loudspeaker echo can remain in the microphone after AudioTrack stops.
     private val lastTtsPlaybackAtMs = AtomicLong(0L)
@@ -350,6 +351,7 @@ private class VoiceConversationController(
                         if (loudSpeechFrames.incrementAndGet() >= requiredFrames &&
                             bargeInTriggered.compareAndSet(false, true)) {
                             bargeInCapturePending.set(aecActive)
+                            bargeInCaptureStartedAtMs.set(nowMs)
                             interrupt("صدای کاربر تشخیص داده شد؛ تولید یا پخش پاسخ قبلی متوقف شد.")
                             loudSpeechFrames.set(0)
                             if (aecActive) frames.trySend(frame)
@@ -360,6 +362,9 @@ private class VoiceConversationController(
 
                     // Never let assistant output or its acoustic tail enter the recognizer.
                     // If AEC is unavailable, barge-in during playback is disabled by design.
+                    if (bargeInCapturePending.get() && nowMs - bargeInCaptureStartedAtMs.get() > 5000L) {
+                        bargeInCapturePending.set(false)
+                    }
                     val preserveUserAudio = bargeInCapturePending.get() && aecActive
                     if ((speaking.get() && !preserveUserAudio) ||
                         (assistantAudioActive && !bargeInCapturePending.get())) {
