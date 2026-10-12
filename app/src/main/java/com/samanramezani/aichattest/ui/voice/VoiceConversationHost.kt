@@ -356,7 +356,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         onStop = {
             controller.stop()
             val serviceOwnedState = wakePrefs.getString(WakeWordForegroundService.PREF_CONVERSATION_STATE, "")
-                ?.let { it == "LISTENING_SCREEN_OFF_CAPABLE" || it == "CONVERSATION_ACTIVE" || it == "CONVERSATION_STARTING" || it == "CONVERSATION_START_REQUESTED" || it == "ACTIVITY_LAUNCH_ATTEMPTED_AUDIO_RUNNING" || it == "AUDIO_RUNNING_UI_UNAVAILABLE" } == true
+                ?.let { it == "LISTENING_SCREEN_OFF_CAPABLE" || it == "CONVERSATION_ACTIVE" || it == "CONVERSATION_STARTING" || it == "CONVERSATION_START_REQUESTED" || it == "ACTIVITY_LAUNCH_ATTEMPTED_START_REQUESTED" || it == "START_REQUESTED_UI_UNAVAILABLE" } == true
             if (serviceOwnedState) {
                 runCatching {
                     context.startService(Intent(context, WakeWordForegroundService::class.java).setAction(WakeWordForegroundService.ACTION_STOP_CONVERSATION))
