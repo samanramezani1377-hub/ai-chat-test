@@ -245,7 +245,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         onImportStt = { sttPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-bzip2", "application/octet-stream")) },
         onImportKoochikModel = { koochikModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
         onImportKoochikTokens = { koochikTokensPicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
-        onImportWakeWord = { wakeWordPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream", "*/*")) },
+        onImportWakeWord = { wakeWordPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-bzip2", "application/octet-stream", "*/*")) },
         onToggleWakeWord = { enabled ->
             val selected = wakeWordModels.firstOrNull { it.directory.absolutePath == selectedWakeWordPath }
             if (enabled && selected == null) {
