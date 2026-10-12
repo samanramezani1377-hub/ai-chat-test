@@ -283,6 +283,94 @@ class WakeWordForegroundService : Service() {
         }
     }
 
+    private fun startVoiceConversationInService(): Boolean {
+        if (voiceController != null) return true
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        return try {
+            val store = VoiceModelStore(contentResolver, File(filesDir, "voice-models"))
+            val sttModels = store.list(VoiceModelKind.STT)
+            val ttsModels = store.list(VoiceModelKind.TTS)
+            val sttId = prefs.getString(PREF_STT_MODEL_ID, null)
+            val ttsId = prefs.getString(PREF_TTS_MODEL_ID, null)
+            val stt = sttModels.firstOrNull { it.id == sttId }
+                ?: sttModels.firstOrNull { it.id.startsWith("stt-shenava-koochik-") }
+                ?: sttModels.firstOrNull()
+            val tts = ttsModels.firstOrNull { it.id == ttsId } ?: ttsModels.firstOrNull()
+            if (stt == null || tts == null) {
+                val missing = buildList {
+                    if (stt == null) add("STT")
+                    if (tts == null) add("TTS")
+                }.joinToString("+")
+                prefs.edit()
+                    .putString(PREF_CONVERSATION_STATE, "DETECTED_MODELS_MISSING")
+                    .putString(PREF_LAST_STATUS, "VOICE-KWS-014: مدل‌های لازم برای مکالمه موجود نیستند: $missing")
+                    .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("MODELS_MISSING", "stt=${stt != null} tts=${tts != null}"))
+                    .apply()
+                return false
+            }
+            prefs.edit()
+                .putString(PREF_STT_MODEL_ID, stt.id)
+                .putString(PREF_TTS_MODEL_ID, tts.id)
+                .putString(PREF_CONVERSATION_STATE, "CONVERSATION_START_REQUESTED")
+                .putString(PREF_LAST_STATUS, "دینا تشخیص داده شد؛ موتورهای مکالمه در حال آماده‌سازی هستند.")
+                .apply()
+            val appContainer = (application as? AIChatApplication)?.container
+                ?: error("VOICE-KWS-016: مخزن برنامه در دسترس نیست.")
+            val controller = VoiceConversationController(
+                context = this,
+                container = appContainer,
+                onStatus = { status ->
+                    val state = when {
+                        status.contains("VOICE-START-001") || status.contains("VOICE-CHAT-003") -> "CONVERSATION_ERROR"
+                        status.contains("گوش‌دادن") -> "LISTENING_SCREEN_OFF_CAPABLE"
+                        status.contains("در حال پخش") || status.contains("در حال پردازش") -> "CONVERSATION_ACTIVE"
+                        else -> "CONVERSATION_STARTING"
+                    }
+                    prefs.edit().putString(PREF_LAST_STATUS, status).putString(PREF_CONVERSATION_STATE, state).apply()
+                    getSystemService(NotificationManager::class.java)
+                        .notify(LISTENING_NOTIFICATION_ID, buildConversationNotification(status))
+                },
+                onDiagnostic = { detail ->
+                    prefs.edit().putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("VOICE_RUNTIME", detail)).apply()
+                    Log.i(TAG, detail)
+                },
+                onListening = { listening ->
+                    prefs.edit().putString(PREF_CONVERSATION_STATE, if (listening) "LISTENING_SCREEN_OFF_CAPABLE" else "CONVERSATION_NOT_LISTENING").apply()
+                },
+                onLine = { speaker, line ->
+                    prefs.edit()
+                        .putString("last_voice_speaker", speaker)
+                        .putString("last_voice_line", line.take(2000))
+                        .putLong("last_voice_line_at", System.currentTimeMillis())
+                        .apply()
+                },
+            )
+            voiceController = controller
+            controller.start(stt, tts)
+            prefs.edit()
+                .putString(PREF_CONVERSATION_STATE, "CONVERSATION_START_REQUESTED")
+                .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("CONVERSATION_START_REQUESTED", "screenInteractive=${getSystemService(PowerManager::class.java)?.isInteractive}; stt=${stt.id}; tts=${tts.id}"))
+                .apply()
+            true
+        } catch (t: Throwable) {
+            prefs.edit()
+                .putString(PREF_CONVERSATION_STATE, "CONVERSATION_START_FAILED")
+                .putString(PREF_LAST_STATUS, "VOICE-KWS-017: شروع مکالمه ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
+                .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("CONVERSATION_START_EXCEPTION", t.stackTraceToString()))
+                .apply()
+            Log.e(TAG, "Could not start service-owned voice conversation", t)
+            false
+        }
+    }
+
+    private fun wakeDiagnostic(event: String, detail: String): String =
+        "DINA WAKE DIAGNOSTICS\\n" +
+            "event=$event\\n" +
+            "screenInteractive=${getSystemService(PowerManager::class.java)?.isInteractive}\\n" +
+            "listenerRunning=${running.get()}\\n" +
+            "voiceControllerActive=${voiceController != null}\\n" +
+            "detail=$detail"
+
     private fun postWakeNotification(message: String, openVoice: Boolean) {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
