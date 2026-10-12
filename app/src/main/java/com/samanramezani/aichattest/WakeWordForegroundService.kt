@@ -307,8 +307,17 @@ class WakeWordForegroundService : Service() {
                 !prefs.getBoolean(PREF_ENABLED, false) && (detected || pauseRequested)
             pauseRequested = false
             if (keepForegroundForVoice) {
-                getSystemService(NotificationManager::class.java)
-                    .notify(LISTENING_NOTIFICATION_ID, buildConversationNotification())
+                val canPostNotification = Build.VERSION.SDK_INT < 33 ||
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED
+                if (canPostNotification) {
+                    getSystemService(NotificationManager::class.java)
+                        .notify(LISTENING_NOTIFICATION_ID, buildConversationNotification())
+                } else {
+                    // The foreground service keeps running; Android may hide regular notifications
+                    // until the user grants notification permission.
+                    Log.w(TAG, "POST_NOTIFICATIONS denied; keeping wake-word service active without updating its regular notification")
+                }
             } else {
                 runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
                 wakeLock = null
