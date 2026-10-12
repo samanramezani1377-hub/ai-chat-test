@@ -18,20 +18,102 @@ private const val MAX_FILE_BYTES = 1_048_576L
 internal object ActionArguments {
     fun string(input: Any, name: String): String {
         val raw = input.toString()
-        val marker = Regex("\\\"${Regex.escape(name)}\\\"\\s*:").find(raw)
-            ?: throw IllegalArgumentException("Missing string argument: $name")
-        var start = marker.range.last + 1
-        while (start < raw.length && raw[start].isWhitespace()) start++
-        require(start < raw.length && raw[start] == '\"') { "Argument must be a JSON string: $name" }
-        var index = start + 1
-        var escaped = false
-        while (index < raw.length) {
-            val c = raw[index]
-            if (!escaped && c == '"') return decode(raw.substring(start + 1, index), name)
-            if (escaped) escaped = false else if (c == '\\') escaped = true
-            index++
+        var index = 0
+        fun skipWhitespace() { while (index < raw.length && raw[index].isWhitespace()) index++ }
+        fun consume(char: Char): Boolean {
+            if (index < raw.length && raw[index] == char) { index++; return true }
+            return false
         }
-        throw IllegalArgumentException("Unterminated string argument: $name")
+        fun expect(char: Char) { require(consume(char)) { "Invalid JSON action arguments" } }
+        fun quotedEnd(start: Int): Int {
+            require(start < raw.length && raw[start] == '"') { "Expected JSON string" }
+            var escaped = false
+            for (i in start + 1 until raw.length) {
+                val char = raw[i]
+                if (escaped) escaped = false
+                else if (char == '\\') escaped = true
+                else if (char == '"') return i
+                else require(char.code >= 0x20) { "Invalid control character in JSON string" }
+            }
+            throw IllegalArgumentException("Unterminated JSON string")
+        }
+        fun decodeQuoted(start: Int): Pair<String, Int> {
+            val end = quotedEnd(start)
+            return decode(raw.substring(start + 1, end), name) to (end + 1)
+        }
+        fun skipValue(): Int {
+            require(index < raw.length) { "Missing JSON value" }
+            when (raw[index]) {
+                '"' -> return quotedEnd(index) + 1
+                '{', '[' -> {
+                    val stack = ArrayDeque<Char>()
+                    stack.addLast(if (raw[index] == '{') '}' else ']')
+                    var i = index + 1
+                    var inString = false
+                    var escaped = false
+                    while (i < raw.length && stack.isNotEmpty()) {
+                        val char = raw[i]
+                        if (inString) {
+                            if (escaped) escaped = false
+                            else if (char == '\\') escaped = true
+                            else if (char == '"') inString = false
+                        } else {
+                            when (char) {
+                                '"' -> inString = true
+                                '{' -> stack.addLast('}')
+                                '[' -> stack.addLast(']')
+                                '}', ']' -> {
+                                    require(stack.removeLast() == char) { "Mismatched JSON delimiters" }
+                                }
+                            }
+                        }
+                        i++
+                    }
+                    require(stack.isEmpty() && !inString) { "Unterminated JSON value" }
+                    return i
+                }
+                else -> {
+                    val start = index
+                    while (index < raw.length && raw[index] != ',' && raw[index] != '}' && !raw[index].isWhitespace()) index++
+                    require(index > start) { "Missing JSON value" }
+                    return index
+                }
+            }
+        }
+
+        skipWhitespace()
+        expect('{')
+        skipWhitespace()
+        var found: String? = null
+        var foundKey = false
+        if (consume('}')) {
+            require(name.isEmpty()) { "Missing string argument: " + name }
+            return ""
+        }
+        while (true) {
+            skipWhitespace()
+            val (key, next) = decodeQuoted(index)
+            index = next
+            skipWhitespace()
+            expect(':')
+            skipWhitespace()
+            if (key == name) {
+                require(!foundKey) { "Duplicate JSON argument: " + name }
+                require(index < raw.length && raw[index] == '"') { "Argument must be a JSON string: " + name }
+                val (value, valueEnd) = decodeQuoted(index)
+                found = value
+                foundKey = true
+                index = valueEnd
+            } else {
+                index = skipValue()
+            }
+            skipWhitespace()
+            if (consume('}')) break
+            expect(',')
+        }
+        skipWhitespace()
+        require(index == raw.length) { "Trailing data in JSON action arguments" }
+        return found ?: throw IllegalArgumentException("Missing string argument: " + name)
     }
 
     private fun decode(value: String, name: String): String {
@@ -40,7 +122,7 @@ internal object ActionArguments {
         while (i < value.length) {
             val c = value[i]
             if (c != '\\') { out.append(c); i++; continue }
-            if (++i >= value.length) throw IllegalArgumentException("Invalid escape in argument: $name")
+            if (++i >= value.length) throw IllegalArgumentException("Invalid escape in argument: " + name)
             when (val escaped = value[i]) {
                 '"', '\\', '/' -> out.append(escaped)
                 'b' -> out.append('\b')
@@ -49,13 +131,13 @@ internal object ActionArguments {
                 'r' -> out.append('\r')
                 't' -> out.append('\t')
                 'u' -> {
-                    require(i + 4 < value.length) { "Invalid unicode escape in argument: $name" }
+                    require(i + 4 < value.length) { "Invalid unicode escape in argument: " + name }
                     val code = value.substring(i + 1, i + 5).toIntOrNull(16)
-                        ?: throw IllegalArgumentException("Invalid unicode escape in argument: $name")
+                        ?: throw IllegalArgumentException("Invalid unicode escape in argument: " + name)
                     out.append(code.toChar())
                     i += 4
                 }
-                else -> throw IllegalArgumentException("Invalid escape in argument: $name")
+                else -> throw IllegalArgumentException("Invalid escape in argument: " + name)
             }
             i++
         }
