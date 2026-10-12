@@ -88,7 +88,16 @@ class WakeWordModelStore(
                 ?: error("VOICE-KWS-IMPORT-007: بسته معتبر نیست. encoder/decoder/joiner، tokens.txt و keywords.txt شامل عبارت «دینا» لازم‌اند.")
             val id = "wake-dina-${System.currentTimeMillis()}"
             val destination = File(root, id)
-            check(candidate.renameTo(destination)) { "VOICE-KWS-IMPORT-008: ذخیرهٔ مدل بیدارباش ناموفق بود." }
+            if (candidate == staging) {
+                check(destination.mkdirs()) { "VOICE-KWS-IMPORT-008: پوشهٔ نهایی مدل بیدارباش ساخته نشد." }
+                candidate.listFiles().orEmpty().forEach { child ->
+                    check(child.renameTo(File(destination, child.name))) {
+                        "VOICE-KWS-IMPORT-008: انتقال فایل ${child.name} به پوشهٔ نهایی ناموفق بود."
+                    }
+                }
+            } else {
+                check(candidate.renameTo(destination)) { "VOICE-KWS-IMPORT-008: ذخیرهٔ مدل بیدارباش ناموفق بود." }
+            }
             staging.deleteRecursively()
             return validateDirectory(destination)
                 ?: run {
@@ -103,7 +112,7 @@ class WakeWordModelStore(
 
     private fun validateDirectory(directory: File): WakeWordModelEntry? {
         if (!directory.isDirectory) return null
-        val files = directory.walkTopDown().filter { it.isFile }.toList()
+        val files = directory.listFiles()?.filter { it.isFile }.orEmpty()
         val encoder = files.firstOrNull { it.name.contains("encoder", true) && it.extension.equals("onnx", true) } ?: return null
         val decoder = files.firstOrNull { it.name.contains("decoder", true) && it.extension.equals("onnx", true) } ?: return null
         val joiner = files.firstOrNull { it.name.contains("joiner", true) && it.extension.equals("onnx", true) } ?: return null
