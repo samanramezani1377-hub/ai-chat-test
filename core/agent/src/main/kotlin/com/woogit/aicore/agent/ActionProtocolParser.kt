@@ -296,17 +296,6 @@ class ProtocolActionIntentPlanner(
         val lastUserIndex = messages.indexOfLast { it.role == ConversationMessage.Role.USER }
         if (lastUserIndex < 0) return false
 
-        val laterToolMessages = messages.drop(lastUserIndex + 1)
-            .filter { it.role == ConversationMessage.Role.TOOL }
-        // A repair feedback message keeps the original request in action mode; a real
-        // tool result means the requested operation has already been attempted.
-        if (laterToolMessages.lastOrNull()?.content?.startsWith("ACTION_PROTOCOL_REPAIR:") == true) {
-            // The latest tool message is repair feedback; AgentSession owns the retry bound.
-        } else if (laterToolMessages.isNotEmpty()) {
-            // A real action result supersedes earlier repair feedback.
-            return false
-        }
-
         val user = messages[lastUserIndex].content.lowercase()
         val indicators = listOf(
             "create_file", "read_file", "list_files", "delete_file", "calculate",
@@ -315,6 +304,23 @@ class ProtocolActionIntentPlanner(
             "بخون", "بخوان", "فهرست کن", "محاسبه کن", "درست کن",
             "بساز برام", "ذخیره‌اش", "ذخیره اش", "اسمشو بزار", "اسمش را بگذار"
         )
-        return indicators.any(user::contains)
+        if (indicators.none(user::contains)) return false
+
+        val lastToolIndex = messages.indexOfLast {
+            it.role == ConversationMessage.Role.TOOL && messages.indexOf(it) > lastUserIndex
+        }
+        if (lastToolIndex < 0) return true
+        if (messages[lastToolIndex].content.startsWith("ACTION_PROTOCOL_REPAIR:")) return true
+
+        // After a real tool result, normal final prose is allowed. But if the model
+        // falls back to shell commands instead of a final answer, keep the repair path open.
+        val lastAssistantIndex = messages.indexOfLast { it.role == ConversationMessage.Role.ASSISTANT }
+        if (lastAssistantIndex <= lastToolIndex) return false
+        val latestAssistant = messages[lastAssistantIndex].content
+        val shellCommand = Regex(
+            "(?im)^\\s*(?:touch|echo|cat|mkdir|rm|mv|cp|printf|bash|sh|python(?:3)?|powershell)\\b"
+        ).containsMatchIn(latestAssistant)
+        val redirection = Regex("(?m)^\\s*[^\\n]+\\s+>\\s*\\S+").containsMatchIn(latestAssistant)
+        return shellCommand || redirection
     }
 }
