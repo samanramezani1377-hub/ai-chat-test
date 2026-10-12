@@ -526,7 +526,11 @@ class VoiceModelStore(
                 val simpleCtcTokens = files.firstOrNull { it.name.equals("tokens.txt", true) }
                 val hasTransducerParts = files.any { it.name.contains("encoder", true) } &&
                     files.any { it.name.contains("decoder", true) }
-                if (simpleCtcModel != null && simpleCtcTokens != null && !hasTransducerParts &&
+                // Piper TTS imports also contain model.onnx + generated tokens.txt.
+                // Do not classify those directories as STT; only the explicitly imported
+                // Shenava Koochik package is the supported simple CTC model in this app.
+                if (directory.name.startsWith("stt-shenava-koochik-") &&
+                    simpleCtcModel != null && simpleCtcTokens != null && !hasTransducerParts &&
                     simpleCtcModel.length() >= 1024 && simpleCtcTokens.length() > 0L) {
                     return VoiceModelEntry(
                         directory.name, if (directory.name.startsWith("stt-shenava-koochik-")) "Shenava Koochik · فارسی · 114M" else directory.name,
