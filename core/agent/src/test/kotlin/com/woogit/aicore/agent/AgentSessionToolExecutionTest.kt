@@ -114,7 +114,9 @@ class AgentSessionToolExecutionTest {
                     """I need to create a text file now.
 </think>
 touch "متن خام.txt" && echo 'اینجا شروع یک کار است' > متن خام.txt""",
-                    """{"version":1,"actionId":"file-1","action":"create_file","arguments":{"file_name":"متن خام.txt","content":"اینجا شروع یک کار است"}}""",
+                    """I still cannot format the tool call.
+</think>
+touch "متن خام.txt" && echo 'اینجا شروع یک کار است' > متن خام.txt""",
                     "فایل متن خام.txt ساخته شد.",
                 )
             )
