@@ -1,149 +1,240 @@
 package com.woogit.aicore.agent
 
-/** Parses only a complete ActionRequest v1 JSON object; surrounding prose is rejected. */
+import com.woogit.aicore.conversation.ConversationContext
+import com.woogit.aicore.conversation.ConversationMessage
+
+/**
+ * Parses one complete ActionRequest v1 object.
+ *
+ * It tolerates the exact formatting mistakes commonly emitted by small local models
+ * (a closed Qwen reasoning block or a JSON-only Markdown fence), but never extracts
+ * a JSON-looking fragment from arbitrary prose or executes shell snippets.
+ */
 class ActionProtocolParser {
     fun parse(text: String): ActionIntent? {
-        val trimmed = text.trim()
-        if (trimmed.isEmpty()) return null
+        val candidate = extractCandidate(text) ?: return null
+        val reader = JsonReader(candidate)
+        val root = runCatching { reader.readRootObject() }.getOrNull() ?: return null
+        if (reader.position != candidate.length) return null
 
-        // Qwen-style local models can emit their reasoning before </think> because
-        // the runtime opens the reasoning section in the generation prompt. Only
-        // discard that explicitly delimited prefix; arbitrary prose around a tool
-        // request remains invalid and must never trigger execution.
-        val json = if (trimmed.startsWith('{')) {
-            trimmed
-        } else {
-            val reasoningEnd = trimmed.lastIndexOf("</think>")
-            if (reasoningEnd < 0) return null
-            trimmed.substring(reasoningEnd + "</think>".length).trim()
-        }
-        if (json.isEmpty() || json.first() != '{') return null
-        val end = findObjectEnd(json, 0) ?: return null
-        if (end != json.lastIndex) return null
-
-        val version = stringOrNumber(json, "version")?.toIntOrNull() ?: return null
+        val version = (root["version"] as? JsonValue.NumberValue)?.raw?.toIntOrNull()
+            ?: (root["version"] as? JsonValue.StringValue)?.value?.toIntOrNull()
+            ?: return null
         if (version != 1) return null
-        val action = string(json, "action") ?: return null
-        val requestId = string(json, "actionId") ?: return null
+        val action = (root["action"] as? JsonValue.StringValue)?.value ?: return null
+        val requestId = (root["actionId"] as? JsonValue.StringValue)?.value ?: return null
+        val arguments = root["arguments"] as? JsonValue.ObjectValue ?: return null
         if (action.isBlank() || requestId.isBlank()) return null
 
-        val arguments = objectValue(json, "arguments") ?: return null
         return ActionIntent(
             actionId = action,
             requestId = requestId,
-            input = arguments,
+            input = arguments.raw,
             explanation = "ActionRequest v1: $action",
         )
     }
 
-    private fun string(json: String, key: String): String? {
-        val marker = Regex("\\\"${Regex.escape(key)}\\\"\\s*:").find(json) ?: return null
-        var index = marker.range.last + 1
-        while (index < json.length && json[index].isWhitespace()) index++
-        if (index >= json.length || json[index] != '\"') return null
-        val end = findStringEnd(json, index) ?: return null
-        return decodeJsonString(json.substring(index + 1, end))
+    private fun extractCandidate(text: String): String? {
+        var candidate = text.trim()
+        if (candidate.isEmpty()) return null
+
+        // The Qwen prompt intentionally opens <think> before generation. The model
+        // may therefore return reasoning without the opening tag, followed by </think>.
+        val reasoningEnd = candidate.lastIndexOf("</think>")
+        if (reasoningEnd >= 0) candidate = candidate.substring(reasoningEnd + "</think>".length).trim()
+        if (candidate.startsWith("<think>")) return null
+
+        if (candidate.startsWith("```")) {
+            val firstNewline = candidate.indexOf('\n')
+            if (firstNewline < 0) return null
+            val closing = candidate.lastIndexOf("```")
+            if (closing <= firstNewline || candidate.substring(closing + 3).isNotBlank()) return null
+            val language = candidate.substring(3, firstNewline).trim()
+            if (language.isNotEmpty() && !language.equals("json", ignoreCase = true)) return null
+            candidate = candidate.substring(firstNewline + 1, closing).trim()
+        }
+        if (!candidate.startsWith('{') || !candidate.endsWith('}')) return null
+        return candidate
     }
 
-    private fun stringOrNumber(json: String, key: String): String? {
-        string(json, key)?.let { return it }
-
-        val marker = Regex("\\\"${Regex.escape(key)}\\\"\\s*:").find(json) ?: return null
-        var index = marker.range.last + 1
-        while (index < json.length && json[index].isWhitespace()) index++
-        val start = index
-        while (index < json.length && json[index].isDigit()) index++
-        if (index == start) return null
-        return json.substring(start, index)
+    private sealed interface JsonValue {
+        data class StringValue(val value: String) : JsonValue
+        data class NumberValue(val raw: String) : JsonValue
+        data class ObjectValue(val raw: String, val members: Map<String, JsonValue>) : JsonValue
+        data class ArrayValue(val values: List<JsonValue>) : JsonValue
+        data object Other : JsonValue
     }
 
-    private fun objectValue(json: String, key: String): String? {
-        val marker = Regex("\\\"${Regex.escape(key)}\\\"\\s*:").find(json) ?: return null
-        var start = marker.range.last + 1
-        while (start < json.length && json[start].isWhitespace()) start++
-        if (start >= json.length || json[start] != '{') return null
-        val end = findObjectEnd(json, start) ?: return null
-        return json.substring(start, end + 1)
-    }
+    /** Small strict JSON reader: validates the whole document and rejects duplicate keys. */
+    private class JsonReader(private val source: String) {
+        var position: Int = 0
+            private set
 
-    private fun findObjectEnd(text: String, start: Int): Int? {
-        if (start >= text.length || text[start] != '{') return null
-        var depth = 0
-        var quoted = false
-        var escaped = false
-        for (i in start until text.length) {
-            val c = text[i]
-            if (quoted) {
-                if (escaped) escaped = false
-                else if (c == '\\') escaped = true
-                else if (c == '"') quoted = false
-                continue
+        fun readRootObject(): Map<String, JsonValue> {
+            skipWhitespace()
+            val value = readValue()
+            require(value is JsonValue.ObjectValue) { "Root must be an object" }
+            skipWhitespace()
+            require(position == source.length) { "Trailing data" }
+            return value.members
+        }
+
+        private fun readValue(): JsonValue {
+            skipWhitespace()
+            require(position < source.length) { "Unexpected end of JSON" }
+            return when (source[position]) {
+                '"' -> JsonValue.StringValue(readString())
+                '{' -> readObject()
+                '[' -> readArray()
+                't' -> { literal("true"); JsonValue.Other }
+                'f' -> { literal("false"); JsonValue.Other }
+                'n' -> { literal("null"); JsonValue.Other }
+                '-', in '0'..'9' -> JsonValue.NumberValue(readNumber())
+                else -> error("Invalid JSON value")
             }
-            when (c) {
-                '"' -> quoted = true
-                '{' -> depth++
-                '}' -> {
-                    depth--
-                    if (depth == 0) return i
-                    if (depth < 0) return null
+        }
+
+        private fun readObject(): JsonValue.ObjectValue {
+            val start = position
+            expect('{')
+            skipWhitespace()
+            val members = linkedMapOf<String, JsonValue>()
+            if (consume('}')) return JsonValue.ObjectValue(source.substring(start, position), members)
+            while (true) {
+                skipWhitespace()
+                require(position < source.length && source[position] == '"') { "Object key must be a string" }
+                val key = readString()
+                skipWhitespace()
+                expect(':')
+                val value = readValue()
+                require(!members.containsKey(key)) { "Duplicate JSON key: $key" }
+                members[key] = value
+                skipWhitespace()
+                if (consume('}')) break
+                expect(',')
+            }
+            return JsonValue.ObjectValue(source.substring(start, position), members)
+        }
+
+        private fun readArray(): JsonValue.ArrayValue {
+            expect('[')
+            skipWhitespace()
+            val values = mutableListOf<JsonValue>()
+            if (consume(']')) return JsonValue.ArrayValue(values)
+            while (true) {
+                values += readValue()
+                skipWhitespace()
+                if (consume(']')) break
+                expect(',')
+            }
+            return JsonValue.ArrayValue(values)
+        }
+
+        private fun readString(): String {
+            expect('"')
+            val out = StringBuilder()
+            while (position < source.length) {
+                val c = source[position++]
+                when {
+                    c == '"' -> return out.toString()
+                    c == '\\' -> {
+                        require(position < source.length) { "Incomplete escape" }
+                        when (val escaped = source[position++]) {
+                            '"', '\\', '/' -> out.append(escaped)
+                            'b' -> out.append('\b')
+                            'f' -> out.append('\u000C')
+                            'n' -> out.append('\n')
+                            'r' -> out.append('\r')
+                            't' -> out.append('\t')
+                            'u' -> {
+                                require(position + 4 <= source.length) { "Incomplete unicode escape" }
+                                val code = source.substring(position, position + 4).toIntOrNull(16)
+                                    ?: error("Invalid unicode escape")
+                                out.append(code.toChar())
+                                position += 4
+                            }
+                            else -> error("Invalid string escape")
+                        }
+                    }
+                    c.code < 0x20 -> error("Unescaped control character")
+                    else -> out.append(c)
                 }
             }
+            error("Unterminated string")
         }
-        return null
-    }
 
-    private fun findStringEnd(text: String, start: Int): Int? {
-        var escaped = false
-        for (i in start + 1 until text.length) {
-            val c = text[i]
-            if (escaped) escaped = false
-            else if (c == '\\') escaped = true
-            else if (c == '"') return i
+        private fun readNumber(): String {
+            val start = position
+            consume('-')
+            require(position < source.length) { "Incomplete number" }
+            if (consume('0')) {
+                require(position >= source.length || source[position] !in '0'..'9') { "Leading zero" }
+            } else {
+                require(source[position] in '1'..'9') { "Invalid number" }
+                while (position < source.length && source[position] in '0'..'9') position++
+            }
+            if (consume('.')) {
+                require(position < source.length && source[position] in '0'..'9') { "Invalid fraction" }
+                while (position < source.length && source[position] in '0'..'9') position++
+            }
+            if (position < source.length && source[position] in "eE") {
+                position++
+                if (position < source.length && source[position] in "+-") position++
+                require(position < source.length && source[position] in '0'..'9') { "Invalid exponent" }
+                while (position < source.length && source[position] in '0'..'9') position++
+            }
+            return source.substring(start, position)
         }
-        return null
-    }
 
-    private fun decodeJsonString(value: String): String? {
-        val out = StringBuilder(value.length)
-        var i = 0
-        while (i < value.length) {
-            val c = value[i]
-            if (c != '\\') {
-                out.append(c)
-                i++
-                continue
-            }
-            if (++i >= value.length) return null
-            when (val escaped = value[i]) {
-                '"', '\\', '/' -> out.append(escaped)
-                'b' -> out.append('\b')
-                'f' -> out.append('\u000C')
-                'n' -> out.append('\n')
-                'r' -> out.append('\r')
-                't' -> out.append('\t')
-                'u' -> {
-                    if (i + 4 >= value.length) return null
-                    val hex = value.substring(i + 1, i + 5)
-                    val code = hex.toIntOrNull(16) ?: return null
-                    out.append(code.toChar())
-                    i += 4
-                }
-                else -> return null
-            }
-            i++
+        private fun literal(value: String) {
+            require(source.startsWith(value, position)) { "Invalid literal" }
+            position += value.length
         }
-        return out.toString()
+
+        private fun skipWhitespace() {
+            while (position < source.length && source[position].isWhitespace()) position++
+        }
+
+        private fun expect(c: Char) {
+            require(consume(c)) { "Expected '$c'" }
+        }
+
+        private fun consume(c: Char): Boolean {
+            if (position < source.length && source[position] == c) {
+                position++
+                return true
+            }
+            return false
+        }
     }
 }
 
+/**
+ * Intent heuristic is used only to decide whether a malformed tool response deserves
+ * one bounded repair attempt. It does not authorize or execute an action.
+ */
 class ProtocolActionIntentPlanner(
     private val parser: ActionProtocolParser = ActionProtocolParser()
 ) : ActionIntentPlanner {
-    override suspend fun plan(context: com.woogit.aicore.conversation.ConversationContext): ActionIntent? {
+    override suspend fun plan(context: ConversationContext): ActionIntent? {
         val assistant = context.recentMessages
             .asReversed()
-            .firstOrNull { it.role == com.woogit.aicore.conversation.ConversationMessage.Role.ASSISTANT }
+            .firstOrNull { it.role == ConversationMessage.Role.ASSISTANT }
             ?: return null
         return parser.parse(assistant.content)
+    }
+
+    override fun requiresAction(context: ConversationContext): Boolean {
+        val user = context.recentMessages.asReversed()
+            .firstOrNull { it.role == ConversationMessage.Role.USER }
+            ?.content?.lowercase()
+            ?: return false
+        val indicators = listOf(
+            "create_file", "read_file", "list_files", "delete_file", "calculate",
+            "فایل", "فضای کار", "بساز", "ایجاد کن", "بنویس", "ذخیره کن",
+            "پاک کن", "حذف کن", "بخون", "بخوان", "فهرست", "محاسبه کن",
+            "درست کن", "بساز برام", "ذخیره‌اش", "ذخیره اش"
+        )
+        return indicators.any(user::contains)
     }
 }
