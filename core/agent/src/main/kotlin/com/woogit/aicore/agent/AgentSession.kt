@@ -152,7 +152,7 @@ class AgentSession(
         val cleaned = stripReasoning(result.text)
         val context = contextProvider.build(Int.MAX_VALUE)
         val actionRequired = actionPlanCoordinator?.requiresAction(context) == true
-        val toolCall = ActionProtocolParser().parse(cleaned) != null
+        val toolCall = actionPlanCoordinator != null && ActionProtocolParser().parse(cleaned) != null
         if (!toolCall && !actionRequired && cleaned.isNotBlank()) eventSink(AgentEvent.Token(cleaned))
         return result.copy(text = cleaned)
     }
