@@ -125,8 +125,16 @@ class AgentSession(
                 result = generateTurn(effectiveSettings, effectiveRecentMessages, nextContext)
                 resultPersisted = false
             }
-            if (plan == null && actionPlanCoordinator?.requiresAction(contextProvider.build(Int.MAX_VALUE)) == true) {
-                result = result.copy(text = "نتوانستم درخواست اجرایی را با ابزار معتبر انجام بدهم؛ هیچ عملیاتی اجرا نشد.")
+            val pendingUnexecutedToolCall = plan?.prepared?.risk != com.woogit.aicore.domain.RiskLevel.SENSITIVE &&
+                actionPlanCoordinator != null && ActionProtocolParser().parse(result.text) != null
+            val unresolvedActionRequest = plan == null &&
+                actionPlanCoordinator?.requiresAction(contextProvider.build(Int.MAX_VALUE)) == true
+            if (pendingUnexecutedToolCall || unresolvedActionRequest) {
+                result = result.copy(text = if (pendingUnexecutedToolCall) {
+                    "به سقف تعداد عملیات رسیدم؛ درخواست بعدی اجرا نشد. می‌توانی ادامهٔ کار را در پیام بعدی بخواهی."
+                } else {
+                    "نتوانستم درخواست اجرایی را با ابزار معتبر انجام بدهم؛ هیچ عملیاتی اجرا نشد."
+                })
                 eventSink(AgentEvent.Token(result.text))
                 resultPersisted = false
             }
