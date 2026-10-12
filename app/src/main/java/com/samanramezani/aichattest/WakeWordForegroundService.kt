@@ -89,13 +89,26 @@ class WakeWordForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP_CONVERSATION) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putString(PREF_CONVERSATION_STATE, "STOP_REQUESTED")
+                .putString(PREF_LAST_STATUS, "مکالمهٔ صوتی از رابط کاربری متوقف شد.")
+                .apply()
+            voiceController?.close()
+            voiceController = null
+            return START_NOT_STICKY
+        }
         if (intent?.action == ACTION_STOP) {
             running.set(false)
+            voiceController?.close()
+            voiceController = null
             stopSelfResult(startId)
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_PAUSE) {
             if (worker == null) {
+                voiceController?.close()
+                voiceController = null
                 stopSelfResult(startId)
                 return START_NOT_STICKY
             }
@@ -222,14 +235,37 @@ class WakeWordForegroundService : Service() {
             runCatching { spotter?.release() }
             spotter = null
             if (detected) {
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, false).apply()
-                postWakeNotification("عبارت «دینا» شنیده شد؛ در حال باز کردن مکالمهٔ صوتی.", openVoice = true)
+                val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+                prefs.edit()
+                    .putBoolean(PREF_ENABLED, false)
+                    .putString(PREF_CONVERSATION_STATE, "WAKE_WORD_DETECTED")
+                    .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("DETECTED", "Activity launch is optional"))
+                    .apply()
+                // Audio starts in the already-running microphone foreground service. Opening UI
+                // is a best-effort enhancement, not a prerequisite for a voice conversation.
+                val conversationStarted = startVoiceConversationInService()
+                postWakeNotification(
+                    if (conversationStarted) "عبارت «دینا» شنیده شد؛ مکالمهٔ صوتی در پس‌زمینه شروع می‌شود."
+                    else "عبارت «دینا» شنیده شد؛ مدل‌های STT و TTS را بررسی کن.",
+                    openVoice = true,
+                )
                 runCatching {
                     startActivity(Intent(this, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                         putExtra(EXTRA_OPEN_VOICE_FROM_WAKE, true)
+                        putExtra(EXTRA_CONVERSATION_STARTED_IN_SERVICE, conversationStarted)
                     })
-                }.onFailure { Log.w(TAG, "Automatic activity launch blocked; notification remains available", it) }
+                    prefs.edit()
+                        .putString(PREF_CONVERSATION_STATE, if (conversationStarted) "ACTIVITY_LAUNCH_ATTEMPTED_AUDIO_RUNNING" else "ACTIVITY_LAUNCH_ATTEMPTED_NO_MODELS")
+                        .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("ACTIVITY_LAUNCH_ATTEMPTED", "conversationStartedInService=$conversationStarted"))
+                        .apply()
+                }.onFailure {
+                    Log.w(TAG, "Automatic activity launch blocked; audio conversation remains service-owned", it)
+                    prefs.edit()
+                        .putString(PREF_CONVERSATION_STATE, if (conversationStarted) "AUDIO_RUNNING_UI_UNAVAILABLE" else "UI_UNAVAILABLE_NO_MODELS")
+                        .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("ACTIVITY_LAUNCH_EXCEPTION", it.javaClass.simpleName + ": " + (it.message ?: "")))
+                        .apply()
+                }
             }
             val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
             val keepForegroundForVoice = prefs.getBoolean(PREF_ARMED, false) &&
