@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.samanramezani.aichattest.AppContainer
 import com.samanramezani.aichattest.ui.voice.VoiceConversationPage
 import com.samanramezani.aichattest.voice.LocalMicrophone
+import com.samanramezani.aichattest.voice.VoiceAudioInputGuard
 import com.samanramezani.aichattest.voice.LocalPiperTts
 import com.samanramezani.aichattest.voice.LocalStreamingAsr
 import com.samanramezani.aichattest.voice.LocalAsr
@@ -281,7 +282,8 @@ private class VoiceConversationController(
     private fun enterCommunicationAudioMode() {
         val manager = context.getSystemService(AudioManager::class.java) ?: return
         if (previousAudioMode == null) previousAudioMode = manager.mode
-        manager.mode = AudioManager.MODE_IN_COMMUNICATION
+        manager.mode = AudioManager.MODE_NORMAL
+        // Media usage follows the device's main speaker and media-volume stream, not the earpiece/call route.
     }
 
     private fun restoreAudioMode() {
@@ -336,6 +338,10 @@ private class VoiceConversationController(
                 microphone = mic
                 mic.start { frame ->
                     val nowMs = SystemClock.elapsedRealtime()
+                    if (VoiceAudioInputGuard.shouldSuppress(nowMs)) {
+                        loudSpeechFrames.set(0)
+                        return@start
+                    }
                     val aecActive = mic.isEchoCancellationActive
                     val sincePlaybackMs = nowMs - lastTtsPlaybackAtMs.get()
                     // AEC shortens the safe echo tail; devices without it use a conservative
