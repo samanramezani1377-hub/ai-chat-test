@@ -315,9 +315,9 @@ private class VoiceConversationController(
                     runCatching { engines.second.close() }
                     return@launch
                 }
-                enterCommunicationAudioMode()
                 recognizer = engines.first
                 tts = engines.second
+                enterCommunicationAudioMode()
                 if (conversationId == null) conversationId = container.conversationHistory.create("مکالمه صوتی").id
                 // Keep capture independent from ASR. The queue is bounded to avoid seconds of
                 // stale microphone audio accumulating while an offline recognizer is decoding.
