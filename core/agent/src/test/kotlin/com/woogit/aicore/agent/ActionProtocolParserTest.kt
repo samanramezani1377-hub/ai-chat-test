@@ -50,6 +50,49 @@ class ActionProtocolParserTest {
     }
 
     @Test
+    fun parsesJsonFenceAfterQwenReasoningAndPreservesPersianSpaces() {
+        val intent = ActionProtocolParser().parse(
+            """Reasoning about the requested file
+</think>
+```json
+{"version":1,"actionId":"file-1","action":"create_file","arguments":{"file_name":"متن خام.txt","content":"اینجا شروع یک کار است"}}
+```"""
+        )
+        requireNotNull(intent)
+        assertEquals("create_file", intent.actionId)
+        assertEquals("""{"file_name":"متن خام.txt","content":"اینجا شروع یک کار است"}""", intent.input)
+    }
+
+    @Test
+    fun rejectsBashInsteadOfAnActionRequest() {
+        assertNull(
+            ActionProtocolParser().parse(
+                """I should create a file
+</think>
+touch "متن خام.txt" && echo 'اینجا شروع یک کار است' > متن خام.txt"""
+            )
+        )
+    }
+
+    @Test
+    fun rejectsDuplicateRootKeysRatherThanChoosingOneSilently() {
+        assertNull(
+            ActionProtocolParser().parse(
+                """{"version":1,"actionId":"req","action":"calculate","action":"delete_file","arguments":{}}"""
+            )
+        )
+    }
+
+    @Test
+    fun rejectsMultipleJsonObjects() {
+        assertNull(
+            ActionProtocolParser().parse(
+                """{"version":1,"actionId":"a","action":"calculate","arguments":{}} {"version":1,"actionId":"b","action":"calculate","arguments":{}}"""
+            )
+        )
+    }
+
+    @Test
     fun rejectsWrongVersion() {
         assertNull(ActionProtocolParser().parse("""{"version":2,"actionId":"req","action":"calculate","arguments":{}}"""))
     }
