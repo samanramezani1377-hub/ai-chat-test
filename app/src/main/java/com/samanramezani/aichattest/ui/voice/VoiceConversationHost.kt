@@ -347,9 +347,8 @@ private class VoiceConversationController(
                                     if (aecActive) "فعال" else "غیرفعال")
                             }
                         }
-                        return@start
-                    }
-                    echoSuppressionReported.set(false)
+                    } else {
+                        echoSuppressionReported.set(false)
                     val sent = frames.trySend(frame)
                     if (sent.isFailure) {
                         // Prefer the newest live audio over stale buffered audio. The consumer
@@ -364,6 +363,7 @@ private class VoiceConversationController(
                         }
                     } else {
                         audioDropReported.set(false)
+                    }
                     }
                 }
                 onDiagnostic("VOICE-AUDIO-SETUP: AEC=" + (if (mic.isEchoCancellationActive) "active" else "unavailable") +
