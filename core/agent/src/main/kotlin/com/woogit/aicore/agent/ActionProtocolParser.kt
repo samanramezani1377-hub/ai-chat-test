@@ -40,7 +40,7 @@ class ActionProtocolParser {
 
         // The Qwen prompt intentionally opens <think> before generation. The model
         // may therefore return reasoning without the opening tag, followed by </think>.
-        val reasoningEnd = candidate.lastIndexOf("</think>")
+        val reasoningEnd = if (candidate.startsWith("{")) -1 else candidate.indexOf("</think>")
         if (reasoningEnd >= 0) candidate = candidate.substring(reasoningEnd + "</think>".length).trim()
         if (candidate.startsWith("<think>")) return null
 
