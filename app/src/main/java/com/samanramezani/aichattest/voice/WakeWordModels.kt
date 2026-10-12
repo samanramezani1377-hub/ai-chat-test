@@ -11,6 +11,15 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import org.json.JSONObject
 
+/**
+ * Accept only the configured wake phrase label, not arbitrary non-empty KWS results.
+ * Sherpa may return the original Persian label or its Latin alias.
+ */
+internal fun isDinaWakeKeywordLabel(keyword: String): Boolean {
+    val normalized = keyword.trim().lowercase().filter { it.isLetterOrDigit() }
+    return normalized == "دینا" || normalized == "dina"
+}
+
 data class WakeWordModelEntry(
     val id: String,
     val title: String,
