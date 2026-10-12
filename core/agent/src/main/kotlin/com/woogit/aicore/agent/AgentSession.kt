@@ -89,7 +89,13 @@ class AgentSession(
                     eventSink(AgentEvent.ApprovalRequired(nextPlan.prepared.executionId))
                     break
                 }
-                val executor = actionExecutor ?: break
+                val executor = actionExecutor
+                if (executor == null) {
+                    result = result.copy(text = "ابزار آمادهٔ اجرا نیست؛ هیچ عملیاتی انجام نشد.")
+                    eventSink(AgentEvent.Token(result.text))
+                    resultPersisted = false
+                    break
+                }
                 var outcome = executor(nextPlan)
                 actionResult = outcome.message
                 eventSink(AgentEvent.ActionExecuted(nextPlan.prepared.executionId))
@@ -122,7 +128,10 @@ class AgentSession(
             }
             if (!resultPersisted) conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
             eventSink(AgentEvent.Completed)
-            AgentSessionResult.Reply(result, plan, actionResult)
+            val userFacingResult = if (plan?.prepared?.risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE) {
+                result.copy(text = "برای اجرای عملیات «${plan.intent.actionId}» تأیید شما لازم است.")
+            } else result
+            AgentSessionResult.Reply(userFacingResult, plan, actionResult)
         } catch (t: Throwable) {
             eventSink(AgentEvent.Failed(t.message ?: t::class.simpleName.orEmpty()))
             throw t
