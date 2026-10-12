@@ -54,7 +54,9 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     val context = LocalContext.current
     val uiScope = rememberCoroutineScope()
     val store = remember(context) { VoiceModelStore(context.contentResolver, File(context.filesDir, "voice-models")) }
-    val wakeWordStore = remember(context) { WakeWordModelStore(context.contentResolver, File(context.filesDir, "wake-word-models")) }
+    val wakeWordStore = remember(context) { WakeWordModelStore(context.contentResolver, File(context.filesDir, "wake-word-models")) {
+        context.assets.open("wake-word/zh-en-3m/tokens.txt")
+    } }
     var sttModels by remember { mutableStateOf(store.list(VoiceModelKind.STT)) }
     var ttsModels by remember { mutableStateOf(store.list(VoiceModelKind.TTS)) }
     var missingKoochikComponents by remember { mutableStateOf(store.missingKoochikComponents()) }
