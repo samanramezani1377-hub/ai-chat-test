@@ -336,9 +336,12 @@ private class VoiceConversationController(
                 microphone = mic
                 mic.start { frame ->
                     val nowMs = SystemClock.elapsedRealtime()
-                    val sincePlaybackMs = nowMs - lastTtsPlaybackAtMs.get()
-                    val assistantAudioActive = speaking.get() || sincePlaybackMs in 0L..1200L
                     val aecActive = mic.isEchoCancellationActive
+                    val sincePlaybackMs = nowMs - lastTtsPlaybackAtMs.get()
+                    // AEC shortens the safe echo tail; devices without it use a conservative
+                    // guard because speaker leakage cannot be distinguished from speech by RMS.
+                    val echoTailMs = if (aecActive) 450L else 1200L
+                    val assistantAudioActive = speaking.get() || sincePlaybackMs in 0L..echoTailMs
                     val threshold = if (assistantAudioActive) 0.060f else 0.035f
                     val requiredFrames = if (assistantAudioActive) 6 else 3
                     // Barge-in during speaker playback is enabled only when platform AEC is
@@ -369,7 +372,7 @@ private class VoiceConversationController(
                         (assistantAudioActive && !bargeInCapturePending.get())) {
                         if (echoSuppressionReported.compareAndSet(false, true)) {
                             scope.launch {
-                                onDiagnostic("VOICE-ECHO-001: ورودی ASR هنگام پخش و تا ۱۲۰۰ms پس از آن مسدود شد؛ AEC=" +
+                                onDiagnostic("VOICE-ECHO-001: ورودی ASR هنگام پخش و تا " + echoTailMs + "ms پس از آن مسدود شد؛ AEC=" +
                                     if (aecActive) "فعال" else "غیرفعال")
                             }
                         }
