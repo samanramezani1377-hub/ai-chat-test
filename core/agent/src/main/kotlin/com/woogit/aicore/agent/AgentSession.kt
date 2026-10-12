@@ -165,7 +165,15 @@ class AgentSession(
         val result = orchestrator.generate(settings, recentMessages, { /* published after classification */ }, contextMessages)
         val cleaned = stripReasoning(result.text)
         val context = contextProvider.build(Int.MAX_VALUE)
-        val actionRequired = actionPlanCoordinator?.requiresAction(context) == true
+        val candidateContext = context.copy(
+            recentMessages = context.recentMessages + ConversationMessage(
+                UUID.randomUUID().toString(),
+                ConversationMessage.Role.ASSISTANT,
+                cleaned,
+                System.currentTimeMillis()
+            )
+        )
+        val actionRequired = actionPlanCoordinator?.requiresAction(candidateContext) == true
         val toolCall = actionPlanCoordinator != null && ActionProtocolParser().parse(cleaned) != null
         if (!toolCall && !actionRequired && cleaned.isNotBlank()) eventSink(AgentEvent.Token(cleaned))
         return result.copy(text = cleaned)
