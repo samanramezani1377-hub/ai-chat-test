@@ -257,9 +257,12 @@ private class VoiceConversationController(
     private val speaking = AtomicBoolean(false)
     private val turnRunning = AtomicBoolean(false)
     private val bargeInTriggered = AtomicBoolean(false)
-    // Audio from the loudspeaker can leak into the mic briefly after AudioTrack stops.
+    // Playback guard is also applied to ASR input, not only to barge-in detection.
+    // Loudspeaker echo can remain in the microphone after AudioTrack stops.
     private val lastTtsPlaybackAtMs = AtomicLong(0L)
+    private val playbackStartedAtMs = AtomicLong(0L)
     private val pendingUtterance = AtomicReference<String?>(null)
+    private val startInProgress = AtomicBoolean(false)
     private var microphone: LocalMicrophone? = null
     private var recognizer: LocalAsr? = null
     private var tts: LocalPiperTts? = null
@@ -270,7 +273,7 @@ private class VoiceConversationController(
     private var closed = false
 
     fun start(stt: VoiceModelEntry, ttsModel: VoiceModelEntry) {
-        if (microphone != null || closed) return
+        if (closed || microphone != null || !startInProgress.compareAndSet(false, true)) return
         scope.launch {
             try {
                 onStatus("در حال آماده‌سازی موتورهای محلی صوت…")
@@ -284,37 +287,61 @@ private class VoiceConversationController(
                 recognizer = engines.first
                 tts = engines.second
                 if (conversationId == null) conversationId = container.conversationHistory.create("مکالمه صوتی").id
-                // 256 x 40 ms frames gives the ASR consumer more room during offline decoding.
-                val frames = Channel<LocalMicrophone.Frame>(capacity = 256)
+                // Keep capture independent from ASR. The queue is bounded to avoid seconds of
+                // stale microphone audio accumulating while an offline recognizer is decoding.
+                val frames = Channel<LocalMicrophone.Frame>(capacity = 128)
                 val mic = LocalMicrophone()
                 val loudSpeechFrames = AtomicInteger(0)
                 val audioDropReported = AtomicBoolean(false)
+                val echoSuppressionReported = AtomicBoolean(false)
                 microphone = mic
                 mic.start { frame ->
-                    // Run barge-in detection on the capture thread, not the ASR consumer.
-                    // Offline ASR may need hundreds of milliseconds to decode an utterance.
-                    // Barge-in must also work while the LLM is generating text, before TTS starts.
-                    // Never interpret the assistant's own loudspeaker output as barge-in.
-                    // Keep a short tail guard because acoustic echo can remain in captured frames
-                    // after AudioTrack stops. Echo cancellation is device-dependent, so RMS/VAD
-                    // alone must not be allowed to interrupt active TTS.
                     val nowMs = SystemClock.elapsedRealtime()
-                    val assistantAudioActive = speaking.get() || nowMs - lastTtsPlaybackAtMs.get() < 700L
-                    if (turnRunning.get() && !assistantAudioActive && frame.rms > 0.035f && frame.speech) {
-                        if (loudSpeechFrames.incrementAndGet() >= 3 && bargeInTriggered.compareAndSet(false, true)) {
+                    val sincePlaybackMs = nowMs - lastTtsPlaybackAtMs.get()
+                    val assistantAudioActive = speaking.get() || sincePlaybackMs in 0L..1200L
+                    val aecActive = mic.isEchoCancellationActive
+                    val threshold = if (assistantAudioActive) 0.060f else 0.035f
+                    val requiredFrames = if (assistantAudioActive) 6 else 3
+                    // Barge-in during speaker playback is enabled only when platform AEC is
+                    // actually active. Without AEC, loudspeaker echo is indistinguishable from
+                    // a user voice using RMS alone, so fail closed instead of spawning false turns.
+                    val candidate = turnRunning.get() && frame.speech && frame.rms > threshold &&
+                        (!assistantAudioActive || aecActive)
+                    if (candidate) {
+                        if (loudSpeechFrames.incrementAndGet() >= requiredFrames &&
+                            bargeInTriggered.compareAndSet(false, true)) {
                             interrupt("صدای کاربر تشخیص داده شد؛ تولید یا پخش پاسخ قبلی متوقف شد.")
                             loudSpeechFrames.set(0)
+                            if (aecActive) frames.trySend(frame)
                         }
                     } else {
                         loudSpeechFrames.set(0)
                     }
+
+                    // Never let assistant output or its acoustic tail enter the recognizer.
+                    // If AEC is unavailable, barge-in during playback is disabled by design.
+                    if (assistantAudioActive && !bargeInTriggered.get()) {
+                        if (echoSuppressionReported.compareAndSet(false, true)) {
+                            scope.launch {
+                                onDiagnostic("VOICE-ECHO-001: ورودی ASR هنگام پخش و تا ۱۲۰۰ms پس از آن مسدود شد؛ AEC=" +
+                                    if (aecActive) "فعال" else "غیرفعال")
+                            }
+                        }
+                        return@start
+                    }
+                    echoSuppressionReported.set(false)
                     if (frames.trySend(frame).isFailure && audioDropReported.compareAndSet(false, true)) {
                         scope.launch {
-                            onDiagnostic("VOICE-AUDIO-001: صف دریافت صدا پر شد؛ بخشی از فریم‌های میکروفون ممکن است از دست رفته باشد.")
-                            onStatus("VOICE-AUDIO-001: پردازش گفتار عقب افتاده است؛ برای جلوگیری از تشخیص ناقص، مکالمه را دوباره شروع کنید.")
+                            onDiagnostic("VOICE-AUDIO-001: صف صوتی پر شد؛ فریم جدید حذف شد تا تأخیر قدیمی انباشته نشود.")
+                            onStatus("VOICE-AUDIO-001: پردازش گفتار از دریافت صدا عقب افتاده است؛ جمله را پس از آماده‌شدن دوباره بگویید.")
                         }
+                    } else if (frames.isEmpty) {
+                        audioDropReported.set(false)
                     }
                 }
+                startInProgress.set(false)
+                onDiagnostic("VOICE-AUDIO-SETUP: AEC=" + (if (mic.isEchoCancellationActive) "active" else "unavailable") +
+                    " NS=" + (if (mic.isNoiseSuppressionActive) "active" else "unavailable") + " sampleRate=16000 frameMs=40")
                 frameJob = scope.launch {
                     onListening(true)
                     onStatus("در حال گوش‌دادن؛ گفتار و پردازش کاملاً روی دستگاه است.")
@@ -344,6 +371,7 @@ private class VoiceConversationController(
                     }
                 }
             } catch (t: Throwable) {
+                startInProgress.set(false)
                 onDiagnostic("VOICE-START-001\n${t.stackTraceToString()}")
                 onStatus("VOICE-START-001: شروع مکالمه ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
                 cleanupEngines()
@@ -367,7 +395,9 @@ private class VoiceConversationController(
                     try {
                         // Mark speaking only when audio playback actually starts, not during synthesis.
                         engine.speak(segment, turnCancel) {
-                            lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
+                            val playbackStart = SystemClock.elapsedRealtime()
+                            playbackStartedAtMs.set(playbackStart)
+                            lastTtsPlaybackAtMs.set(playbackStart)
                             speaking.set(true)
                         }
                     } finally {
@@ -492,6 +522,7 @@ private class VoiceConversationController(
     }
 
     fun stop(): Job {
+        startInProgress.set(false)
         val oldFrameJob = frameJob
         frameJob = null
         oldFrameJob?.cancel()
