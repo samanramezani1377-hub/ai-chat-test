@@ -39,9 +39,12 @@ interface ChatCompletionProvider {
     val id: String
     val displayName: String
     suspend fun generate(config: CloudflareConfig, request: GenerationRequest, onToken: suspend (String) -> Unit): GenerationResult
+    suspend fun stopGeneration() = Unit
 }
 
 class CloudflareProvider : ChatCompletionProvider {
+    private val activeConnection = java.util.concurrent.atomic.AtomicReference<HttpURLConnection?>(null)
+
     override val id: String = "cloudflare-workers-ai"
     override val displayName: String = "Cloudflare Workers AI"
 
@@ -58,6 +61,7 @@ class CloudflareProvider : ChatCompletionProvider {
         }
         val endpoint = URL("https://api.cloudflare.com/client/v4/accounts/${config.accountId}/ai/v1/chat/completions")
         val connection = endpoint.openConnection() as HttpURLConnection
+        activeConnection.set(connection)
         val startedAt = System.nanoTime()
         var firstTokenMs: Long? = null
         var outputTokens = 0L
@@ -144,6 +148,39 @@ class CloudflareProvider : ChatCompletionProvider {
                 firstTokenTimeMs = firstTokenMs,
                 generationTimeMs = (System.nanoTime() - startedAt) / 1_000_000,
             )
+        } finally {
+            activeConnection.compareAndSet(connection, null)
+            connection.disconnect()
+        }
+    }
+
+    override suspend fun stopGeneration() {
+        activeConnection.getAndSet(null)?.disconnect()
+    }
+
+    suspend fun listModels(config: CloudflareConfig): List<ProviderModel> = withContext(Dispatchers.IO) {
+        require(config.accountId.isNotBlank() && config.apiToken.isNotBlank()) { "ابتدا شناسه حساب و توکن Cloudflare را وارد کن." }
+        val url = URL("https://api.cloudflare.com/client/v4/accounts/${config.accountId}/ai/models/search?task=Text%20Generation&per_page=100&hide_experimental=true")
+        val connection = url.openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 30_000
+            connection.setRequestProperty("Authorization", "Bearer ${config.apiToken}")
+            connection.setRequestProperty("Accept", "application/json")
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) throw IllegalStateException("CLOUDFLARE-MODELS-$status: دریافت فهرست مدل‌ها ناموفق بود: ${text.take(300)}")
+            val result = JSONObject(text).optJSONArray("result") ?: JSONArray()
+            (0 until result.length()).mapNotNull { index ->
+                val item = result.optJSONObject(index) ?: return@mapNotNull null
+                val name = item.optString("name").takeIf { it.startsWith("@cf/") }
+                    ?: item.optString("id").takeIf { it.startsWith("@cf/") }
+                    ?: return@mapNotNull null
+                val description = item.optString("description").takeIf { it.isNotBlank() && it != "null" }
+                ProviderModel(name, if (description == null) name else "${name} · ${description.take(72)}")
+            }.distinctBy { it.id }.sortedBy { it.id }
         } finally {
             connection.disconnect()
         }
@@ -254,7 +291,8 @@ class ProviderRoutingModelRuntime(
     }
 
     override suspend fun stopGeneration() {
-        local.stopGeneration()
+        if (providerStore.load().mode == InferenceProviderMode.CLOUDFLARE) cloudflare.stopGeneration()
+        else local.stopGeneration()
     }
 
     override fun runtimeInfo(): RuntimeInfo {
