@@ -60,6 +60,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     val wakePrefs = remember(context) { context.getSharedPreferences(WakeWordForegroundService.PREFS, Context.MODE_PRIVATE) }
     var selectedWakeWordPath by remember { mutableStateOf(wakePrefs.getString(WakeWordForegroundService.PREF_MODEL_DIRECTORY, null)) }
     var wakeWordEnabled by remember { mutableStateOf(wakePrefs.getBoolean(WakeWordForegroundService.PREF_ENABLED, false)) }
+    var wakeWordArmed by remember { mutableStateOf(wakePrefs.getBoolean(WakeWordForegroundService.PREF_ARMED, false)) }
     var missingTtsComponents by remember { mutableStateOf(store.missingPiperComponents()) }
     var activeSttId by remember { mutableStateOf(sttModels.firstOrNull { it.id.startsWith("stt-shenava-koochik-") }?.id ?: sttModels.firstOrNull()?.id) }
     var activeTtsId by remember { mutableStateOf(ttsModels.firstOrNull()?.id) }
@@ -83,7 +84,17 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             } },
         )
     }
-    DisposableEffect(controller) { onDispose { controller.close() } }
+    DisposableEffect(controller) {
+        onDispose {
+            controller.close()
+            if (wakePrefs.getBoolean(WakeWordForegroundService.PREF_ARMED, false) &&
+                !wakePrefs.getBoolean(WakeWordForegroundService.PREF_ENABLED, false)) {
+                wakePrefs.getString(WakeWordForegroundService.PREF_MODEL_DIRECTORY, null)?.let { path ->
+                    runCatching { WakeWordForegroundService.start(context, path) }
+                }
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         val activity = context as? Activity
@@ -148,9 +159,11 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             try {
                 val ready = withContext(Dispatchers.IO) { wakeWordStore.importArchive(uri) }
                 wakeWordModels = wakeWordStore.list()
+                if (wakeWordArmed || wakeWordEnabled) WakeWordForegroundService.stop(context)
                 selectedWakeWordPath = ready.directory.absolutePath
-                wakePrefs.edit().putString(WakeWordForegroundService.PREF_MODEL_DIRECTORY, selectedWakeWordPath).putBoolean(WakeWordForegroundService.PREF_ENABLED, false).apply()
+                wakePrefs.edit().putString(WakeWordForegroundService.PREF_MODEL_DIRECTORY, selectedWakeWordPath).putBoolean(WakeWordForegroundService.PREF_ENABLED, false).putBoolean(WakeWordForegroundService.PREF_ARMED, false).apply()
                 wakeWordEnabled = false
+                wakeWordArmed = false
                 updateVoiceStatus("مدل بیدارباش وارد شد. برای تشخیص «دینا»، شنود پس‌زمینه را روشن کن.")
             } catch (t: Throwable) {
                 updateVoiceStatus("VOICE-KWS-IMPORT: ${t.message ?: t.javaClass.simpleName}")
@@ -243,6 +256,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
                     if (enabled && selected != null) WakeWordForegroundService.start(context, selected.directory.absolutePath)
                     else WakeWordForegroundService.stop(context)
                     wakeWordEnabled = enabled
+                    wakeWordArmed = enabled
                     updateVoiceStatus(if (enabled) "بیدارباش «دینا» فعال شد؛ شنود محلی با اعلان دائمی ادامه دارد." else "بیدارباش «دینا» خاموش شد.")
                 } catch (t: Throwable) {
                     wakeWordEnabled = false
@@ -261,12 +275,21 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             val tts = ttsModels.firstOrNull { it.id == activeTtsId }
             if (stt == null || tts == null) updateVoiceStatus("VOICE-MODEL-001: ابتدا مدل‌های STT و TTS را وارد و انتخاب کنید.")
             else {
-                if (wakeWordEnabled) { WakeWordForegroundService.stop(context); wakeWordEnabled = false }
+                if (wakeWordEnabled) { WakeWordForegroundService.pause(context); wakeWordEnabled = false }
                 busy = true
                 controller.start(stt, tts)
             }
         },
-        onStop = { controller.stop() },
+        onStop = {
+            controller.stop()
+            val armed = wakePrefs.getBoolean(WakeWordForegroundService.PREF_ARMED, false)
+            val path = wakePrefs.getString(WakeWordForegroundService.PREF_MODEL_DIRECTORY, null)
+            if (armed && !path.isNullOrBlank()) {
+                runCatching { WakeWordForegroundService.start(context, path) }
+                    .onSuccess { wakeWordEnabled = true; wakeWordArmed = true }
+                    .onFailure { updateVoiceStatus("VOICE-KWS-015: فعال‌سازی دوبارهٔ بیدارباش ناموفق بود: ${it.message}") }
+            }
+        },
         onInterrupt = { controller.interrupt("گفتار مدل با درخواست کاربر قطع شد.") },
     )
 }
