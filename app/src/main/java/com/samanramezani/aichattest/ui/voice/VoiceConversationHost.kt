@@ -265,6 +265,7 @@ private class VoiceConversationController(
     // Bounded queue preserves short consecutive user turns without unbounded memory growth.
     private val pendingUtterances = ConcurrentLinkedQueue<String>()
     private val startInProgress = AtomicBoolean(false)
+    private val lifecycleEpoch = AtomicLong(0L)
     private var microphone: LocalMicrophone? = null
     private var recognizer: LocalAsr? = null
     private var tts: LocalPiperTts? = null
@@ -276,6 +277,7 @@ private class VoiceConversationController(
 
     fun start(stt: VoiceModelEntry, ttsModel: VoiceModelEntry) {
         if (closed || microphone != null || !startInProgress.compareAndSet(false, true)) return
+        val startEpoch = lifecycleEpoch.get()
         scope.launch {
             try {
                 onStatus("در حال آماده‌سازی موتورهای محلی صوت…")
@@ -285,6 +287,11 @@ private class VoiceConversationController(
                         "nemo-ctc" -> LocalNemoCtcAsr(stt)
                         else -> LocalStreamingAsr(stt)
                     }) to LocalPiperTts(ttsModel)
+                }
+                if (closed || lifecycleEpoch.get() != startEpoch) {
+                    runCatching { engines.first.close() }
+                    runCatching { engines.second.close() }
+                    return@launch
                 }
                 recognizer = engines.first
                 tts = engines.second
@@ -296,6 +303,11 @@ private class VoiceConversationController(
                 val loudSpeechFrames = AtomicInteger(0)
                 val audioDropReported = AtomicBoolean(false)
                 val echoSuppressionReported = AtomicBoolean(false)
+                if (closed || lifecycleEpoch.get() != startEpoch) {
+                    runCatching { mic.stop() }
+                    cleanupEngines()
+                    return@launch
+                }
                 microphone = mic
                 mic.start { frame ->
                     val nowMs = SystemClock.elapsedRealtime()
@@ -348,7 +360,6 @@ private class VoiceConversationController(
                         audioDropReported.set(false)
                     }
                 }
-                startInProgress.set(false)
                 onDiagnostic("VOICE-AUDIO-SETUP: AEC=" + (if (mic.isEchoCancellationActive) "active" else "unavailable") +
                     " NS=" + (if (mic.isNoiseSuppressionActive) "active" else "unavailable") + " sampleRate=16000 frameMs=40")
                 frameJob = scope.launch {
@@ -389,6 +400,8 @@ private class VoiceConversationController(
                 onStatus("VOICE-START-001: شروع مکالمه ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
                 cleanupEngines()
                 onListening(false)
+            } finally {
+                startInProgress.set(false)
             }
         }
     }
@@ -524,6 +537,8 @@ private class VoiceConversationController(
     }
 
     fun interrupt(message: String) {
+        // Start the echo-tail window from the interruption instant, not from playback start.
+        lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
         cancelledSpeech.get()?.set(true)
         speaking.set(false)
         scope.launch { container.modelManager?.stopGeneration() }
@@ -535,7 +550,7 @@ private class VoiceConversationController(
     }
 
     fun stop(): Job {
-        startInProgress.set(false)
+        lifecycleEpoch.incrementAndGet()
         val oldFrameJob = frameJob
         frameJob = null
         oldFrameJob?.cancel()
