@@ -143,7 +143,7 @@ internal fun VoiceConversationPage(
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("۲. بیدارباش صوتی · «دینا»", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text("وارد کردن یک بستهٔ کامل sherpa-onnx KWS برای تشخیص محلی «دینا». فایل ZIP باید encoder/decoder/joiner مدل ONNX، tokens.txt و keywords.txt ازپیش‌تنظیم‌شده برای «دینا» را داشته باشد. مدل و tokenizer باید واقعاً با فارسی سازگار باشند.", style = MaterialTheme.typography.bodySmall)
+                        Text("بستهٔ کامل sherpa-onnx KWS را با ZIP یا TAR.BZ2 وارد کن. بسته باید encoder/decoder/joiner مدل ONNX و tokens.txt داشته باشد. برای مدل رسمی کوچک zh-en، برنامه keywords.txt را با تقریب آوایی «دینا» می‌سازد؛ چون مدل اصلی چینی/انگلیسی است، دقت فارسی تضمین نیست. مدل آموزش‌دیدهٔ فارسی می‌تواند keywords.txt اختصاصی خود را داشته باشد.", style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(onClick = onImportWakeWord, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                             Text(if (wakeWordModel == null) "انتخاب و وارد کردن مدل بیدارباش · ZIP" else "انتخاب مدل بیدارباش دیگر · ZIP")
                         }
