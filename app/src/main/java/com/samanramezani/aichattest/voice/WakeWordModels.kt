@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import java.io.File
 import java.io.FileOutputStream
+import java.io.BufferedInputStream
 import java.util.zip.ZipInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
@@ -140,7 +141,7 @@ class WakeWordModelStore(
             onProgress("در حال بازکردن و استخراج بستهٔ بیدارباش…")
             input.use { source ->
                 if (isZip) {
-                    ZipInputStream(source).use { zip ->
+                    ZipInputStream(BufferedInputStream(source, ARCHIVE_BUFFER_BYTES)).use { zip ->
                         while (true) {
                             val item = zip.nextEntry ?: break
                             extract(item.name, item.isDirectory, zip)
@@ -148,7 +149,7 @@ class WakeWordModelStore(
                         }
                     }
                 } else {
-                    TarArchiveInputStream(BZip2CompressorInputStream(source)).use { tar ->
+                    TarArchiveInputStream(BZip2CompressorInputStream(BufferedInputStream(source, ARCHIVE_BUFFER_BYTES), true)).use { tar ->
                         while (true) {
                             val item = tar.nextTarEntry ?: break
                             extract(item.name, item.isDirectory, tar)
@@ -306,6 +307,9 @@ class WakeWordModelStore(
 
     companion object {
         private const val MAX_ENTRIES = 4_000
+        // SAF-backed document streams may cross a Binder boundary for every small read.
+        // Buffer before ZIP/BZip2 decoding to avoid thousands of tiny provider reads.
+        private const val ARCHIVE_BUFFER_BYTES = 256 * 1024
         private const val MAX_EXPANDED_BYTES = 768L * 1024 * 1024
     }
 }
