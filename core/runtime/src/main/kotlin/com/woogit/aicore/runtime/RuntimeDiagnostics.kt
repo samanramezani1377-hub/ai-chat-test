@@ -146,8 +146,18 @@ object RuntimeDiagnosticsStore {
     }
 
     private fun nativeLine(prefix: String): String? {
-        val text = readNativeDiagnostics() ?: return null
-        return text.lineSequence().toList().asReversed().firstOrNull { it.contains(prefix) }
+        // The UI-facing diagnostic bundle is intentionally capped to the latest 80 lines.
+        // Residency/device records are emitted at model-load time and can be older than that
+        // after a long conversation. Read the native trace directly for structured metrics so
+        // those measurements do not silently become N/A just because the human log was trimmed.
+        val candidates = buildList {
+            runCatching { if (nativeTraceFile.isFile) add(nativeTraceFile.readText()) }
+            runCatching { if (markerFile.isFile) add(markerFile.readText()) }
+            runCatching { if (preflightFile.isFile) add(preflightFile.readText()) }
+        }
+        return candidates.asSequence()
+            .flatMap { it.lineSequence().toList().asReversed().asSequence() }
+            .firstOrNull { it.contains(prefix) }
     }
 
     private fun nativeField(line: String, key: String): String? =
