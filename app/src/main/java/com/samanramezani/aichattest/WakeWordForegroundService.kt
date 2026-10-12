@@ -44,9 +44,11 @@ class WakeWordForegroundService : Service() {
         const val PREFS = "dina_wake_word"
         const val PREF_MODEL_DIRECTORY = "model_directory"
         const val PREF_ENABLED = "enabled"
+        private const val SAMPLE_RATE = 16000
+        private const val SAMPLES_PER_CHUNK = 1600
 
         fun start(context: android.content.Context, modelDirectory: String) {
-            context.getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+            context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).edit()
                 .putString(PREF_MODEL_DIRECTORY, modelDirectory)
                 .putBoolean(PREF_ENABLED, true)
                 .apply()
@@ -257,8 +259,4 @@ class WakeWordForegroundService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private companion object Constants {
-        const val SAMPLE_RATE = 16000
-        const val SAMPLES_PER_CHUNK = 1600
-    }
 }
