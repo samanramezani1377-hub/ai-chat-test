@@ -7,7 +7,7 @@ import com.woogit.aicore.conversation.DefaultContextProvider
 import com.woogit.aicore.domain.GenerationResult
 import com.woogit.aicore.domain.InferenceSettings
 import java.util.UUID
-import kotlinx.coroutines.CancellationException
+import java.util.concurrent.CancellationException
 
 sealed interface AgentSessionResult {
     data class Reply(
