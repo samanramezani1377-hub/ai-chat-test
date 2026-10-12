@@ -282,11 +282,17 @@ private class VoiceConversationController(
             try {
                 onStatus("در حال آماده‌سازی موتورهای محلی صوت…")
                 val engines = withContext(Dispatchers.IO) {
-                    (when (stt.asrMode) {
+                    val asr = when (stt.asrMode) {
                         "qwen3-asr" -> LocalQwen3Asr(stt)
                         "nemo-ctc" -> LocalNemoCtcAsr(stt)
                         else -> LocalStreamingAsr(stt)
-                    }) to LocalPiperTts(ttsModel)
+                    }
+                    try {
+                        asr to LocalPiperTts(ttsModel)
+                    } catch (t: Throwable) {
+                        runCatching { asr.close() }
+                        throw t
+                    }
                 }
                 if (closed || lifecycleEpoch.get() != startEpoch) {
                     runCatching { engines.first.close() }
@@ -334,7 +340,7 @@ private class VoiceConversationController(
 
                     // Never let assistant output or its acoustic tail enter the recognizer.
                     // If AEC is unavailable, barge-in during playback is disabled by design.
-                    if (assistantAudioActive && !bargeInTriggered.get()) {
+                    if (speaking.get() || (assistantAudioActive && !bargeInTriggered.get())) {
                         if (echoSuppressionReported.compareAndSet(false, true)) {
                             scope.launch {
                                 onDiagnostic("VOICE-ECHO-001: ورودی ASR هنگام پخش و تا ۱۲۰۰ms پس از آن مسدود شد؛ AEC=" +
