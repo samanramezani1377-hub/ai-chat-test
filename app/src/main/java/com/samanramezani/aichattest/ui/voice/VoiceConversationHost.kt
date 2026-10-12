@@ -1,6 +1,7 @@
 package com.samanramezani.aichattest.ui.voice
 
 import android.content.Context
+import android.media.AudioManager
 import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -273,7 +274,22 @@ private class VoiceConversationController(
     private var turnJob: Job? = null
     private var speechJob: Job? = null
     private var conversationId: String? = null
+    private var previousAudioMode: Int? = null
     private var closed = false
+
+    private fun enterCommunicationAudioMode() {
+        val manager = context.getSystemService(AudioManager::class.java) ?: return
+        if (previousAudioMode == null) previousAudioMode = manager.mode
+        manager.mode = AudioManager.MODE_IN_COMMUNICATION
+    }
+
+    private fun restoreAudioMode() {
+        val previous = previousAudioMode ?: return
+        previousAudioMode = null
+        runCatching {
+            context.getSystemService(AudioManager::class.java)?.mode = previous
+        }
+    }
 
     fun start(stt: VoiceModelEntry, ttsModel: VoiceModelEntry) {
         if (closed || microphone != null || !startInProgress.compareAndSet(false, true)) return
@@ -299,6 +315,7 @@ private class VoiceConversationController(
                     runCatching { engines.second.close() }
                     return@launch
                 }
+                enterCommunicationAudioMode()
                 recognizer = engines.first
                 tts = engines.second
                 if (conversationId == null) conversationId = container.conversationHistory.create("مکالمه صوتی").id
@@ -405,6 +422,7 @@ private class VoiceConversationController(
                 onDiagnostic("VOICE-START-001\n${t.stackTraceToString()}")
                 onStatus("VOICE-START-001: شروع مکالمه ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
                 cleanupEngines()
+                restoreAudioMode()
                 onListening(false)
             } finally {
                 startInProgress.set(false)
@@ -573,6 +591,7 @@ private class VoiceConversationController(
         return scope.launch {
             listOfNotNull(oldFrameJob, oldTurnJob, oldSpeechJob).joinAll()
             cleanupEngines()
+            restoreAudioMode()
             onListening(false)
             onStatus("مکالمه متوقف شد.")
         }
