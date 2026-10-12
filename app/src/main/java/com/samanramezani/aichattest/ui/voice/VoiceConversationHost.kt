@@ -456,9 +456,9 @@ private class VoiceConversationController(
                 for (segment in queue) {
                     if (turnCancel.get()) break
                     val engine = tts ?: break
+                    val segmentPlaybackStarted = AtomicBoolean(false)
                     try {
                         // Mark speaking only when audio playback actually starts, not during synthesis.
-                        val segmentPlaybackStarted = AtomicBoolean(false)
                         engine.speak(segment, turnCancel) {
                             val playbackStart = SystemClock.elapsedRealtime()
                             segmentPlaybackStarted.set(true)
@@ -466,8 +466,9 @@ private class VoiceConversationController(
                             lastTtsPlaybackAtMs.set(playbackStart)
                             speaking.set(true)
                         }
-                        if (segmentPlaybackStarted.get()) lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
                     } finally {
+                        // Record the actual end even when cancellation interrupts AudioTrack.write().
+                        if (segmentPlaybackStarted.get()) lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
                         speaking.set(false)
                     }
                 }
