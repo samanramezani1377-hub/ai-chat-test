@@ -125,15 +125,17 @@ class AgentSession(
                 result = generateTurn(effectiveSettings, effectiveRecentMessages, nextContext)
                 resultPersisted = false
             }
-            val pendingUnexecutedToolCall = plan?.prepared?.risk != com.woogit.aicore.domain.RiskLevel.SENSITIVE &&
+            val safeToReplaceActionOutput = plan?.prepared?.risk != com.woogit.aicore.domain.RiskLevel.SENSITIVE
+            val pendingUnexecutedToolCall = safeToReplaceActionOutput &&
                 actionPlanCoordinator != null && ActionProtocolParser().parse(result.text) != null
-            val unresolvedActionRequest = plan == null &&
+            val actionStillRequired = safeToReplaceActionOutput &&
                 actionPlanCoordinator?.requiresAction(contextProvider.build(Int.MAX_VALUE)) == true
+            val unresolvedActionRequest = actionStillRequired && ActionProtocolParser().parse(result.text) == null
             if (pendingUnexecutedToolCall || unresolvedActionRequest) {
-                result = result.copy(text = if (pendingUnexecutedToolCall) {
-                    "به سقف تعداد عملیات رسیدم؛ درخواست بعدی اجرا نشد. می‌توانی ادامهٔ کار را در پیام بعدی بخواهی."
-                } else {
-                    "نتوانستم درخواست اجرایی را با ابزار معتبر انجام بدهم؛ هیچ عملیاتی اجرا نشد."
+                result = result.copy(text = when {
+                    pendingUnexecutedToolCall -> "به سقف تعداد عملیات رسیدم؛ درخواست بعدی اجرا نشد. می‌توانی ادامهٔ کار را در پیام بعدی بخواهی."
+                    plan == null -> "نتوانستم درخواست اجرایی را با ابزار معتبر انجام بدهم؛ هیچ عملیاتی اجرا نشد."
+                    else -> "پاسخ نهایی ابزار معتبر نبود؛ نتیجهٔ عملیات قبلی را در گزارش اجرا بررسی کن. هیچ دستور پوسته‌ای اجرا نشد."
                 })
                 eventSink(AgentEvent.Token(result.text))
                 resultPersisted = false
