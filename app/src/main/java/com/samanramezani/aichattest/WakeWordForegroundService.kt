@@ -410,6 +410,21 @@ class WakeWordForegroundService : Service() {
     private fun startVoiceConversationInService(): Boolean {
         if (voiceController != null) return true
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val currentState = prefs.getString(PREF_CONVERSATION_STATE, "").orEmpty()
+        if (voiceController != null) {
+            if (currentState in setOf(
+                    "CONVERSATION_START_REQUESTED",
+                    "CONVERSATION_STARTING",
+                    "LISTENING_SCREEN_OFF_CAPABLE",
+                    "CONVERSATION_ACTIVE",
+                )
+            ) return true
+            // A controller object can survive a failed asynchronous startup. Do not mistake
+            // non-null for a live microphone; dispose it and allow a clean retry.
+            runCatching { voiceController?.close() }
+            voiceController = null
+        }
         return try {
             val store = VoiceModelStore(contentResolver, File(filesDir, "voice-models"))
             val sttModels = store.list(VoiceModelKind.STT)
@@ -444,13 +459,24 @@ class WakeWordForegroundService : Service() {
                 context = this,
                 container = appContainer,
                 onStatus = { status ->
+                    val previous = prefs.getString(PREF_CONVERSATION_STATE, "").orEmpty()
                     val state = when {
-                        status.contains("VOICE-START-001") || status.contains("VOICE-CHAT-003") -> "CONVERSATION_ERROR"
+                        status.contains("VOICE-START-001") || status.contains("VOICE-CHAT-003") ||
+                            status.contains("VOICE-TTS-005") || status.contains("VOICE-STT-002") ||
+                            status.contains("VOICE-LLM-001") -> "CONVERSATION_ERROR"
+                        status.contains("متوقف شد") -> "CONVERSATION_STOPPED"
                         status.contains("گوش‌دادن") -> "LISTENING_SCREEN_OFF_CAPABLE"
-                        status.contains("در حال پخش") || status.contains("در حال پردازش") -> "CONVERSATION_ACTIVE"
+                        status.contains("در حال پخش") || status.contains("در حال پردازش") ||
+                            status.contains("در حال شنیدن") || status.contains("پاسخ آماده است") ||
+                            status.contains("گفتار جدید دریافت شد") -> "CONVERSATION_ACTIVE"
+                        previous in setOf("LISTENING_SCREEN_OFF_CAPABLE", "CONVERSATION_ACTIVE") ->
+                            previous
                         else -> "CONVERSATION_STARTING"
                     }
                     prefs.edit().putString(PREF_LAST_STATUS, status).putString(PREF_CONVERSATION_STATE, state).apply()
+                    if (state == "CONVERSATION_ERROR") {
+                        Log.e(TAG, "Voice controller reported startup/runtime failure: $status")
+                    }
                     notifyIfPermitted(LISTENING_NOTIFICATION_ID, buildConversationNotification(status))
                 },
                 onDiagnostic = { detail ->
@@ -458,7 +484,20 @@ class WakeWordForegroundService : Service() {
                     Log.i(TAG, detail)
                 },
                 onListening = { listening ->
-                    prefs.edit().putString(PREF_CONVERSATION_STATE, if (listening) "LISTENING_SCREEN_OFF_CAPABLE" else "CONVERSATION_NOT_LISTENING").apply()
+                    val previous = prefs.getString(PREF_CONVERSATION_STATE, "").orEmpty()
+                    val next = when {
+                        listening -> "LISTENING_SCREEN_OFF_CAPABLE"
+                        previous == "CONVERSATION_ERROR" -> previous
+                        previous == "CONVERSATION_STOPPED" -> previous
+                        else -> "CONVERSATION_NOT_LISTENING"
+                    }
+                    prefs.edit().putString(PREF_CONVERSATION_STATE, next).apply()
+                    if (listening) {
+                        prefs.edit()
+                            .putString(PREF_LAST_STATUS, "مکالمه فعال است؛ میکروفون آماده دریافت گفتار است.")
+                            .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("CONVERSATION_ACTIVE_CONFIRMED", "controller callback confirmed microphone/ASR loop"))
+                            .apply()
+                    }
                 },
                 onLine = { speaker, line ->
                     prefs.edit()
@@ -469,11 +508,14 @@ class WakeWordForegroundService : Service() {
                 },
             )
             voiceController = controller
-            controller.start(stt, tts)
             prefs.edit()
                 .putString(PREF_CONVERSATION_STATE, "CONVERSATION_START_REQUESTED")
+                .putString(PREF_LAST_STATUS, "دینا تشخیص داده شد؛ موتورهای مکالمه در حال آماده‌سازی هستند.")
                 .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("CONVERSATION_START_REQUESTED", "screenInteractive=${getSystemService(PowerManager::class.java)?.isInteractive}; stt=${stt.id}; tts=${tts.id}"))
                 .apply()
+            controller.start(stt, tts)
+            // This means the asynchronous start was requested, not that the microphone is live.
+            // onListening(true) is the only transition that confirms an active conversation.
             true
         } catch (t: Throwable) {
             prefs.edit()
