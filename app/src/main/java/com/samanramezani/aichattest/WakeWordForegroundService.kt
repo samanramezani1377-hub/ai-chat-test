@@ -1,11 +1,13 @@
 package com.samanramezani.aichattest
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -201,6 +203,9 @@ class WakeWordForegroundService : Service() {
             }
             spotter = KeywordSpotter(config = config)
             stream = spotter!!.createStream()
+            check(ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                "VOICE-KWS-001: مجوز میکروفون داده نشده یا لغو شده است."
+            }
             val minBytes = AudioRecord.getMinBufferSize(
                 SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
             )
