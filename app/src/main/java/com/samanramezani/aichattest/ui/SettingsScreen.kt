@@ -55,6 +55,7 @@ fun SettingsScreen(
     onAssignDraft: (String?) -> Unit, onDeleteDraft: (String) -> Unit,
     onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)? = null, onDelete: (String) -> Unit,
     onProviderChanged: () -> Unit = {},
+    providerStore: CloudflareProviderStore? = null,
 ) {
     var section by remember { mutableStateOf("مدل") }
     LazyColumn(
@@ -117,14 +118,14 @@ private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescript
             models.forEach { model -> ModelCard(model, model.id == active?.id, onActivate, onDelete) }
         }
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
-        CloudflareProviderSettings(onProviderChanged)
+        CloudflareProviderSettings(onProviderChanged, providerStore)
     }
 }
 
 @Composable
-private fun CloudflareProviderSettings(onProviderChanged: () -> Unit) {
+private fun CloudflareProviderSettings(onProviderChanged: () -> Unit, sharedStore: CloudflareProviderStore?) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val store = remember(context) { CloudflareProviderStore(context) }
+    val store = remember(context, sharedStore) { sharedStore ?: CloudflareProviderStore(context) }
     val initial = remember(store) { store.load() }
     var accountId by remember { mutableStateOf(initial.accountId) }
     var apiToken by remember { mutableStateOf(initial.apiToken) }
