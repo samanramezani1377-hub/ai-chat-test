@@ -602,7 +602,7 @@ private class VoiceConversationController(
         if (speaking.get()) lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
         cancelledSpeech.get()?.set(true)
         speaking.set(false)
-        scope.launch { container.modelManager?.stopGeneration() }
+        scope.launch { container.modelRuntime.stopGeneration() }
         turnJob?.cancel(CancellationException("barge-in"))
         turnJob = null
         speechJob?.cancel()
