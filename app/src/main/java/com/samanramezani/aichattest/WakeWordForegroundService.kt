@@ -393,11 +393,11 @@ class WakeWordForegroundService : Service() {
         getSystemService(NotificationManager::class.java).notify(DETECTED_NOTIFICATION_ID, notification)
     }
 
-    private fun buildConversationNotification(): Notification =
+    private fun buildConversationNotification(status: String? = null): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_btn_speak_now)
             .setContentTitle("مکالمهٔ صوتی دینا فعال است")
-            .setContentText("برای حفظ صدای پس‌زمینه، سرویس پیش‌زمینه فعال می‌ماند؛ پس از توقف مکالمه بیدارباش دوباره شروع می‌شود.")
+            .setContentText(status?.take(180) ?: "شنود و پردازش گفتار در سرویس پیش‌زمینه ادامه دارد؛ برای توقف از صفحه مکالمه استفاده کن.")
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -431,6 +431,8 @@ class WakeWordForegroundService : Service() {
         runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
         wakeLock = null
         worker?.interrupt()
+        voiceController?.close()
+        voiceController = null
         super.onDestroy()
     }
 
