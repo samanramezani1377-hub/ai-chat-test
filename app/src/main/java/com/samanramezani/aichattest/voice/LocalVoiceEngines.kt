@@ -30,6 +30,17 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
+private fun normalizePersianTtsText(value: String): String =
+    java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFC)
+        .replace('ي', 'ی')
+        .replace('ى', 'ی')
+        .replace('ك', 'ک')
+        .replace("ۀ", "هٔ")
+        .replace('ة', 'ه')
+        .replace('\u0640'.toString(), "")
+        .replace(Regex("[\\t\\x0B\\f\\r ]+"), " ")
+        .trim()
+
 class LocalPiperTts(private val entry: VoiceModelEntry) {
     private val engine: OfflineTts
 
@@ -93,7 +104,9 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
     ) = withContext(Dispatchers.Default) {
         require(text.isNotBlank()) { "VOICE-TTS-002: متن گفتار خالی است." }
         val synthesisStartedAtMs = SystemClock.elapsedRealtime()
-        val audio = engine.generate(text = text, sid = 0, speed = 1.0f)
+        val normalizedText = normalizePersianTtsText(text)
+        // Normalize common Arabic-script variants before espeak phonemization.
+        val audio = engine.generate(text = normalizedText, sid = 0, speed = 1.0f)
         onSynthesisComplete(SystemClock.elapsedRealtime() - synthesisStartedAtMs)
         if (cancelled.get()) throw CancellationException("TTS interrupted")
         val samples = audio.samples
