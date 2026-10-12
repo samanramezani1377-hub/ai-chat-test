@@ -226,9 +226,13 @@ class ProtocolActionIntentPlanner(
         // One deterministic recovery path for an explicit, quoted file-creation request.
         // It is enabled only after the model has already received a repair instruction.
         val lastUserIndex = context.recentMessages.indexOfLast { it.role == ConversationMessage.Role.USER }
-        val wasAskedToRepair = lastUserIndex >= 0 && context.recentMessages.drop(lastUserIndex + 1).any {
-            it.role == ConversationMessage.Role.TOOL && it.content.startsWith("ACTION_PROTOCOL_REPAIR:")
-        }
+        // Recovery is valid only while the repair instruction is the newest tool
+        // message. Once a real tool result arrives, do not replay the same fallback
+        // action while generating the final answer.
+        val latestToolMessage = context.recentMessages
+            .drop(if (lastUserIndex >= 0) lastUserIndex + 1 else context.recentMessages.size)
+            .lastOrNull { it.role == ConversationMessage.Role.TOOL }
+        val wasAskedToRepair = latestToolMessage?.content?.startsWith("ACTION_PROTOCOL_REPAIR:") == true
         if (!wasAskedToRepair) return null
         return explicitFileCreationFallback(context)
     }
