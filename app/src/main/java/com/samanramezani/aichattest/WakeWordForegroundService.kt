@@ -28,6 +28,7 @@ import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OnlineStream
 import com.samanramezani.aichattest.voice.WakeWordModelEntry
 import com.samanramezani.aichattest.voice.WakeWordModelStore
+import com.samanramezani.aichattest.voice.isDinaWakeKeywordLabel
 import com.samanramezani.aichattest.voice.VoiceModelStore
 import com.samanramezani.aichattest.voice.VoiceModelKind
 import com.samanramezani.aichattest.ui.voice.VoiceConversationController
@@ -274,7 +275,7 @@ class WakeWordForegroundService : Service() {
                     activeSpotter.decode(activeStream)
                     val result = activeSpotter.getResult(activeStream)
                     if (result.keyword.isNotBlank()) {
-                        if (isDinaWakeKeyword(result.keyword)) {
+                        if (isDinaWakeKeywordLabel(result.keyword)) {
                             detectedKeyword = result.keyword
                             Log.i(
                                 TAG,
@@ -469,13 +470,6 @@ class WakeWordForegroundService : Service() {
             Log.e(TAG, "Could not start service-owned voice conversation", t)
             false
         }
-    }
-
-    private fun isDinaWakeKeyword(keyword: String): Boolean {
-        val value = keyword.trim().lowercase()
-        // sherpa-onnx may return the configured label or its normalized spelling.
-        // Never start a conversation for an unrelated non-empty keyword result.
-        return value.contains("دینا") || value == "dina" || value == "@dina"
     }
 
     private fun wakeDiagnostic(event: String, detail: String): String =
