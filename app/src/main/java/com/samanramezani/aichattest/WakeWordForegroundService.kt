@@ -182,6 +182,18 @@ class WakeWordForegroundService : Service() {
             val modelStore = WakeWordModelStore(contentResolver, File(filesDir, "wake-word-models"))
             val entry = modelStore.list().firstOrNull { it.directory.absolutePath == modelPath }
                 ?: error("VOICE-KWS-001: مدل بیدارباش انتخاب‌شده پیدا نشد.")
+            // Migrate already-imported copies of the official zh-en package too. Updating the
+            // importer alone leaves older on-device keywords.txt files unchanged.
+            val isKnownZhEnPhoneModel = entry.directory.listFiles().orEmpty().any {
+                it.isFile && it.name.equals("en.phone", ignoreCase = true)
+            } && entry.encoder.name.contains("epoch-13-avg-2", ignoreCase = true)
+            if (isKnownZhEnPhoneModel) {
+                val correctedKeywords = "D IY1 N AA1 @دینا\nD IY1 N AH0 @دینا\n"
+                if (runCatching { entry.keywords.readText(Charsets.UTF_8) }.getOrNull() != correctedKeywords) {
+                    entry.keywords.writeText(correctedKeywords, Charsets.UTF_8)
+                    Log.i(TAG, "Migrated existing zh-en wake keywords to canonical phone tokens")
+                }
+            }
             val config = KeywordSpotterConfig().apply {
                 featConfig = FeatureConfig().apply { sampleRate = SAMPLE_RATE; featureDim = 80 }
                 modelConfig = OnlineModelConfig().apply {
@@ -198,10 +210,11 @@ class WakeWordForegroundService : Service() {
                     bpeVocab = entry.bpeVocab?.absolutePath.orEmpty()
                 }
                 keywordsFile = entry.keywords.absolutePath
-                // Improve recall for the phonetic approximation; one active path avoids duplicate results.
-                keywordsScore = 2.5f
-                keywordsThreshold = 0.15f
-                maxActivePaths = 1
+                // This model is not Persian-trained; bias the configured phonetic approximation
+                // toward recall and keep multiple pronunciation paths alive.
+                keywordsScore = 3.0f
+                keywordsThreshold = 0.08f
+                maxActivePaths = 4
                 numTrailingBlanks = 2
             }
             spotter = KeywordSpotter(config = config)
@@ -241,11 +254,15 @@ class WakeWordForegroundService : Service() {
                 activeStream.acceptWaveform(samples, SAMPLE_RATE)
                 while (activeSpotter.isReady(activeStream)) {
                     activeSpotter.decode(activeStream)
-                    val result = activeSpotter.getResult(activeStream).keyword
-                    if (result.isNotBlank() &&
-                        (result.contains("دینا") || result.contains("dina", ignoreCase = true))) {
-                        detectedKeyword = result
-                        Log.i(TAG, "Wake phrase detected: keyword=$result")
+                    val result = activeSpotter.getResult(activeStream)
+                    if (result.keyword.isNotBlank()) {
+                        // This spotter is configured with only Dina aliases. Do not reject a valid
+                        // hit because sherpa returns the normalized/original label differently.
+                        detectedKeyword = result.keyword
+                        Log.i(
+                            TAG,
+                            "Wake phrase candidate accepted: keyword=${result.keyword}; tokens=${result.tokens.joinToString(" ")}",
+                        )
                         detected = true
                         running.set(false)
                         break
