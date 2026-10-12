@@ -150,7 +150,7 @@ class AgentSession(
 
     private fun stripReasoning(raw: String): String {
         var text = raw.trim()
-        val end = text.lastIndexOf("</think>")
+        val end = if (text.startsWith("{") || text.startsWith("```")) -1 else text.indexOf("</think>")
         if (end >= 0) text = text.substring(end + "</think>".length).trimStart()
         if (text.startsWith("<think>")) {
             val closing = text.indexOf("</think>")
