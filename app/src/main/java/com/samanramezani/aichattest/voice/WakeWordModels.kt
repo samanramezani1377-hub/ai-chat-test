@@ -121,6 +121,29 @@ class WakeWordModelStore(
             }
 
             onProgress("در حال بررسی فایل‌های مدل و آماده‌سازی عبارت «دینا»…")
+            // The official zh-en KWS archive ships redundant chunk-8/chunk-16 graphs and
+            // test audio that are not needed at runtime. Prune those only for this known archive;
+            // leave arbitrary user-provided model packages unchanged.
+            val isOfficialZhEn = archive.contains("zh-en-3m")
+            if (isOfficialZhEn) {
+                staging.walkTopDown().filter { it.isDirectory }.forEach { directory ->
+                    directory.listFiles()?.filter { it.isDirectory && it.name.equals("test_wavs", true) }?.forEach {
+                        it.deleteRecursively()
+                    }
+                    directory.listFiles()?.filter { it.isFile && it.extension.equals("onnx", true) }?.forEach { modelFile ->
+                        val name = modelFile.name.lowercase()
+                        val isChunk16 = name.contains("chunk-16-left-64")
+                        val keep = when {
+                            name.contains("encoder") -> isChunk16 && name.contains("int8")
+                            name.contains("decoder") -> isChunk16 && !name.contains("int8")
+                            name.contains("joiner") -> isChunk16 && name.contains("int8")
+                            else -> true
+                        }
+                        if (!keep) modelFile.delete()
+                    }
+                }
+            }
+
             // The official tiny zh-en KWS model has an English phoneme inventory but no Persian
             // keyword file. For that specific model family, seed a phonetic approximation of
             // Persian "دینا" (DEE-NAA); custom-trained Persian packages should ship their own
@@ -173,9 +196,35 @@ class WakeWordModelStore(
     private fun validateDirectory(directory: File): WakeWordModelEntry? {
         if (!directory.isDirectory) return null
         val files = directory.listFiles()?.filter { it.isFile }.orEmpty()
-        val encoder = files.firstOrNull { it.name.contains("encoder", true) && it.extension.equals("onnx", true) } ?: return null
-        val decoder = files.firstOrNull { it.name.contains("decoder", true) && it.extension.equals("onnx", true) } ?: return null
-        val joiner = files.firstOrNull { it.name.contains("joiner", true) && it.extension.equals("onnx", true) } ?: return null
+        val onnxFiles = files.filter { it.extension.equals("onnx", true) }
+        val encoders = onnxFiles.filter { it.name.contains("encoder", true) }
+        val decoders = onnxFiles.filter { it.name.contains("decoder", true) }
+        val joiners = onnxFiles.filter { it.name.contains("joiner", true) }
+        if (encoders.isEmpty() || decoders.isEmpty() || joiners.isEmpty()) return null
+
+        // KWS releases can contain chunk-8 and chunk-16 graphs side by side, plus
+        // FP32 and INT8 encoders/joiners. Select a compatible set, not each role independently.
+        fun chunkKey(file: File): String? =
+            Regex("chunk-(8|16)-left-\\d+", RegexOption.IGNORE_CASE)
+                .find(file.name)?.value?.lowercase()
+        val preferredEncoderChunk = encoders.firstOrNull { chunkKey(it) == "chunk-16-left-64" }?.let(::chunkKey)
+            ?: encoders.firstOrNull { chunkKey(it) != null }?.let(::chunkKey)
+        fun matching(roleFiles: List<File>): List<File> =
+            if (preferredEncoderChunk == null) roleFiles
+            else roleFiles.filter { chunkKey(it) == preferredEncoderChunk }.ifEmpty { roleFiles }
+        val matchingEncoders = matching(encoders)
+        val matchingDecoders = matching(decoders)
+        val matchingJoiners = matching(joiners)
+        val encoder = matchingEncoders.firstOrNull { it.name.contains("int8", true) }
+            ?: matchingEncoders.firstOrNull() ?: return null
+        // The upstream zh-en release has FP32 decoders; pair every component with the same chunk size.
+        val decoder = matchingDecoders.firstOrNull { !it.name.contains("int8", true) }
+            ?: matchingDecoders.firstOrNull() ?: return null
+        val joiner = if (encoder.name.contains("int8", true)) {
+            matchingJoiners.firstOrNull { it.name.contains("int8", true) } ?: matchingJoiners.firstOrNull()
+        } else {
+            matchingJoiners.firstOrNull { !it.name.contains("int8", true) } ?: matchingJoiners.firstOrNull()
+        } ?: return null
         val tokens = files.firstOrNull { it.name.equals("tokens.txt", true) } ?: return null
         val keywords = files.firstOrNull { it.name.equals("keywords.txt", true) } ?: return null
         if (listOf(encoder, decoder, joiner).any { it.length() < 1024L } || tokens.length() == 0L) return null
@@ -185,14 +234,21 @@ class WakeWordModelStore(
         val config = configFile?.let { runCatching { JSONObject(it.readText(Charsets.UTF_8)) }.getOrNull() }
         val bpeVocab = files.firstOrNull { it.name.equals("bpe.model", true) }
         val inferredModelType = when {
-            encoder.name.contains("zipformer2", true) || encoder.name.contains("chunk-16-left", true) -> "zipformer2"
+            encoder.name.contains("zipformer2", true) -> "zipformer2"
             encoder.name.contains("lstm", true) -> "lstm"
-            else -> "zipformer"
+            encoder.name.contains("conformer", true) -> "conformer"
+            // Standard Zipformer KWS uses an empty model_type in sherpa-onnx.
+            else -> ""
         }
-        val modelType = config?.optString("modelType")?.takeIf { it in setOf("zipformer", "zipformer2", "lstm", "conformer") }
-            ?: inferredModelType
+        val modelType = config?.optString("modelType")?.takeIf {
+            it in setOf("", "zipformer", "zipformer2", "lstm", "conformer")
+        } ?: inferredModelType
         val modelingUnit = config?.optString("modelingUnit")?.takeIf { it.isNotBlank() }
-            ?: if (bpeVocab != null) "bpe" else ""
+            ?: when {
+                bpeVocab != null -> "bpe"
+                files.any { it.name.equals("en.phone", true) } -> "cjkchar"
+                else -> ""
+            }
         return WakeWordModelEntry(
             id = directory.name,
             title = "بیدارباش «دینا» · sherpa-onnx KWS",
