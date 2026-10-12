@@ -181,7 +181,11 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             busy = true
             updateVoiceStatus("در حال وارد کردن مدل بیدارباش «دینا»…")
             try {
-                val ready = withContext(Dispatchers.IO) { wakeWordStore.importArchive(uri) }
+                val ready = withContext(Dispatchers.IO) {
+                    wakeWordStore.importArchive(uri) { progress ->
+                        uiScope.launch { updateVoiceStatus(progress) }
+                    }
+                }
                 wakeWordModels = wakeWordStore.list()
                 if (wakeWordArmed || wakeWordEnabled) WakeWordForegroundService.stop(context)
                 selectedWakeWordPath = ready.directory.absolutePath
