@@ -197,7 +197,9 @@ class WakeWordForegroundService : Service() {
         var audioChunksProcessed = 0L
         var rejectedKeywordCandidates = 0
         try {
-            val modelStore = WakeWordModelStore(contentResolver, File(filesDir, "wake-word-models"))
+            val modelStore = WakeWordModelStore(contentResolver, File(filesDir, "wake-word-models")) {
+                assets.open("wake-word/zh-en-3m/tokens.txt")
+            }
             val entry = modelStore.list().firstOrNull { it.directory.absolutePath == modelPath }
                 ?: error("VOICE-KWS-001: مدل بیدارباش انتخاب‌شده پیدا نشد.")
             // Migrate already-imported copies of the official zh-en package too. Updating the
