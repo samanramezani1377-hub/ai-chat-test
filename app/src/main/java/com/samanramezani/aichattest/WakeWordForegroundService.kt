@@ -59,7 +59,7 @@ class WakeWordForegroundService : Service() {
         }
 
         fun stop(context: android.content.Context) {
-            context.getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, false).apply()
+            context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, false).apply()
             context.stopService(Intent(context, WakeWordForegroundService::class.java).setAction(ACTION_STOP))
             context.getSystemService(NotificationManager::class.java).cancel(DETECTED_NOTIFICATION_ID)
         }
@@ -127,12 +127,9 @@ class WakeWordForegroundService : Service() {
                     tokens = entry.tokens.absolutePath
                     numThreads = 1
                     provider = "cpu"
-                    modelType = when {
-                        entry.encoder.name.contains("zipformer2", true) ||
-                            entry.encoder.name.contains("chunk-16-left", true) -> "zipformer2"
-                        entry.encoder.name.contains("lstm", true) -> "lstm"
-                        else -> "zipformer"
-                    }
+                    modelType = entry.modelType
+                    modelingUnit = entry.modelingUnit
+                    bpeVocab = entry.bpeVocab?.absolutePath.orEmpty()
                 }
                 keywordsFile = entry.keywords.absolutePath
                 keywordsScore = 1.5f
