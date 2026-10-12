@@ -105,6 +105,16 @@ static bool init_generation_context() {
         std::to_string(cp.n_threads_batch) + " nBatch=" +
         std::to_string(cp.n_batch) + " nUbatch=" +
         std::to_string(cp.n_ubatch) + " flashAttn=auto").c_str());
+#if defined(AI_CHAT_GGML_OPENMP_ENABLED)
+    append_native_trace("NATIVE_OPENMP_POLICY enabled=1 linkage=static");
+#else
+    append_native_trace("NATIVE_OPENMP_POLICY enabled=0");
+#endif
+#if defined(AI_CHAT_GGML_CPU_KLEIDIAI_ENABLED)
+    append_native_trace("NATIVE_KLEIDIAI_POLICY enabled=1 cpuRuntimeDispatch=1");
+#else
+    append_native_trace("NATIVE_KLEIDIAI_POLICY enabled=0");
+#endif
     // Hybrid/recurrent architectures (including Qwen3.5-family models) carry
     // recurrent state across prompt batches. On Android, graph reuse in the pinned
     // llama.cpp build can fail on the second otherwise-identical prefill batch
@@ -1059,11 +1069,10 @@ static void append_weight_residency_trace() {
 }
 
 static llama_model *load_model_android(const char *path, llama_model_params mp, bool gpu) {
-    // Avoid the mmap -> OpenCL host-pointer import path on Android. Mobile UMA OpenCL
-    // drivers can fail inside buffer_from_host_ptr while the model is being initialized.
-    // LLAMA_LOAD_MODE_NONE keeps bounded file reads and normal backend allocations, so
-    // GPU layers remain enabled without relying on the fragile mmap buffer import.
-    mp.load_mode = LLAMA_LOAD_MODE_NONE;
+    // Keep the OpenCL path on bounded reads: some Android OpenCL drivers fail when
+    // mmap-backed host pointers are imported into GPU buffers. CPU fallback can use
+    // llama.cpp's automatic load-mode selection independently of the GPU path.
+    mp.load_mode = gpu ? LLAMA_LOAD_MODE_NONE : LLAMA_LOAD_MODE_AUTO;
     mp.check_tensors = false;
     mp.no_host = gpu;
 
@@ -1071,7 +1080,8 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
     // CPU loading is a supported recovery path, not an activation error.
     checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_OPENCL_PREFERRED" : "ANDROID_MODEL_LOAD_POLICY_CPU_FALLBACK");
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
-        " check_tensors=" + (mp.check_tensors ? "1" : "0")).c_str());
+        " check_tensors=" + (mp.check_tensors ? "1" : "0") +
+        " no_host=" + (mp.no_host ? "1" : "0")).c_str());
     return llama_model_load_from_file(path, mp);
 }
 
@@ -1165,7 +1175,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
             (gpu_attempted ? "1" : "0") + " gpuFailureReason=" + gpu_failure_reason).c_str());
         llama_model_params cpu_params = llama_model_default_params();
         cpu_params.n_gpu_layers = 0;
-        cpu_params.load_mode = LLAMA_LOAD_MODE_NONE;
+        cpu_params.load_mode = LLAMA_LOAD_MODE_AUTO;
         cpu_params.check_tensors = false;
         g_model = load_model_android(stable_model_path.c_str(), cpu_params, false);
         checkpoint(g_model ? "CPU_MODEL_LOAD_RETURNED_SUCCESS" : "CPU_MODEL_LOAD_RETURNED_FAILED");

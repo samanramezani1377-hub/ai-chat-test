@@ -30,7 +30,12 @@ android {
                     "-DLLAMA_OPENSSL=OFF",
                     "-DGGML_NATIVE=OFF",
                     "-DGGML_CPU_ARM_ARCH=armv8-a",
-                    "-DGGML_OPENMP=OFF",
+                    "-DGGML_CPU_KLEIDIAI=ON",
+                    "-DGGML_OPENMP=ON",
+                    // NDK Clang's OpenMP runtime must be statically linked into the
+                    // native library; no separate libomp.so is required in the APK.
+                    "-DOpenMP_C_FLAGS=-fopenmp -static-openmp",
+                    "-DOpenMP_CXX_FLAGS=-fopenmp -static-openmp",
                     "-DGGML_LLAMAFILE=OFF",
                     "-DGGML_OPENCL=ON",
                     "-DGGML_VULKAN=OFF",

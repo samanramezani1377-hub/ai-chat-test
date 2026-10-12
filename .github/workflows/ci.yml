@@ -114,6 +114,13 @@ jobs:
           # Match a real setenv call, not unsetenv (which contains setenv as a substring).
           ! grep -Eq '(^|[^[:alnum:]_])setenv\("GGML_OPENCL_Q6K_GEMV_TILED"' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'GGML_OPENCL_USE_ADRENO_KERNELS OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'GGML_CPU_KLEIDIAI ON' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'GGML_OPENMP ON' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'GGML_CPU_KLEIDIAI=ON' core/runtime-android/build.gradle.kts
+          grep -q 'GGML_OPENMP=ON' core/runtime-android/build.gradle.kts
+          grep -q 'LLAMA_LOAD_MODE_AUTO' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'NATIVE_OPENMP_POLICY enabled=1 linkage=static' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'NATIVE_KLEIDIAI_POLICY enabled=1 cpuRuntimeDispatch=1' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'NATIVE_EXECUTION_POLICY mode=OPENCL_GPU_PREFERRED' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'wholeModelCpuFallback=enabled' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'OPENCL_ATTEMPT_FAILED reason=' core/runtime-android/src/main/cpp/native_runtime.cpp
@@ -166,7 +173,10 @@ jobs:
           test "${#native_dirs[@]}" -gt 0
           grep -R 'GGML_USE_OPENCL' "${native_dirs[@]}" >/dev/null
           grep -R 'ggml-opencl' "${native_dirs[@]}" >/dev/null
-          echo "Static OpenCL backend linkage verified: $opencl_target"
+          grep -R 'GGML_USE_OPENMP' "${native_dirs[@]}" >/dev/null
+          grep -R 'GGML_USE_CPU_KLEIDIAI' "${native_dirs[@]}" >/dev/null
+          grep -R 'GGML_OPENMP_ENABLED' "${native_dirs[@]}" >/dev/null
+          echo "Static OpenCL backend, OpenMP and KleidiAI build integration verified: $opencl_target"
           echo "OpenCL profiling instrumentation is present in the compiled llama.cpp source: $source_file"
 
       - name: Verify APK ABI and size budget

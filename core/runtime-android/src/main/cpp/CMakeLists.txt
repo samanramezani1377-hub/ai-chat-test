@@ -70,11 +70,30 @@ set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_UI OFF CACHE BOOL "" FORCE)
 set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
+# Keep the generic ARM64 baseline portable. KleidiAI compiles its specialized
+# microkernels separately and selects only CPU-compatible kernels at runtime.
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
-set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+set(GGML_CPU_KLEIDIAI ON CACHE BOOL "Enable portable ARM KleidiAI CPU microkernels" FORCE)
+
+# OpenMP is enabled for the CPU backend. Android's NDK Clang requires static
+# OpenMP runtime linkage so the APK does not depend on a system libomp.so.
+set(GGML_OPENMP ON CACHE BOOL "Enable GGML OpenMP CPU parallelism" FORCE)
+if (ANDROID)
+    set(OpenMP_C_FLAGS "-fopenmp -static-openmp" CACHE STRING "Android static OpenMP C flags" FORCE)
+    set(OpenMP_CXX_FLAGS "-fopenmp -static-openmp" CACHE STRING "Android static OpenMP C++ flags" FORCE)
+endif()
 set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
+
+# Do not silently ship a build where OpenMP was requested but FindOpenMP could
+# not enable it. This also catches NDK/runtime-linking regressions during CI.
+if (NOT GGML_OPENMP_ENABLED)
+    message(FATAL_ERROR "GGML_OPENMP=ON was requested, but the pinned GGML build did not enable OpenMP")
+endif()
+if (NOT GGML_CPU_KLEIDIAI)
+    message(FATAL_ERROR "GGML_CPU_KLEIDIAI=ON was requested, but KleidiAI is disabled")
+endif()
 
 # Add one-shot per-node CPU/OpenCL backend assignment logs for performance diagnostics.
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_backend_assignment_trace.cmake")
@@ -171,6 +190,8 @@ target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"
     AI_CHAT_GPU_BACKEND_OPENCL=1
     AI_CHAT_GPU_BACKEND_VULKAN=0
+    AI_CHAT_GGML_OPENMP_ENABLED=1
+    AI_CHAT_GGML_CPU_KLEIDIAI_ENABLED=1
 )
 
 if (ANDROID)
