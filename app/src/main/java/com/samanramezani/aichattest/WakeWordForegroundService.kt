@@ -18,6 +18,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.KeywordSpotter
@@ -492,7 +493,7 @@ class WakeWordForegroundService : Service() {
             Log.w(TAG, "POST_NOTIFICATIONS denied; skipping notification id=$id")
             return
         }
-        getSystemService(NotificationManager::class.java).notify(id, notification)
+        NotificationManagerCompat.from(this).notify(id, notification)
     }
 
     private fun buildConversationNotification(status: String? = null): Notification =
