@@ -49,6 +49,7 @@ internal fun VoiceConversationPage(
     onImportKoochikTokens: () -> Unit,
     wakeWordModel: com.samanramezani.aichattest.voice.WakeWordModelEntry?,
     wakeWordEnabled: Boolean,
+    wakeWordArmed: Boolean,
     onImportWakeWord: () -> Unit,
     onToggleWakeWord: (Boolean) -> Unit,
     onImportTts: () -> Unit,
@@ -158,13 +159,14 @@ internal fun VoiceConversationPage(
                                     permission.launch(Manifest.permission.RECORD_AUDIO)
                                 } else onToggleWakeWord(!wakeWordEnabled)
                             },
-                            enabled = !busy && (wakeWordModel != null || wakeWordEnabled),
+                            enabled = !busy && !listening && (wakeWordModel != null || wakeWordEnabled),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(if (wakeWordEnabled) "خاموش کردن بیدارباش «دینا»" else "روشن کردن بیدارباش «دینا»")
                         }
                         Text(
                             if (wakeWordEnabled) "شنود محلی فعال است و اعلان دائمی اندروید نمایش داده می‌شود."
+                            else if (wakeWordArmed && listening) "بیدارباش مسلح است؛ هنگام مکالمه موقتاً متوقف می‌شود و پس از توقف مکالمه دوباره فعال خواهد شد."
                             else "برای کارکرد در پس‌زمینه، بیدارباش را روشن کن. فعال‌سازی خودکار صفحه به محدودیت‌های نسخهٔ اندروید و سازندهٔ گوشی وابسته است.",
                             style = MaterialTheme.typography.bodySmall,
                         )
