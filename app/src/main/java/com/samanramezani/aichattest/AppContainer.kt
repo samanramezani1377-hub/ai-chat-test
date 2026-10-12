@@ -39,7 +39,6 @@ import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
 import java.nio.file.Files
 import java.nio.file.LinkOption
-import java.nio.file.StandardCharsets
 
 /** Application composition root. Local GGUF inference is the only runtime. */
 class AppContainer(context: Context? = null) {
