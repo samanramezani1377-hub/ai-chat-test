@@ -237,6 +237,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         missingKoochikComponents = missingKoochikComponents,
         wakeWordModel = wakeWordModels.firstOrNull { it.directory.absolutePath == selectedWakeWordPath },
         wakeWordEnabled = wakeWordEnabled,
+        wakeWordArmed = wakeWordArmed,
         missingTtsComponents = missingTtsComponents,
         activeSttId = activeSttId,
         activeTtsId = activeTtsId,
