@@ -398,7 +398,7 @@ class VoiceModelStore(
         }
         onProgress("شروع استخراج داده‌های آواشناسی Piper…")
         if (archiveName.endsWith(".zip")) {
-            ZipInputStream(input).use { zip ->
+            ZipInputStream(input.buffered(256 * 1024)).use { zip ->
                 while (true) {
                     val item = zip.nextEntry ?: break
                     writeEntry(item.name, item.isDirectory, zip)
@@ -406,7 +406,7 @@ class VoiceModelStore(
                 }
             }
         } else {
-            TarArchiveInputStream(BZip2CompressorInputStream(input)).use { tar ->
+            TarArchiveInputStream(BZip2CompressorInputStream(input.buffered(256 * 1024))).use { tar ->
                 while (true) {
                     val item = tar.nextTarEntry ?: break
                     writeEntry(item.name, item.isDirectory, tar)
