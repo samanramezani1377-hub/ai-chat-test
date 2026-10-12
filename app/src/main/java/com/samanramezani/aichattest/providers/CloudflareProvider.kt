@@ -10,6 +10,7 @@ import com.woogit.aicore.domain.GenerationResult
 import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.domain.ModelRuntime
 import com.woogit.aicore.domain.RuntimeInfo
+import com.woogit.aicore.runtime.RuntimeAdapter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -240,7 +241,7 @@ class ProviderRoutingModelRuntime(
     private val local: ModelRuntime,
     private val providerStore: CloudflareProviderStore,
     private val cloudflare: ChatCompletionProvider = CloudflareProvider(),
-) : ModelRuntime {
+) : RuntimeAdapter {
     override suspend fun load(model: ModelDescriptor) = local.load(model)
     override suspend fun unload() = local.unload()
 
