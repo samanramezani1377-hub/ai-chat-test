@@ -2,6 +2,8 @@ package com.samanramezani.aichattest
 
 import android.content.Context
 import android.os.Build
+import com.samanramezani.aichattest.providers.CloudflareProviderStore
+import com.samanramezani.aichattest.providers.ProviderRoutingModelRuntime
 import com.woogit.aicore.actions.ActionExecutionService
 import com.woogit.aicore.actions.ActionExecutionState
 import com.woogit.aicore.actions.ActionLifecycle
@@ -40,7 +42,7 @@ import com.woogit.aicore.runtime.RuntimeMetrics
 import java.nio.file.Files
 import java.nio.file.LinkOption
 
-/** Application composition root. Local GGUF inference is the only runtime. */
+/** Application composition root: local GGUF and optional provider-backed inference share one agent path. */
 class AppContainer(context: Context? = null) {
     companion object {
         @Volatile var latest: AppContainer? = null
@@ -58,10 +60,12 @@ class AppContainer(context: Context? = null) {
         traceStore = appContext?.let { AndroidExecutionTraceStore(it) } ?: com.woogit.aicore.observability.InMemoryExecutionTraceStore(),
     )
 
-    val modelRuntime: RuntimeAdapter = LlamaCppAndroidRuntimeAdapter()
+    private val localModelRuntime = LlamaCppAndroidRuntimeAdapter()
+    val providerStore: CloudflareProviderStore? = appContext?.let { CloudflareProviderStore(it) }
+    val modelRuntime: RuntimeAdapter = if (providerStore != null) ProviderRoutingModelRuntime(localModelRuntime, providerStore) else localModelRuntime
     val conversationHistory: ConversationHistoryRepository = appContext?.let { AndroidConversationHistoryRepository(it) } ?: InMemoryConversationHistoryRepository()
     val modelManager: AndroidModelManager? = appContext?.let {
-        AndroidModelManager(it.contentResolver, it, it.filesDir.toPath().resolve("models"), modelRuntime as LlamaCppAndroidRuntimeAdapter)
+        AndroidModelManager(it.contentResolver, it, it.filesDir.toPath().resolve("models"), localModelRuntime)
     }
 
     val actionRegistry: ActionRegistry = DefaultActionRegistry().also { registry ->
@@ -234,6 +238,11 @@ class AppContainer(context: Context? = null) {
     }
 
     val actionExecutionService = ActionExecutionService(lifecycle, ApprovalController(lifecycle))
+
+    fun isCloudflareConfigured(): Boolean = providerStore?.load()?.let {
+        it.mode == com.samanramezani.aichattest.providers.InferenceProviderMode.CLOUDFLARE &&
+            it.accountId.isNotBlank() && it.apiToken.isNotBlank() && it.model.isNotBlank()
+    } == true
 
     private suspend fun reportError(component: String, code: String, userMessageFa: String, throwable: Throwable, actionId: String? = null, taskId: String? = null, executionId: String? = null) {
         val trace = executionId?.let { observability.traces(it) }?.joinToString("\n") { "${it.timestamp} ${it.phase}: ${it.message ?: ""}" }
