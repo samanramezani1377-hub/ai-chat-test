@@ -38,6 +38,8 @@ import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
 import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.StandardCharsets
 
 /** Application composition root. Local GGUF inference is the only runtime. */
 class AppContainer(context: Context? = null) {
@@ -127,6 +129,34 @@ class AppContainer(context: Context? = null) {
     }.getOrElse {
         reportError("Action", "RETRY_FAILED", "تلاش مجدد عملیات ناموفق بود.", it, executionId = executionId)
         ActionExecutionOutcome(false, false, it.message ?: "Retry failed", errorCode = "RETRY_FAILED")
+    }
+
+    data class WorkspaceFileEntry(val path: String, val sizeBytes: Long, val modifiedAtMs: Long)
+
+    /** Lists actual files created in the same app-private Workspace used by filesystem actions. */
+    fun workspaceFiles(): List<WorkspaceFileEntry> {
+        val root = workspaceRoot ?: return emptyList()
+        if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(root)) return emptyList()
+        return Files.walk(root).use { paths ->
+            paths.filter { path ->
+                path != root && !Files.isSymbolicLink(path) && Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+            }.map { path ->
+                WorkspaceFileEntry(
+                    path = root.relativize(path).toString().replace(java.io.File.separatorChar, '/'),
+                    sizeBytes = Files.size(path),
+                    modifiedAtMs = Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toMillis(),
+                )
+            }.sorted(compareBy<WorkspaceFileEntry> { it.path.lowercase() }).toList()
+        }
+    }
+
+    /** Reads a Workspace file without allowing traversal outside the app-private Workspace. */
+    fun readWorkspaceFile(relativePath: String): String {
+        val root = requireNotNull(workspaceRoot) { "Workspace is unavailable" }
+        val path = com.woogit.aicore.actions.WorkspacePathResolver(root).resolve(relativePath)
+        require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) { "File not found" }
+        require(Files.size(path) <= 1_048_576L) { "File exceeds 1 MiB preview limit" }
+        return Files.readString(path, StandardCharsets.UTF_8)
     }
 
     fun actionTraces() = actionTraceSink.snapshot()
