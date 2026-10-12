@@ -92,7 +92,7 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
         val minBuffer = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         require(minBuffer > 0) { "VOICE-TTS-003: پیکربندی خروجی صوتی پشتیبانی نمی‌شود." }
         val track = AudioTrack.Builder()
-            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             .setAudioFormat(AudioFormat.Builder().setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
             .setBufferSizeInBytes(maxOf(minBuffer, rate / 5 * 2))
             .setTransferMode(AudioTrack.MODE_STREAM)
@@ -276,6 +276,7 @@ class LocalQwen3Asr(private val entry: VoiceModelEntry) : LocalAsr {
     }
 
     override fun accept(samples: FloatArray, sampleRate: Int, speech: Boolean): AsrUpdate {
+        require(sampleRate == 16000) { "VOICE-STT-QWEN-001: مدل Qwen3-ASR به صدای ۱۶ کیلوهرتز نیاز دارد." }
         if (speech) {
             hasSpeech = true
             silenceSamples = 0
@@ -283,7 +284,10 @@ class LocalQwen3Asr(private val entry: VoiceModelEntry) : LocalAsr {
             silenceSamples += samples.size
         }
         if (hasSpeech) {
-            for (sample in samples) utterance.add(sample)
+            // Bound memory even if an upstream caller sends unusually large frames.
+            val remaining = maxUtteranceSamples - utterance.size
+            val count = minOf(remaining, samples.size)
+            for (i in 0 until count) utterance.add(samples[i])
         }
         if (!hasSpeech || (silenceSamples < endSilenceSamples && utterance.size < maxUtteranceSamples)) {
             return AsrUpdate("", false)
@@ -313,6 +317,8 @@ class LocalMicrophone {
     private var recorder: AudioRecord? = null
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
+    val isEchoCancellationActive: Boolean get() = runCatching { echoCanceler?.enabled == true }.getOrDefault(false)
+    val isNoiseSuppressionActive: Boolean get() = runCatching { noiseSuppressor?.enabled == true }.getOrDefault(false)
     private val running = AtomicBoolean(false)
 
     fun start(onFrame: (Frame) -> Unit) {
@@ -340,8 +346,14 @@ class LocalMicrophone {
             error("VOICE-MIC-003: راه‌اندازی میکروفون ناموفق بود.")
         }
         recorder = record
-        if (AcousticEchoCanceler.isAvailable()) echoCanceler = AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true }
-        if (NoiseSuppressor.isAvailable()) noiseSuppressor = NoiseSuppressor.create(record.audioSessionId)?.apply { enabled = true }
+        // Audio effects are optional and OEM implementations can throw despite isAvailable().
+        // Never fail microphone startup solely because an effect could not be instantiated.
+        if (AcousticEchoCanceler.isAvailable()) {
+            echoCanceler = runCatching { AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true } }.getOrNull()
+        }
+        if (NoiseSuppressor.isAvailable()) {
+            noiseSuppressor = runCatching { NoiseSuppressor.create(record.audioSessionId)?.apply { enabled = true } }.getOrNull()
+        }
         try {
             record.startRecording()
         } catch (e: SecurityException) {
