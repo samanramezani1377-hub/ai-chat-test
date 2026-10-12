@@ -24,6 +24,9 @@ import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OnlineStream
 import com.samanramezani.aichattest.voice.WakeWordModelEntry
 import com.samanramezani.aichattest.voice.WakeWordModelStore
+import com.samanramezani.aichattest.voice.VoiceModelStore
+import com.samanramezani.aichattest.voice.VoiceModelKind
+import com.samanramezani.aichattest.ui.voice.VoiceConversationController
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -42,7 +45,14 @@ class WakeWordForegroundService : Service() {
         const val ACTION_START = "com.samanramezani.aichattest.action.START_DINA_WAKE_WORD"
         const val ACTION_STOP = "com.samanramezani.aichattest.action.STOP_DINA_WAKE_WORD"
         const val ACTION_PAUSE = "com.samanramezani.aichattest.action.PAUSE_DINA_WAKE_WORD"
+        const val ACTION_STOP_CONVERSATION = "com.samanramezani.aichattest.action.STOP_DINA_CONVERSATION"
         const val EXTRA_OPEN_VOICE_FROM_WAKE = "open_voice_from_wake_word"
+        const val EXTRA_CONVERSATION_STARTED_IN_SERVICE = "dina_conversation_started_in_service"
+        const val PREF_STT_MODEL_ID = "voice_stt_model_id"
+        const val PREF_TTS_MODEL_ID = "voice_tts_model_id"
+        const val PREF_CONVERSATION_STATE = "conversation_state"
+        const val PREF_LAST_STATUS = "conversation_last_status"
+        const val PREF_LAST_DIAGNOSTIC = "conversation_last_diagnostic"
         const val PREFS = "dina_wake_word"
         const val PREF_MODEL_DIRECTORY = "model_directory"
         const val PREF_ENABLED = "enabled"
@@ -76,6 +86,7 @@ class WakeWordForegroundService : Service() {
     }
 
     private val running = AtomicBoolean(false)
+    @Volatile private var voiceController: VoiceConversationController? = null
     @Volatile private var worker: Thread? = null
     @Volatile private var audioRecord: AudioRecord? = null
     @Volatile private var spotter: KeywordSpotter? = null
@@ -364,11 +375,11 @@ class WakeWordForegroundService : Service() {
     }
 
     private fun wakeDiagnostic(event: String, detail: String): String =
-        "DINA WAKE DIAGNOSTICS\\n" +
-            "event=$event\\n" +
-            "screenInteractive=${getSystemService(PowerManager::class.java)?.isInteractive}\\n" +
-            "listenerRunning=${running.get()}\\n" +
-            "voiceControllerActive=${voiceController != null}\\n" +
+        "DINA WAKE DIAGNOSTICS\n" +
+            "event=$event\n" +
+            "screenInteractive=${getSystemService(PowerManager::class.java)?.isInteractive}\n" +
+            "listenerRunning=${running.get()}\n" +
+            "voiceControllerActive=${voiceController != null}\n" +
             "detail=$detail"
 
     private fun postWakeNotification(message: String, openVoice: Boolean) {
