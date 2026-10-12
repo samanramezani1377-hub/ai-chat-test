@@ -318,8 +318,7 @@ class WakeWordForegroundService : Service() {
                     ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
                     PackageManager.PERMISSION_GRANTED
                 if (canPostNotification) {
-                    getSystemService(NotificationManager::class.java)
-                        .notify(LISTENING_NOTIFICATION_ID, buildConversationNotification())
+                    notifyIfPermitted(LISTENING_NOTIFICATION_ID, buildConversationNotification())
                 } else {
                     // The foreground service keeps running; Android may hide regular notifications
                     // until the user grants notification permission.
@@ -398,8 +397,7 @@ class WakeWordForegroundService : Service() {
                         else -> "CONVERSATION_STARTING"
                     }
                     prefs.edit().putString(PREF_LAST_STATUS, status).putString(PREF_CONVERSATION_STATE, state).apply()
-                    getSystemService(NotificationManager::class.java)
-                        .notify(LISTENING_NOTIFICATION_ID, buildConversationNotification(status))
+                    notifyIfPermitted(LISTENING_NOTIFICATION_ID, buildConversationNotification(status))
                 },
                 onDiagnostic = { detail ->
                     prefs.edit().putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("VOICE_RUNTIME", detail)).apply()
@@ -462,7 +460,22 @@ class WakeWordForegroundService : Service() {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
-        getSystemService(NotificationManager::class.java).notify(DETECTED_NOTIFICATION_ID, notification)
+        notifyIfPermitted(DETECTED_NOTIFICATION_ID, notification)
+    }
+
+    /**
+     * Android 13+ requires runtime notification permission for ordinary notification updates.
+     * Keep the microphone foreground service alive even when the user has denied that permission.
+     */
+    private fun notifyIfPermitted(id: Int, notification: Notification) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(TAG, "POST_NOTIFICATIONS denied; skipping notification id=$id")
+            return
+        }
+        getSystemService(NotificationManager::class.java).notify(id, notification)
     }
 
     private fun buildConversationNotification(status: String? = null): Notification =
