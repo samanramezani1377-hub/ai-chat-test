@@ -3,6 +3,8 @@ package com.woogit.aicore.agent
 import com.woogit.aicore.actions.ActionExecutionState
 import com.woogit.aicore.actions.ActionLifecycle
 import com.woogit.aicore.actions.CalculateAction
+import com.woogit.aicore.actions.CreateFileAction
+import com.woogit.aicore.actions.WorkspacePathResolver
 import com.woogit.aicore.actions.DefaultActionRegistry
 import com.woogit.aicore.actions.InMemoryActionCheckpointStore
 import com.woogit.aicore.conversation.ConversationMessage
@@ -17,6 +19,7 @@ import com.woogit.aicore.domain.ModelRuntime
 import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.domain.VerificationResult
 import com.woogit.aicore.domain.Verifier
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -83,6 +86,72 @@ class AgentSessionToolExecutionTest {
         assertEquals("1800", reply.actionResult)
         assertTrue(events.any { it is AgentEvent.ActionExecuted })
         assertTrue(store.messages.any { it.role == ConversationMessage.Role.TOOL })
+    }
+
+    @Test
+    fun malformedBashOutputIsRepairedAndPersianWorkspaceFileIsActuallyCreated() = runTest {
+        val root = Files.createTempDirectory("agent-persian-file")
+        try {
+            val registry = DefaultActionRegistry().apply {
+                register("filesystem", CreateFileAction(WorkspacePathResolver(root)))
+            }
+            val lifecycle = ActionLifecycle(
+                registry = registry,
+                capabilityProvider = object : CapabilityProvider {
+                    override fun supports(capability: String) = capability == "filesystem"
+                },
+                checkpointStore = InMemoryActionCheckpointStore(),
+            )
+            val store = TestStore()
+            val provider = DefaultContextProvider(
+                conversationStore = store,
+                systemContext = { ActionToolPrompt.build(registry) },
+                persistentTaskContext = { null },
+                workspaceContext = { "Use filesystem actions for files in the app workspace." },
+            )
+            val runtime = SequencedRuntime(
+                listOf(
+                    """I need to create a text file now.
+</think>
+touch "متن خام.txt" && echo 'اینجا شروع یک کار است' > متن خام.txt""",
+                    """{"version":1,"actionId":"file-1","action":"create_file","arguments":{"file_name":"متن خام.txt","content":"اینجا شروع یک کار است"}}""",
+                    "فایل متن خام.txt ساخته شد.",
+                )
+            )
+            val verifier = object : Verifier<Any> {
+                override suspend fun verify(result: Any) = VerificationResult(result.toString().isNotBlank(), result.toString())
+            }
+            val events = mutableListOf<AgentEvent>()
+            val session = AgentSession(
+                orchestrator = AgentOrchestrator(provider, runtime),
+                conversationStore = store,
+                actionPlanCoordinator = ActionPlanCoordinator(lifecycle, ProtocolActionIntentPlanner()),
+                actionExecutor = { plan ->
+                    when (val state = lifecycle.executeApproved(plan.prepared.executionId, verifier)) {
+                        is ActionExecutionState.Completed -> ActionExecutionOutcome(true, state.verification.success, state.verification.evidence.orEmpty(), state.verification.evidence)
+                        is ActionExecutionState.Failed -> ActionExecutionOutcome(false, false, state.message, errorCode = "ACTION_FAILED")
+                        else -> ActionExecutionOutcome(false, false, "Action was not executed")
+                    }
+                },
+                eventSink = { events += it },
+                contextProvider = provider,
+                maxActionSteps = 2,
+                conversationId = "persian-file-test",
+            )
+
+            val reply = session.send("یه فایل تکست برام بساز تو فضای کار اسمشو بزار «متن خام» و داخلش بنویس «اینجا شروع یک کار است»", InferenceSettings(maxNewTokens = 256, maxActionSteps = 2))
+
+            val file = root.resolve("متن خام.txt")
+            assertTrue(Files.isRegularFile(file))
+            assertEquals("اینجا شروع یک کار است", Files.readString(file))
+            assertEquals(3, runtime.requests.size, "one malformed response, one repair, then the final answer")
+            assertEquals("فایل متن خام.txt ساخته شد.", reply.generation.text)
+            assertEquals("create_file", requireNotNull(reply.actionPlan).intent.actionId)
+            assertTrue(events.filterIsInstance<AgentEvent.Token>().none { it.value.contains("touch") || it.value.contains("</think>") })
+            assertTrue(store.messages.any { it.role == ConversationMessage.Role.TOOL && it.content.contains("success\\\":true") })
+        } finally {
+            root.toFile().deleteRecursively()
+        }
     }
 
     private class TestStore : ConversationStore {
