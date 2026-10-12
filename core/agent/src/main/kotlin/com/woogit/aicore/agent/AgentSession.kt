@@ -45,15 +45,37 @@ class AgentSession(
             val initialContext = conversationStore.recent(
                 if (requestedRecentMessages == null) Int.MAX_VALUE else effectiveRecentMessages
             )
-            var result = orchestrator.generate(effectiveSettings, effectiveRecentMessages, { token -> eventSink(AgentEvent.Token(token)) }, initialContext)
+            var result = generateTurn(effectiveSettings, effectiveRecentMessages, initialContext)
             var plan: ActionPlan? = null
             var actionResult: String? = null
             var steps = 0
+            var repairAttempts = 0
             var resultPersisted = false
             while (actionPlanCoordinator != null && steps < effectiveMaxActionSteps) {
                 conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
                 resultPersisted = true
-                val nextPlan = actionPlanCoordinator.prepare(contextProvider.build(effectiveRecentMessages), conversationId) ?: break
+                val context = contextProvider.build(Int.MAX_VALUE)
+                val nextPlan = runCatching { actionPlanCoordinator.prepare(context, conversationId) }.getOrNull()
+                if (nextPlan == null) {
+                    if (repairAttempts == 0 && actionPlanCoordinator.requiresAction(context)) {
+                        repairAttempts++
+                        conversationStore.append(ConversationMessage(
+                            UUID.randomUUID().toString(),
+                            ConversationMessage.Role.TOOL,
+                            "ACTION_PROTOCOL_REPAIR: Previous output was not a valid ActionRequest v1. Do not output Bash, shell commands, prose, or Markdown. Return only one JSON object for a registered action, with version, actionId, action, and arguments. Never claim success without a verified tool result.",
+                            System.currentTimeMillis()
+                        ))
+                        result = generateTurn(effectiveSettings, effectiveRecentMessages, conversationStore.recent(Int.MAX_VALUE))
+                        resultPersisted = false
+                        continue
+                    }
+                    if (repairAttempts > 0 && actionPlanCoordinator.requiresAction(context)) {
+                        result = result.copy(text = "نتوانستم درخواست اجرایی را به فراخوانی ابزار معتبر تبدیل کنم؛ هیچ عملیاتی اجرا نشد. لطفاً درخواست را دوباره با نام و محتوای دقیق فایل ارسال کن.")
+                        eventSink(AgentEvent.Token(result.text))
+                        resultPersisted = false
+                    }
+                    break
+                }
                 plan = nextPlan
                 eventSink(AgentEvent.ActionPrepared(nextPlan.prepared.executionId, nextPlan.prepared.actionId))
                 if (nextPlan.prepared.risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE) {
@@ -81,14 +103,14 @@ class AgentSession(
                         outcome = retried
                     }
                     val retryContext = conversationStore.recent(Int.MAX_VALUE)
-                    result = orchestrator.generate(effectiveSettings, effectiveRecentMessages, { token -> eventSink(AgentEvent.Token(token)) }, retryContext)
+                    result = generateTurn(effectiveSettings, effectiveRecentMessages, retryContext)
                     resultPersisted = false
                     if (outcome.success && outcome.verified) continue
                     continue
                 }
 
                 val nextContext = conversationStore.recent(Int.MAX_VALUE)
-                result = orchestrator.generate(effectiveSettings, effectiveRecentMessages, { token -> eventSink(AgentEvent.Token(token)) }, nextContext)
+                result = generateTurn(effectiveSettings, effectiveRecentMessages, nextContext)
                 resultPersisted = false
             }
             if (!resultPersisted) conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
@@ -100,6 +122,37 @@ class AgentSession(
         }
     }
 
+
+    /**
+     * Buffer native output until it is known whether the model produced a tool call.
+     * This prevents internal reasoning and raw tool JSON from leaking into chat.
+     */
+    private suspend fun generateTurn(
+        settings: InferenceSettings,
+        recentMessages: Int,
+        contextMessages: List<ConversationMessage>,
+    ): GenerationResult {
+        val result = orchestrator.generate(settings, recentMessages, { /* published after classification */ }, contextMessages)
+        val cleaned = stripReasoning(result.text)
+        val context = contextProvider.build(Int.MAX_VALUE)
+        val actionRequired = actionPlanCoordinator?.requiresAction(context) == true
+        val toolCall = ActionProtocolParser().parse(cleaned) != null
+        if (!toolCall && !actionRequired && cleaned.isNotBlank()) eventSink(AgentEvent.Token(cleaned))
+        return result.copy(text = cleaned)
+    }
+
+    private fun stripReasoning(raw: String): String {
+        var text = raw.trim()
+        val end = text.lastIndexOf("</think>")
+        if (end >= 0) text = text.substring(end + "</think>".length).trimStart()
+        if (text.startsWith("<think>")) {
+            val closing = text.indexOf("</think>")
+            if (closing >= 0) text = text.substring(closing + "</think>".length).trimStart()
+            else return ""
+        }
+        return text.trim()
+    }
+
     suspend fun resumeApproved(executionId: String, outcome: ActionExecutionOutcome, settings: InferenceSettings, requestedRecentMessages: Int? = null): AgentSessionResult.Reply {
         require(executionId.isNotBlank()) { "executionId must not be blank" }
         require(outcome.success && outcome.verified) { "Approved action result must be successful and verified before resuming the agent" }
@@ -109,12 +162,7 @@ class AgentSession(
         conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(executionId), System.currentTimeMillis()))
         return try {
             val resumeContext = conversationStore.recent(Int.MAX_VALUE)
-            val result = orchestrator.generate(
-                effectiveSettings,
-                effectiveRecentMessages,
-                { token -> eventSink(AgentEvent.Token(token)) },
-                resumeContext
-            )
+            val result = generateTurn(effectiveSettings, effectiveRecentMessages, resumeContext)
             conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
             eventSink(AgentEvent.Completed)
             AgentSessionResult.Reply(result, null, outcome.message)
