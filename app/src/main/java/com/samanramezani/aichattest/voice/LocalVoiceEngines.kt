@@ -338,9 +338,12 @@ class LocalMicrophone {
                 AudioFormat.ENCODING_PCM_16BIT,
                 maxOf(min * 2, sampleRate / 2),
             )
-        } catch (e: SecurityException) {
+        } catch (t: Throwable) {
             running.set(false)
-            throw IllegalStateException("VOICE-MIC-004: مجوز ضبط صدا داده نشده است.", e)
+            if (t is SecurityException) {
+                throw IllegalStateException("VOICE-MIC-004: مجوز ضبط صدا داده نشده است.", t)
+            }
+            throw IllegalStateException("VOICE-MIC-005: ساخت AudioRecord ناموفق بود: ${t.message ?: t.javaClass.simpleName}", t)
         }
         if (record.state != AudioRecord.STATE_INITIALIZED) {
             running.set(false); record.release()
