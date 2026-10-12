@@ -285,7 +285,12 @@ class ProviderRoutingModelRuntime(
         val config = providerStore.load()
         return when (config.mode) {
             InferenceProviderMode.LOCAL -> local.generate(request, onToken)
-            InferenceProviderMode.CLOUDFLARE -> cloudflare.generate(config, request, onToken)
+            InferenceProviderMode.CLOUDFLARE -> {
+                require(config.accountId.isNotBlank()) { "شناسه حساب Cloudflare وارد نشده است." }
+                require(config.apiToken.isNotBlank()) { "توکن API در دسترس نیست؛ دوباره واردش کن و ذخیره کن." }
+                require(config.model.isNotBlank()) { "شناسه مدل Cloudflare وارد نشده است." }
+                cloudflare.generate(config, request, onToken)
+            }
         }
     }
 
