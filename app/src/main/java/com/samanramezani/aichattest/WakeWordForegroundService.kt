@@ -12,6 +12,7 @@ import android.content.pm.ServiceInfo
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -176,6 +177,7 @@ class WakeWordForegroundService : Service() {
 
     private fun listen(modelPath: String) {
         var detected = false
+        var detectedKeyword = ""
         try {
             val modelStore = WakeWordModelStore(contentResolver, File(filesDir, "wake-word-models"))
             val entry = modelStore.list().firstOrNull { it.directory.absolutePath == modelPath }
@@ -196,9 +198,10 @@ class WakeWordForegroundService : Service() {
                     bpeVocab = entry.bpeVocab?.absolutePath.orEmpty()
                 }
                 keywordsFile = entry.keywords.absolutePath
-                keywordsScore = 1.5f
-                keywordsThreshold = 0.25f
-                maxActivePaths = 4
+                // Improve recall for the phonetic approximation; one active path avoids duplicate results.
+                keywordsScore = 2.5f
+                keywordsThreshold = 0.15f
+                maxActivePaths = 1
                 numTrailingBlanks = 2
             }
             spotter = KeywordSpotter(config = config)
@@ -241,6 +244,8 @@ class WakeWordForegroundService : Service() {
                     val result = activeSpotter.getResult(activeStream).keyword
                     if (result.isNotBlank() &&
                         (result.contains("دینا") || result.contains("dina", ignoreCase = true))) {
+                        detectedKeyword = result
+                        Log.i(TAG, "Wake phrase detected: keyword=$result")
                         detected = true
                         running.set(false)
                         break
@@ -274,8 +279,10 @@ class WakeWordForegroundService : Service() {
                 prefs.edit()
                     .putBoolean(PREF_ENABLED, false)
                     .putString(PREF_CONVERSATION_STATE, "WAKE_WORD_DETECTED")
-                    .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("DETECTED", "Activity launch is optional"))
+                    .putString(PREF_LAST_STATUS, "عبارت «دینا» تشخیص داده شد؛ صدای تأیید پخش می‌شود و میکروفون مکالمه فعال خواهد شد.")
+                    .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("DETECTED", "keyword=$detectedKeyword; Activity launch is optional"))
                     .apply()
+                playWakeDetectedCue()
                 // Audio starts in the already-running microphone foreground service. Opening UI
                 // is a best-effort enhancement, not a prerequisite for a voice conversation.
                 val conversationStarted = startVoiceConversationInService()
@@ -326,6 +333,24 @@ class WakeWordForegroundService : Service() {
             }
             // Clear only our own worker reference; a newer worker may already have replaced it.
             if (worker === Thread.currentThread()) worker = null
+        }
+    }
+
+    /** Audible confirmation independent of whether the app UI is visible. */
+    private fun playWakeDetectedCue() {
+        val tone = runCatching { ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 85) }.getOrNull()
+        if (tone == null) {
+            Log.w(TAG, "Could not create wake-detection confirmation tone")
+            return
+        }
+        try {
+            tone.startTone(ToneGenerator.TONE_PROP_ACK, 180)
+            // Let the cue finish before starting conversation capture, to avoid feeding the beep to STT.
+            Thread.sleep(240)
+        } catch (t: InterruptedException) {
+            Thread.currentThread().interrupt()
+        } finally {
+            tone.release()
         }
     }
 
