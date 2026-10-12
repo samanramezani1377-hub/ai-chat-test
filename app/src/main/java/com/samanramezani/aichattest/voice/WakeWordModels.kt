@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import java.io.File
 import java.io.FileOutputStream
 import java.util.zip.ZipInputStream
+import org.json.JSONObject
 
 data class WakeWordModelEntry(
     val id: String,
@@ -16,13 +17,17 @@ data class WakeWordModelEntry(
     val joiner: File,
     val tokens: File,
     val keywords: File,
+    val modelType: String,
+    val modelingUnit: String,
+    val bpeVocab: File?,
 )
 
 /**
  * Imports a complete sherpa-onnx streaming KWS package configured for the Persian wake phrase
  * "دینا". The archive must contain encoder/decoder/joiner ONNX files, tokens.txt, and
- * keywords.txt with the original keyword label "دینا". The package's tokenizer/model must
- * actually support Persian; filename validation alone cannot guarantee recognition quality.
+ * keywords.txt with the original keyword label "دینا". Optional wakeword.json may set
+ * modelType and modelingUnit; bpe.model is detected automatically. The package's tokenizer/model
+ * must actually support Persian; filename validation alone cannot guarantee recognition quality.
  */
 class WakeWordModelStore(
     private val resolver: ContentResolver,
@@ -121,6 +126,18 @@ class WakeWordModelStore(
         if (listOf(encoder, decoder, joiner).any { it.length() < 1024L } || tokens.length() == 0L) return null
         val keywordText = runCatching { keywords.readText(Charsets.UTF_8) }.getOrNull() ?: return null
         if (!keywordText.contains("دینا")) return null
+        val configFile = files.firstOrNull { it.name.equals("wakeword.json", true) }
+        val config = configFile?.let { runCatching { JSONObject(it.readText(Charsets.UTF_8)) }.getOrNull() }
+        val bpeVocab = files.firstOrNull { it.name.equals("bpe.model", true) }
+        val inferredModelType = when {
+            encoder.name.contains("zipformer2", true) || encoder.name.contains("chunk-16-left", true) -> "zipformer2"
+            encoder.name.contains("lstm", true) -> "lstm"
+            else -> "zipformer"
+        }
+        val modelType = config?.optString("modelType")?.takeIf { it in setOf("zipformer", "zipformer2", "lstm", "conformer") }
+            ?: inferredModelType
+        val modelingUnit = config?.optString("modelingUnit")?.takeIf { it.isNotBlank() }
+            ?: if (bpeVocab != null) "bpe" else ""
         return WakeWordModelEntry(
             id = directory.name,
             title = "بیدارباش «دینا» · sherpa-onnx KWS",
@@ -130,6 +147,9 @@ class WakeWordModelStore(
             joiner = joiner,
             tokens = tokens,
             keywords = keywords,
+            modelType = modelType,
+            modelingUnit = modelingUnit,
+            bpeVocab = bpeVocab,
         )
     }
 
