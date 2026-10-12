@@ -38,6 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.ConcurrentLinkedQueue
 
 @Composable
 internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) {
@@ -261,7 +262,8 @@ private class VoiceConversationController(
     // Loudspeaker echo can remain in the microphone after AudioTrack stops.
     private val lastTtsPlaybackAtMs = AtomicLong(0L)
     private val playbackStartedAtMs = AtomicLong(0L)
-    private val pendingUtterance = AtomicReference<String?>(null)
+    // Bounded queue preserves short consecutive user turns without unbounded memory growth.
+    private val pendingUtterances = ConcurrentLinkedQueue<String>()
     private val startInProgress = AtomicBoolean(false)
     private var microphone: LocalMicrophone? = null
     private var recognizer: LocalAsr? = null
@@ -330,12 +332,19 @@ private class VoiceConversationController(
                         return@start
                     }
                     echoSuppressionReported.set(false)
-                    if (frames.trySend(frame).isFailure && audioDropReported.compareAndSet(false, true)) {
-                        scope.launch {
-                            onDiagnostic("VOICE-AUDIO-001: صف صوتی پر شد؛ فریم جدید حذف شد تا تأخیر قدیمی انباشته نشود.")
-                            onStatus("VOICE-AUDIO-001: پردازش گفتار از دریافت صدا عقب افتاده است؛ جمله را پس از آماده‌شدن دوباره بگویید.")
+                    val sent = frames.trySend(frame)
+                    if (sent.isFailure) {
+                        // Prefer the newest live audio over stale buffered audio. The consumer
+                        // remains bounded and latency does not grow by several seconds.
+                        frames.tryReceive()
+                        frames.trySend(frame)
+                        if (audioDropReported.compareAndSet(false, true)) {
+                            scope.launch {
+                                onDiagnostic("VOICE-AUDIO-001: صف صوتی پر شد؛ قدیمی‌ترین فریم حذف شد تا تأخیر زنده محدود بماند.")
+                                onStatus("VOICE-AUDIO-001: تشخیص گفتار زیر بار پردازش عقب افتاده است؛ ممکن است بخشی از جمله از دست برود.")
+                            }
                         }
-                    } else if (frames.isEmpty) {
+                    } else {
                         audioDropReported.set(false)
                     }
                 }
@@ -362,7 +371,11 @@ private class VoiceConversationController(
                                 } else {
                                     // Keep the latest finalized utterance instead of silently dropping it
                                     // while the previous generation is being cancelled.
-                                    pendingUtterance.set(utterance)
+                                    if (pendingUtterances.size >= 4) {
+                                        pendingUtterances.poll()
+                                        onDiagnostic("VOICE-TURN-001: صف گفتارهای منتظر پر بود؛ قدیمی‌ترین درخواست حذف شد.")
+                                    }
+                                    pendingUtterances.offer(utterance)
                                     onLine("شما", utterance)
                                     onStatus("گفتار جدید دریافت شد؛ پس از توقف امن پاسخ قبلی پردازش می‌شود.")
                                 }
@@ -502,7 +515,7 @@ private class VoiceConversationController(
             if (speechJob === activeSpeechJob && activeSpeechJob.isCompleted) speechJob = null
             turnRunning.set(false)
             bargeInTriggered.set(false)
-            val pending = pendingUtterance.getAndSet(null)
+            val pending = pendingUtterances.poll()
             if (!closed && pending != null && turnRunning.compareAndSet(false, true)) {
                 onStatus("در حال پردازش گفتار جدید…")
                 turnJob = scope.launch { processTurn(pending) }
