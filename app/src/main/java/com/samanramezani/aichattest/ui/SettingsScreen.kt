@@ -8,6 +8,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import com.samanramezani.aichattest.providers.CloudflareConfig
+import com.samanramezani.aichattest.providers.CloudflareProvider
+import com.samanramezani.aichattest.providers.CloudflareProviderStore
+import com.samanramezani.aichattest.providers.InferenceProviderMode
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -45,6 +50,7 @@ fun SettingsScreen(
     draftModels: List<ModelDescriptor>, activeDraft: ModelDescriptor?, onImportDraft: () -> Unit,
     onAssignDraft: (String?) -> Unit, onDeleteDraft: (String) -> Unit,
     onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)? = null, onDelete: (String) -> Unit,
+    onProviderChanged: () -> Unit = {},
 ) {
     var section by remember { mutableStateOf("مدل") }
     LazyColumn(
@@ -71,7 +77,7 @@ fun SettingsScreen(
         }
         item {
             when (section) {
-                "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete)
+                "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete, onProviderChanged)
                 "پاسخ" -> InferenceControls()
                 "زمینه" -> ContextControls()
                 "عامل" -> AgentControls()
@@ -81,7 +87,7 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescriptor>, error: String?, onImport: () -> Unit, onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)?, onDelete: (String) -> Unit) {
+private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescriptor>, error: String?, onImport: () -> Unit, onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)?, onDelete: (String) -> Unit, onProviderChanged: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.primaryContainer) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -105,6 +111,91 @@ private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescript
             }
         } else {
             models.forEach { model -> ModelCard(model, model.id == active?.id, onActivate, onDelete) }
+        }
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+        CloudflareProviderSettings(onProviderChanged)
+    }
+}
+
+@Composable
+private fun CloudflareProviderSettings(onProviderChanged: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val store = remember(context) { CloudflareProviderStore(context) }
+    val initial = remember(store) { store.load() }
+    var accountId by remember { mutableStateOf(initial.accountId) }
+    var apiToken by remember { mutableStateOf(initial.apiToken) }
+    var model by remember { mutableStateOf(initial.model) }
+    var mode by remember { mutableStateOf(initial.mode) }
+    var modelMenu by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var failed by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("مدل ابری و API", style = MaterialTheme.typography.titleLarge)
+        Text("بین اجرای محلی روی گوشی و Cloudflare Workers AI جابه‌جا شو. تنظیمات هر ارائه‌دهنده از همین بخش مدیریت می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = mode == InferenceProviderMode.LOCAL, onClick = { mode = InferenceProviderMode.LOCAL }, label = { Text("مدل محلی") })
+            FilterChip(selected = mode == InferenceProviderMode.CLOUDFLARE, onClick = { mode = InferenceProviderMode.CLOUDFLARE }, label = { Text("Cloudflare API") })
+        }
+        OutlinedTextField(
+            value = accountId, onValueChange = { accountId = it.trim() }, modifier = Modifier.fillMaxWidth(),
+            label = { Text("شناسه حساب Cloudflare") }, singleLine = true,
+        )
+        OutlinedTextField(
+            value = apiToken, onValueChange = { apiToken = it }, modifier = Modifier.fillMaxWidth(),
+            label = { Text("API Token") }, placeholder = { Text("توکن به‌صورت رمزگذاری‌شده ذخیره می‌شود") },
+            singleLine = true, visualTransformation = PasswordVisualTransformation(),
+        )
+        OutlinedTextField(
+            value = model, onValueChange = { model = it }, modifier = Modifier.fillMaxWidth(),
+            label = { Text("شناسه مدل API") }, singleLine = true,
+            trailingIcon = { TextButton(onClick = { modelMenu = true }) { Text("مدل‌ها") } },
+        )
+        DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
+            CloudflareProvider.suggestedModels.forEach { item ->
+                DropdownMenuItem(
+                    text = { Text(item.label) },
+                    onClick = { model = item.id; modelMenu = false },
+                )
+            }
+        }
+        Text("می‌توانی از فهرست مدل‌های پیشنهادی انتخاب کنی یا شناسه هر مدل پشتیبانی‌شده Cloudflare را دستی وارد کنی.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    try {
+                        val next = CloudflareConfig(accountId, apiToken, model, mode)
+                        if (mode == InferenceProviderMode.CLOUDFLARE) {
+                            require(accountId.isNotBlank() && apiToken.isNotBlank() && model.isNotBlank()) { "شناسه حساب، توکن API و شناسه مدل را کامل وارد کن." }
+                        }
+                        store.save(next)
+                        message = if (mode == InferenceProviderMode.CLOUDFLARE) "Cloudflare انتخاب شد؛ پیام‌های بعدی با مدل ابری اجرا می‌شوند." else "مدل محلی انتخاب شد؛ اجرای ابری غیرفعال است."
+                        failed = false
+                        onProviderChanged()
+                    } catch (t: Throwable) {
+                        message = t.message ?: "ذخیره تنظیمات ناموفق بود."
+                        failed = true
+                    }
+                },
+            ) { Text("ذخیره و اعمال") }
+            OutlinedButton(
+                onClick = {
+                    mode = InferenceProviderMode.LOCAL
+                    try {
+                        store.save(CloudflareConfig(accountId, apiToken, model, InferenceProviderMode.LOCAL))
+                        message = "مدل محلی انتخاب شد."
+                        failed = false
+                        onProviderChanged()
+                    } catch (t: Throwable) {
+                        message = t.message ?: "تغییر ارائه‌دهنده ناموفق بود."
+                        failed = true
+                    }
+                },
+            ) { Text("فقط محلی") }
+        }
+        message?.let {
+            Text(it, color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
