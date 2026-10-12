@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import java.io.File
 import java.io.FileOutputStream
 import java.io.BufferedInputStream
+import java.io.InputStream
 import java.util.zip.ZipInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
@@ -51,6 +52,8 @@ data class WakeWordModelEntry(
 class WakeWordModelStore(
     private val resolver: ContentResolver,
     private val root: File,
+    /** Bundled exact token table for the known upstream zh-en KWS archive. */
+    private val officialTokensProvider: (() -> InputStream)? = null,
 ) {
     init { root.mkdirs() }
 
@@ -153,7 +156,7 @@ class WakeWordModelStore(
             }
         }
         fun hasOfficialRuntimeSet(): Boolean {
-            if (!isOfficialZhEnArchive) return false
+            if (!isOfficialZhEnArchive || officialTokensProvider == null) return false
             return staging.walkTopDown().filter { it.isDirectory }.any { directory ->
                 val files = directory.listFiles()?.filter { it.isFile }.orEmpty()
                 fun hasOnnx(role: String, int8: Boolean): Boolean = files.any { file ->
@@ -166,7 +169,6 @@ class WakeWordModelStore(
                 hasOnnx("encoder", int8 = true) &&
                     hasOnnx("decoder", int8 = false) &&
                     hasOnnx("joiner", int8 = true) &&
-                    files.any { it.name.equals("tokens.txt", true) } &&
                     files.any { it.name.equals("en.phone", true) }
             }
         }
@@ -208,6 +210,28 @@ class WakeWordModelStore(
                                 hasOfficialRuntimeSet()
                             ) break
                         }
+                    }
+                }
+            }
+
+            // In the upstream tarball tokens.txt comes after the large test_wavs directory.
+            // Ship its exact 263-token table with the app so import can stop after the three
+            // compatible ONNX graphs and en.phone instead of decoding all test audio first.
+            if (isOfficialZhEnArchive && officialTokensProvider != null) {
+                val runtimeDirectory = staging.walkTopDown().filter { it.isDirectory }.firstOrNull { directory ->
+                    val files = directory.listFiles()?.filter { it.isFile }.orEmpty()
+                    files.any { it.name.contains("encoder", true) && it.name.contains("chunk-16-left-64", true) && it.name.contains("int8", true) && it.extension.equals("onnx", true) } &&
+                        files.any { it.name.contains("decoder", true) && it.name.contains("chunk-16-left-64", true) && !it.name.contains("int8", true) && it.extension.equals("onnx", true) } &&
+                        files.any { it.name.contains("joiner", true) && it.name.contains("chunk-16-left-64", true) && it.name.contains("int8", true) && it.extension.equals("onnx", true) } &&
+                        files.any { it.name.equals("en.phone", true) }
+                }
+                if (runtimeDirectory != null && runtimeDirectory.listFiles().orEmpty().none { it.name.equals("tokens.txt", true) }) {
+                    val tokensFile = File(runtimeDirectory, "tokens.txt")
+                    officialTokensProvider.invoke().use { source ->
+                        FileOutputStream(tokensFile).use { output -> source.copyTo(output) }
+                    }
+                    check(tokensFile.length() > 0L && tokensFile.readLines(Charsets.UTF_8).size == 263) {
+                        "VOICE-KWS-IMPORT-010: جدول واژگان داخلی مدل zh-en معتبر نیست."
                     }
                 }
             }
