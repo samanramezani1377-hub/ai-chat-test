@@ -1,5 +1,6 @@
 package com.samanramezani.aichattest
 
+import android.annotation.SuppressLint
 import android.os.Bundle
 import android.view.KeyEvent
 import com.samanramezani.aichattest.voice.VoiceAudioInputGuard
@@ -7,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 
 class MainActivity : ComponentActivity() {
+    @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN &&
             (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
