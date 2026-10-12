@@ -41,6 +41,7 @@ class WakeWordForegroundService : Service() {
         private const val DETECTED_NOTIFICATION_ID = 4202
         const val ACTION_START = "com.samanramezani.aichattest.action.START_DINA_WAKE_WORD"
         const val ACTION_STOP = "com.samanramezani.aichattest.action.STOP_DINA_WAKE_WORD"
+        const val ACTION_PAUSE = "com.samanramezani.aichattest.action.PAUSE_DINA_WAKE_WORD"
         const val EXTRA_OPEN_VOICE_FROM_WAKE = "open_voice_from_wake_word"
         const val PREFS = "dina_wake_word"
         const val PREF_MODEL_DIRECTORY = "model_directory"
@@ -63,7 +64,10 @@ class WakeWordForegroundService : Service() {
 
         fun pause(context: android.content.Context) {
             context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, false).apply()
-            context.stopService(Intent(context, WakeWordForegroundService::class.java).setAction(ACTION_STOP))
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, WakeWordForegroundService::class.java).setAction(ACTION_PAUSE),
+            )
         }
 
         fun stop(context: android.content.Context) {
@@ -80,6 +84,7 @@ class WakeWordForegroundService : Service() {
     @Volatile private var spotter: KeywordSpotter? = null
     @Volatile private var stream: OnlineStream? = null
     @Volatile private var wakeLock: PowerManager.WakeLock? = null
+    @Volatile private var pauseRequested = false
 
     override fun onCreate() {
         super.onCreate()
@@ -92,6 +97,14 @@ class WakeWordForegroundService : Service() {
             stopSelfResult(startId)
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_PAUSE) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, false).apply()
+            pauseRequested = true
+            running.set(false)
+            runCatching { audioRecord?.stop() }
+            return START_NOT_STICKY
+        }
+        pauseRequested = false
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val modelPath = prefs.getString(PREF_MODEL_DIRECTORY, null)
         if (modelPath.isNullOrBlank() || !prefs.getBoolean(PREF_ENABLED, false)) {
@@ -213,10 +226,19 @@ class WakeWordForegroundService : Service() {
                     })
                 }.onFailure { Log.w(TAG, "Automatic activity launch blocked; notification remains available", it) }
             }
-            runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
-            wakeLock = null
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+            val keepForegroundForVoice = prefs.getBoolean(PREF_ARMED, false) &&
+                !prefs.getBoolean(PREF_ENABLED, false) && (detected || pauseRequested)
+            pauseRequested = false
+            if (keepForegroundForVoice) {
+                getSystemService(NotificationManager::class.java)
+                    .notify(LISTENING_NOTIFICATION_ID, buildConversationNotification())
+            } else {
+                runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
+                wakeLock = null
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
         }
     }
 
@@ -241,6 +263,16 @@ class WakeWordForegroundService : Service() {
             .build()
         getSystemService(NotificationManager::class.java).notify(DETECTED_NOTIFICATION_ID, notification)
     }
+
+    private fun buildConversationNotification(): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_btn_speak_now)
+            .setContentTitle("مکالمهٔ صوتی دینا فعال است")
+            .setContentText("برای حفظ صدای پس‌زمینه، سرویس پیش‌زمینه فعال می‌ماند؛ پس از توقف مکالمه بیدارباش دوباره شروع می‌شود.")
+            .setOngoing(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
 
     private fun buildListeningNotification(): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
