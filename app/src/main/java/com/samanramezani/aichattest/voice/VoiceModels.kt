@@ -86,6 +86,50 @@ class VoiceModelStore(
      * Import the tiny Persian Shenava Rizeh-Pizeh NeMo-CTC model in two steps.
      * Model and tokens can be selected in either order; incomplete imports stay hidden.
      */
+    private fun copyBoundedInput(input: InputStream, target: File, maxBytes: Long, errorCode: String) {
+        target.parentFile?.mkdirs()
+        val temporary = File(target.parentFile, "${target.name}.part")
+        temporary.delete()
+        try {
+            FileOutputStream(temporary).use { output ->
+                val buffer = ByteArray(64 * 1024)
+                var total = 0L
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    total += n
+                    require(total <= maxBytes) {
+                        "$errorCode: حجم فایل انتخاب‌شده از حد مجاز بیشتر است."
+                    }
+                    output.write(buffer, 0, n)
+                }
+            }
+            if (target.exists()) {
+                check(target.delete()) { "$errorCode: جایگزینی فایل قبلی ناموفق بود." }
+            }
+            check(temporary.renameTo(target)) { "$errorCode: ذخیره فایل موقت ناموفق بود." }
+        } catch (t: Throwable) {
+            temporary.delete()
+            throw t
+        }
+    }
+
+    private fun readBoundedBytes(input: InputStream, maxBytes: Int, errorCode: String): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(16 * 1024)
+        var total = 0
+        while (true) {
+            val n = input.read(buffer)
+            if (n < 0) break
+            total += n
+            require(total <= maxBytes) {
+                "$errorCode: فایل انتخاب‌شده از حد مجاز بزرگ‌تر است."
+            }
+            output.write(buffer, 0, n)
+        }
+        return output.toByteArray()
+    }
+
     fun importSmallPersianSttComponent(
         uri: Uri,
         component: SmallSttComponent,
@@ -108,28 +152,13 @@ class VoiceModelStore(
                         "VOICE-STT-IMPORT-004: فایل مدل Shenava باید با پسوند .onnx باشد."
                     }
                     val target = File(staging, "model.onnx")
-                    FileOutputStream(target).use { output ->
-                        val buffer = ByteArray(64 * 1024)
-                        var total = 0L
-                        while (true) {
-                            val n = input.read(buffer)
-                            if (n < 0) break
-                            total += n
-                            require(total <= MAX_STT_MODEL_BYTES) {
-                                "VOICE-STT-IMPORT-005: حجم مدل STT از حد مجاز بیشتر است."
-                            }
-                            output.write(buffer, 0, n)
-                        }
-                    }
+                    copyBoundedInput(input, target, MAX_STT_MODEL_BYTES, "VOICE-STT-IMPORT-005")
                 }
                 SmallSttComponent.TOKENS -> {
                     require(displayName.equals("tokens.txt", true) || displayName.endsWith(".txt", true)) {
                         "VOICE-STT-IMPORT-006: فایل واژگان مدل باید tokens.txt باشد."
                     }
-                    val bytes = input.readBytes()
-                    require(bytes.size <= 4 * 1024 * 1024) {
-                        "VOICE-STT-IMPORT-007: فایل tokens.txt بیش از حد بزرگ است."
-                    }
+                    val bytes = readBoundedBytes(input, 4 * 1024 * 1024, "VOICE-STT-IMPORT-007")
                     val text = bytes.toString(Charsets.UTF_8)
                     val nonEmptyLines = text.lineSequence().count { it.isNotBlank() }
                     require(nonEmptyLines >= 100 && text.contains("0")) {
@@ -250,13 +279,13 @@ class VoiceModelStore(
                     // Normalize filenames: SAF providers and downloads often rename files,
                     // while the previous code required the JSON basename to match byte-for-byte.
                     // A canonical pair avoids a valid model silently remaining "not imported".
-                    File(staging, "model.onnx").outputStream().use(input::copyTo)
+                    copyBoundedInput(input, File(staging, "model.onnx"), MAX_TTS_MODEL_BYTES, "VOICE-PIPER-018")
                 }
                 PiperComponent.CONFIG -> {
                     require(displayName.endsWith(".onnx.json", true) || displayName.endsWith(".json", true)) {
                         "VOICE-PIPER-004: فایل پیکربندی Piper با پسوند JSON انتخاب کنید."
                     }
-                    File(staging, "model.onnx.json").outputStream().use(input::copyTo)
+                    copyBoundedInput(input, File(staging, "model.onnx.json"), MAX_PIPER_CONFIG_BYTES, "VOICE-PIPER-019")
                 }
                 PiperComponent.ESPEAK_DATA -> {
                     val archive = displayName.lowercase()
@@ -524,6 +553,8 @@ class VoiceModelStore(
 
     companion object {
         private const val MAX_STT_MODEL_BYTES = 512L * 1024 * 1024
+        private const val MAX_TTS_MODEL_BYTES = 1024L * 1024 * 1024
+        private const val MAX_PIPER_CONFIG_BYTES = 8L * 1024 * 1024
         private const val MAX_ENTRIES = 20_000
         private const val MAX_EXPANDED_BYTES = 2L * 1024 * 1024 * 1024
     }
