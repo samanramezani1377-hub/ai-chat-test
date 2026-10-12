@@ -41,6 +41,44 @@ class BuiltinActionsTest {
     }
 
     @Test
+    fun createsPersianFilenameWithSpacesAndNeverOverwritesDifferentContent() = runTest {
+        val root = Files.createTempDirectory("ai-chat-persian-file")
+        try {
+            val action = CreateFileAction(WorkspacePathResolver(root))
+            val result = action.execute(
+                """{"content":"اینجا شروع یک کار است","file_name":"متن خام.txt"}"""
+            )
+            assertEquals("created:متن خام.txt", result)
+            assertEquals("اینجا شروع یک کار است", Files.readString(root.resolve("متن خام.txt")))
+
+            assertEquals(
+                "already_exists:متن خام.txt",
+                action.execute("""{"file_name":"متن خام.txt","content":"اینجا شروع یک کار است"}""")
+            )
+            assertFailsWith<IllegalArgumentException> {
+                action.execute("""{"file_name":"متن خام.txt","content":"متن متفاوت"}""")
+            }
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun stringArgumentsAreReadFromRootObjectNotFromQuotedContent() = runTest {
+        val root = Files.createTempDirectory("ai-chat-action-json")
+        try {
+            val action = CreateFileAction(WorkspacePathResolver(root))
+            action.execute(
+                """{"content":"literal \"file_name\":\"wrong.txt\"","file_name":"correct.txt"}"""
+            )
+            assertEquals("literal \"file_name\":\"wrong.txt\"", Files.readString(root.resolve("correct.txt")))
+            assertTrue(!Files.exists(root.resolve("wrong.txt")))
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun deleteIsSensitive() {
         val root = Files.createTempDirectory("ai-chat-actions")
         try {
