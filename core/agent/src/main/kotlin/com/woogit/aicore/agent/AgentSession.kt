@@ -7,6 +7,7 @@ import com.woogit.aicore.conversation.DefaultContextProvider
 import com.woogit.aicore.domain.GenerationResult
 import com.woogit.aicore.domain.InferenceSettings
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 
 sealed interface AgentSessionResult {
     data class Reply(
@@ -55,7 +56,13 @@ class AgentSession(
                 conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
                 resultPersisted = true
                 val context = contextProvider.build(Int.MAX_VALUE)
-                val nextPlan = runCatching { actionPlanCoordinator.prepare(context, conversationId) }.getOrNull()
+                val nextPlan = try {
+                    actionPlanCoordinator.prepare(context, conversationId)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    null
+                }
                 if (nextPlan == null) {
                     if (repairAttempts == 0 && actionPlanCoordinator.requiresAction(context)) {
                         repairAttempts++
