@@ -401,11 +401,16 @@ private class VoiceConversationController(
                     onListening(true)
                     onStatus("در حال گوش‌دادن؛ گفتار و پردازش کاملاً روی دستگاه است.")
                     for (frame in frames) {
+                        val asrStartedAtMs = SystemClock.elapsedRealtime()
                         val update = try { recognizer?.accept(frame.samples, 16000, frame.speech) } catch (t: Throwable) {
                             onDiagnostic("VOICE-STT-002\n${t.stackTraceToString()}")
                             onStatus("VOICE-STT-002: خطا در تشخیص گفتار: ${t.message ?: t.javaClass.simpleName}")
                             null
                         } ?: continue
+                        val asrDurationMs = SystemClock.elapsedRealtime() - asrStartedAtMs
+                        if (update.endpoint || asrDurationMs >= 100L) {
+                            onDiagnostic("VOICE-STT-PERF: acceptMs=$asrDurationMs endpoint=${update.endpoint} textChars=${update.text.length}")
+                        }
                         if (update.text.isNotBlank()) onStatus("در حال شنیدن: ${update.text}")
                         if (update.endpoint) bargeInCapturePending.set(false)
                         if (update.endpoint && update.text.isNotBlank()) {
