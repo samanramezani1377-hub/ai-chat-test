@@ -78,7 +78,6 @@ class AgentSession(
                     }
                     if (repairAttempts > 0 && actionPlanCoordinator.requiresAction(context)) {
                         result = result.copy(text = "نتوانستم درخواست اجرایی را به فراخوانی ابزار معتبر تبدیل کنم؛ هیچ عملیاتی اجرا نشد. لطفاً درخواست را دوباره با نام و محتوای دقیق فایل ارسال کن.")
-                        eventSink(AgentEvent.Token(result.text))
                         resultPersisted = false
                     }
                     break
