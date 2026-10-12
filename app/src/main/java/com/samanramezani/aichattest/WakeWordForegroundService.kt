@@ -310,6 +310,8 @@ class WakeWordForegroundService : Service() {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
+            // Clear only our own worker reference; a newer worker may already have replaced it.
+            if (worker === Thread.currentThread()) worker = null
         }
     }
 
