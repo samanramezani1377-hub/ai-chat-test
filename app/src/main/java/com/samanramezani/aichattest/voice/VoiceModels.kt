@@ -292,8 +292,24 @@ class VoiceModelStore(
                     require(archive.endsWith(".tar.bz2") || archive.endsWith(".tbz2") || archive.endsWith(".zip")) {
                         "VOICE-PIPER-005: پوشهٔ آواشناسی باید به‌صورت .tar.bz2 یا .zip باشد."
                     }
-                    extractEspeakArchive(input, archive, staging)
-                    normalizeEspeakDirectory(staging)
+                    // Extract into an isolated temporary directory so a failed or malicious
+                    // archive cannot mix partial files with a previously imported voice.
+                    val espeakStaging = File(staging, ".espeak-extract")
+                    espeakStaging.deleteRecursively()
+                    check(espeakStaging.mkdirs()) { "VOICE-PIPER-020: پوشه موقت داده‌های آواشناسی ساخته نشد." }
+                    try {
+                        extractEspeakArchive(input, archive, espeakStaging)
+                        normalizeEspeakDirectory(espeakStaging)
+                        val normalizedData = File(espeakStaging, "espeak-ng-data")
+                        requireEspeakData(normalizedData, "VOICE-PIPER-017")
+                        val destinationData = File(staging, "espeak-ng-data")
+                        destinationData.deleteRecursively()
+                        check(normalizedData.renameTo(destinationData)) {
+                            "VOICE-PIPER-021: انتقال داده‌های آواشناسی معتبر ناموفق بود."
+                        }
+                    } finally {
+                        espeakStaging.deleteRecursively()
+                    }
                 }
             }
         }
