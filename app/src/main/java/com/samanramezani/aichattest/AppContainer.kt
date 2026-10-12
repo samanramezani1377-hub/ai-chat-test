@@ -146,7 +146,7 @@ class AppContainer(context: Context? = null) {
                     sizeBytes = Files.size(path),
                     modifiedAtMs = Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toMillis(),
                 )
-            }.sorted(compareBy<WorkspaceFileEntry> { it.path.lowercase() }).toList()
+            }.sorted(compareBy<WorkspaceFileEntry> { it.path.lowercase() }).collect(java.util.stream.Collectors.toList())
         }
     }
 
