@@ -306,9 +306,8 @@ class ProtocolActionIntentPlanner(
         )
         if (indicators.none(user::contains)) return false
 
-        val lastToolIndex = messages.indexOfLast {
-            it.role == ConversationMessage.Role.TOOL && messages.indexOf(it) > lastUserIndex
-        }
+        val lastToolIndex = (lastUserIndex + 1 until messages.size)
+            .lastOrNull { messages[it].role == ConversationMessage.Role.TOOL } ?: -1
         if (lastToolIndex < 0) return true
         if (messages[lastToolIndex].content.startsWith("ACTION_PROTOCOL_REPAIR:")) return true
 
