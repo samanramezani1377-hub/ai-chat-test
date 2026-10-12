@@ -185,7 +185,12 @@ class WakeWordModelStore(
                             // The upstream archive bundles large test WAVs and duplicate graphs.
                             // Once the exact runtime graph and its vocabulary are present, do not
                             // decompress unrelated trailing entries just to reach archive EOF.
-                            if (hasOfficialRuntimeSet()) break
+                            if (isOfficialZhEnArchive &&
+                                (item.name.endsWith(".onnx", true) ||
+                                    item.name.endsWith("tokens.txt", true) ||
+                                    item.name.endsWith("en.phone", true)) &&
+                                hasOfficialRuntimeSet()
+                            ) break
                         }
                     }
                 } else {
@@ -196,7 +201,12 @@ class WakeWordModelStore(
                             // BZip2 is expensive to decode on mid-range Android devices. The
                             // official archive stores test audio and duplicate models after the
                             // runtime files; stop as soon as the complete compatible set is found.
-                            if (hasOfficialRuntimeSet()) break
+                            if (isOfficialZhEnArchive &&
+                                (item.name.endsWith(".onnx", true) ||
+                                    item.name.endsWith("tokens.txt", true) ||
+                                    item.name.endsWith("en.phone", true)) &&
+                                hasOfficialRuntimeSet()
+                            ) break
                         }
                     }
                 }
