@@ -56,7 +56,7 @@ class WakeWordModelStore(
         fun extract(nameValue: String, isDirectory: Boolean, entryStream: java.io.InputStream) {
             count++
             require(count <= MAX_ENTRIES) { "VOICE-KWS-IMPORT-004: تعداد فایل‌های بسته بیش از حد مجاز است." }
-            val name = nameValue.replace('\\\\', '/')
+            val name = nameValue.replace('\\', '/')
             require(!name.startsWith("/") && name.split('/').none { it == ".." }) {
                 "VOICE-KWS-IMPORT-005: مسیر نامعتبر داخل بستهٔ مدل وجود دارد."
             }
@@ -121,7 +121,7 @@ class WakeWordModelStore(
                     keywordFile.readText(Charsets.UTF_8).contains("دینا")
                 }.getOrDefault(false)
                 if (hasKwsParts && supportsEnglishPhones && !alreadyHasDina) {
-                    keywordFile.writeText("D IY1 N AA1 @دینا\\n", Charsets.UTF_8)
+                    keywordFile.writeText("D IY1 N AA1 @دینا\n", Charsets.UTF_8)
                 }
             }
 
