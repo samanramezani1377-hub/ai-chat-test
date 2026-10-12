@@ -337,7 +337,7 @@ class WakeWordForegroundService : Service() {
                 // is a best-effort enhancement, not a prerequisite for a voice conversation.
                 val conversationStarted = startVoiceConversationInService()
                 postWakeNotification(
-                    if (conversationStarted) "عبارت «دینا» شنیده شد؛ مکالمهٔ صوتی در پس‌زمینه شروع می‌شود."
+                    if (conversationStarted) "عبارت «دینا» شنیده شد؛ در حال آماده‌سازی موتورهای مکالمه در پس‌زمینه هستیم."
                     else "عبارت «دینا» شنیده شد؛ مدل‌های STT و TTS را بررسی کن.",
                     openVoice = true,
                 )
@@ -348,13 +348,13 @@ class WakeWordForegroundService : Service() {
                         putExtra(EXTRA_CONVERSATION_STARTED_IN_SERVICE, conversationStarted)
                     })
                     prefs.edit()
-                        .putString(PREF_UI_STATE, if (conversationStarted) "ACTIVITY_LAUNCH_ATTEMPTED_AUDIO_RUNNING" else "ACTIVITY_LAUNCH_ATTEMPTED_NO_MODELS")
+                        .putString(PREF_UI_STATE, if (conversationStarted) "ACTIVITY_LAUNCH_ATTEMPTED_START_REQUESTED" else "ACTIVITY_LAUNCH_ATTEMPTED_NO_MODELS")
                         .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("ACTIVITY_LAUNCH_ATTEMPTED", "conversationStartedInService=$conversationStarted"))
                         .apply()
                 }.onFailure {
                     Log.w(TAG, "Automatic activity launch blocked; audio conversation remains service-owned", it)
                     prefs.edit()
-                        .putString(PREF_UI_STATE, if (conversationStarted) "AUDIO_RUNNING_UI_UNAVAILABLE" else "UI_UNAVAILABLE_NO_MODELS")
+                        .putString(PREF_UI_STATE, if (conversationStarted) "START_REQUESTED_UI_UNAVAILABLE" else "UI_UNAVAILABLE_NO_MODELS")
                         .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("ACTIVITY_LAUNCH_EXCEPTION", it.javaClass.simpleName + ": " + (it.message ?: "")))
                         .apply()
                 }
