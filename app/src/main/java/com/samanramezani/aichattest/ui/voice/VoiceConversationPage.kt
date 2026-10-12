@@ -144,8 +144,12 @@ internal fun VoiceConversationPage(
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("۲. بیدارباش صوتی · «دینا»", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text("بستهٔ کامل sherpa-onnx KWS را با ZIP یا TAR.BZ2 وارد کن. بسته باید encoder/decoder/joiner مدل ONNX و tokens.txt داشته باشد. برای مدل رسمی کوچک zh-en، برنامه keywords.txt را با تقریب آوایی «دینا» می‌سازد؛ چون مدل اصلی چینی/انگلیسی است، دقت فارسی تضمین نیست. مدل آموزش‌دیدهٔ فارسی می‌تواند keywords.txt اختصاصی خود را داشته باشد.", style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(
+                            onClick = { uriHandler.openUri("https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models") },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("دریافت مدل‌های کوچک آمادهٔ بیدارباش") }
                         OutlinedButton(onClick = onImportWakeWord, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                            Text(if (wakeWordModel == null) "انتخاب و وارد کردن مدل بیدارباش · ZIP" else "انتخاب مدل بیدارباش دیگر · ZIP")
+                            Text(if (wakeWordModel == null) "انتخاب و وارد کردن مدل بیدارباش · ZIP / TAR.BZ2" else "انتخاب مدل بیدارباش دیگر · ZIP / TAR.BZ2")
                         }
                         Text(
                             wakeWordModel?.let { "مدل انتخاب‌شده: ${it.title}" } ?: "هنوز مدل بیدارباشی وارد نشده است.",
