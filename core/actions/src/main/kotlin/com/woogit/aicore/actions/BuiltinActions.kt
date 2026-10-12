@@ -9,7 +9,6 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -169,9 +168,14 @@ class CreateFileAction(private val workspace: WorkspacePathResolver) : Action<An
             Files.write(temp, bytes)
             require(Files.size(temp) == bytes.size.toLong()) { "File write verification failed" }
             try {
-                Files.move(temp, path, StandardCopyOption.ATOMIC_MOVE)
-            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                // Do not request ATOMIC_MOVE here: some providers may replace an existing
+                // destination during an atomic move, which violates create_file semantics.
                 Files.move(temp, path)
+            } catch (_: java.nio.file.FileAlreadyExistsException) {
+                require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) { "Existing target is not a regular file" }
+                val existing = Files.readAllBytes(path)
+                require(existing.contentEquals(bytes)) { "File already exists with different content; refusing overwrite" }
+                return "already_exists:${workspace.relative(path)}"
             }
             require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) { "File creation verification failed" }
             require(Files.size(path) == bytes.size.toLong()) { "File write verification failed" }
