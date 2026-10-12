@@ -1,6 +1,9 @@
 package com.samanramezani.aichattest.ui.voice
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import android.app.Activity
 import android.media.AudioManager
 import android.net.Uri
 import android.os.SystemClock
@@ -9,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import com.samanramezani.aichattest.AppContainer
+import com.samanramezani.aichattest.WakeWordForegroundService
 import com.samanramezani.aichattest.ui.voice.VoiceConversationPage
 import com.samanramezani.aichattest.voice.LocalMicrophone
 import com.samanramezani.aichattest.voice.LocalPiperTts
@@ -20,11 +24,13 @@ import com.samanramezani.aichattest.voice.VoiceModelKind
 import com.samanramezani.aichattest.voice.VoiceModelStore
 import com.samanramezani.aichattest.voice.PiperComponent
 import com.samanramezani.aichattest.voice.SmallSttComponent
-import com.samanramezani.aichattest.voice.SmallSttModel
+import com.samanramezani.aichattest.voice.WakeWordModelStore
+import com.samanramezani.aichattest.voice.WakeWordModelEntry
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.domain.InferenceSettings
 import kotlinx.coroutines.CancellationException
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,12 +52,16 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     val context = LocalContext.current
     val uiScope = rememberCoroutineScope()
     val store = remember(context) { VoiceModelStore(context.contentResolver, File(context.filesDir, "voice-models")) }
+    val wakeWordStore = remember(context) { WakeWordModelStore(context.contentResolver, File(context.filesDir, "wake-word-models")) }
     var sttModels by remember { mutableStateOf(store.list(VoiceModelKind.STT)) }
     var ttsModels by remember { mutableStateOf(store.list(VoiceModelKind.TTS)) }
-    var missingSttComponents by remember { mutableStateOf(store.missingSmallSttComponents()) }
-    var missingKoochikComponents by remember { mutableStateOf(store.missingSmallSttComponents(SmallSttModel.KOOCHIK)) }
+    var missingKoochikComponents by remember { mutableStateOf(store.missingKoochikComponents()) }
+    var wakeWordModels by remember { mutableStateOf(wakeWordStore.list()) }
+    val wakePrefs = remember(context) { context.getSharedPreferences(WakeWordForegroundService.PREFS, Context.MODE_PRIVATE) }
+    var selectedWakeWordPath by remember { mutableStateOf(wakePrefs.getString(WakeWordForegroundService.PREF_MODEL_DIRECTORY, null)) }
+    var wakeWordEnabled by remember { mutableStateOf(wakePrefs.getBoolean(WakeWordForegroundService.PREF_ENABLED, false)) }
     var missingTtsComponents by remember { mutableStateOf(store.missingPiperComponents()) }
-    var activeSttId by remember { mutableStateOf(sttModels.firstOrNull()?.id) }
+    var activeSttId by remember { mutableStateOf(sttModels.firstOrNull { it.id.startsWith("stt-shenava-koochik-") }?.id ?: sttModels.firstOrNull()?.id) }
     var activeTtsId by remember { mutableStateOf(ttsModels.firstOrNull()?.id) }
     var lines by remember { mutableStateOf(emptyList<VoiceLine>()) }
     var status by remember { mutableStateOf("برای شروع، مدل‌های محلی STT و TTS را انتخاب یا وارد کنید.") }
@@ -78,46 +88,55 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     fun refreshModels() {
         sttModels = store.list(VoiceModelKind.STT)
         ttsModels = store.list(VoiceModelKind.TTS)
-        if (activeSttId !in sttModels.map { it.id }) activeSttId = sttModels.firstOrNull()?.id
+        if (activeSttId !in sttModels.map { it.id }) activeSttId = sttModels.firstOrNull { it.id.startsWith("stt-shenava-koochik-") }?.id ?: sttModels.firstOrNull()?.id
         if (activeTtsId !in ttsModels.map { it.id }) activeTtsId = ttsModels.firstOrNull()?.id
     }
 
     fun refreshImportProgress() {
-        missingSttComponents = store.missingSmallSttComponents()
-        missingKoochikComponents = store.missingSmallSttComponents(SmallSttModel.KOOCHIK)
+        missingKoochikComponents = store.missingKoochikComponents()
         missingTtsComponents = store.missingPiperComponents()
     }
 
-    fun importSmallSttComponent(uri: Uri, component: SmallSttComponent, label: String, modelType: SmallSttModel = SmallSttModel.RIZEH_PIZEH) {
+    fun importKoochikComponent(uri: Uri, component: SmallSttComponent, label: String) {
         uiScope.launch {
             busy = true
-            updateVoiceStatus("در حال وارد کردن ${label} مدل فارسی کوچک…")
+            updateVoiceStatus("در حال وارد کردن ${label} مدل اصلی Shenava Koochik…")
             try {
-                val ready = withContext(Dispatchers.IO) { store.importSmallPersianSttComponent(uri, component, modelType) }
+                val ready = withContext(Dispatchers.IO) { store.importKoochikComponent(uri, component) }
                 refreshModels()
                 refreshImportProgress()
                 if (ready != null) activeSttId = ready.id
-                val missing = if (ready == null) store.missingSmallSttComponents(modelType) else emptyList()
-                val modelName = if (modelType == SmallSttModel.KOOCHIK) "Shenava Koochik" else "Shenava Rizeh-Pizeh"
-                updateVoiceStatus(if (ready != null) "مدل $modelName آماده و انتخاب شد؛ تشخیص نهایی پس از مکث کوتاه گفتار انجام می‌شود."
-                    else "فایل ${label} مدل $modelName ذخیره شد؛ برای تکمیل آن هنوز وارد کنید: ${missing.joinToString(" و ")}.")
+                val missing = if (ready == null) store.missingKoochikComponents() else emptyList()
+                updateVoiceStatus(if (ready != null) "مدل اصلی Shenava Koochik آماده و انتخاب شد."
+                    else "فایل ${label} ذخیره شد؛ برای تکمیل Koochik هنوز لازم است: ${missing.joinToString(" و ")}.")
             } catch (t: Throwable) {
                 updateVoiceStatus("VOICE-STT-IMPORT: ${t.message ?: t.javaClass.simpleName}")
             } finally { refreshImportProgress(); busy = false }
         }
     }
 
-    val smallSttModelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) importSmallSttComponent(uri, SmallSttComponent.MODEL, "model.onnx")
-    }
-    val smallSttTokensPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) importSmallSttComponent(uri, SmallSttComponent.TOKENS, "tokens.txt")
-    }
     val koochikModelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) importSmallSttComponent(uri, SmallSttComponent.MODEL, "model.onnx", SmallSttModel.KOOCHIK)
+        if (uri != null) importKoochikComponent(uri, SmallSttComponent.MODEL, "model.onnx")
     }
     val koochikTokensPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) importSmallSttComponent(uri, SmallSttComponent.TOKENS, "tokens.txt", SmallSttModel.KOOCHIK)
+        if (uri != null) importKoochikComponent(uri, SmallSttComponent.TOKENS, "tokens.txt")
+    }
+
+    val wakeWordPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) uiScope.launch {
+            busy = true
+            updateVoiceStatus("در حال وارد کردن مدل بیدارباش «دینا»…")
+            try {
+                val ready = withContext(Dispatchers.IO) { wakeWordStore.importArchive(uri) }
+                wakeWordModels = wakeWordStore.list()
+                selectedWakeWordPath = ready.directory.absolutePath
+                wakePrefs.edit().putString(WakeWordForegroundService.PREF_MODEL_DIRECTORY, selectedWakeWordPath).putBoolean(WakeWordForegroundService.PREF_ENABLED, false).apply()
+                wakeWordEnabled = false
+                updateVoiceStatus("مدل بیدارباش وارد شد. برای تشخیص «دینا»، شنود پس‌زمینه را روشن کن.")
+            } catch (t: Throwable) {
+                updateVoiceStatus("VOICE-KWS-IMPORT: ${t.message ?: t.javaClass.simpleName}")
+            } finally { busy = false }
+        }
     }
 
     val sttPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -183,17 +202,35 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         busy = busy,
         sttModels = sttModels,
         ttsModels = ttsModels,
-        missingSttComponents = missingSttComponents,
         missingKoochikComponents = missingKoochikComponents,
+        wakeWordModel = wakeWordModels.firstOrNull { it.directory.absolutePath == selectedWakeWordPath },
+        wakeWordEnabled = wakeWordEnabled,
         missingTtsComponents = missingTtsComponents,
         activeSttId = activeSttId,
         activeTtsId = activeTtsId,
         onBack = onBack,
         onImportStt = { sttPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-bzip2", "application/octet-stream")) },
-        onImportSmallSttModel = { smallSttModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
-        onImportSmallSttTokens = { smallSttTokensPicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
         onImportKoochikModel = { koochikModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
         onImportKoochikTokens = { koochikTokensPicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
+        onImportWakeWord = { wakeWordPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream", "*/*")) },
+        onToggleWakeWord = { enabled ->
+            val selected = wakeWordModels.firstOrNull { it.directory.absolutePath == selectedWakeWordPath }
+            if (enabled && selected == null) {
+                updateVoiceStatus("VOICE-KWS-010: ابتدا یک بستهٔ مدل بیدارباش سازگار با عبارت «دینا» وارد کن.")
+            } else if (enabled && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                updateVoiceStatus("VOICE-KWS-011: برای شنود بیدارباش، ابتدا مجوز میکروفون را با شروع یک‌بارهٔ مکالمه صوتی بده.")
+            } else {
+                try {
+                    if (enabled && selected != null) WakeWordForegroundService.start(context, selected.directory.absolutePath)
+                    else WakeWordForegroundService.stop(context)
+                    wakeWordEnabled = enabled
+                    updateVoiceStatus(if (enabled) "بیدارباش «دینا» فعال شد؛ شنود محلی با اعلان دائمی ادامه دارد." else "بیدارباش «دینا» خاموش شد.")
+                } catch (t: Throwable) {
+                    wakeWordEnabled = false
+                    updateVoiceStatus("VOICE-KWS-012: شروع/توقف شنود ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
+                }
+            }
+        },
         onImportTts = { ttsPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-bzip2", "application/octet-stream")) },
         onImportTtsModel = { ttsModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
         onImportTtsConfig = { ttsConfigPicker.launch(arrayOf("application/json", "text/json", "text/plain", "*/*")) },
@@ -205,6 +242,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             val tts = ttsModels.firstOrNull { it.id == activeTtsId }
             if (stt == null || tts == null) updateVoiceStatus("VOICE-MODEL-001: ابتدا مدل‌های STT و TTS را وارد و انتخاب کنید.")
             else {
+                if (wakeWordEnabled) { WakeWordForegroundService.stop(context); wakeWordEnabled = false }
                 busy = true
                 controller.start(stt, tts)
             }
