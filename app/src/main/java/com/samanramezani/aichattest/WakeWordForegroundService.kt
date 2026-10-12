@@ -111,6 +111,14 @@ class WakeWordForegroundService : Service() {
                 .apply()
             voiceController?.close()
             voiceController = null
+            // This service owns the foreground notification and wake lock too. Do not leave
+            // an idle microphone service alive after the conversation controller has stopped.
+            running.set(false)
+            runCatching { audioRecord?.stop() }
+            runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
+            wakeLock = null
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelfResult(startId)
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_STOP) {
@@ -179,6 +187,8 @@ class WakeWordForegroundService : Service() {
     private fun listen(modelPath: String) {
         var detected = false
         var detectedKeyword = ""
+        var audioChunksProcessed = 0L
+        var rejectedKeywordCandidates = 0
         try {
             val modelStore = WakeWordModelStore(contentResolver, File(filesDir, "wake-word-models"))
             val entry = modelStore.list().firstOrNull { it.directory.absolutePath == modelPath }
@@ -248,7 +258,14 @@ class WakeWordForegroundService : Service() {
                 if (count == AudioRecord.ERROR_DEAD_OBJECT || count == AudioRecord.ERROR_INVALID_OPERATION) {
                     error("VOICE-KWS-019: ضبط صوت از کار افتاد؛ AudioRecord.read=$count")
                 }
-                if (count <= 0) continue
+                if (count < 0) {
+                    if (count == AudioRecord.ERROR_BAD_VALUE || count == AudioRecord.ERROR) {
+                        error("VOICE-KWS-019: ضبط صوت خطا داد؛ AudioRecord.read=$count")
+                    }
+                    continue
+                }
+                if (count == 0) continue
+                audioChunksProcessed++
                 val samples = FloatArray(count) { pcm[it] / 32768.0f }
                 val activeStream = stream ?: break
                 val activeSpotter = spotter ?: break
@@ -257,16 +274,18 @@ class WakeWordForegroundService : Service() {
                     activeSpotter.decode(activeStream)
                     val result = activeSpotter.getResult(activeStream)
                     if (result.keyword.isNotBlank()) {
-                        // This spotter is configured with only Dina aliases. Do not reject a valid
-                        // hit because sherpa returns the normalized/original label differently.
-                        detectedKeyword = result.keyword
-                        Log.i(
-                            TAG,
-                            "Wake phrase candidate accepted: keyword=${result.keyword}; tokens=${result.tokens.joinToString(" ")}",
-                        )
-                        detected = true
-                        running.set(false)
-                        break
+                        if (isDinaWakeKeyword(result.keyword)) {
+                            detectedKeyword = result.keyword
+                            Log.i(
+                                TAG,
+                                "Wake phrase accepted: keyword=${result.keyword}; chunks=$audioChunksProcessed; tokens=${result.tokens.joinToString(" ")}",
+                            )
+                            detected = true
+                            running.set(false)
+                            break
+                        }
+                        rejectedKeywordCandidates++
+                        Log.w(TAG, "Ignoring non-Dina KWS result: keyword=${result.keyword}; rejected=$rejectedKeywordCandidates")
                     }
                 }
                 if (detected) break
@@ -298,7 +317,7 @@ class WakeWordForegroundService : Service() {
                     .putBoolean(PREF_ENABLED, false)
                     .putString(PREF_CONVERSATION_STATE, "WAKE_WORD_DETECTED")
                     .putString(PREF_LAST_STATUS, "عبارت «دینا» تشخیص داده شد؛ صدای تأیید پخش می‌شود و میکروفون مکالمه فعال خواهد شد.")
-                    .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("DETECTED", "keyword=$detectedKeyword; Activity launch is optional"))
+                    .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("DETECTED", "keyword=$detectedKeyword; audioChunks=$audioChunksProcessed; rejectedCandidates=$rejectedKeywordCandidates; Activity launch is optional"))
                     .apply()
                 playWakeDetectedCue()
                 // Audio starts in the already-running microphone foreground service. Opening UI
@@ -329,7 +348,7 @@ class WakeWordForegroundService : Service() {
             }
             val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
             val keepForegroundForVoice = prefs.getBoolean(PREF_ARMED, false) &&
-                !prefs.getBoolean(PREF_ENABLED, false) && (detected || pauseRequested)
+                !prefs.getBoolean(PREF_ENABLED, false) && detected && voiceController != null
             pauseRequested = false
             if (keepForegroundForVoice) {
                 val canPostNotification = Build.VERSION.SDK_INT < 33 ||
@@ -445,9 +464,18 @@ class WakeWordForegroundService : Service() {
                 .putString(PREF_LAST_STATUS, "VOICE-KWS-017: شروع مکالمه ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
                 .putString(PREF_LAST_DIAGNOSTIC, wakeDiagnostic("CONVERSATION_START_EXCEPTION", t.stackTraceToString()))
                 .apply()
+            runCatching { voiceController?.close() }
+            voiceController = null
             Log.e(TAG, "Could not start service-owned voice conversation", t)
             false
         }
+    }
+
+    private fun isDinaWakeKeyword(keyword: String): Boolean {
+        val value = keyword.trim().lowercase()
+        // sherpa-onnx may return the configured label or its normalized spelling.
+        // Never start a conversation for an unrelated non-empty keyword result.
+        return value.contains("دینا") || value == "dina" || value == "@dina"
     }
 
     private fun wakeDiagnostic(event: String, detail: String): String =
