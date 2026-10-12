@@ -20,6 +20,13 @@ internal fun isDinaWakeKeywordLabel(keyword: String): Boolean {
     return normalized == "دینا" || normalized == "dina"
 }
 
+internal fun shouldKeepWakeServiceForConversation(
+    armed: Boolean,
+    listeningEnabled: Boolean,
+    phraseDetected: Boolean,
+    controllerActive: Boolean,
+): Boolean = armed && !listeningEnabled && phraseDetected && controllerActive
+
 data class WakeWordModelEntry(
     val id: String,
     val title: String,
