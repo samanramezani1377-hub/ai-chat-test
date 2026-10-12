@@ -225,15 +225,27 @@ class ProtocolActionIntentPlanner(
     }
 
     override fun requiresAction(context: ConversationContext): Boolean {
-        val user = context.recentMessages.asReversed()
-            .firstOrNull { it.role == ConversationMessage.Role.USER }
-            ?.content?.lowercase()
-            ?: return false
+        val messages = context.recentMessages
+        val lastUserIndex = messages.indexOfLast { it.role == ConversationMessage.Role.USER }
+        if (lastUserIndex < 0) return false
+
+        val laterToolMessages = messages.drop(lastUserIndex + 1)
+            .filter { it.role == ConversationMessage.Role.TOOL }
+        // A repair feedback message keeps the original request in action mode; a real
+        // tool result means the requested operation has already been attempted.
+        if (laterToolMessages.any { it.content.startsWith("ACTION_PROTOCOL_REPAIR:") }) {
+            // continue to repair once; AgentSession owns the retry bound.
+        } else if (laterToolMessages.isNotEmpty()) {
+            return false
+        }
+
+        val user = messages[lastUserIndex].content.lowercase()
         val indicators = listOf(
             "create_file", "read_file", "list_files", "delete_file", "calculate",
             "فایل", "فضای کار", "بساز", "ایجاد کن", "بنویس", "ذخیره کن",
             "پاک کن", "حذف کن", "بخون", "بخوان", "فهرست", "محاسبه کن",
-            "درست کن", "بساز برام", "ذخیره‌اش", "ذخیره اش"
+            "درست کن", "بساز برام", "ذخیره‌اش", "ذخیره اش", "تو فضای کار",
+            "متن خام", "اسمشو بزار", "اسمش را بگذار"
         )
         return indicators.any(user::contains)
     }
