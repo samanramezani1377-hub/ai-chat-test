@@ -233,9 +233,10 @@ class ProtocolActionIntentPlanner(
             .filter { it.role == ConversationMessage.Role.TOOL }
         // A repair feedback message keeps the original request in action mode; a real
         // tool result means the requested operation has already been attempted.
-        if (laterToolMessages.any { it.content.startsWith("ACTION_PROTOCOL_REPAIR:") }) {
-            // continue to repair once; AgentSession owns the retry bound.
+        if (laterToolMessages.lastOrNull()?.content?.startsWith("ACTION_PROTOCOL_REPAIR:") == true) {
+            // The latest tool message is repair feedback; AgentSession owns the retry bound.
         } else if (laterToolMessages.isNotEmpty()) {
+            // A real action result supersedes earlier repair feedback.
             return false
         }
 
