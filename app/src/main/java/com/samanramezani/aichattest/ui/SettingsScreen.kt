@@ -82,7 +82,7 @@ fun SettingsScreen(
         }
         item {
             when (section) {
-                "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete, onProviderChanged)
+                "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete, onProviderChanged, providerStore)
                 "پاسخ" -> InferenceControls()
                 "زمینه" -> ContextControls()
                 "عامل" -> AgentControls()
@@ -92,7 +92,7 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescriptor>, error: String?, onImport: () -> Unit, onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)?, onDelete: (String) -> Unit, onProviderChanged: () -> Unit) {
+private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescriptor>, error: String?, onImport: () -> Unit, onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)?, onDelete: (String) -> Unit, onProviderChanged: () -> Unit, providerStore: CloudflareProviderStore?) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.primaryContainer) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
