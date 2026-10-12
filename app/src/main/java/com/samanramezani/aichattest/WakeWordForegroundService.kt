@@ -205,8 +205,10 @@ class WakeWordForegroundService : Service() {
             }
         } catch (t: Throwable) {
             Log.e(TAG, "Wake-word listener stopped", t)
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, false).putBoolean(PREF_ARMED, false).apply()
-            postWakeNotification("شنود بیدارباش متوقف شد؛ برای جزئیات، گزارش برنامه را بررسی کن.", openVoice = false)
+            if (!pauseRequested && running.get()) {
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, false).putBoolean(PREF_ARMED, false).apply()
+                postWakeNotification("شنود بیدارباش متوقف شد؛ برای جزئیات، گزارش برنامه را بررسی کن.", openVoice = false)
+            }
         } finally {
             running.set(false)
             runCatching { audioRecord?.stop() }
