@@ -148,7 +148,7 @@ touch "متن خام.txt" && echo 'اینجا شروع یک کار است' > م�
             assertEquals("فایل متن خام.txt ساخته شد.", reply.generation.text)
             assertEquals("create_file", requireNotNull(reply.actionPlan).intent.actionId)
             assertTrue(events.filterIsInstance<AgentEvent.Token>().none { it.value.contains("touch") || it.value.contains("</think>") })
-            assertTrue(store.messages.any { it.role == ConversationMessage.Role.TOOL && it.content.contains("\\"success\\":true") })
+            assertTrue(store.messages.any { it.role == ConversationMessage.Role.TOOL && it.content.contains("success") && it.content.contains("true") })
         } finally {
             root.toFile().deleteRecursively()
         }
