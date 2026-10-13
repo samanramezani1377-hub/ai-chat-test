@@ -246,7 +246,7 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
                 tokens.addAll(wordPiece(basic))
                 if (tokens.size >= maxLength - 2) break
             }
-            return encodeTokens(tokens.take(maxLength - 2), vocab, clsToken, sepToken, unkToken, padToken, maxLength)
+            return MiniLmOnnxIntentClassifier.encodeTokens(tokens.take(maxLength - 2), vocab, clsToken, sepToken, unkToken, padToken, maxLength)
         }
 
         private fun basicTokenize(input: String): List<String> {
@@ -316,7 +316,7 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
                 pieces.addAll(bpe(token))
                 if (pieces.size >= maxLength - 2) break
             }
-            return encodeTokens(pieces.take(maxLength - 2), vocab, clsToken, sepToken, unkToken, padToken, maxLength)
+            return MiniLmOnnxIntentClassifier.encodeTokens(pieces.take(maxLength - 2), vocab, clsToken, sepToken, unkToken, padToken, maxLength)
         }
 
         private fun bpe(token: String): List<String> {
