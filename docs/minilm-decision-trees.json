@@ -36,21 +36,6 @@
         }
       ]
     },
-    "time_date": {
-      "prompt": "Choose which time or date information the user requests.",
-      "choices": [
-        {
-          "id": "GET_TIME",
-          "description": "Return the current local clock time.",
-          "examples": ["What time is it now?", "Tell me the time.", "Current time please."]
-        },
-        {
-          "id": "GET_DATE",
-          "description": "Return today's calendar date.",
-          "examples": ["What is today's date?", "Tell me the date today.", "Which date is it?"]
-        }
-      ]
-    },
     "audio": {
       "prompt": "Choose the requested audio or volume operation.",
       "choices": [
