@@ -429,12 +429,12 @@ internal fun sanitizeAssistantVoiceText(raw: String): String {
         .replace(Regex("(?m)^\\\\s*(?:[-*_]\\\\s*){3,}$"), " ")
         .replace(Regex("(?m)^\\\\s*[-*+]\\\\s+"), "")
         .replace(Regex("(?m)^\\\\s*\\\\d+[.)]\\\\s+"), "")
-        .replace(Regex("(?<!\\\\w)(?:\\\\*\\\\*|__) (?=\\\\S)|(?<=\\\\S)(?:\\\\*\\\\*|__)".replace(" ", "")), "")
+        .replace(Regex("(?<!\\\\w)(?:\\\\*\\\\*|__)(?=\\\\S)|(?<=\\\\S)(?:\\\\*\\\\*|__)"), "")
         .replace(Regex("(?<!\\\\w)[*_~](?=\\\\S)|(?<=\\\\S)[*_~](?!\\\\w)"), "")
         .replace(Regex("(?is)<[^>]+>"), " ")
         .replace(Regex("[ \\\\t]+"), " ")
-        .replace(Regex(" *\\\\n *")) { "\\\\n" }
-        .replace(Regex("\\\\n{3,}")) { "\\\\n\\\\n" }
+        .replace(Regex(" *\\\\n *")) { "\\n" }
+        .replace(Regex("\\\\n{3,}")) { "\\n\\n" }
         .trim()
     return text
 }
