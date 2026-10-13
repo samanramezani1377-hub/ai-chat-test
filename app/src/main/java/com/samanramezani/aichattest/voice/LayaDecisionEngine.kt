@@ -251,8 +251,10 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 }
             }
             active.run(feeds).use { result ->
-                val output = result.firstOrNull()?.value as? OnnxTensor
-                    ?: error("LAYA-INFER-003: مدل خروجی tensor ندارد.")
+                val logitsEntry = result.firstOrNull { it.key.equals("logits", ignoreCase = true) }
+                    ?: result.firstOrNull()
+                val output = logitsEntry?.value as? OnnxTensor
+                    ?: error("LAYA-INFER-003: خروجی logits مدل پیدا نشد.")
                 val buffer = output.floatBuffer
                 val logits = FloatArray(buffer.remaining())
                 buffer.get(logits)
@@ -284,7 +286,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 val margin = probs[best] - (second?.let { probs[it] } ?: 0.0)
                 val entropy = -probs.sumOf { p -> if (p > 0.0) p * kotlin.math.ln(p) else 0.0 }
                 val confidence = (1.0 - entropy / kotlin.math.ln(options.size.toDouble())).coerceIn(0.0, 1.0)
-                val actTensor = result.toList().getOrNull(1)?.value as? OnnxTensor
+                val actTensor = result.firstOrNull { it.key.equals("act_logits", ignoreCase = true) }?.value as? OnnxTensor
                 val actSummary = actTensor?.let { tensor ->
                     val values = tensor.floatBuffer.let { b -> FloatArray(b.remaining()).also(b::get) }
                     if (values.size >= 2 && values.all { it.isFinite() }) {
