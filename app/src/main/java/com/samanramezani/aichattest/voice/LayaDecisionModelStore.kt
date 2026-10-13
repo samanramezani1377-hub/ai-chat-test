@@ -55,7 +55,7 @@ internal class LayaDecisionModelStore(
                         val entry = zip.nextEntry ?: break
                         entries++
                         require(entries <= MAX_ENTRIES) { "LAYA-IMPORT-004: تعداد فایل‌های ZIP بیش از حد مجاز است." }
-                        val relative = entry.name.replace('\\', '/').trimStart('.', '/')
+                        val relative = entry.name.replace('\\', '/').trimStart('.', '/').trimEnd('/')
                         require(relative.isNotBlank() && !relative.startsWith("/") &&
                             relative.split('/').none { it == ".." || it.isBlank() }) {
                             "LAYA-IMPORT-005: مسیر ناامن در ZIP مدل وجود دارد."
@@ -83,10 +83,8 @@ internal class LayaDecisionModelStore(
                     }
                 }
             }
-            val candidates = listOf(staging, File(staging, "laya-multilingual-onnx-int4"),
-                File(staging, "androidli/laya-multilingual-onnx-int4"))
-            val sourceRoot = candidates.firstOrNull { candidate ->
-                REQUIRED.all { File(candidate, it).isFile }
+            val sourceRoot = staging.walkTopDown().maxDepth(5).firstOrNull { candidate ->
+                candidate.isDirectory && REQUIRED.all { File(candidate, it).isFile }
             } ?: error("LAYA-IMPORT-007: ZIP باید شامل مدل layer32-vocab128، فایل data، tokenizer و rl_agent_config.json باشد.")
             val tokenizer = JSONObject(File(sourceRoot, "tokenizer/tokenizer.json").readText(Charsets.UTF_8))
             require(tokenizer.optJSONObject("model") != null) {
