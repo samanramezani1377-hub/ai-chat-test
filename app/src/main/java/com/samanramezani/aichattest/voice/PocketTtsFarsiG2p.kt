@@ -78,16 +78,38 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
                 val ids = tensor(generated.toLongArray())
                 val logits = try {
                     decoder.run(mapOf("decoder_input_ids" to ids, "encoder_hidden" to hidden)).use { result ->
-                        val tensor = result[0].value as? OnnxTensor ?: error("خروجی decoder از نوع Tensor نیست")
-                        val shape = tensor.info.shape
-                        require(shape.size == 3 && shape[0] == 1L && shape[1] >= generated.size) {
-                            "ابعاد logits نامعتبر است: ${shape.contentToString()}"
+                        require(result.size() > 0) { "گراف decoder هیچ خروجی‌ای برنگرداند" }
+                        val raw = result[0].value
+                        // ONNX Runtime may expose tensor output as nested primitive arrays
+                        // (for example float[][][]) instead of OnnxTensor.
+                        val outputTensor = try {
+                            copyHiddenTensor(raw)
+                        } catch (t: Throwable) {
+                            throw IllegalStateException(
+                                "POCKET-TTS-G2P-003: خروجی decoder قابل تبدیل به Tensor نیست؛ " +
+                                    "output index 0, valueClass=${raw.javaClass.name}, " +
+                                    "outputNames=${decoder.outputNames.joinToString()}: ${t.message}",
+                                t
+                            )
                         }
-                        val values = FloatArray(tensor.floatBuffer.remaining())
-                        tensor.floatBuffer.get(values)
-                        val vocab = shape[2].toInt()
-                        val lastOffset = (shape[1].toInt() - 1) * vocab
-                        values.copyOfRange(lastOffset, lastOffset + vocab)
+                        try {
+                            val shape = outputTensor.info.shape
+                            require(shape.size == 3 && shape[0] == 1L && shape[1] >= generated.size) {
+                                "ابعاد logits نامعتبر است: ${shape.contentToString()}، decoderTokens=${generated.size}"
+                            }
+                            val buffer = outputTensor.floatBuffer
+                            val values = FloatArray(buffer.remaining())
+                            buffer.get(values)
+                            val vocab = shape[2].toInt()
+                            // The next token is predicted from the last supplied decoder token.
+                            val lastOffset = (generated.size - 1) * vocab
+                            require(vocab > 0 && lastOffset >= 0 && lastOffset + vocab <= values.size) {
+                                "خروجی logits ناقص است: shape=${shape.contentToString()}, values=${values.size}"
+                            }
+                            values.copyOfRange(lastOffset, lastOffset + vocab)
+                        } finally {
+                            outputTensor.close()
+                        }
                     }
                 } finally {
                     ids.close()
