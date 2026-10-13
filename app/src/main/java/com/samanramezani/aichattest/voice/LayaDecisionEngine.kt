@@ -22,7 +22,11 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
         private const val MODEL_FILE = LayaDecisionModelStore.MODEL_FILE
         private const val DEFAULT_MAX_SEQUENCE = 1024
         private const val DEFAULT_HEAD_MAX_SEQUENCE = 256
+        // Entropy confidence and top-class probability are distinct. Both must pass,
+        // so diffuse predictions such as "سلام" -> GET_TIME (p=0.62, confidence=0.297)
+        // abstain instead of triggering a local device action.
         private const val MIN_CONFIDENCE = 0.43
+        private const val MIN_MAX_PROBABILITY = 0.43
         private const val MIN_MARGIN = 0.09
     }
 
@@ -308,8 +312,11 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 // Keep the app's conservative action gate on the top probability and margin.
                 // Entropy confidence is the official Laya confidence metric, but it is not
                 // interchangeable with the old max-probability threshold.
-                if (probs[best] < MIN_CONFIDENCE || margin < MIN_MARGIN) {
-                    lastError = "LAYA-INFER-005: تصمیم کم‌اطمینان؛ confidence=${"%.3f".format(Locale.US, confidence)}, maxProbability=${"%.3f".format(Locale.US, probs[best])}, margin=${"%.3f".format(Locale.US, margin)}, maxProbabilityThreshold=$MIN_CONFIDENCE, marginThreshold=$MIN_MARGIN; $detail"
+                if (confidence < MIN_CONFIDENCE ||
+                    probs[best] < MIN_MAX_PROBABILITY ||
+                    margin < MIN_MARGIN
+                ) {
+                    lastError = "LAYA-INFER-005: تصمیم کم‌اطمینان؛ confidence=${"%.3f".format(Locale.US, confidence)}, maxProbability=${"%.3f".format(Locale.US, probs[best])}, margin=${"%.3f".format(Locale.US, margin)}, confidenceThreshold=$MIN_CONFIDENCE, maxProbabilityThreshold=$MIN_MAX_PROBABILITY, marginThreshold=$MIN_MARGIN; $detail"
                     return null
                 }
                 return Ranked(options[best].id, confidence)
