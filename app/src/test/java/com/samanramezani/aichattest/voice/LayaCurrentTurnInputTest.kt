@@ -6,13 +6,13 @@ import org.junit.Test
 class LayaCurrentTurnInputTest {
     @Test fun extractsOnlyLastNumberedTurnFromSerializedTranscript() {
         assertEquals(
-            "چطور می‌توانم بروم کرج؟",
+            "۵. چطور می‌توانم بروم کرج؟",
             extractCurrentLayaTurn("۱. سلام ۲. سلام چطور می‌توانم کمکتان کنم؟ ۳. ساعت چنده؟ ۴. ساعت بیست‌ودو و سی دقیقه ۵. چطور می‌توانم بروم کرج؟")
         )
     }
 
-    @Test fun stripsSingleLeadingTurnNumber() {
-        assertEquals("ساعت چنده؟", extractCurrentLayaTurn("۳. ساعت چنده؟"))
+    @Test fun preservesSingleLeadingUserAuthoredNumber() {
+        assertEquals("۳. ساعت چنده؟", extractCurrentLayaTurn("۳. ساعت چنده؟"))
     }
 
     @Test fun selectsLatestUserRoleAndDropsAssistantHistory() {
