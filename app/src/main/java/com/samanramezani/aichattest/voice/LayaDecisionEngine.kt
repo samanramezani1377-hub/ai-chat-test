@@ -506,7 +506,7 @@ private class LayaTokenizer(file: File) {
         // BertNormalizer stores strip_accents as a boolean, while tokenizer pipelines store
         // the same operation as a "StripAccents" stage. Support both JSON representations.
         return needle.equals("StripAccents", ignoreCase = true) &&
-            Regex("\\"strip_accents\\"\\s*:\\s*true", RegexOption.IGNORE_CASE)
+            Regex("\"strip_accents\"\\s*:\\s*true", RegexOption.IGNORE_CASE)
                 .containsMatchIn(normalizerConfig)
     }
 
