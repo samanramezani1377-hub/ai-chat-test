@@ -21,7 +21,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val openVoiceFromWake = intent?.getBooleanExtra(WakeWordForegroundService.EXTRA_OPEN_VOICE_FROM_WAKE, false) == true
+        val openVoiceFromWake = intent?.getBooleanExtra(AlwaysOnKoochikService.EXTRA_OPEN_VOICE_FROM_WAKE, false) == true
         if (openVoiceFromWake) {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
                 setShowWhenLocked(true)
