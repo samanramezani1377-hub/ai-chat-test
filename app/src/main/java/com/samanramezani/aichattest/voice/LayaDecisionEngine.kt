@@ -49,7 +49,10 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
 
     fun isReady(): Boolean = File(root, MODEL_FILE).isFile &&
         File(root, "$MODEL_FILE.data").isFile &&
-        File(root, "tokenizer/tokenizer.json").isFile
+        File(root, "tokenizer/tokenizer.json").isFile &&
+        File(root, "tokenizer/tokenizer_config.json").isFile &&
+        File(root, "encoder/config.json").isFile &&
+        File(root, "rl_agent_config.json").isFile
 
     fun classify(rawText: String, currentVolume: Int? = null, maxVolume: Int? = null): Decision? = synchronized(lock) {
         lastTrace = emptyList()
@@ -185,7 +188,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 }
             val origin = t.stackTrace.firstOrNull()?.let { " at $it" }.orEmpty()
             lastError = "LAYA-INFER-001: $causes$origin"
-            lastTrace = trace.toList()
+            lastTrace = trace.toList() + lastTrace
             null
         } finally {
             if (!retainLoadedSession) closeLoaded()
@@ -370,7 +373,6 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
 
 /** Small tokenizer implementation for the WordPiece/BPE tokenizer formats used by Laya bundles. */
 private class LayaTokenizer(file: File) {
-    private val rootTokenizerPath = file.absolutePath
     private val vocab = HashMap<String, Int>()
     private val merges = HashMap<String, Int>()
     private val tokenScores = HashMap<String, Double>()
