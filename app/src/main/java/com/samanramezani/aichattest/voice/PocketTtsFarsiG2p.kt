@@ -1,7 +1,6 @@
 package com.samanramezani.aichattest.voice
 
 import ai.onnxruntime.OnnxTensor
-import ai.onnxruntime.OnnxSequence
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import java.io.Closeable
@@ -56,16 +55,14 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
         // remains valid after the encoder Result is closed.
         val hidden = try {
             encoder.run(mapOf("input_ids" to encoded)).use { result ->
-                val output = result[0].value
-                try {
-                    copyHiddenTensor(output)
-                } catch (t: Throwable) {
-                    throw IllegalStateException(
-                        "POCKET-TTS-G2P-002: خروجی رمزگذار قابل تبدیل به Tensor نیست؛ " +
-                            "output index 0, valueClass=${output.javaClass.name}: ${t.message}",
-                        t
+                require(result.size() > 0) { "گراف encoder هیچ خروجی‌ای برنگرداند" }
+                val outputValue = result[0]
+                val output = outputValue as? OnnxTensor
+                    ?: throw IllegalStateException(
+                        "POCKET-TTS-G2P-002: خروجی encoder از نوع Tensor نیست؛ " +
+                            "outputClass=${outputValue.javaClass.name}, outputs=${encoder.outputNames.joinToString()}"
                     )
-                }
+                copyFloatTensor(output)
             }
         } finally {
             encoded.close()
@@ -79,37 +76,35 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
                 val logits = try {
                     decoder.run(mapOf("decoder_input_ids" to ids, "encoder_hidden" to hidden)).use { result ->
                         require(result.size() > 0) { "گراف decoder هیچ خروجی‌ای برنگرداند" }
-                        val raw = result[0].value
-                        // ONNX Runtime may expose tensor output as nested primitive arrays
-                        // (for example float[][][]) instead of OnnxTensor.
-                        val outputTensor = try {
-                            copyHiddenTensor(raw)
-                        } catch (t: Throwable) {
-                            throw IllegalStateException(
-                                "POCKET-TTS-G2P-003: خروجی decoder قابل تبدیل به Tensor نیست؛ " +
-                                    "output index 0, valueClass=${raw.javaClass.name}, " +
-                                    "outputNames=${decoder.outputNames.joinToString()}: ${t.message}",
-                                t
+                        // Read the ONNX value itself. Accessing result[0].value materializes
+                        // a JVM array (or another wrapper) and then incorrectly treats that
+                        // Java representation as the model output object. ONNX Runtime already
+                        // owns the actual tensor in the Result; consume its typed buffer while
+                        // the Result is open instead of round-tripping through value/createTensor.
+                        val outputValue = result[0]
+                        val outputTensor = outputValue as? OnnxTensor
+                            ?: throw IllegalStateException(
+                                "POCKET-TTS-G2P-003: خروجی decoder از نوع Tensor نیست؛ " +
+                                    "outputClass=${outputValue.javaClass.name}, " +
+                                    "outputNames=${decoder.outputNames.joinToString()}"
                             )
+                        val shape = outputTensor.info.shape
+                        require(shape.size == 3 && shape[0] == 1L && shape[1] >= generated.size) {
+                            "ابعاد logits نامعتبر است: ${shape.contentToString()}، decoderTokens=${generated.size}"
                         }
-                        try {
-                            val shape = outputTensor.info.shape
-                            require(shape.size == 3 && shape[0] == 1L && shape[1] >= generated.size) {
-                                "ابعاد logits نامعتبر است: ${shape.contentToString()}، decoderTokens=${generated.size}"
-                            }
-                            val buffer = outputTensor.floatBuffer
-                            val values = FloatArray(buffer.remaining())
-                            buffer.get(values)
-                            val vocab = shape[2].toInt()
-                            // The next token is predicted from the last supplied decoder token.
-                            val lastOffset = (generated.size - 1) * vocab
-                            require(vocab > 0 && lastOffset >= 0 && lastOffset + vocab <= values.size) {
-                                "خروجی logits ناقص است: shape=${shape.contentToString()}, values=${values.size}"
-                            }
-                            values.copyOfRange(lastOffset, lastOffset + vocab)
-                        } finally {
-                            outputTensor.close()
+                        require(outputTensor.info.type == ai.onnxruntime.OnnxJavaType.FLOAT) {
+                            "نوع logits پشتیبانی نمی‌شود: ${outputTensor.info.type}"
                         }
+                        val buffer = outputTensor.floatBuffer.duplicate()
+                        val values = FloatArray(buffer.remaining())
+                        buffer.get(values)
+                        val vocab = shape[2].toInt()
+                        // The next token is predicted from the last supplied decoder token.
+                        val lastOffset = (generated.size - 1) * vocab
+                        require(vocab > 0 && lastOffset >= 0 && lastOffset + vocab <= values.size) {
+                            "خروجی logits ناقص است: shape=${shape.contentToString()}, values=${values.size}"
+                        }
+                        values.copyOfRange(lastOffset, lastOffset + vocab)
                     }
                 } finally {
                     ids.close()
@@ -128,20 +123,16 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
         }
     }
 
-    /**
-     * Materialize an independent tensor from the Java value representation returned by
-     * ONNX Runtime. This handles direct tensors, sequence-wrapped values, and primitive
-     * multidimensional arrays such as float[][][] (whose JVM class name is [[[F).
-     */
-    private fun copyHiddenTensor(value: Any): OnnxTensor = when (value) {
-        is OnnxTensor -> OnnxTensor.createTensor(env, value.value)
-        is OnnxSequence -> {
-            val first = value.value.firstOrNull()
-                ?: error("خروجی sequence رمزگذار خالی است")
-            copyHiddenTensor(first)
+    /** Copy the encoder hidden-state tensor before its Result is closed. */
+    private fun copyFloatTensor(source: OnnxTensor): OnnxTensor {
+        require(source.info.type == ai.onnxruntime.OnnxJavaType.FLOAT) {
+            "نوع hidden-state پشتیبانی نمی‌شود: ${source.info.type}"
         }
-        is Array<*> -> OnnxTensor.createTensor(env, value)
-        else -> error("نمایش خروجی برای ساخت Tensor پشتیبانی نمی‌شود: ${value.javaClass.name}")
+        val shape = source.info.shape
+        val buffer = source.floatBuffer.duplicate()
+        val values = FloatArray(buffer.remaining())
+        buffer.get(values)
+        return OnnxTensor.createTensor(env, java.nio.FloatBuffer.wrap(values), shape)
     }
 
     private fun tensor(values: LongArray): OnnxTensor {
