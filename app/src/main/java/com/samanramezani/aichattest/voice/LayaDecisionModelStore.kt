@@ -22,13 +22,14 @@ internal class LayaDecisionModelStore(
         private const val MAX_EXPANDED_BYTES = 650L * 1024L * 1024L
         private val REQUIRED = setOf(
             MODEL_FILE, "$MODEL_FILE.data", "tokenizer/tokenizer.json",
-            "tokenizer/tokenizer_config.json", "rl_agent_config.json",
+            "tokenizer/tokenizer_config.json", "encoder/config.json", "rl_agent_config.json",
         )
     }
 
     fun isReady(): Boolean = REQUIRED.all { File(root, it).isFile && File(root, it).length() > 0 } &&
         File(root, MODEL_FILE).length() > 16_000 &&
-        File(root, "$MODEL_FILE.data").length() > 100_000_000L
+        File(root, "$MODEL_FILE.data").length() > 100_000_000L &&
+        runCatching { JSONObject(File(root, "encoder/config.json").readText(Charsets.UTF_8)) }.isSuccess
 
     fun status(): String = when {
         isReady() -> "Laya Multilingual INT4 آماده است؛ تصمیم‌گیری محلی فعال است."
@@ -88,8 +89,11 @@ internal class LayaDecisionModelStore(
             }
             val sourceRoot = staging.walkTopDown().maxDepth(5).firstOrNull { candidate ->
                 candidate.isDirectory && REQUIRED.all { File(candidate, it).isFile }
-            } ?: error("LAYA-IMPORT-007: ZIP باید شامل مدل layer32-vocab128، فایل data، tokenizer و rl_agent_config.json باشد.")
+            } ?: error("LAYA-IMPORT-007: ZIP باید شامل مدل و فایل data، tokenizer/tokenizer_config، encoder/config.json و rl_agent_config.json باشد.")
             val tokenizer = JSONObject(File(sourceRoot, "tokenizer/tokenizer.json").readText(Charsets.UTF_8))
+            JSONObject(File(sourceRoot, "tokenizer/tokenizer_config.json").readText(Charsets.UTF_8))
+            JSONObject(File(sourceRoot, "encoder/config.json").readText(Charsets.UTF_8))
+            JSONObject(File(sourceRoot, "rl_agent_config.json").readText(Charsets.UTF_8))
             require(tokenizer.optJSONObject("model") != null) {
                 "LAYA-IMPORT-008: tokenizer/tokenizer.json ساختار نامعتبر دارد."
             }
@@ -106,10 +110,14 @@ internal class LayaDecisionModelStore(
                 if (hadPrevious) backup.renameTo(root)
                 error("LAYA-IMPORT-011: انتقال مدل به پوشه نهایی ناموفق بود.")
             }
-            if (hadPrevious) backup.deleteRecursively()
             staging.deleteRecursively()
-            check(isReady()) { "LAYA-IMPORT-012: اعتبارسنجی نهایی مدل ناموفق بود." }
-            return "مدل Laya Multilingual INT4 با tokenizer و وزن‌های خارجی وارد شد."
+            if (!isReady()) {
+                root.deleteRecursively()
+                if (hadPrevious) backup.renameTo(root)
+                error("LAYA-IMPORT-012: اعتبارسنجی نهایی مدل ناموفق بود؛ نسخه قبلی بازیابی شد.")
+            }
+            if (hadPrevious) backup.deleteRecursively()
+            return "مدل Laya Multilingual INT4 همراه با tokenizer، encoder و وزن‌های خارجی وارد شد."
         } catch (t: Throwable) {
             staging.deleteRecursively()
             throw t
