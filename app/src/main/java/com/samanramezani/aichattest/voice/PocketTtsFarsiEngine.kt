@@ -252,14 +252,24 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
                     val hlen=if(major>=2) ByteBuffer.wrap(bytes,8,4).order(ByteOrder.LITTLE_ENDIAN).int else ByteBuffer.wrap(bytes,8,2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 65535
                     val hs=if(major>=2)12 else 10; val header=String(bytes,hs,hlen,Charsets.US_ASCII)
                     val dtype=Regex("""['"]descr['"]\s*:\s*['"]([^'"]+)""").find(header)?.groupValues?.get(1)?:error("NPY dtype missing")
-                    require(dtype.endsWith("f4")||dtype.endsWith("f8")) { "Unsupported NPZ dtype $dtype" }
+                    val isBool = dtype == "|b1" || dtype == "?b1"
+                    require(dtype.endsWith("f4") || dtype.endsWith("f8") || isBool) {
+                        "Unsupported NPZ dtype $dtype in ${file.name}:${e.name}"
+                    }
                     val st=Regex("""['"]shape['"]\s*:\s*\(([^)]*)""").find(header)?.groupValues?.get(1).orEmpty()
                     val shape=st.split(',').mapNotNull { it.trim().toLongOrNull() }.toLongArray()
                     val n=if(shape.isEmpty())1L else shape.fold(1L){a,b->Math.multiplyExact(a,b)}
-                    val bytesPer=if(dtype.endsWith("f8"))8 else 4; val pos=hs+hlen
-                    require(pos+n*bytesPer<=bytes.size) { "NPY payload truncated" }
+                    val bytesPer=when { isBool -> 1; dtype.endsWith("f8") -> 8; else -> 4 }
+                    val pos=hs+hlen
+                    require(n <= Int.MAX_VALUE && pos.toLong()+n*bytesPer<=bytes.size) { "NPY payload truncated or too large" }
                     val bb=ByteBuffer.wrap(bytes,pos,(n*bytesPer).toInt()).order(ByteOrder.LITTLE_ENDIAN)
-                    val values=FloatArray(n.toInt()){if(bytesPer==4)bb.float else bb.double.toFloat()}
+                    val values=FloatArray(n.toInt()) {
+                        when {
+                            isBool -> if (bb.get().toInt() != 0) 1f else 0f
+                            bytesPer==4 -> bb.float
+                            else -> bb.double.toFloat()
+                        }
+                    }
                     val name=e.name.removeSuffix(".npy")
                     out[name]=A(name,shape,values,name.endsWith(".cache"))
                 }
