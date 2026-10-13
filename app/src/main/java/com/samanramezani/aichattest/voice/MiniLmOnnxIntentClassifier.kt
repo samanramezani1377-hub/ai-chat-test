@@ -105,7 +105,7 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
             DinaIntent.SET_VOLUME, DinaIntent.SET_BRIGHTNESS -> parsed.value ?: return null
             else -> null
         }
-        return DinaCommand(modelIntent, value)
+        return DinaCommand(modelIntent, value, modelIntent == DinaIntent.SET_BRIGHTNESS || parsed.valueIsPercent)
     }
 
     private fun ensureLoaded() {
