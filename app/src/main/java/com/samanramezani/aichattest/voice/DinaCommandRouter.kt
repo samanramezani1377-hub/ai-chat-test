@@ -99,7 +99,10 @@ internal class DinaDeviceCommandExecutor(private val context: Context) {
         DinaIntent.CHAT -> null
         DinaIntent.GET_TIME -> {
             val now = SimpleDateFormat("HH:mm", Locale.US).format(Date()).split(":")
-            "الان ساعت ${persianNumber(now[0].toInt())} و ${persianNumber(now[1].toInt())} دقیقه است."
+            val hour = now[0].toInt()
+            val minute = now[1].toInt()
+            if (minute == 0) "الان ساعت ${persianNumber(hour)} است."
+            else "الان ساعت ${persianNumber(hour)} و ${persianNumber(minute)} دقیقه است."
         }
         DinaIntent.GET_DATE -> "تاریخ امروز ${SimpleDateFormat("d MMMM yyyy", Locale("fa", "IR")).format(Date())} است."
         DinaIntent.INCREASE_VOLUME -> changeVolume(2)
@@ -135,7 +138,7 @@ internal class DinaDeviceCommandExecutor(private val context: Context) {
         require(requested in 0..100) { "VOICE-CMD-VOLUME-001: مقدار صدا باید بین صفر تا صد باشد." }
         val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        val target = if (isPercent || requested > max) (requested * max / 100.0).toInt().coerceIn(0, max) else requested
+        val target = if (isPercent || requested > max) kotlin.math.round(requested * max / 100.0).toInt().coerceIn(0, max) else requested
         audio.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
         return "صدای رسانه روی ${persianNumber(target)} از ${persianNumber(max)} تنظیم شد."
     }
