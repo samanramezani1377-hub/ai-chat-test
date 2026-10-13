@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 import com.samanramezani.aichattest.ui.voice.VoiceConversationController
 import com.samanramezani.aichattest.voice.LocalMicrophone
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
+import com.samanramezani.aichattest.voice.LocalPiperTts
 import com.samanramezani.aichattest.voice.VoiceModelKind
 import com.samanramezani.aichattest.voice.VoiceModelStore
 import com.samanramezani.aichattest.voice.extractDinaCommand
@@ -27,6 +28,7 @@ import java.io.File
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.runBlocking
 
 /**
  * Always-on local Persian speech listener. Shenava Koochik ASR recognizes each bounded utterance;
@@ -81,6 +83,9 @@ class AlwaysOnKoochikService : Service() {
     @Volatile private var voiceController: VoiceConversationController? = null
     @Volatile private var transitioningToConversation = false
     @Volatile private var wakeLock: PowerManager.WakeLock? = null
+    @Volatile private var acknowledgementTts: LocalPiperTts? = null
+    @Volatile private var acknowledgementThread: Thread? = null
+    private val acknowledgementPlayed = AtomicBoolean(false)
 
     override fun onCreate() {
         super.onCreate()
@@ -160,7 +165,26 @@ class AlwaysOnKoochikService : Service() {
         var recognizer: LocalNemoCtcAsr? = null
         var mic: LocalMicrophone? = null
         var detectedCommand: String? = null
+        var lastProbeCommand: String? = null
+        var wakeSeenInRollingWindow = false
+        var speechSinceProbe = 0
         var failure: Throwable? = null
+        val rollingWindow = FloatArray(16000 * 3)
+        var rollingWrite = 0
+        var rollingCount = 0
+        fun appendRolling(samples: FloatArray) {
+            for (sample in samples) {
+                rollingWindow[rollingWrite] = sample
+                rollingWrite = (rollingWrite + 1) % rollingWindow.size
+                if (rollingCount < rollingWindow.size) rollingCount++
+            }
+        }
+        fun rollingSnapshot(): FloatArray {
+            val result = FloatArray(rollingCount)
+            val start = (rollingWrite - rollingCount + rollingWindow.size) % rollingWindow.size
+            for (i in result.indices) result[i] = rollingWindow[(start + i) % rollingWindow.size]
+            return result
+        }
         try {
             check(ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                 "VOICE-ALWAYS-002: مجوز میکروفون داده نشده یا لغو شده است."
@@ -172,8 +196,14 @@ class AlwaysOnKoochikService : Service() {
             val stt = sttModels.firstOrNull { it.id == selectedId && it.asrMode == "nemo-ctc" }
                 ?: sttModels.firstOrNull { it.id.startsWith("stt-shenava-koochik-") && it.asrMode == "nemo-ctc" }
                 ?: error("VOICE-ALWAYS-003: مدل فارسی Shenava Koochik آماده نیست؛ model.onnx و tokens.txt را وارد کنید.")
+            val ttsModels = store.list(VoiceModelKind.TTS)
+            val selectedTtsId = prefs.getString(PREF_TTS_MODEL_ID, null)
+            val tts = ttsModels.firstOrNull { it.id == selectedTtsId } ?: ttsModels.firstOrNull()
+                ?: error("VOICE-ALWAYS-005: مدل TTS محلی آماده نیست.")
+            acknowledgementPlayed.set(false)
+            acknowledgementTts = LocalPiperTts(tts)
             recognizer = LocalNemoCtcAsr(stt)
-            val frames = ArrayBlockingQueue<LocalMicrophone.Frame>(64)
+            val frames = ArrayBlockingQueue<LocalMicrophone.Frame>(256)
             mic = LocalMicrophone()
             microphone = mic
             mic.start { frame ->
@@ -185,31 +215,60 @@ class AlwaysOnKoochikService : Service() {
             updateStatus(
                 "شنود دائمی با مدل فارسی Shenava Koochik فعال است؛ متن مکالمه ذخیره نمی‌شود.",
                 "ALWAYS_ON_LISTENING",
-                "model=${stt.id}; mode=bounded-utterance; queueCapacity=64; persistentTranscript=false",
+                "model=${stt.id}; mode=bounded-utterance-plus-3s-rolling-probe; queueCapacity=256; persistentTranscript=false",
             )
             notifyStatus("در حال شنیدن «دینا» با مدل فارسی محلی…")
             while (running.get() && getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_ENABLED, false)) {
                 val frame = frames.poll(300, TimeUnit.MILLISECONDS) ?: continue
+                appendRolling(frame.samples)
+                if (frame.speech) speechSinceProbe += frame.samples.size
                 val update = recognizer.accept(frame.samples, 16000, frame.speech)
+
+                // Shenava Koochik is an offline CTC recognizer, not a streaming partial decoder.
+                // Probe only the last 3 seconds once per ~1 second of speech; audio history stays
+                // bounded, and the current utterance is still accumulated by the same recognizer.
+                if (!wakeSeenInRollingWindow && frame.speech &&
+                    rollingCount >= 24000 && speechSinceProbe >= 16000
+                ) {
+                    speechSinceProbe = 0
+                    val probe = recognizer.recognizeWindow(rollingSnapshot())
+                    val commandCandidate = extractDinaCommand(probe)
+                    if (commandCandidate != null) {
+                        wakeSeenInRollingWindow = true
+                        lastProbeCommand = commandCandidate
+                        updateStatus(
+                            "«دینا» در گفتار تشخیص داده شد؛ ادامهٔ همان جمله در بافر محدود ثبت می‌شود.",
+                            "DINA_DETECTED_RECORDING",
+                            "probeWindowMs=${rollingCount * 1000 / 16000}; probeChars=${probe.length}; persistentTranscript=false",
+                        )
+                        speakAcknowledgementAsync()
+                    }
+                }
+
                 if (!update.endpoint) continue
                 val transcript = update.text
-                if (transcript.isBlank()) continue
                 val command = extractDinaCommand(transcript)
-                Log.d(TAG, "ASR endpoint: chars=${transcript.length}; wakeFound=${command != null}")
-                // Do not log or persist the transcript. Only the extracted command is handed off.
-                if (command != null) {
-                    detectedCommand = command
+                Log.d(TAG, "ASR endpoint: chars=${transcript.length}; wakeFound=${command != null || wakeSeenInRollingWindow}")
+                // Prefer the full utterance decoded at endpoint; use the last rolling result only
+                // if endpoint decoding omitted a phrase already detected in the rolling window.
+                val finalCommand = command ?: if (wakeSeenInRollingWindow) lastProbeCommand else null
+                if (finalCommand != null) {
+                    detectedCommand = finalCommand
                     transitioningToConversation = true
                     running.set(false)
                     updateStatus(
-                        "«دینا» تشخیص داده شد؛ عبارت بعد از آن به مدل محلی ارسال می‌شود.",
+                        "«دینا» تأیید شد؛ فقط متن بعد از آن برای پردازش محلی ارسال می‌شود.",
                         "DINA_DETECTED",
-                        "utteranceChars=${transcript.length}; commandChars=${command.length}; transcriptPersisted=false",
+                        "utteranceChars=${transcript.length}; commandChars=${finalCommand.length}; transcriptPersisted=false",
                     )
                     break
                 }
-                // The ASR adapter clears its bounded utterance buffer at every endpoint.
-                // This local reference is dropped immediately; only character count was logged.
+                // Drop each completed non-trigger utterance and its rolling audio immediately.
+                java.util.Arrays.fill(rollingWindow, 0f)
+                rollingWrite = 0
+                rollingCount = 0
+                speechSinceProbe = 0
+                lastProbeCommand = null
             }
         } catch (t: Throwable) {
             if (running.get()) failure = t
@@ -224,7 +283,11 @@ class AlwaysOnKoochikService : Service() {
 
         if (detectedCommand != null) {
             val command = detectedCommand.orEmpty()
-            val started = startVoiceConversationInService(command)
+            runCatching { acknowledgementThread?.join() }
+            val acknowledgeInController = !acknowledgementPlayed.get()
+            runCatching { acknowledgementTts?.close() }
+            acknowledgementTts = null
+            val started = startVoiceConversationInService(command, acknowledgeWake = acknowledgeInController)
             transitioningToConversation = false
             if (started) {
                 notifyStatus("«دینا» شنیده شد؛ «متوجه شدم» با TTS محلی گفته می‌شود و درخواست پردازش می‌شود.")
@@ -242,6 +305,8 @@ class AlwaysOnKoochikService : Service() {
                 startListenerIfNeeded()
             }
         } else if (failure != null) {
+            runCatching { acknowledgementTts?.close() }
+            acknowledgementTts = null
             val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
             updateStatus(
                 "VOICE-ALWAYS-004: شنود فارسی متوقف شد: ${failure.message ?: failure.javaClass.simpleName}",
@@ -255,7 +320,11 @@ class AlwaysOnKoochikService : Service() {
             runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
             wakeLock = null
             stopSelf()
-        } else if (getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_ENABLED, false) &&
+        } else {
+            runCatching { acknowledgementTts?.close() }
+            acknowledgementTts = null
+        }
+        if (detectedCommand == null && getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_ENABLED, false) &&
             voiceController == null && !transitioningToConversation
         ) {
             // Listener can stop only when the user disables the mode or a detected command is handed off.
@@ -263,7 +332,37 @@ class AlwaysOnKoochikService : Service() {
         }
     }
 
-    private fun startVoiceConversationInService(initialUtterance: String): Boolean {
+    private fun speakAcknowledgementAsync() {
+        if (acknowledgementThread?.isAlive == true || acknowledgementPlayed.get()) return
+        val engine = acknowledgementTts ?: return
+        acknowledgementThread = Thread({
+            try {
+                runBlocking {
+                    engine.speak(
+                        "متوجه شدم",
+                        AtomicBoolean(false),
+                        onSynthesisComplete = { duration ->
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                .putString(PREF_LAST_DIAGNOSTIC, "ALWAYS_ON_TTS_ACK: synthesisMs=$duration")
+                                .apply()
+                        },
+                    )
+                }
+                acknowledgementPlayed.set(true)
+                Log.i(TAG, "Local TTS acknowledgement completed")
+            } catch (t: Throwable) {
+                Log.e(TAG, "Could not speak local wake acknowledgement", t)
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putString(PREF_LAST_DIAGNOSTIC, "ALWAYS_ON_TTS_ACK_FAILED: ${t.stackTraceToString()}")
+                    .apply()
+            }
+        }, "Dina-Local-TTS-Acknowledgement").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun startVoiceConversationInService(initialUtterance: String, acknowledgeWake: Boolean): Boolean {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         if (voiceController != null) return true
         return try {
@@ -318,7 +417,7 @@ class AlwaysOnKoochikService : Service() {
                 },
             )
             voiceController = controller
-            controller.start(stt, tts, initialUtterance = initialUtterance, acknowledgeWake = true)
+            controller.start(stt, tts, initialUtterance = initialUtterance, acknowledgeWake = acknowledgeWake)
             true
         } catch (t: Throwable) {
             Log.e(TAG, "Could not start voice conversation after Dina", t)
