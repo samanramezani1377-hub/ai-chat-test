@@ -45,6 +45,10 @@ internal fun VoiceConversationPage(
     activeTtsId: String?,
     layaModelReady: Boolean,
     layaStatus: String,
+    pocketTtsReady: Boolean,
+    pocketTtsStatus: String,
+    onDownloadPocketTts: () -> Unit,
+    onImportPocketTts: () -> Unit,
     onImportLaya: () -> Unit,
     onDownloadLaya: () -> Unit,
     onBack: () -> Unit,
@@ -186,6 +190,29 @@ internal fun VoiceConversationPage(
                             else "برای فعال‌سازی، مدل Shenava Koochik و مدل TTS باید وارد شده باشند. شنود در پس‌زمینه به مجوز میکروفون و محدودیت‌های اندروید وابسته است.",
                             style = MaterialTheme.typography.bodySmall,
                         )
+                    }
+                }
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("بستهٔ Pocket TTS Farsi v2 · ONNX", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "دریافت همهٔ گراف‌ها و وزن‌های موردنیاز در یک ZIP حدود ۴۹۱ مگابایتی؛ فایل در پوشهٔ Downloads ذخیره می‌شود و بعداً می‌توانی همان ZIP را وارد کنی. این بسته با Piper متفاوت است و ورود فایل‌ها به‌تنهایی موتور را فعال نمی‌کند.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Button(onClick = onDownloadPocketTts, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text("دانلود یکجای بستهٔ کامل Pocket TTS")
+                        }
+                        OutlinedButton(onClick = onImportPocketTts, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text("وارد کردن بستهٔ ZIP از حافظه")
+                        }
+                        Text(
+                            if (pocketTtsReady) "✓ فایل‌های بسته نصب و اعتبارسنجی شده‌اند؛ موتور اجرا هنوز به مکالمه متصل نشده است."
+                            else "بسته هنوز نصب نشده است.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (pocketTtsReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(pocketTtsStatus, style = MaterialTheme.typography.bodySmall)
+                        Text("مجوز مدل: CC-BY-NC-4.0 (غیرتجاری).", style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 Card(Modifier.fillMaxWidth()) {

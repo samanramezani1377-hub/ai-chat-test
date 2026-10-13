@@ -30,6 +30,7 @@ import com.samanramezani.aichattest.voice.PiperComponent
 import com.samanramezani.aichattest.voice.SmallSttComponent
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
 import com.samanramezani.aichattest.voice.LayaDecisionModelStore
+import com.samanramezani.aichattest.voice.PocketTtsFarsiBundleStore
 import com.samanramezani.aichattest.voice.LayaDecisionEngine
 import com.samanramezani.aichattest.voice.DinaDeviceCommandExecutor
 import com.samanramezani.aichattest.voice.extractDinaCommand
@@ -64,6 +65,11 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     }
     var layaReady by remember { mutableStateOf(layaStore.isReady()) }
     var layaStatus by remember { mutableStateOf(layaStore.status()) }
+    val pocketTtsStore = remember(context) {
+        PocketTtsFarsiBundleStore(context.contentResolver, File(context.filesDir, "voice-models/pocket-tts-farsi-v2"))
+    }
+    var pocketTtsReady by remember { mutableStateOf(pocketTtsStore.isReady()) }
+    var pocketTtsStatus by remember { mutableStateOf(pocketTtsStore.status()) }
     var sttModels by remember { mutableStateOf(store.list(VoiceModelKind.STT)) }
     var ttsModels by remember { mutableStateOf(store.list(VoiceModelKind.TTS)) }
     var missingKoochikComponents by remember { mutableStateOf(store.missingKoochikComponents()) }
@@ -312,6 +318,47 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         }
     }
 
+
+    val pocketTtsPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) uiScope.launch {
+            busy = true
+            pocketTtsStatus = "در حال وارد کردن و اعتبارسنجی بستهٔ Pocket TTS…"
+            try {
+                pocketTtsStatus = withContext(Dispatchers.IO) { pocketTtsStore.importArchive(uri) }
+                pocketTtsReady = pocketTtsStore.isReady()
+                updateVoiceStatus(pocketTtsStatus)
+            } catch (t: Throwable) {
+                pocketTtsStatus = "POCKET-TTS-IMPORT: ${t.message ?: t.javaClass.simpleName}"
+                updateVoiceStatus(pocketTtsStatus)
+            } finally { busy = false }
+        }
+    }
+
+    fun downloadPocketTtsBundle() {
+        uiScope.launch {
+            busy = true
+            val finished = AtomicBoolean(false)
+            pocketTtsStatus = "در حال دریافت بستهٔ کامل Pocket TTS Farsi v2 از Hugging Face…"
+            updateVoiceStatus(pocketTtsStatus)
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    pocketTtsStore.downloadArchive { progress ->
+                        uiScope.launch(Dispatchers.Main.immediate) {
+                            if (!finished.get()) pocketTtsStatus = progress
+                        }
+                    }
+                }
+                finished.set(true)
+                pocketTtsStatus = result
+                updateVoiceStatus(result)
+            } catch (t: Throwable) {
+                finished.set(true)
+                pocketTtsStatus = "POCKET-TTS-DOWNLOAD: ${t.message ?: t.javaClass.simpleName}"
+                updateVoiceStatus(pocketTtsStatus)
+            } finally { finished.set(true); busy = false }
+        }
+    }
+
     fun downloadLayaModel() {
         uiScope.launch {
             busy = true
@@ -357,6 +404,10 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         activeTtsId = activeTtsId,
         layaModelReady = layaReady,
         layaStatus = layaStatus,
+        pocketTtsReady = pocketTtsReady,
+        pocketTtsStatus = pocketTtsStatus,
+        onDownloadPocketTts = { downloadPocketTtsBundle() },
+        onImportPocketTts = { pocketTtsPicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
         onImportLaya = { layaPicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
         onDownloadLaya = { downloadLayaModel() },
         onBack = onBack,
