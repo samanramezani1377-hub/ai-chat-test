@@ -11,16 +11,22 @@ import org.json.JSONObject
 
 /**
  * Stores a user-supplied, fine-tuned MiniLM intent-classifier bundle locally.
- * Expected ZIP entries: model.onnx, tokenizer.json, labels.json.
- * A generic sentence-embedding MiniLM is not an intent classifier by itself. WordPiece and SentencePiece-style BPE tokenizer JSONs are supported by the runtime.
+ * Accepted ZIPs:
+ * - fine-tuned classifier: model.onnx, tokenizer.json, labels.json
+ * - sentence-embedding decision tree: model.onnx, tokenizer.json, decision_trees.json
+ * all-MiniLM-L6-v2 is English-trained; Persian input is routed to safe Persian rules.
  */
 internal class MiniLmIntentModelStore(
     private val resolver: ContentResolver,
     private val root: File,
 ) {
-    fun isReady(): Boolean = File(root, "model.onnx").let { it.isFile && it.length() > 1024 } &&
-        File(root, "tokenizer.json").let { it.isFile && it.length() > 0 } &&
-        File(root, "labels.json").let { it.isFile && it.length() > 0 }
+    fun isReady(): Boolean {
+        val modelReady = File(root, "model.onnx").let { it.isFile && it.length() > 1024 }
+        val tokenizerReady = File(root, "tokenizer.json").let { it.isFile && it.length() > 0 }
+        val classifierBundle = File(root, "labels.json").let { it.isFile && it.length() > 0 }
+        val decisionTreeBundle = File(root, "decision_trees.json").let { it.isFile && it.length() > 0 }
+        return modelReady && tokenizerReady && (classifierBundle || decisionTreeBundle)
+    }
 
     private fun parseLabels(raw: String): List<String> {
         val text = raw.trim()
@@ -68,7 +74,7 @@ internal class MiniLmIntentModelStore(
                         }
                         if (!entry.isDirectory) {
                             val basename = path.substringAfterLast('/')
-                            if (basename in setOf("model.onnx", "tokenizer.json", "labels.json")) {
+                            if (basename in setOf("model.onnx", "tokenizer.json", "labels.json", "decision_trees.json")) {
                                 val target = File(staging, basename)
                                 FileOutputStream(target).use { out ->
                                     val buffer = ByteArray(32 * 1024)
@@ -94,12 +100,34 @@ internal class MiniLmIntentModelStore(
             require(model.isFile && model.length() > 1024 && tokenizer.isFile && tokenizer.length() > 0 && labels.isFile && labels.length() > 0) {
                 "MINILM-IMPORT-007: بسته باید هر سه فایل model.onnx، tokenizer.json و labels.json را داشته باشد."
             }
-            val labelText = labels.readText(Charsets.UTF_8)
-            val parsedLabels = parseLabels(labelText)
-            val allowedLabels = setOf("CHAT", "GET_TIME", "GET_DATE", "INCREASE_VOLUME", "DECREASE_VOLUME",
-                "SET_VOLUME", "INCREASE_BRIGHTNESS", "DECREASE_BRIGHTNESS", "SET_BRIGHTNESS")
-            require(parsedLabels.isNotEmpty() && parsedLabels.contains("CHAT") && parsedLabels.all { it in allowedLabels }) {
-                "MINILM-IMPORT-008: labels.json باید CHAT و برچسب‌های معتبر فرمان‌های پشتیبانی‌شده را تعریف کند."
+            val decisionTrees = File(staging, "decision_trees.json")
+            if (decisionTrees.isFile) {
+                require(decisionTrees.length() <= 256 * 1024) {
+                    "MINILM-IMPORT-012: فایل decision_trees.json بیش از ۲۵۶ کیلوبایت است."
+                }
+                val config = JSONObject(decisionTrees.readText(Charsets.UTF_8))
+                require(config.optString("model_type") == "sentence_embedding") {
+                    "MINILM-IMPORT-013: model_type در decision_trees.json باید sentence_embedding باشد."
+                }
+                val nodes = config.optJSONObject("nodes")
+                require(nodes != null && listOf("domain", "time_date", "audio", "display").all { id ->
+                    nodes.optJSONObject(id)?.optJSONArray("choices")?.length()?.let { it > 0 } == true
+                }) {
+                    "MINILM-IMPORT-014: درخت تصمیم باید گره‌های domain، time_date، audio و display را داشته باشد."
+                }
+                require(model.length() <= 100L * 1024 * 1024) {
+                    "MINILM-IMPORT-015: فایل مدل تصمیم‌گیری باید حداکثر ۱۰۰ مگابایت باشد."
+                }
+            } else {
+                require(labels.isFile && labels.length() > 0) {
+                    "MINILM-IMPORT-007: بسته باید labels.json یا decision_trees.json داشته باشد."
+                }
+                val parsedLabels = parseLabels(labels.readText(Charsets.UTF_8))
+                val allowedLabels = setOf("CHAT", "GET_TIME", "GET_DATE", "INCREASE_VOLUME", "DECREASE_VOLUME",
+                    "SET_VOLUME", "INCREASE_BRIGHTNESS", "DECREASE_BRIGHTNESS", "SET_BRIGHTNESS")
+                require(parsedLabels.isNotEmpty() && parsedLabels.contains("CHAT") && parsedLabels.all { it in allowedLabels }) {
+                    "MINILM-IMPORT-008: labels.json باید CHAT و برچسب‌های معتبر فرمان‌های پشتیبانی‌شده را تعریف کند."
+                }
             }
             // Replace atomically where possible; retain the previous working bundle if promotion fails.
             val backup = File(root.parentFile, ".minilm-backup-${System.currentTimeMillis()}")
@@ -112,7 +140,11 @@ internal class MiniLmIntentModelStore(
                 error("MINILM-IMPORT-010: انتقال بسته مدل به پوشه نهایی ناموفق بود.")
             }
             if (hadPrevious) backup.deleteRecursively()
-            return "بسته وارد شد. استنتاج MiniLM فقط وقتی فعال می‌شود که model.onnx یک طبقه‌بند سازگار با WordPiece و برچسب‌های labels.json باشد؛ در غیر این صورت فرمان‌های امن قاعده‌محور ادامه می‌یابند."
+            return if (decisionTrees.isFile) {
+                "مدل تصمیم‌گیری مرحله‌ای وارد شد. توجه: all-MiniLM-L6-v2 انگلیسی است؛ فرمان‌های فارسی با قواعد امن دینا پردازش می‌شوند."
+            } else {
+                "بسته طبقه‌بند MiniLM وارد شد؛ پیش‌بینی‌های نامطمئن به قواعد امن دینا برمی‌گردند."
+            }
         } catch (t: Throwable) {
             staging.deleteRecursively()
             throw t
