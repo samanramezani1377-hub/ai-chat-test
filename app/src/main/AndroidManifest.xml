@@ -28,7 +28,7 @@
                 android:value="Long-running on-device local AI model inference with native GPU runtime" />
         </service>
         <service
-            android:name=".WakeWordForegroundService"
+            android:name=".AlwaysOnKoochikService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
         <activity
