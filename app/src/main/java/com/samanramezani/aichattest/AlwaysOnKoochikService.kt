@@ -515,6 +515,12 @@ class AlwaysOnKoochikService : Service() {
                         .putLong("last_voice_line_at", System.currentTimeMillis())
                         .apply()
                 },
+                onWakeShutdown = {
+                    startService(
+                        Intent(this, AlwaysOnKoochikService::class.java)
+                            .setAction(ACTION_STOP_CONVERSATION),
+                    )
+                },
             )
             voiceController = controller
             val alreadyLoadedAsr = pendingConversationRecognizer
