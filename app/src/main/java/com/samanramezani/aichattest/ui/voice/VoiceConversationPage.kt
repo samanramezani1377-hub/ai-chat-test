@@ -46,6 +46,7 @@ internal fun VoiceConversationPage(
     layaModelReady: Boolean,
     layaStatus: String,
     onImportLaya: () -> Unit,
+    onDownloadLaya: () -> Unit,
     onBack: () -> Unit,
     onImportStt: () -> Unit,
     onImportKoochikModel: () -> Unit,
@@ -110,10 +111,13 @@ internal fun VoiceConversationPage(
                             "مدل تصمیم‌گیری Laya چندمرحله‌ای و کاملاً محلی است: ابتدا نوع درخواست، سپس عملیات دستگاه و در صورت نیاز سطح هدف را انتخاب می‌کند. فرمان‌های ساعت، تاریخ، صدا و روشنایی پیش از مدل گفت‌وگو اجرا می‌شوند. اگر تصمیم مدل مطمئن نباشد، فرمان دستگاه اجرا نمی‌شود و متن اصلی بدون تغییر به مدل گفت‌وگو فرستاده می‌شود. متن درخواست عادی بدون افزودن برچسب تصمیم‌گیری به مدل گفت‌وگو فرستاده می‌شود.",
                             style = MaterialTheme.typography.bodySmall,
                         )
-                        OutlinedButton(onClick = onImportLaya, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                            Text(if (layaModelReady) "جایگزینی مدل Laya INT4" else "وارد کردن مدل Laya INT4 · ZIP")
+                        Button(onClick = onDownloadLaya, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (layaModelReady) "دریافت مجدد و تعمیر مدل رسمی Laya" else "دانلود و نصب خودکار Laya INT4 · حدود ۲۲۰ مگابایت")
                         }
-                        Text("بسته ZIP باید شامل laya-multilingual-int4-layer32-vocab128.onnx و فایل هم‌نام .data، tokenizer/tokenizer.json، tokenizer/tokenizer_config.json، encoder/config.json و rl_agent_config.json باشد. پوشهٔ بالادستی Laya/ مجاز است. مدل را داخل APK قرار نمی‌دهیم؛ واردسازی در حافظه خصوصی برنامه انجام می‌شود. عملیات عددی روی دستگاه اعتبارسنجی می‌شود و پاسخ نهایی فقط از TTS یا مدل گفت‌وگوی جداگانه می‌آید.", style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(onClick = onImportLaya, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text("وارد کردن بسته ZIP از حافظه")
+                        }
+                        Text("دانلود خودکار، فایل‌های رسمی مدل چندزبانه، وزن‌های خارجی، tokenizer و تنظیمات را مستقیم از Hugging Face می‌گیرد؛ دانلود به‌صورت جریانی در حافظه خصوصی برنامه ذخیره و پیش از فعال‌شدن بررسی می‌شود. مدل داخل APK نیست. اگر ZIP کامل را از قبل داری، می‌توانی آن را وارد کنی. بدون نصب موفق Laya تصمیم محلی اجرا نمی‌شود.", style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(
                             onClick = { uriHandler.openUri("https://huggingface.co/androidli/laya-multilingual-onnx-int4/tree/main") },
                             modifier = Modifier.fillMaxWidth(),
