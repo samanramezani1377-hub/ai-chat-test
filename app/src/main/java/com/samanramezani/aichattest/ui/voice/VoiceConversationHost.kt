@@ -442,7 +442,7 @@ internal fun sanitizeAssistantVoiceText(raw: String): String {
         .trim()
 }
 
-internal internal fun shouldInterruptForVoiceBargeIn(
+internal fun shouldInterruptForVoiceBargeIn(
     turnRunning: Boolean,
     assistantSpeaking: Boolean,
     speech: Boolean,
@@ -451,7 +451,7 @@ internal internal fun shouldInterruptForVoiceBargeIn(
     aecActive: Boolean,
 ): Boolean = turnRunning && assistantSpeaking && speech && rms > threshold && aecActive
 
-class VoiceConversationController(
+internal class VoiceConversationController(
     private val context: Context,
     private val container: AppContainer,
     private val decisionEngine: LayaDecisionEngine,
