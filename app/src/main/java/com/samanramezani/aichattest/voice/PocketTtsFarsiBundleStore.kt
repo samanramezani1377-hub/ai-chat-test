@@ -53,7 +53,7 @@ internal class PocketTtsFarsiBundleStore(private val resolver: ContentResolver, 
 
     fun isReady(): Boolean = validateDirectory(root).isEmpty()
     fun status(): String = when {
-        isReady() -> "گراف‌های ONNX، توکنایزر، نرمال‌ساز فارسی و صدای مرجع نصب شده‌اند؛ موتور اجرا هنوز به مکالمه متصل نشده است."
+        isReady() -> "بستهٔ Pocket TTS Farsi v2 معتبر و آمادهٔ انتخاب برای تولید گفتار در مکالمه است."
         !root.exists() -> "بستهٔ Pocket TTS Farsi v2 هنوز وارد نشده است."
         else -> "بسته ناقص است: ${validateDirectory(root).joinToString("، ")}"
     }
@@ -190,7 +190,7 @@ internal class PocketTtsFarsiBundleStore(private val resolver: ContentResolver, 
                 error("POCKET-TTS-IMPORT-011: نصب نهایی ناموفق بود.")
             }
             backup.deleteRecursively()
-            return "بستهٔ Pocket TTS Farsi v2، توکنایزر، نرمال‌ساز فارسی و صدای مرجع وارد و اعتبارسنجی شدند؛ اتصال موتور اجرا به مکالمه هنوز کامل نشده است."
+            return "بستهٔ Pocket TTS Farsi v2، توکنایزر، نرمال‌ساز فارسی و صدای مرجع وارد و اعتبارسنجی شدند؛ موتور برای انتخاب و اجرا در مکالمه آماده است."
         } catch (t: Throwable) {
             stage.deleteRecursively()
             throw t
