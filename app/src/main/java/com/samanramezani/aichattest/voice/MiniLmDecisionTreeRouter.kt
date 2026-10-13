@@ -71,7 +71,7 @@ internal class MiniLmDecisionTreeRouter(private val root: File) : AutoCloseable 
                 "CHAT" -> DinaCommand(DinaIntent.CHAT)
                 else -> null
             }
-            lastError = null
+            if (command != null) lastError = null
             command
         } catch (t: Throwable) {
             lastError = "MINILM-TREE-001: ${t.message ?: t.javaClass.simpleName}"
