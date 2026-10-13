@@ -114,7 +114,11 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
         onSynthesisComplete(SystemClock.elapsedRealtime() - synthesisStartedAtMs)
         if (cancelled.get()) throw CancellationException("TTS interrupted")
         val samples = audio.samples
+        require(samples.isNotEmpty() && samples.any { it > 1e-5f || it < -1e-5f }) {
+            "VOICE-TTS-011: مدل «${entry.title}» برای متن «${normalizedText.take(48)}» صدای قابل پخشی تولید نکرد؛ samples=${samples.size}."
+        }
         val rate = audio.sampleRate
+        require(rate > 0) { "VOICE-TTS-012: نرخ نمونه‌برداری خروجی TTS نامعتبر است: $rate." }
         val minBuffer = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         require(minBuffer > 0) { "VOICE-TTS-003: پیکربندی خروجی صوتی پشتیبانی نمی‌شود." }
         val track = AudioTrack.Builder()
