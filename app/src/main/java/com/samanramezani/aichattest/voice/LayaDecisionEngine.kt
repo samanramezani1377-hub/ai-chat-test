@@ -222,8 +222,9 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
         for (option in optionTokens) {
             markers += ids.size.toLong()
             ids += option
+            // Official build_sequence inserts a separator after every option, not just after the list.
+            ids += tok.sepId
         }
-        ids += tok.sepId
         // Upstream reserves head_max_len for instruction + option token content, excluding
         // the structural [CLS]/[SEP] markers. It does not assert this intermediate length.
         require(markers.size == options.size && ids.size <= maxSequence) {
