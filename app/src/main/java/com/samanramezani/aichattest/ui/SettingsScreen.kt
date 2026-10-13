@@ -137,7 +137,7 @@ private fun CloudflareProviderSettings(onProviderChanged: () -> Unit, sharedStor
     var remoteModels by remember { mutableStateOf(emptyList<ProviderModel>()) }
     var loadingModels by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val modelChoices = remember(remoteModels) { (remoteModels + CloudflareProvider.suggestedModels).distinctBy { it.id } }
+    val modelChoices = remember(remoteModels) { remoteModels.distinctBy { it.id } }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("مدل ابری و API", style = MaterialTheme.typography.titleLarge)
@@ -179,7 +179,10 @@ private fun CloudflareProviderSettings(onProviderChanged: () -> Unit, sharedStor
                             CloudflareProvider().listModels(CloudflareConfig(accountId, apiToken, model, mode))
                         }
                         remoteModels = fetched
-                        message = if (fetched.isEmpty()) "مدل قابل‌استفاده‌ای از حساب دریافت نشد؛ شناسه مدل را می‌توانی دستی وارد کنی." else "${fetched.size} مدل متنی از حساب Cloudflare دریافت شد."
+                        if (CloudflareProvider.isKnownDeprecatedModelId(model)) {
+                            model = fetched.firstOrNull()?.id ?: CloudflareProvider.DEFAULT_MODEL
+                        }
+                        message = if (fetched.isEmpty()) "مدل متنی فعالی از حساب دریافت نشد؛ مجوز Workers AI و توکن را بررسی کن. مدل‌های منسوخ در فهرست نمایش داده نمی‌شوند." else "${fetched.size} مدل متنی فعال از حساب Cloudflare دریافت شد؛ مدل‌های منسوخ حذف شده‌اند."
                         failed = false
                         modelMenu = true
                     } catch (t: Throwable) {
@@ -201,6 +204,9 @@ private fun CloudflareProviderSettings(onProviderChanged: () -> Unit, sharedStor
                         val next = CloudflareConfig(accountId, apiToken, model, mode)
                         if (mode == InferenceProviderMode.CLOUDFLARE) {
                             require(accountId.isNotBlank() && apiToken.isNotBlank() && model.isNotBlank()) { "شناسه حساب، توکن API و شناسه مدل را کامل وارد کن." }
+                            require(!CloudflareProvider.isKnownDeprecatedModelId(model)) {
+                                "این مدل Cloudflare منسوخ شده است؛ ابتدا فهرست مدل‌های فعال را بارگیری و یک مدل دیگر انتخاب کن."
+                            }
                         }
                         store.save(next)
                         message = if (mode == InferenceProviderMode.CLOUDFLARE) "Cloudflare انتخاب شد؛ پیام‌های بعدی با مدل ابری اجرا می‌شوند." else "مدل محلی انتخاب شد؛ اجرای ابری غیرفعال است."
