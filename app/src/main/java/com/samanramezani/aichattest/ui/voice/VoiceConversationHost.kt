@@ -453,7 +453,12 @@ internal class VoiceConversationController(
         }
     }
 
-    fun start(stt: VoiceModelEntry, ttsModel: VoiceModelEntry) {
+    fun start(
+        stt: VoiceModelEntry,
+        ttsModel: VoiceModelEntry,
+        initialUtterance: String? = null,
+        acknowledgeWake: Boolean = false,
+    ) {
         if (closed || microphone != null || !startInProgress.compareAndSet(false, true)) return
         val startEpoch = lifecycleEpoch.get()
         scope.launch {
@@ -601,6 +606,16 @@ internal class VoiceConversationController(
                         }
                     }
                 }
+                if (acknowledgeWake) {
+                    val initial = initialUtterance?.trim().orEmpty()
+                    if (initial.isNotBlank()) {
+                        onLine("شما", initial)
+                        turnRunning.set(true)
+                        turnJob = scope.launch { processTurn(initial, acknowledgeWake = true) }
+                    } else {
+                        scope.launch { speakWakeAcknowledgement() }
+                    }
+                }
             } catch (t: Throwable) {
                 startInProgress.set(false)
                 onDiagnostic("VOICE-START-001\n${t.stackTraceToString()}")
@@ -616,7 +631,7 @@ internal class VoiceConversationController(
         }
     }
 
-    private suspend fun processTurn(utterance: String) {
+    private suspend fun processTurn(utterance: String, acknowledgeWake: Boolean = false) {
         // A cancelled native TTS call may finish its current ONNX inference before returning.
         // Never enter the same native TTS object concurrently for a barge-in replacement turn.
         speechJob?.takeIf { !it.isCompleted }?.join()
@@ -659,6 +674,10 @@ internal class VoiceConversationController(
             }
         }
         speechJob = activeSpeechJob
+        if (acknowledgeWake) {
+            queue.trySend("متوجه شدم")
+            onLine("دستیار", "متوجه شدم")
+        }
         val pending = StringBuilder()
         fun enqueueCompleteSentences(token: String, flush: Boolean = false) {
             for (char in token) {
@@ -752,6 +771,31 @@ internal class VoiceConversationController(
                 onStatus("در حال پردازش گفتار جدید…")
                 turnJob = scope.launch { processTurn(pending) }
             }
+        }
+    }
+
+    private suspend fun speakWakeAcknowledgement() {
+        val engine = tts ?: return
+        val cancelled = AtomicBoolean(false)
+        try {
+            engine.speak(
+                "متوجه شدم",
+                cancelled,
+                onStarted = {
+                    lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
+                    speaking.set(true)
+                },
+                onSynthesisComplete = { synthesisMs ->
+                    onDiagnostic("VOICE-TTS-ACK: synthesisMs=$synthesisMs")
+                },
+            )
+            onLine("دستیار", "متوجه شدم")
+        } catch (t: Throwable) {
+            onDiagnostic("VOICE-TTS-ACK-001: ${t.stackTraceToString()}")
+            onStatus("VOICE-TTS-ACK-001: پخش تأیید بیدارباش ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
+        } finally {
+            speaking.set(false)
+            lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
         }
     }
 
