@@ -59,7 +59,10 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     val uiScope = rememberCoroutineScope()
     val store = remember(context) { VoiceModelStore(context.contentResolver, File(context.filesDir, "voice-models")) }
     val miniLmStore = remember(context) {
-        MiniLmIntentModelStore(context.contentResolver, File(context.filesDir, "voice-models/minilm-intent"))
+        MiniLmIntentModelStore(context.contentResolver, File(context.filesDir, "voice-models/minilm-intent")).also {
+            // Copy the version-controlled default once. A user/imported tree is never overwritten.
+            runCatching { it.ensureDefaultDecisionTree(context.assets) }
+        }
     }
     var miniLmReady by remember { mutableStateOf(miniLmStore.isReady()) }
     var miniLmStatus by remember {
