@@ -56,6 +56,7 @@ class AlwaysOnKoochikService : Service() {
         const val PREF_WAKE_STATE = "wake_detection_state"
         const val PREF_LAST_STATUS = "conversation_last_status"
         const val PREF_LAST_DIAGNOSTIC = "conversation_last_diagnostic"
+        const val PREF_MIC_LISTENING = "conversation_mic_listening"
         const val PREF_ENABLED = "enabled"
 
         fun start(context: Context) {
@@ -428,6 +429,7 @@ class AlwaysOnKoochikService : Service() {
                 .putString(PREF_STT_MODEL_ID, stt.id)
                 .putString(PREF_TTS_MODEL_ID, tts.id)
                 .putString(PREF_CONVERSATION_STATE, "CONVERSATION_START_REQUESTED")
+                .putBoolean(PREF_MIC_LISTENING, false)
                 .apply()
             val controller = VoiceConversationController(
                 context = this,
@@ -441,8 +443,7 @@ class AlwaysOnKoochikService : Service() {
                         status.contains("متوقف شد") -> "CONVERSATION_STOPPED"
                         status.contains("گوش‌دادن") -> "CONVERSATION_ACTIVE"
                         status.contains("در حال پخش") || status.contains("در حال پردازش") ||
-                            status.contains("در حال شنیدن") || status.contains("پاسخ آماده است") ||
-                            status.contains("گفتار جدید دریافت شد") -> "CONVERSATION_ACTIVE"
+                            status.contains("در حال شنیدن") || status.contains("پاسخ آماده است") -> "CONVERSATION_ACTIVE"
                         else -> prefs.getString(PREF_CONVERSATION_STATE, "CONVERSATION_STARTING").orEmpty()
                     }
                     prefs.edit().putString(PREF_LAST_STATUS, status).putString(PREF_CONVERSATION_STATE, state).apply()
@@ -454,7 +455,10 @@ class AlwaysOnKoochikService : Service() {
                     Log.i(TAG, detail)
                 },
                 onListening = { active ->
-                    prefs.edit().putString(PREF_CONVERSATION_STATE, if (active) "CONVERSATION_ACTIVE" else "CONVERSATION_NOT_LISTENING").apply()
+                    prefs.edit()
+                        .putBoolean(PREF_MIC_LISTENING, active)
+                        .putString(PREF_CONVERSATION_STATE, if (active) "CONVERSATION_ACTIVE" else "CONVERSATION_NOT_LISTENING")
+                        .apply()
                     if (active) notifyStatus("مکالمه فعال است؛ مدل محلی آماده دریافت گفتار است.")
                 },
                 onLine = { speaker, line ->
@@ -489,6 +493,9 @@ class AlwaysOnKoochikService : Service() {
         worker = null
         runCatching { voiceController?.close() }
         voiceController = null
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+            .putBoolean(PREF_MIC_LISTENING, false)
+            .apply()
         transitioningToConversation = false
         runCatching { acknowledgementThread?.interrupt() }
         runCatching { acknowledgementTts?.close() }
