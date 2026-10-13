@@ -51,6 +51,7 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
     }
 
     private val lock = Any()
+    private val decisionTreeRouter by lazy { MiniLmDecisionTreeRouter(root) }
     @Volatile private var cachedModelPath: String? = null
     @Volatile var lastError: String? = null
         private set
@@ -65,6 +66,14 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
     /** Returns a high-confidence model prediction, or null to use the safe rules fallback. */
     fun classify(text: String): DinaCommand? = synchronized(lock) {
         if (!isReady() || text.isBlank()) return@synchronized null
+        if (File(root, "decision_trees.json").isFile) {
+            val decision = runCatching { decisionTreeRouter.classify(text) }
+                .onFailure { lastError = "MINILM-TREE-001: ${it.message ?: it.javaClass.simpleName}" }
+                .getOrNull()
+            if (decisionTreeRouter.lastError != null) lastError = decisionTreeRouter.lastError
+            else if (decision != null) lastError = null
+            return@synchronized decision
+        }
         try {
             ensureLoaded()
             val env = environment ?: return@synchronized null
@@ -185,6 +194,7 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
                 BpeTokenizer(vocab, merges, actualCls, actualSep, actualUnk, actualPad)
             }
         }
+        require(File(root, "labels.json").isFile) { "MINILM-INFER-003: labels.json در بستهٔ طبقه‌بند پیدا نشد." }
         labels = parseLabels(File(root, "labels.json").readText(Charsets.UTF_8))
         require(labels.isNotEmpty() && labels.all { it in ALLOWED_LABELS } && labels.contains("CHAT")) {
             "MINILM-INFER-003: labels.json باید فقط برچسب‌های معتبر و CHAT را شامل شود."
@@ -226,7 +236,10 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
         environment = null
     }
 
-    override fun close() = synchronized(lock) { closeLoaded() }
+    override fun close() = synchronized(lock) {
+        closeLoaded()
+        if (File(root, "decision_trees.json").isFile) runCatching { decisionTreeRouter.close() }
+    }
 
     private data class Encoded(val ids: LongArray, val mask: LongArray, val typeIds: LongArray)
     private interface TextTokenizer {
