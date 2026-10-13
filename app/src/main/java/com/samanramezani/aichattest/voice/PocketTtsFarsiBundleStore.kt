@@ -36,6 +36,7 @@ internal class PocketTtsFarsiBundleStore(private val resolver: ContentResolver, 
             // through this SentencePiece model, and synthesis needs a reference
             // recording to initialize the speaker-conditioning KV cache.
             "male_hello.wav" to 100_000L,
+            "normalize_fa.py" to 1_000L,
             "mimi_decoder_step_kv.onnx" to 100_000L,
             "mimi_decoder_step_kv.onnx.data" to 10_000_000L,
             "mimi_encoder.onnx" to 100_000L,
@@ -44,6 +45,7 @@ internal class PocketTtsFarsiBundleStore(private val resolver: ContentResolver, 
             "weights.npz" to 1_000_000L,
         )
         private val sourceUrls = mapOf(
+            "normalize_fa.py" to "https://huggingface.co/mehdi-hf/pocket-tts-farsi-v2/resolve/main/normalize_fa.py",
             "male_hello.wav" to "https://raw.githubusercontent.com/Nimaone/persian_tts/main/voices/male_hello.wav",
             "tokenizer_ph.model" to "https://huggingface.co/mehdi-hf/pocket-tts-farsi-v2/resolve/main/tokenizer_ph.model?download=true",
         )
@@ -51,7 +53,7 @@ internal class PocketTtsFarsiBundleStore(private val resolver: ContentResolver, 
 
     fun isReady(): Boolean = validateDirectory(root).isEmpty()
     fun status(): String = when {
-        isReady() -> "فایل‌های ONNX، توکنایزر و صدای مرجع نصب و اعتبارسنجی شده‌اند؛ موتور اجرا هنوز به مکالمه متصل نشده است."
+        isReady() -> "گراف‌های ONNX، توکنایزر، نرمال‌ساز فارسی و صدای مرجع نصب شده‌اند؛ موتور اجرا هنوز به مکالمه متصل نشده است."
         !root.exists() -> "بستهٔ Pocket TTS Farsi v2 هنوز وارد نشده است."
         else -> "بسته ناقص است: ${validateDirectory(root).joinToString("، ")}"
     }
@@ -182,7 +184,7 @@ internal class PocketTtsFarsiBundleStore(private val resolver: ContentResolver, 
                 error("POCKET-TTS-IMPORT-011: نصب نهایی ناموفق بود.")
             }
             backup.deleteRecursively()
-            return "بستهٔ Pocket TTS Farsi v2، توکنایزر و صدای مرجع وارد و اعتبارسنجی شدند؛ اتصال موتور اجرا به مکالمه هنوز کامل نشده است."
+            return "بستهٔ Pocket TTS Farsi v2، توکنایزر، نرمال‌ساز فارسی و صدای مرجع وارد و اعتبارسنجی شدند؛ اتصال موتور اجرا به مکالمه هنوز کامل نشده است."
         } catch (t: Throwable) {
             stage.deleteRecursively()
             throw t
