@@ -33,6 +33,22 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 
 /**
+ * Wake-word control phrase: stop the current dialogue without disabling always-on wake listening.
+ * The command is already extracted after «دینا», so match only the remaining short phrase.
+ */
+internal fun isDinaSleepCommand(rawCommand: String): Boolean {
+    val normalized = rawCommand
+        .lowercase(java.util.Locale.ROOT)
+        .replace('ي', 'ی')
+        .replace('ك', 'ک')
+        .replace('‌', ' ')
+        .trim()
+        .replace(Regex("""[.!؟?،,؛;]+$"""), "")
+        .replace(Regex("""\\s+"""), " ")
+    return normalized in setOf("خاموش شو", "خاموش", "برو بخواب", "فعلا خاموش شو")
+}
+
+/**
  * Always-on local Persian speech listener. Shenava Koochik ASR recognizes each bounded utterance;
  * only the text after "دینا" is handed to the assistant. Utterance audio/transcripts are discarded
  * when the utterance ends if the wake phrase was not present; no transcript history is persisted.
@@ -87,6 +103,9 @@ class AlwaysOnKoochikService : Service() {
     @Volatile private var wakeLock: PowerManager.WakeLock? = null
     @Volatile private var acknowledgementTts: LocalPiperTts? = null
     @Volatile private var acknowledgementThread: Thread? = null
+    // Transfer the already-loaded wake recognizer into the conversation controller instead of
+    // loading the same large Shenava model a second time immediately after wake detection.
+    @Volatile private var pendingConversationRecognizer: LocalNemoCtcAsr? = null
     private val acknowledgementPlayed = AtomicBoolean(false)
 
     override fun onCreate() {
@@ -274,13 +293,28 @@ class AlwaysOnKoochikService : Service() {
                 // if endpoint decoding omitted a phrase already detected in the rolling window.
                 val finalCommand = command ?: if (wakeSeenInRollingWindow) lastProbeCommand else null
                 if (finalCommand != null) {
+                    if (isDinaSleepCommand(finalCommand)) {
+                        // This is a conversation-level stop command, not a request to disable
+                        // always-on mode. Tear down the current turn and re-arm the wake listener.
+                        detectedCommand = null
+                        transitioningToConversation = false
+                        running.set(false)
+                        updateStatus(
+                            "دینا مکالمه را متوقف کرد؛ شنود کلمهٔ بیدارباش همچنان روشن می‌ماند.",
+                            "ALWAYS_ON_REARMING",
+                            "wakeCommand=STOP_CONVERSATION; enabled=true; transcriptPersisted=false",
+                        )
+                        break
+                    }
                     detectedCommand = finalCommand
                     transitioningToConversation = true
                     running.set(false)
+                    // Transfer this loaded recognizer; listenForDina's finally block must not release it.
+                    pendingConversationRecognizer = activeRecognizer
                     updateStatus(
-                        "«دینا» تأیید شد؛ فقط متن بعد از آن برای پردازش محلی ارسال می‌شود.",
+                        "«دینا» تأیید شد؛ مدل شنوا بدون بارگذاری مجدد به مکالمه منتقل می‌شود.",
                         "DINA_DETECTED",
-                        "utteranceChars=${transcript.length}; commandChars=${finalCommand.length}; transcriptPersisted=false",
+                        "utteranceChars=${transcript.length}; commandChars=${finalCommand.length}; sttReused=true; transcriptPersisted=false",
                     )
                     break
                 }
@@ -298,8 +332,18 @@ class AlwaysOnKoochikService : Service() {
             running.set(false)
             runCatching { mic?.stop() }
             microphone = null
-            runCatching { recognizer?.close() }
+            // A wake-to-conversation handoff transfers ownership to VoiceConversationController.
+            if (recognizer !== pendingConversationRecognizer) runCatching { recognizer?.close() }
             if (worker === Thread.currentThread()) worker = null
+        }
+
+        if (detectedCommand == null &&
+            getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_ENABLED, false) &&
+            voiceController == null && !transitioningToConversation
+        ) {
+            // The special «دینا خاموش شو» command stops the current dialogue only; keep the
+            // service preference enabled and return to the existing wake-listening loop.
+            startListenerIfNeeded()
         }
 
         if (detectedCommand != null) {
@@ -473,12 +517,15 @@ class AlwaysOnKoochikService : Service() {
                 },
             )
             voiceController = controller
+            val alreadyLoadedAsr = pendingConversationRecognizer
+            pendingConversationRecognizer = null
             controller.start(
                 stt,
                 tts,
                 initialUtterance = initialUtterance,
                 acknowledgeWake = acknowledgeWake,
                 speechStartGate = speechStartGate,
+                preloadedAsr = alreadyLoadedAsr,
             )
             true
         } catch (t: Throwable) {
@@ -496,6 +543,8 @@ class AlwaysOnKoochikService : Service() {
         worker = null
         runCatching { voiceController?.close() }
         voiceController = null
+        runCatching { pendingConversationRecognizer?.close() }
+        pendingConversationRecognizer = null
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
             .putBoolean(PREF_MIC_LISTENING, false)
             .apply()
