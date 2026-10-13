@@ -169,12 +169,13 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 }
                 else -> return@synchronized null
             }
-            lastTrace = trace.toList() + lastTrace
+            val fullTrace = trace.toList() + lastTrace
+            lastTrace = fullTrace
             lastError = null
             // Laya's resident memory is large. Keep it warm only after local device actions;
             // close the session before the chat model is loaded, and also on every abstention.
             retainLoadedSession = command.intent != DinaIntent.CHAT
-            Decision(command, domain.id, domain.confidence, trace.toList())
+            Decision(command, domain.id, domain.confidence, fullTrace)
         } catch (t: Throwable) {
             val causes = generateSequence(t as Throwable?) { it.cause }
                 .take(8)
@@ -299,7 +300,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 val top = ranked.take(3).joinToString(";") { index ->
                     "${options[index].id}:logit=${"%.4f".format(Locale.US, logits[index])},p=${"%.4f".format(Locale.US, probs[index])}"
                 }
-                val detail = "stage=${instructions.take(48).replace(Regex("\\s+"), " ")} options=${options.size} inputTokens=${ids.size} stateTokens=${stateIds.size} headTokens=${ids.size - stateIds.size - 1} temperature=${"%.3f".format(Locale.US, activeTemperature)} calibration=$activeCalibration confidence=${"%.3f".format(Locale.US, confidence)} margin=${"%.3f".format(Locale.US, margin)}$actSummary top=[$top]"
+                val detail = "stage=${instructions.take(48).replace(Regex("\\s+"), " ")} qtype=choice(0) options=${options.size} inputTokens=${ids.size} stateTokens=${stateIds.size} headTokens=${ids.size - stateIds.size - 1} outputs=${active.outputNames.joinToString(",")} temperature=${"%.3f".format(Locale.US, activeTemperature)} calibration=$activeCalibration confidence=${"%.3f".format(Locale.US, confidence)} margin=${"%.3f".format(Locale.US, margin)}$actSummary top=[$top]"
                 lastTrace = lastTrace + detail
                 // Keep the app's conservative action gate on the top probability and margin.
                 // Entropy confidence is the official Laya confidence metric, but it is not
@@ -349,6 +350,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
         require(names.containsAll(required)) {
             "LAYA-INFER-006: ورودی‌های مدل با قالب Laya سازگار نیستند؛ inputs=${names.joinToString()}"
         }
+        lastTrace = lastTrace + "tokenizerBackend=HuggingFace-Tokenizers-Rust-0.22.1 clsId=${tokenizer!!.clsId} sepId=${tokenizer!!.sepId} maskId=${tokenizer!!.maskId} max_len=$maxSequence head_max_len=$headMaxSequence"
         cachedModelKey = key
     }
 
