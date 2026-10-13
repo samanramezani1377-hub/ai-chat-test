@@ -245,7 +245,7 @@ class AlwaysOnKoochikService : Service() {
                             "DINA_DETECTED_RECORDING",
                             "probeWindowMs=${rollingCount * 1000 / 16000}; probeChars=${probe.length}; persistentTranscript=false",
                         )
-                        speakAcknowledgementAsync()
+                        // Acknowledge only after the complete utterance is decoded and handed to the dialogue controller.
                     }
                 }
 
@@ -287,37 +287,33 @@ class AlwaysOnKoochikService : Service() {
 
         if (detectedCommand != null) {
             val command = detectedCommand.orEmpty()
-            val ackThread = acknowledgementThread
-            var ackAlreadyPlayed = acknowledgementPlayed.get()
-            val ackStillPlaying = ackThread?.isAlive == true
-            val speechGate = if (ackStillPlaying) CompletableDeferred<Unit>() else null
-            if (ackStillPlaying) {
-                val gate = requireNotNull(speechGate)
-                Thread({
-                    runCatching { ackThread?.join() }
-                    // Keep the preloaded TTS alive until its acknowledgement playback has ended.
-                    runCatching { acknowledgementTts?.close() }
-                    acknowledgementTts = null
-                    gate.complete(Unit)
-                }, "Dina-Acknowledgement-Cleanup").apply {
-                    isDaemon = true
-                    start()
-                }
-            } else {
-                if (ackThread != null) runCatching { ackThread.join() }
-                ackAlreadyPlayed = acknowledgementPlayed.get()
-                runCatching { acknowledgementTts?.close() }
-                acknowledgementTts = null
-            }
-            val acknowledgeInController = ackThread == null || (!ackAlreadyPlayed && !ackStillPlaying)
+            // Start the dialogue turn first so the command is submitted to the model. Gate assistant
+            // speech until the local acknowledgement finishes, preventing the two voices from overlapping.
+            val speechGate = CompletableDeferred<Unit>()
             val started = startVoiceConversationInService(
                 command,
-                acknowledgeWake = acknowledgeInController,
+                acknowledgeWake = false,
                 speechStartGate = speechGate,
             )
             transitioningToConversation = false
             if (started) {
-                notifyStatus("«دینا» شنیده شد؛ «متوجه شدم» با TTS محلی گفته می‌شود و درخواست پردازش می‌شود.")
+                speakAcknowledgementAsync()
+                val ackThread = acknowledgementThread
+                Thread({
+                    try {
+                        if (ackThread != null) ackThread.join()
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    } finally {
+                        runCatching { acknowledgementTts?.close() }
+                        acknowledgementTts = null
+                        speechGate.complete(Unit)
+                    }
+                }, "Dina-Acknowledgement-Cleanup").apply {
+                    isDaemon = true
+                    start()
+                }
+                notifyStatus("«دینا» شنیده شد؛ جمله به مدل گفت‌وگو ارسال شد و سپس «متوجه شدم» با TTS محلی پخش می‌شود.")
                 runCatching {
                     startActivity(Intent(this, MainActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
