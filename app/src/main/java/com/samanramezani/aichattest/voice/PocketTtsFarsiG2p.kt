@@ -62,8 +62,7 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
                 } catch (t: Throwable) {
                     throw IllegalStateException(
                         "POCKET-TTS-G2P-002: خروجی رمزگذار قابل تبدیل به Tensor نیست؛ " +
-                            "output index 0, valueClass=${output.javaClass.name}, " +
-                            "outputName=${result[0].key}, outputInfo=${result[0].value.info}: ${t.message}",
+                            "output index 0, valueClass=${output.javaClass.name}: ${t.message}",
                         t
                     )
                 }
