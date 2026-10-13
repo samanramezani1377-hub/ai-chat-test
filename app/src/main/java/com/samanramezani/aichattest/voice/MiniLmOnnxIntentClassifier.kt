@@ -37,7 +37,7 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
     @Volatile private var cachedModelPath: String? = null
     private var environment: OrtEnvironment? = null
     private var session: OrtSession? = null
-    private var tokenizer: WordPieceTokenizer? = null
+    private var tokenizer: TextTokenizer? = null
     private var labels: List<String> = emptyList()
 
     fun isReady(): Boolean = File(root, "model.onnx").isFile &&
@@ -114,10 +114,11 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
         closeLoaded()
         val tokenizerJson = JSONObject(File(root, "tokenizer.json").readText(Charsets.UTF_8))
         val modelJson = tokenizerJson.optJSONObject("model") ?: error("tokenizer.json فاقد بخش model است.")
-        require(modelJson.optString("type") == "WordPiece") {
-            "MINILM-INFER-001: tokenizer فعلاً باید از نوع WordPiece باشد."
+        val tokenizerType = modelJson.optString("type")
+        require(tokenizerType == "WordPiece" || tokenizerType == "BPE") {
+            "MINILM-INFER-001: tokenizer باید از نوع WordPiece یا BPE باشد."
         }
-        val vocabObject = modelJson.optJSONObject("vocab") ?: error("واژگان WordPiece پیدا نشد.")
+        val vocabObject = modelJson.optJSONObject("vocab") ?: error("واژگان tokenizer پیدا نشد.")
         val vocab = HashMap<String, Int>(vocabObject.length())
         val keys = vocabObject.keys()
         while (keys.hasNext()) {
@@ -125,23 +126,34 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
             vocab[key] = vocabObject.getInt(key)
         }
         val addedTokens = tokenizerJson.optJSONArray("added_tokens") ?: JSONArray()
-        var cls = "[CLS]"
-        var sep = "[SEP]"
-        var unk = modelJson.optString("unk_token", "[UNK]")
-        var pad = "[PAD]"
-        for (i in 0 until addedTokens.length()) {
-            val token = addedTokens.optJSONObject(i) ?: continue
-            when (token.optString("content")) {
-                "[CLS]" -> cls = token.optString("content")
-                "[SEP]" -> sep = token.optString("content")
-                "[UNK]" -> unk = token.optString("content")
-                "[PAD]" -> pad = token.optString("content")
+        val cls = when { vocab.containsKey("[CLS]") -> "[CLS]"; vocab.containsKey("<s>") -> "<s>"; else -> "" }
+        val sep = when { vocab.containsKey("[SEP]") -> "[SEP]"; vocab.containsKey("</s>") -> "</s>"; else -> "" }
+        val unk = (modelJson.opt("unk_token") as? String)?.takeIf { vocab.containsKey(it) }
+            ?: when { vocab.containsKey("[UNK]") -> "[UNK]"; vocab.containsKey("<unk>") -> "<unk>"; else -> "" }
+        val pad = when { vocab.containsKey("[PAD]") -> "[PAD]"; vocab.containsKey("<pad>") -> "<pad>"; else -> "" }
+        // Added-token metadata is authoritative for custom special token names.
+        val specialContents = (0 until addedTokens.length()).mapNotNull { addedTokens.optJSONObject(it)?.optString("content") }
+        val actualCls = cls.takeIf { it.isNotEmpty() } ?: specialContents.firstOrNull { it.equals("[CLS]", true) || it == "<s>" }.orEmpty()
+        val actualSep = sep.takeIf { it.isNotEmpty() } ?: specialContents.firstOrNull { it.equals("[SEP]", true) || it == "</s>" }.orEmpty()
+        val actualUnk = unk.takeIf { it.isNotEmpty() } ?: specialContents.firstOrNull { it.equals("[UNK]", true) || it == "<unk>" }.orEmpty()
+        val actualPad = pad.takeIf { it.isNotEmpty() } ?: specialContents.firstOrNull { it.equals("[PAD]", true) || it == "<pad>" }.orEmpty()
+        require(listOf(actualCls, actualSep, actualUnk, actualPad).all { it.isNotEmpty() && vocab.containsKey(it) }) {
+            "MINILM-INFER-002: واژگان باید توکن‌های شروع، پایان، ناشناخته و padding را داشته باشد."
+        }
+        tokenizer = when (tokenizerType) {
+            "WordPiece" -> WordPieceTokenizer(vocab, actualCls, actualSep, actualUnk, actualPad)
+            else -> {
+                val mergeArray = modelJson.optJSONArray("merges") ?: JSONArray()
+                val merges = (0 until mergeArray.length()).mapNotNull { i ->
+                    when (val item = mergeArray.opt(i)) {
+                        is String -> item
+                        is JSONArray -> if (item.length() >= 2) "${item.getString(0)} ${item.getString(1)}" else null
+                        else -> null
+                    }
+                }
+                BpeTokenizer(vocab, merges, actualCls, actualSep, actualUnk, actualPad)
             }
         }
-        require(vocab.containsKey(cls) && vocab.containsKey(sep) && vocab.containsKey(unk) && vocab.containsKey(pad)) {
-            "MINILM-INFER-002: واژگان باید توکن‌های CLS، SEP، UNK و PAD را داشته باشد."
-        }
-        tokenizer = WordPieceTokenizer(vocab, cls, sep, unk, pad)
         labels = parseLabels(File(root, "labels.json").readText(Charsets.UTF_8))
         require(labels.isNotEmpty() && labels.all { it in ALLOWED_LABELS } && labels.contains("CHAT")) {
             "MINILM-INFER-003: labels.json باید فقط برچسب‌های معتبر و CHAT را شامل شود."
@@ -186,6 +198,24 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
     override fun close() = synchronized(lock) { closeLoaded() }
 
     private data class Encoded(val ids: LongArray, val mask: LongArray, val typeIds: LongArray)
+    private interface TextTokenizer {
+        fun encode(input: String, maxLength: Int): Encoded
+    }
+
+    private fun encodeTokens(tokens: List<String>, vocab: Map<String, Int>, cls: String, sep: String, unk: String, pad: String, maxLength: Int): Encoded {
+        val bounded = ArrayList<String>()
+        bounded += cls
+        bounded.addAll(tokens.take(maxLength - 2))
+        bounded += sep
+        val ids = LongArray(maxLength) { vocab.getValue(pad).toLong() }
+        val mask = LongArray(maxLength)
+        val types = LongArray(maxLength)
+        for (i in 0 until minOf(bounded.size, maxLength)) {
+            ids[i] = (vocab[bounded[i]] ?: vocab.getValue(unk)).toLong()
+            mask[i] = 1L
+        }
+        return Encoded(ids, mask, types)
+    }
 
     private class WordPieceTokenizer(
         private val vocab: Map<String, Int>,
@@ -193,24 +223,14 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
         private val sepToken: String,
         private val unkToken: String,
         private val padToken: String,
-    ) {
-        fun encode(input: String, maxLength: Int): Encoded {
+    ) : TextTokenizer {
+        override fun encode(input: String, maxLength: Int): Encoded {
             val tokens = ArrayList<String>()
-            tokens += clsToken
             for (basic in basicTokenize(input)) {
-                val pieces = wordPiece(basic)
-                tokens.addAll(pieces)
-                if (tokens.size >= maxLength - 1) break
+                tokens.addAll(wordPiece(basic))
+                if (tokens.size >= maxLength - 2) break
             }
-            tokens += sepToken
-            val ids = LongArray(maxLength) { vocab.getValue(padToken).toLong() }
-            val mask = LongArray(maxLength)
-            val types = LongArray(maxLength)
-            for (i in 0 until minOf(tokens.size, maxLength)) {
-                ids[i] = (vocab[tokens[i]] ?: vocab.getValue(unkToken)).toLong()
-                mask[i] = 1L
-            }
-            return Encoded(ids, mask, types)
+            return encodeTokens(tokens.take(maxLength - 2), vocab, clsToken, sepToken, unkToken, padToken, maxLength)
         }
 
         private fun basicTokenize(input: String): List<String> {
@@ -225,10 +245,7 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
             for (char in input.lowercase(Locale.ROOT)) {
                 when {
                     char.isWhitespace() || char.isISOControl() -> flush()
-                    char.isPunctuationLike() -> {
-                        flush()
-                        out += char.toString()
-                    }
+                    char.isPunctuationLike() -> { flush(); out += char.toString() }
                     else -> current.append(char)
                 }
             }
@@ -249,10 +266,7 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
                 var found: String? = null
                 while (start < end) {
                     val candidate = (if (start == 0) "" else "##") + word.substring(start, end)
-                    if (vocab.containsKey(candidate)) {
-                        found = candidate
-                        break
-                    }
+                    if (vocab.containsKey(candidate)) { found = candidate; break }
                     end--
                 }
                 if (found == null) return listOf(unkToken)
@@ -260,6 +274,56 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
                 start = end
             }
             return pieces
+        }
+    }
+
+    /** Supports the SentencePiece-style BPE tokenizer used by XLM-R-based multilingual MiniLM models. */
+    private class BpeTokenizer(
+        private val vocab: Map<String, Int>,
+        mergeLines: List<String>,
+        private val clsToken: String,
+        private val sepToken: String,
+        private val unkToken: String,
+        private val padToken: String,
+    ) : TextTokenizer {
+        private val ranks = mergeLines.mapIndexedNotNull { index, line ->
+            val split = line.trim().split(Regex("\\s+"), limit = 2)
+            if (split.size == 2) (split[0] to split[1]) to index else null
+        }.toMap()
+
+        override fun encode(input: String, maxLength: Int): Encoded {
+            val normalized = input.replace(Regex("\\s+"), " ").trim()
+            val words = normalized.split(' ').filter { it.isNotBlank() }
+            val pieces = ArrayList<String>()
+            for (word in words) {
+                val token = "▁" + word
+                pieces.addAll(bpe(token))
+                if (pieces.size >= maxLength - 2) break
+            }
+            return encodeTokens(pieces.take(maxLength - 2), vocab, clsToken, sepToken, unkToken, padToken, maxLength)
+        }
+
+        private fun bpe(token: String): List<String> {
+            var pieces = token.map { it.toString() }
+            if (pieces.any { it !in vocab }) {
+                // Prefer exact whole-token and unknown fallback before emitting invalid character IDs.
+                if (token in vocab) return listOf(token)
+                if (pieces.any { it !in vocab }) return listOf(unkToken)
+            }
+            while (pieces.size > 1) {
+                var bestIndex = -1
+                var bestRank = Int.MAX_VALUE
+                for (i in 0 until pieces.size - 1) {
+                    val rank = ranks[pieces[i] to pieces[i + 1]] ?: continue
+                    if (rank < bestRank) { bestRank = rank; bestIndex = i }
+                }
+                if (bestIndex < 0) break
+                pieces = pieces.toMutableList().also {
+                    it[bestIndex] = it[bestIndex] + it[bestIndex + 1]
+                    it.removeAt(bestIndex + 1)
+                }
+            }
+            return if (pieces.all { it in vocab }) pieces else listOf(unkToken)
         }
     }
 }
