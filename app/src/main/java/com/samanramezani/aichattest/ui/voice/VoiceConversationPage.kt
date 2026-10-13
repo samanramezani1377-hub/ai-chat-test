@@ -107,13 +107,13 @@ internal fun VoiceConversationPage(
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("۱. فرمان‌های محلی فارسی · MiniLM", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "فرمان‌های ساعت، تاریخ، صدا و نور صفحه پیش از مدل گفت‌وگو بررسی می‌شوند. اگر بستهٔ معتبر و سازگار MiniLM وارد شده باشد، طبقه‌بند ONNX روی دستگاه با آستانهٔ اطمینان بالا اجرا می‌شود؛ در حالت نامطمئن یا نبودن مدل، قواعد محافظه‌کارانهٔ محلی استفاده می‌شوند. درخواست‌های عادی با متن اصلی و بدون برچسب به مدل گفت‌وگو می‌روند.",
+                            "فرمان‌های ساعت، تاریخ، صدا و نور صفحه پیش از مدل گفت‌وگو بررسی می‌شوند. ZIP می‌تواند طبقه‌بند آموزش‌دیده یا مدل embedding همراه درخت تصمیم چندمرحله‌ای باشد. تصمیم نامطمئن به قواعد امن محلی برمی‌گردد. all-MiniLM-L6-v2 انگلیسی است؛ برای متن فارسی از قواعد فارسی استفاده می‌شود و کیفیت تصمیم‌گیری معنایی فارسی این مدل تأیید نشده است.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         OutlinedButton(onClick = onImportMiniLm, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                             Text(if (miniLmModelReady) "جایگزینی بسته مدل MiniLM" else "وارد کردن بسته مدل MiniLM · ZIP")
                         }
-                        Text("ZIP باید model.onnx (طبقه‌بند sequence-classification با خروجی logits)، tokenizer.json از نوع WordPiece یا BPE و labels.json هم‌ترتیب خروجی مدل را داشته باشد. مدل sentence-embedding عمومی به‌تنهایی کافی نیست. همهٔ استنتاج‌ها محلی‌اند؛ مدل نامعتبر یا کم‌اطمینان باعث توقف مکالمه نمی‌شود و به قواعد امن برمی‌گردد.", style = MaterialTheme.typography.bodySmall)
+                        Text("بستهٔ طبقه‌بند: model.onnx + tokenizer.json + labels.json. بستهٔ تصمیم مرحله‌ای: model.onnx + tokenizer.json + decision_trees.json. مدل embedding باید خروجی [1, sequence, 384] یا [1,384] داشته باشد و فایل آن حداکثر ۱۰۰ مگابایت باشد. نمونهٔ درخت‌ها در docs/minilm-decision-trees.json است. همهٔ استنتاج‌ها محلی‌اند؛ مقدار عددی از متن واقعی استخراج می‌شود، نه از حدس embedding.", style = MaterialTheme.typography.bodySmall)
                         Text(miniLmStatus, style = MaterialTheme.typography.bodySmall, color = if (miniLmModelReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
