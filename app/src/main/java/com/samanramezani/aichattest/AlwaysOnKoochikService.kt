@@ -332,7 +332,6 @@ class AlwaysOnKoochikService : Service() {
             val started = startVoiceConversationInService(
                 command,
                 acknowledgeWake = true,
-                speechStartGate = null,
             )
             transitioningToConversation = false
             if (started) {
@@ -364,9 +363,6 @@ class AlwaysOnKoochikService : Service() {
             runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
             wakeLock = null
             stopSelf()
-        } else {
-            runCatching { acknowledgementTts?.close() }
-            acknowledgementTts = null
         }
         if (detectedCommand == null && getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_ENABLED, false) &&
             voiceController == null && !transitioningToConversation
@@ -379,7 +375,6 @@ class AlwaysOnKoochikService : Service() {
     private fun startVoiceConversationInService(
         initialUtterance: String,
         acknowledgeWake: Boolean,
-        speechStartGate: CompletableDeferred<Unit>? = null,
     ): Boolean {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         if (voiceController != null) return true
@@ -460,7 +455,6 @@ class AlwaysOnKoochikService : Service() {
                 tts,
                 initialUtterance = initialUtterance,
                 acknowledgeWake = acknowledgeWake,
-                speechStartGate = speechStartGate,
                 preloadedAsr = alreadyLoadedAsr,
             )
             true
