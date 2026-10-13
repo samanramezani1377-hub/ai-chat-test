@@ -42,7 +42,18 @@ private fun normalizePersianTtsText(value: String): String =
         .replace(Regex("[\\t\\x0B\\f\\r ]+"), " ")
         .trim()
 
-class LocalPiperTts(private val entry: VoiceModelEntry) {
+interface LocalTtsEngine : java.io.Closeable {
+    suspend fun speak(
+        text: String,
+        cancelled: AtomicBoolean,
+        onStarted: () -> Unit = {},
+        onSynthesisComplete: (Long) -> Unit = {},
+        speed: Float = 1.0f,
+        playbackTailMs: Long = 0L,
+    )
+}
+
+class LocalPiperTts(private val entry: VoiceModelEntry) : LocalTtsEngine {
     private val engine: OfflineTts
 
     init {
@@ -120,13 +131,13 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
         }
     }
 
-    suspend fun speak(
+    override suspend fun speak(
         text: String,
         cancelled: AtomicBoolean,
-        onStarted: () -> Unit = {},
-        onSynthesisComplete: (Long) -> Unit = {},
-        speed: Float = 1.0f,
-        playbackTailMs: Long = 0L,
+        onStarted: () -> Unit,
+        onSynthesisComplete: (Long) -> Unit,
+        speed: Float,
+        playbackTailMs: Long,
     ) = withContext(Dispatchers.Default) {
         require(text.isNotBlank()) { "VOICE-TTS-002: متن گفتار خالی است." }
         require(speed in 0.5f..1.5f) { "VOICE-TTS-008: سرعت گفتار خارج از محدودهٔ مجاز است." }
@@ -193,7 +204,7 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
         if (cancelled.get()) throw CancellationException("TTS interrupted")
     }
 
-    fun close() = engine.release()
+    override fun close() = engine.release()
 }
 
 /** Streaming local ASR for sherpa-onnx online transducer packages. */
