@@ -43,9 +43,11 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
 
     fun classify(rawText: String, currentVolume: Int? = null, maxVolume: Int? = null): Decision? = synchronized(lock) {
         lastTrace = emptyList()
+        lastError = null
         if (rawText.isBlank()) return@synchronized null
         if (!isReady()) {
             closeLoaded()
+            lastError = "LAYA-MODEL-001: مدل یا فایل‌های لازم آن نصب نیستند؛ تصمیم‌گیری محلی انجام نشد."
             return@synchronized null
         }
         val trace = mutableListOf<String>()
@@ -164,7 +166,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
             // Laya's resident memory is large. Keep it warm only after local device actions;
             // close the session before the chat model is loaded, and also on every abstention.
             retainLoadedSession = command.intent != DinaIntent.CHAT
-            Decision(command, domain.id, trace.lastOrNull()?.substringAfter("confidence=")?.toDoubleOrNull() ?: 1.0, trace.toList())
+            Decision(command, domain.id, domain.confidence, trace.toList())
         } catch (t: Throwable) {
             val causes = generateSequence(t as Throwable?) { it.cause }
                 .take(8)
