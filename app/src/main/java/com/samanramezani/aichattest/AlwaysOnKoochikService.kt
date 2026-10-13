@@ -21,7 +21,7 @@ import com.samanramezani.aichattest.ui.voice.VoiceConversationController
 import com.samanramezani.aichattest.voice.LocalMicrophone
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
 import com.samanramezani.aichattest.voice.LocalPiperTts
-import com.samanramezani.aichattest.voice.MiniLmOnnxIntentClassifier
+import com.samanramezani.aichattest.voice.LayaDecisionEngine
 import com.samanramezani.aichattest.voice.VoiceModelKind
 import com.samanramezani.aichattest.voice.VoiceModelStore
 import com.samanramezani.aichattest.voice.extractDinaCommand
