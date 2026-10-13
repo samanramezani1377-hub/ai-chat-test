@@ -1,3 +1,5 @@
+import java.util.zip.ZipFile
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -77,7 +79,7 @@ val extractOnnxRuntimeApi by tasks.registering {
         val aar = onnxRuntimeApiAar.singleFile
         val output = onnxRuntimeApiJar.get().asFile
         output.parentFile.mkdirs()
-        java.util.zip.ZipFile(aar).use { zip ->
+        ZipFile(aar).use { zip ->
             val entry = zip.getEntry("classes.jar")
                 ?: error("ONNX Runtime AAR does not contain classes.jar: ${aar.name}")
             zip.getInputStream(entry).use { input ->
