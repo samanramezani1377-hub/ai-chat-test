@@ -35,6 +35,8 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
 
     private val lock = Any()
     @Volatile private var cachedModelPath: String? = null
+    @Volatile var lastError: String? = null
+        private set
     private var environment: OrtEnvironment? = null
     private var session: OrtSession? = null
     private var tokenizer: TextTokenizer? = null
@@ -84,13 +86,15 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
                     val confidence = expScores[best] / sum
                     val second = ranked.getOrNull(1)?.let { expScores[it] / sum } ?: 0.0
                     if (confidence < MIN_CONFIDENCE || confidence - second < MIN_MARGIN) return@synchronized null
+                    lastError = null
                     commandFor(labels[best], text)
                 }
             } finally {
                 inputs.values.forEach { runCatching { it.close() } }
             }
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
             // Bad/unsupported model bundles must never break the voice conversation.
+            lastError = "MINILM-INFER-005: ${t.message ?: t.javaClass.simpleName}"
             null
         }
     }
