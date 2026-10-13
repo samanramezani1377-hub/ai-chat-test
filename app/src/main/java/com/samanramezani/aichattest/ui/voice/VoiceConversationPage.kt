@@ -113,7 +113,7 @@ internal fun VoiceConversationPage(
                         OutlinedButton(onClick = onImportMiniLm, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                             Text(if (miniLmModelReady) "جایگزینی بسته مدل MiniLM" else "وارد کردن بسته مدل MiniLM · ZIP")
                         }
-                        Text("ZIP باید model.onnx (طبقه‌بند sequence-classification با خروجی logits)، tokenizer.json از نوع WordPiece و labels.json هم‌ترتیب خروجی مدل را داشته باشد. مدل sentence-embedding عمومی به‌تنهایی کافی نیست. همهٔ استنتاج‌ها محلی‌اند؛ مدل نامعتبر یا کم‌اطمینان باعث توقف مکالمه نمی‌شود و به قواعد امن برمی‌گردد.", style = MaterialTheme.typography.bodySmall)
+                        Text("ZIP باید model.onnx (طبقه‌بند sequence-classification با خروجی logits)، tokenizer.json از نوع WordPiece یا BPE و labels.json هم‌ترتیب خروجی مدل را داشته باشد. مدل sentence-embedding عمومی به‌تنهایی کافی نیست. همهٔ استنتاج‌ها محلی‌اند؛ مدل نامعتبر یا کم‌اطمینان باعث توقف مکالمه نمی‌شود و به قواعد امن برمی‌گردد.", style = MaterialTheme.typography.bodySmall)
                         Text(miniLmStatus, style = MaterialTheme.typography.bodySmall, color = if (miniLmModelReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
