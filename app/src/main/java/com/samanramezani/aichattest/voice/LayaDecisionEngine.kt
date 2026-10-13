@@ -42,12 +42,27 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
     private var temperatureSource = "missing; neutral fallback 1.0"
     private val optionTemperatures = mutableMapOf<String, Double>()
 
-    fun isReady(): Boolean = File(root, MODEL_FILE).isFile &&
-        File(root, "$MODEL_FILE.data").isFile &&
-        File(root, "tokenizer/tokenizer.json").isFile &&
-        File(root, "tokenizer/tokenizer_config.json").isFile &&
-        File(root, "encoder/config.json").isFile &&
-        File(root, "rl_agent_config.json").isFile
+    fun missingModelFiles(): List<String> {
+        val required = listOf(
+            MODEL_FILE,
+            "$MODEL_FILE.data",
+            "tokenizer/tokenizer.json",
+            "tokenizer/tokenizer_config.json",
+            "encoder/config.json",
+            "rl_agent_config.json",
+        )
+        val missing = required.filter { relative ->
+            val file = File(root, relative)
+            !file.isFile || file.length() <= 0L
+        }.toMutableList()
+        val graph = File(root, MODEL_FILE)
+        if (graph.isFile && graph.length() <= 16_000L) missing += "$MODEL_FILE (گراف ناقص)"
+        val weights = File(root, "$MODEL_FILE.data")
+        if (weights.isFile && weights.length() <= 100_000_000L) missing += "$MODEL_FILE.data (وزن‌ها ناقص)"
+        return missing.distinct()
+    }
+
+    fun isReady(): Boolean = missingModelFiles().isEmpty()
 
     fun classify(rawText: String, currentVolume: Int? = null, maxVolume: Int? = null): Decision? = synchronized(lock) {
         lastTrace = emptyList()
@@ -55,7 +70,12 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
         if (rawText.isBlank()) return@synchronized null
         if (!isReady()) {
             closeLoaded()
-            lastError = "LAYA-MODEL-001: مدل یا فایل‌های لازم آن نصب نیستند؛ تصمیم‌گیری محلی انجام نشد."
+            val missing = missingModelFiles()
+            lastTrace = listOf(
+                "modelRoot=${root.absolutePath}",
+                "missingModelFiles=${missing.joinToString(",").ifBlank { "bundle validation failed" }}",
+            )
+            lastError = "LAYA-MODEL-001: بستهٔ Laya نصب یا کامل نیست؛ فایل‌های ناقص/مفقود: ${missing.joinToString(", ").ifBlank { "اعتبارسنجی بسته ناموفق بود" }}. از تنظیمات مکالمه صوتی «دانلود و نصب خودکار Laya INT4» را اجرا کن."
             return@synchronized null
         }
         val trace = mutableListOf<String>()
