@@ -26,15 +26,28 @@ internal class LayaDecisionModelStore(
         )
     }
 
-    fun isReady(): Boolean = REQUIRED.all { File(root, it).isFile && File(root, it).length() > 0 } &&
-        File(root, MODEL_FILE).length() > 16_000 &&
-        File(root, "$MODEL_FILE.data").length() > 100_000_000L &&
-        runCatching { JSONObject(File(root, "encoder/config.json").readText(Charsets.UTF_8)) }.isSuccess
+    private fun missingRequirements(): List<String> {
+        val missing = REQUIRED.filter { relative ->
+            val file = File(root, relative)
+            !file.isFile || file.length() <= 0L
+        }.toMutableList()
+        val graph = File(root, MODEL_FILE)
+        if (graph.isFile && graph.length() <= 16_000L) missing += "$MODEL_FILE (گراف ناقص)"
+        val weights = File(root, "$MODEL_FILE.data")
+        if (weights.isFile && weights.length() <= 100_000_000L) missing += "$MODEL_FILE.data (وزن‌ها ناقص)"
+        val encoderConfig = File(root, "encoder/config.json")
+        if (encoderConfig.isFile &&
+            runCatching { JSONObject(encoderConfig.readText(Charsets.UTF_8)) }.isFailure
+        ) missing += "encoder/config.json (JSON نامعتبر)"
+        return missing.distinct()
+    }
+
+    fun isReady(): Boolean = missingRequirements().isEmpty()
 
     fun status(): String = when {
         isReady() -> "Laya Multilingual INT4 آماده است؛ تصمیم‌گیری محلی فعال است."
-        root.exists() -> "بسته Laya ناقص است؛ ZIP کامل مدل INT4 را دوباره وارد کن."
-        else -> "مدل Laya هنوز وارد نشده است."
+        !root.exists() -> "مدل Laya هنوز نصب نشده است؛ از گزینهٔ دانلود و نصب خودکار استفاده کن."
+        else -> "بستهٔ Laya ناقص است؛ موارد مفقود/ناقص: ${missingRequirements().joinToString(", ")}"
     }
 
     fun importBundle(uri: Uri): String {
