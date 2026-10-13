@@ -158,9 +158,9 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
                 val li=names.indexOfFirst { it.contains("latent",true) }.let { if(it<0) 0 else it }
                 val ei=names.indexOfFirst { it.contains("eos",true) }.let { if(it<0) 1 else it }
                 val ki=names.indexOfFirst { it.contains("kv",true)||it.contains("cache",true) }.let { if(it<0) 2 else it }
-                val lat=floats(r[li].value as OnnxTensor)
-                val eos=floats(r[ei].value as OnnxTensor).firstOrNull()?.let { it>.5f } ?: false
-                val kt=r[ki].value as OnnxTensor; val kv=floats(kt)
+                val lat=floats(r[li] as OnnxTensor)
+                val eos=floats(r[ei] as OnnxTensor).firstOrNull()?.let { it>.5f } ?: false
+                val kt=r[ki] as OnnxTensor; val kv=floats(kt)
                 val count=kv.size/(layers*2*heads*hd)
                 require(count>0 && offset+count<=cap) { "Flow KV cache overflow: offset=$offset count=$count cap=$cap" }
                 val updated=cache.copyOf()
@@ -178,7 +178,7 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
     private fun voiceCache(): Pair<FloatArray,Int> {
         val audio=readWav(File(dir,"male_hello.wav"))
         val at=tensor(audio,longArrayOf(1,1,audio.size.toLong()))
-        val latent=try { enc.run(mapOf("audio" to at)).use { floats(it[0].value as OnnxTensor) } } finally { at.close() }
+        val latent=try { enc.run(mapOf("audio" to at)).use { floats(it[0] as OnnxTensor) } } finally { at.close() }
         val count=latent.size/ld
         require(count>0 && projShape.size==2 && projShape[1]==ld.toLong()) { "Bad speaker conditioning tensors" }
         val text=FloatArray((count+1)*dim)
@@ -197,7 +197,7 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
             flow.run(mapOf("sequence" to a,"text_emb" to b,"offset" to o,"noise" to n,"cache" to k)).use { r ->
                 val names=flow.outputNames.toList()
                 val ix=names.indexOfFirst { it.contains("kv",true)||it.contains("cache",true) }.let { if(it<0) 2 else it }
-                val kv=floats(r[ix].value as OnnxTensor)
+                val kv=floats(r[ix] as OnnxTensor)
                 val countSteps=kv.size/(layers*2*heads*hd)
                 require(countSteps<=cap) { "Voice prompt exceeds cache capacity" }
                 for(l in 0 until layers) for(kind in 0..1) for(s in 0 until countSteps)
@@ -223,13 +223,13 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
                 states.forEachIndexed { i,s -> tensor(s).also { stateTensors+=it; feeds[decInputs[i+1]]=it } }
                 dec.run(feeds).use { r ->
                     val ai=decOutputs.indexOf("audio").let { if(it<0) 0 else it }
-                    audio += floats(r[ai].value as OnnxTensor)
+                    audio += floats(r[ai] as OnnxTensor)
                     smallOutputs.forEachIndexed { j,oi ->
-                        val slot=smallSlots[j]; val ot=r[oi].value as OnnxTensor
+                        val slot=smallSlots[j]; val ot=r[oi] as OnnxTensor
                         states[slot]=stateFromTensor(states[slot].name, ot, false)
                     }
                     kvOutputs.forEachIndexed { j,oi ->
-                        val slot=cacheSlots[j]; val ot=r[oi].value as OnnxTensor; val out=floats(ot)
+                        val slot=cacheSlots[j]; val ot=r[oi] as OnnxTensor; val out=floats(ot)
                         val state=states[slot]; val per=state.v.size/state.shape[2].toInt()
                         val n=min(steps,out.size/per)
                         require(offset+n<=state.shape[2]) { "Mimi KV cache overflow" }
