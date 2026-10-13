@@ -715,7 +715,7 @@ internal class VoiceConversationController(
             decisionEngine.lastError?.let { modelError ->
                 if (lastLoggedIntentModelError != modelError) {
                     lastLoggedIntentModelError = modelError
-                    onDiagnostic(modelError + "؛ در صورت نامطمئن بودن، مسیر امن محلی استفاده می‌شود.")
+                    onDiagnostic(modelError + "؛ هیچ فرمانی بدون تصمیم معتبر Laya اجرا نمی‌شود و متن اصلی به مدل گفت‌وگو می‌رود.")
                 }
             }
             layaDecision?.trace?.forEach { onDiagnostic("LAYA-DECISION: $it") }
