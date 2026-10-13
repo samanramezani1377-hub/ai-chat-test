@@ -151,13 +151,18 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                     return@synchronized null
                 }
                 val (instructions, confirmOption, rejectOption) = confirmation
+                // Read-only clock/date questions were being rejected by the generic
+                // binary-confirmation entropy gate even when Laya's top choice was correct.
+                // Calibrate only these harmless routes more appropriately; device-changing
+                // actions keep the existing stricter confirmation thresholds.
+                val readOnlyTimeOrDate = domain.id == "GET_TIME" || domain.id == "GET_DATE"
                 val validation = choose(
                     decisionText,
-                    "$instructions\nمسیر پیشنهادی: ${domain.id}. کل پیام اصلی را بررسی کن و فقط وجود درخواست صریح همین عملیات را تأیید کن؛ از واژهٔ مشابه یا سابقهٔ مکالمه نتیجه نگیر. در تردید REJECT_ROUTE را انتخاب کن.",
+                    "$instructions\nمسیر پیشنهادی: ${domain.id}. فقط همین درخواست فعلی را بررسی کن. اگر کاربر مستقیماً ساعت همین لحظه یا تاریخ امروز را می‌پرسد، CONFIRM_ROUTE را انتخاب کن؛ ساعت کاری، زمان رویداد، تنظیم ساعت، تاریخ غیرامروز، نقل‌قول، نفی یا ابهام REJECT_ROUTE است. متن درخواست را از روی سابقه حدس نزن.",
                     listOf(confirmOption, rejectOption),
-                    minConfidence = 0.50,
-                    minMaxProbability = 0.58,
-                    minMargin = 0.16,
+                    minConfidence = if (readOnlyTimeOrDate) 0.20 else 0.50,
+                    minMaxProbability = if (readOnlyTimeOrDate) 0.75 else 0.58,
+                    minMargin = if (readOnlyTimeOrDate) 0.50 else 0.16,
                 )
                 if (validation?.id != "CONFIRM_ROUTE") {
                     trace += "route_confirmation=${validation?.id ?: "ABSTAIN"} proposed=${domain.id} result=CHAT"
