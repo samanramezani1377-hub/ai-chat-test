@@ -51,8 +51,8 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
         val encoded = tensor(inputIds)
         val hidden = try {
             encoder.run(mapOf("input_ids" to encoded)).use { result ->
-                (result[0] as? OnnxTensor)
-                    ?: error("خروجی encoder از نوع Tensor نیست")
+                (result[0].value as? OnnxTensor)
+                    ?: error("POCKET-TTS-G2P-002: خروجی encoder از نوع Tensor نیست؛ output=${result[0].key}, valueClass=${result[0].value.javaClass.name}")
             }
         } finally {
             encoded.close()
@@ -65,7 +65,7 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
                 val ids = tensor(generated.toLongArray())
                 val logits = try {
                     decoder.run(mapOf("decoder_input_ids" to ids, "encoder_hidden" to hidden)).use { result ->
-                        val tensor = result[0] as? OnnxTensor ?: error("خروجی decoder از نوع Tensor نیست")
+                        val tensor = result[0].value as? OnnxTensor ?: error("خروجی decoder از نوع Tensor نیست")
                         val shape = tensor.info.shape
                         require(shape.size == 3 && shape[0] == 1L && shape[1] >= generated.size) {
                             "ابعاد logits نامعتبر است: ${shape.contentToString()}"
