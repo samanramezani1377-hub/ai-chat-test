@@ -161,9 +161,9 @@ internal class MiniLmDecisionTreeRouter(private val root: File) : AutoCloseable 
             "decision_trees.json باید model_type=sentence_embedding داشته باشد."
         }
         nodes = config.optJSONObject("nodes") ?: error("decision_trees.json فاقد nodes است.")
-        minSimilarity = config.optDouble("min_similarity", DEFAULT_MIN_SIMILARITY).toFloat()
-        minMargin = config.optDouble("min_margin", DEFAULT_MIN_MARGIN).toFloat()
-        require(minSimilarity in -1f..1f && minMargin >= 0f) { "آستانه‌های شباهت نامعتبرند." }
+        minSimilarity = config.optDouble("min_similarity", DEFAULT_MIN_SIMILARITY)
+        minMargin = config.optDouble("min_margin", DEFAULT_MIN_MARGIN)
+        require(minSimilarity in -1.0..1.0 && minMargin >= 0.0) { "آستانه‌های شباهت نامعتبرند." }
         for (nodeId in listOf("domain", "audio", "display")) {
             require(nodes?.optJSONObject(nodeId)?.optJSONArray("choices")?.length()?.let { it > 0 } == true) {
                 "درخت تصمیم گره معتبر '$nodeId' را ندارد."
