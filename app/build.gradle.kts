@@ -73,11 +73,14 @@ val onnxRuntimeApiAar by configurations.creating {
 
 val onnxRuntimeApiJar = layout.buildDirectory.file("generated/onnxruntime-api/classes.jar")
 val extractOnnxRuntimeApi by tasks.registering {
+    // Declare all task I/O through Gradle's task model. Do not capture the
+    // script-level Configuration or Provider inside doLast: that breaks the
+    // configuration cache used by CI.
     inputs.files(onnxRuntimeApiAar)
     outputs.file(onnxRuntimeApiJar)
     doLast {
-        val aar = onnxRuntimeApiAar.singleFile
-        val output = onnxRuntimeApiJar.get().asFile
+        val aar = inputs.files.singleFile
+        val output = outputs.files.singleFile
         output.parentFile.mkdirs()
         ZipFile(aar).use { zip ->
             val entry = zip.getEntry("classes.jar")
