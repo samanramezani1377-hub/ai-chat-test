@@ -32,17 +32,26 @@ internal class PocketTtsFarsiBundleStore(private val resolver: ContentResolver, 
             "g2p_decoder.onnx.data" to 1_000_000L,
             "g2p_encoder.onnx" to 1_000_000L,
             "manifest.json" to 100L,
+            // Required by the reference runtime: phoneme token IDs are looked up
+            // through this SentencePiece model, and synthesis needs a reference
+            // recording to initialize the speaker-conditioning KV cache.
+            "male_hello.wav" to 100_000L,
             "mimi_decoder_step_kv.onnx" to 100_000L,
             "mimi_decoder_step_kv.onnx.data" to 10_000_000L,
             "mimi_encoder.onnx" to 100_000L,
             "mimi_encoder.onnx.data" to 10_000_000L,
+            "tokenizer_ph.model" to 100_000L,
             "weights.npz" to 1_000_000L,
+        )
+        private val sourceUrls = mapOf(
+            "male_hello.wav" to "https://raw.githubusercontent.com/Nimaone/persian_tts/main/voices/male_hello.wav",
+            "tokenizer_ph.model" to "https://huggingface.co/mehdi-hf/pocket-tts-farsi-v2/resolve/main/tokenizer_ph.model?download=true",
         )
     }
 
     fun isReady(): Boolean = validateDirectory(root).isEmpty()
     fun status(): String = when {
-        isReady() -> "بسته نصب و اعتبارسنجی شده؛ موتور اجرا هنوز به مکالمه متصل نشده است."
+        isReady() -> "فایل‌های ONNX، توکنایزر و صدای مرجع نصب و اعتبارسنجی شده‌اند؛ موتور اجرا هنوز به مکالمه متصل نشده است."
         !root.exists() -> "بستهٔ Pocket TTS Farsi v2 هنوز وارد نشده است."
         else -> "بسته ناقص است: ${validateDirectory(root).joinToString("، ")}"
     }
@@ -56,8 +65,9 @@ internal class PocketTtsFarsiBundleStore(private val resolver: ContentResolver, 
             ZipOutputStream(BufferedOutputStream(FileOutputStream(temp), 256 * 1024)).use { zip ->
                 required.keys.forEachIndexed { index, path ->
                     onProgress("دریافت Pocket TTS — فایل ${index + 1} از ${required.size}: $path")
-                    val conn = (URL("https://huggingface.co/$REPO/resolve/main/$path?download=true")
-                        .openConnection() as HttpURLConnection).apply {
+                    val sourceUrl = sourceUrls[path]
+                        ?: "https://huggingface.co/$REPO/resolve/main/$path?download=true"
+                    val conn = (URL(sourceUrl).openConnection() as HttpURLConnection).apply {
                         connectTimeout = 30_000
                         readTimeout = 180_000
                         instanceFollowRedirects = true
@@ -172,7 +182,7 @@ internal class PocketTtsFarsiBundleStore(private val resolver: ContentResolver, 
                 error("POCKET-TTS-IMPORT-011: نصب نهایی ناموفق بود.")
             }
             backup.deleteRecursively()
-            return "بستهٔ Pocket TTS Farsi v2 وارد و اعتبارسنجی شد؛ موتور اجرا هنوز به مکالمه متصل نشده است."
+            return "بستهٔ Pocket TTS Farsi v2، توکنایزر و صدای مرجع وارد و اعتبارسنجی شدند؛ اتصال موتور اجرا به مکالمه هنوز کامل نشده است."
         } catch (t: Throwable) {
             stage.deleteRecursively()
             throw t
