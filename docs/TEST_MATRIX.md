@@ -8,7 +8,11 @@
 |---|---|---|
 | Model | Import valid GGUF | model metadata + load success |
 | Model | Invalid model | validation error |
-| Chat | Persian prompt | streamed local response |
+| Chat | Persian prompt with Local selected | streamed local response; no provider request |
+| Chat | Persian prompt with Provider selected | request sent to selected provider; provider response/error surfaced |
+| Settings | Change inference source | selected source persists and is shown in UI |
+| Privacy | Provider selected | only request-required conversation context is sent; secrets redacted from logs |
+| Routing | Selected source unavailable | explicit error; no silent fallback to other source |
 | Generation | Stop | generation stops without fake completion |
 | Action | Valid request | executor result + verification |
 | Action | Invalid JSON | parser error, no execution |
