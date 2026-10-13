@@ -54,7 +54,7 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
     private val mean = weights.getValue("emb_mean").v
     private val decInputs: List<String>
     private val decOutputs: List<String>
-    private val init: List<A>
+    private val decoderInitial: List<A>
     private val cacheSlots: List<Int>
     private val smallSlots: List<Int>
     private val smallOutputs: List<Int>
@@ -74,9 +74,9 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
         val states = npz(File(dir, "decode_state_init.npz"))
         decInputs = dec.inputNames.toList(); decOutputs = dec.outputNames.toList()
         require(decInputs.size == states.size + 1) { "Mimi state/input count mismatch" }
-        init = states.values.map { A(it.name, it.shape, it.v, it.name.endsWith(".cache")) }
-        cacheSlots = init.indices.filter { init[it].cache }
-        smallSlots = init.indices.filterNot { it in cacheSlots }
+        decoderInitial = states.values.map { A(it.name, it.shape, it.v, it.name.endsWith(".cache")) }
+        cacheSlots = init.indices.filter { decoderInitial[it].cache }
+        smallSlots = decoderInitial.indices.filterNot { it in cacheSlots }
         smallOutputs = decOutputs.indices.filter { decOutputs[it].endsWith("o") && decOutputs[it] != "audio" }
         kvOutputs = decOutputs.indices.filter { decOutputs[it].startsWith("kv") }
         require(smallOutputs.size == smallSlots.size && kvOutputs.size == cacheSlots.size) {
@@ -212,7 +212,7 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
     }
 
     private fun decode(latents: List<FloatArray>): FloatArray {
-        val states=init.map { A(it.name,it.shape,it.v.copyOf(),it.cache) }.toMutableList()
+        val states=decoderInitial.map { A(it.name,it.shape,it.v.copyOf(),it.cache) }.toMutableList()
         val audio=mutableListOf<FloatArray>(); var offset=0
         for(latent in latents) {
             val un=FloatArray(ld) { i -> latent.getOrElse(i){0f}*std.getOrElse(i){1f}+mean.getOrElse(i){0f} }
