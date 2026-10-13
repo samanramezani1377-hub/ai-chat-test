@@ -76,17 +76,11 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                         "INCREASE", "DECREASE", "SET" -> {
                             val parsed = DinaCommandClassifier.classify(rawText)
                             val explicitPercent = Regex("(?:%|درصد|percent)", RegexOption.IGNORE_CASE).containsMatchIn(rawText)
-                            if (operation.id == "SET" && explicitPercent &&
-                                parsed.intent == DinaIntent.SET_VOLUME && parsed.value != null) {
-                                parsed
-                            } else if (operation.id == "SET" && parsed.intent == DinaIntent.SET_VOLUME &&
-                                parsed.value != null && parsed.valueIsPercent) {
-                                parsed
-                            } else {
+                            run {
                                 val actual = currentVolume
                                 val maximum = maxVolume
                                 val currentLevel = if (actual != null && maximum != null && maximum > 0) {
-                                    ((actual * 10.0 / maximum).toInt().coerceIn(0, 10)).coerceAtLeast(1)
+                                    (actual * 10.0 / maximum).toInt().coerceIn(0, 10)
                                 } else null
                                 val question = when (operation.id) {
                                     "INCREASE" -> "The user requests louder sound. Choose a target level on a 1-10 scale, greater than the current level."
@@ -104,9 +98,9 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                                 ) else emptyList()) ?: return@synchronized null
                                 trace += "volume_target=${level.id} confidence=${"%.3f".format(Locale.US, level.confidence)} current=${currentLevel ?: "unknown"}"
                                 when {
-                                    level.id == "OTHER_EXPLICIT_VALUE" && parsed.intent == DinaIntent.SET_VOLUME && parsed.value != null ->
-                                        parsed
-                                    level.id.startsWith("LEVEL_") -> {
+                                    level.id == "OTHER_EXPLICIT_VALUE" && operation.id == "SET" &&
+                                        parsed.intent == DinaIntent.SET_VOLUME && parsed.value != null -> parsed
+                                    level.id.startsWith("LEVEL_") && !explicitPercent -> {
                                         val targetLevel = level.id.removePrefix("LEVEL_").toIntOrNull() ?: return@synchronized null
                                         if (operation.id == "INCREASE" && currentLevel != null && targetLevel <= currentLevel) return@synchronized null
                                         if (operation.id == "DECREASE" && currentLevel != null && targetLevel >= currentLevel) return@synchronized null
