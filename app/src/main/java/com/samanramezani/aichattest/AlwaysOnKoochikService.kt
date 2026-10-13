@@ -290,12 +290,10 @@ class AlwaysOnKoochikService : Service() {
             // Start the dialogue turn first so the command is submitted to the model. Gate assistant
             // speech until the local acknowledgement finishes, preventing the two voices from overlapping.
             val speechGate = CompletableDeferred<Unit>()
-            val promptSubmittedGate = CompletableDeferred<Unit>()
             val started = startVoiceConversationInService(
                 command,
                 acknowledgeWake = false,
                 speechStartGate = speechGate,
-                promptSubmittedGate = promptSubmittedGate,
             )
             transitioningToConversation = false
             if (started) {
