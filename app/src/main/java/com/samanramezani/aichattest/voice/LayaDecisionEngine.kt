@@ -99,13 +99,13 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
             trace += "input originalChars=${rawText.length} modelInputChars=${decisionText.length} userTextPreserved=true"
             val domain = choose(
                 decisionText,
-                "تمام متن ورودی کاربر را دقیقاً همان‌طور که دریافت شده طبقه‌بندی کن؛ شماره‌گذاری، نشانه‌گذاری و ترتیب کلمات بخشی از متن کاربر هستند. اگر درخواست درباره ساعت همین لحظه یا تاریخ امروز است، گزینه مربوط را انتخاب کن. مسیر‌یابی، سفر، آدرس، پرسش دانشی و گفت‌وگوی معمولی CHAT هستند. Classify the complete supplied user text exactly as received; do not rewrite or remove user-authored content.",
+                "وظیفه: فقط نیت اصلی و صریح کاربر را از روی کل پیام فعلی انتخاب کن؛ متن را خلاصه، اصلاح یا بازنویسی نکن و هیچ شماره‌گذاری یا بخشی از متن را حذف نکن. انتخاب باید بر اساس کاری باشد که کاربر می‌خواهد انجام شود، نه صرفاً واژه‌های موجود در پیام. اگر درخواست روشن و مستقیم برای ساعت فعلی، تاریخ امروز یا تغییر تنظیم دستگاه وجود ندارد، CHAT را انتخاب کن. نقل‌قول، مثال، نفی، فرضیه و پرسش دربارهٔ موضوعی با فرمان انجام آن موضوع یکی نیستند. فقط یک گزینه را انتخاب کن؛ اگر تردید داری CHAT امن‌تر است. Classify intent from the complete current user message, not keywords alone.",
                 listOf(
-                    Option("GET_TIME", "درخواست صریح ساعت فعلی همین لحظه یا پرسش «ساعت چنده؟». فقط وقتی کاربر زمان فعلی را می‌خواهد. Current time now, what time is it."),
-                    Option("GET_DATE", "درخواست صریح تاریخ امروز یا روز و ماه فعلی. فقط وقتی کاربر تاریخ فعلی را می‌خواهد. Today's current date."),
-                    Option("AUDIO", "درخواست برای کنترل صدای رسانهٔ دستگاه: افزایش، کاهش، تنظیم سطح یا قطع/وصل صدا. Media volume control."),
-                    Option("DISPLAY", "درخواست برای کنترل روشنایی نمایشگر دستگاه: افزایش، کاهش یا تنظیم درصد روشنایی. Screen brightness control."),
-                    Option("CHAT", "هر درخواست دیگر، از جمله سلام، گفت‌وگو، سؤال دانشی، مسیر رفتن به کرج، آدرس، سفر یا راهنمایی؛ همچنین اگر ساعت/تاریخ فعلی را صریحاً نپرسیده است. Normal chat, directions, travel, knowledge questions."),
+                    Option("GET_TIME", "کاربر واقعاً ساعت همین لحظه را می‌پرسد: «ساعت چنده؟»، «الان ساعت رو بگو»، «می‌دونی الان چه ساعتیه؟». نه ساعت کاری، مدت‌زمان، زمان یک رویداد، تنظیم ساعت گوشی، یا صرفاً ذکر/نقل‌قول واژهٔ ساعت. Explicit request for the current clock time now."),
+                    Option("GET_DATE", "کاربر تاریخ امروز را می‌خواهد: «امروز چندمه؟»، «تاریخ امروز رو بگو»، «امروز چه روزیه؟» وقتی منظور تاریخ/روز فعلی است. نه تاریخ یک رویداد، تاریخ تاریخی، روز هفتهٔ یک تاریخ دیگر یا برنامه‌ریزی آینده. Explicit request for today's current date."),
+                    Option("AUDIO", "درخواست اجرایی برای تغییر صدای رسانهٔ همین گوشی: زیاد/کم کردن، تنظیم سطح، بی‌صدا کردن یا برگرداندن صدا؛ مثل «صدا رو کم کن». نه سؤال یا گفت‌وگو دربارهٔ صدا، صدای یک فایل، یا نقل‌قول فرمان. Explicit media-volume action on this device."),
+                    Option("DISPLAY", "درخواست اجرایی برای تغییر روشنایی نمایشگر همین گوشی: زیاد/کم کردن یا تنظیم سطح؛ مثل «نور صفحه رو کم کن». نه سؤال دربارهٔ صفحه/روشنایی، تنظیمات دستگاهی دیگر، یا نقل‌قول فرمان. Explicit screen-brightness action on this device."),
+                    Option("CHAT", "پیش‌فرض برای سلام و گفت‌وگوی عادی، دانش عمومی، راهنمایی/مسیر/آدرس/سفر، ساعت کاری، مدت‌زمان، تاریخ‌های غیرامروز، درخواست مبهم، نقل‌قول یا نفی فرمان؛ همچنین هر پیام که صریحاً یکی از عملیات محلی بالا را درخواست نمی‌کند. All other requests and uncertain cases."),
                 ),
                 minConfidence = 0.48,
                 minMaxProbability = 0.52,
@@ -124,24 +124,24 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
             if (domain.id != "CHAT") {
                 val confirmation = when (domain.id) {
                     "GET_TIME" -> Triple(
-                        "مرحلهٔ تأیید مستقل: آیا منظور صریح همین پیامِ کامل کاربر پرسیدن ساعت فعلیِ همین لحظه است؟ فقط اگر کاربر واقعاً ساعت الان را می‌خواهد CONFIRM_ROUTE را انتخاب کن. وجود واژهٔ «ساعت» به‌تنهایی کافی نیست؛ سؤال دربارهٔ ساعت کاری، مدت‌زمان، تنظیم ساعت، زمان یک رویداد، یا مثال/نقل‌قول، درخواست ساعت فعلی نیست. اگر درخواست مبهم است یا منظور دیگری دارد، گزینهٔ رد را انتخاب کن. Do not infer intent from keywords alone; verify the user's actual request.",
-                        Option("CONFIRM_ROUTE", "پیام صریحاً می‌پرسد ساعت همین الان چند است؛ مثلاً «ساعت چنده؟»، «الان ساعت چند است؟»، «می‌تونی ساعت فعلی رو بگی؟». The user wants the current local clock time now."),
-                        Option("REJECT_ROUTE", "پیام ساعت فعلی را نمی‌پرسد، فقط واژهٔ ساعت را دارد، دربارهٔ زمان/ساعت دیگری است، یا مبهم است. Not a clear request for the current clock time.")
+                        "تأیید مستقل مسیر پیشنهادی GET_TIME: فقط بررسی کن آیا کل پیام فعلی واقعاً درخواست دانستن ساعت همین لحظه است. به قصد ارتباطی پیام توجه کن، نه حضور کلمهٔ «ساعت». «ساعت چنده؟» و «الان ساعت رو می‌گی؟» تأیید می‌شوند؛ «ساعت کاری چنده؟»، «دو ساعت طول می‌کشه؟»، «ساعت گوشی رو تنظیم کن»، نقل‌قول فرمان یا ذکر ساعت در مثال تأیید نمی‌شوند. اگر متن مبهم، نفی‌شده یا صرفاً نقل‌قول است، رد کن. This is a binary verification of the proposed route, not a fresh broad classification.",
+                        Option("CONFIRM_ROUTE", "درخواست واقعی و مستقیم برای دانستن زمان فعلی همین لحظه وجود دارد؛ مثلاً «ساعت چنده؟»، «الان ساعت چند است؟»، «می‌تونی ساعت فعلی رو بگی؟». The current clock time is the requested answer."),
+                        Option("REJECT_ROUTE", "درخواست ساعت فعلی وجود ندارد یا از متن با اطمینان قابل استنباط نیست؛ از جمله ساعت کاری، مدت‌زمان، زمان رویداد، تنظیم ساعت، نقل‌قول، نفی یا ابهام. Reject keyword-only matches.")
                     )
                     "GET_DATE" -> Triple(
-                        "مرحلهٔ تأیید مستقل: آیا منظور صریح همین پیامِ کامل کاربر دانستن تاریخ امروز است؟ فقط اگر کاربر تاریخ امروز/تاریخ فعلی را می‌خواهد CONFIRM_ROUTE را انتخاب کن. پرسش دربارهٔ ساعت، روز یک رویداد، تاریخ تاریخی یا برنامه‌ریزی آینده درخواست تاریخ امروز نیست. اگر مبهم است، رد کن. Verify intent, not keywords.",
-                        Option("CONFIRM_ROUTE", "پیام صریحاً تاریخ امروز یا تاریخ فعلی را می‌خواهد؛ مثلاً «امروز چندمه؟» یا «تاریخ امروز رو بگو». The user wants today's date."),
-                        Option("REJECT_ROUTE", "پیام تاریخ امروز را نمی‌خواهد، دربارهٔ تاریخ دیگری است، یا مبهم است. Not a clear request for today's date.")
+                        "تأیید مستقل مسیر پیشنهادی GET_DATE: فقط بررسی کن آیا کل پیام فعلی واقعاً تاریخ امروز/تاریخ فعلی را می‌خواهد. «امروز چندمه؟» و «تاریخ امروز رو بگو» تأیید می‌شوند؛ ساعت فعلی، تاریخ یک رویداد یا مناسبت، تاریخ تاریخی، پرسش دربارهٔ روزی در آینده یا برنامه‌ریزی زمان‌بندی تأیید نمی‌شوند. اگر مبهم، نفی‌شده یا نقل‌قول است، رد کن. Verify the proposed intent, not keywords.",
+                        Option("CONFIRM_ROUTE", "پیام به‌وضوح تاریخ امروز/تاریخ فعلی را می‌خواهد؛ مانند «امروز چندمه؟»، «تاریخ امروز رو بگو»، «امروز چه روزیه؟» با معنای روز فعلی. The requested answer is today's date."),
+                        Option("REJECT_ROUTE", "تاریخ امروز درخواست نشده یا متن دربارهٔ تاریخ دیگری، یک رویداد، برنامهٔ آینده، نقل‌قول، نفی یا مورد مبهم است. Reject keyword-only matches.")
                     )
                     "AUDIO" -> Triple(
-                        "مرحلهٔ تأیید مستقل: آیا کاربر در همین پیام واقعاً می‌خواهد بلندی صدای رسانهٔ دستگاه تغییر کند؟ باید درخواست عملیِ افزایش، کاهش، تنظیم، قطع یا وصل صدا باشد. پرسش اطلاعاتی دربارهٔ صدا، اشاره به صدای یک فایل/ویدئو، یا جملهٔ نقل‌شده فرمان دستگاه نیست. اگر تغییر صدا صریح نیست، رد کن. Verify the requested action, not topic words.",
-                        Option("CONFIRM_ROUTE", "کاربر صریحاً می‌خواهد صدای رسانهٔ همین دستگاه را تغییر دهد، تنظیم کند، قطع یا وصل کند. Explicit media-volume control request."),
-                        Option("REJECT_ROUTE", "کاربر فقط دربارهٔ صدا حرف می‌زند/سؤال می‌پرسد یا درخواست تغییر صدای رسانه روشن نیست. No clear media-volume action.")
+                        "تأیید مستقل مسیر پیشنهادی AUDIO: فقط بررسی کن آیا کاربر از دستیار می‌خواهد صدای رسانهٔ همین گوشی را تغییر دهد. درخواست‌های «صدا رو زیاد/کم کن»، «گوشی رو بی‌صدا کن» و «صدا رو برگردون» تأیید می‌شوند. سؤال دربارهٔ صدا، کیفیت صدای فایل، صحبت دربارهٔ موسیقی، فرمانی که نقل یا نفی شده، یا درخواست مبهم تأیید نمی‌شود. این مرحله فقط مسیر پیشنهادی را بررسی می‌کند.",
+                        Option("CONFIRM_ROUTE", "کاربر از دستیار یک عمل روشن روی صدای رسانهٔ همین گوشی می‌خواهد: افزایش، کاهش، تنظیم سطح، قطع یا وصل صدا. Explicit action on this device's media volume."),
+                        Option("REJECT_ROUTE", "درخواست اجرایی روشن برای صدای رسانهٔ همین گوشی وجود ندارد؛ موضوع صرفاً اطلاعاتی، نقل‌قولی، نفی‌شده یا مبهم است. No explicit device-volume action.")
                     )
                     "DISPLAY" -> Triple(
-                        "مرحلهٔ تأیید مستقل: آیا کاربر در همین پیام واقعاً می‌خواهد روشنایی نمایشگر دستگاه تغییر کند؟ باید درخواست عملیِ بیشتر/کمتر کردن یا تنظیم روشنایی باشد. پرسش اطلاعاتی دربارهٔ صفحه، اشاره به روشنایی در متن دیگر یا جملهٔ نقل‌شده فرمان دستگاه نیست. اگر تغییر روشنایی صریح نیست، رد کن. Verify the requested action, not topic words.",
-                        Option("CONFIRM_ROUTE", "کاربر صریحاً می‌خواهد روشنایی نمایشگر همین دستگاه را کم، زیاد یا روی مقداری تنظیم کند. Explicit screen-brightness control request."),
-                        Option("REJECT_ROUTE", "کاربر فقط دربارهٔ روشنایی/صفحه حرف می‌زند یا درخواست تغییر روشنایی روشن نیست. No clear brightness action.")
+                        "تأیید مستقل مسیر پیشنهادی DISPLAY: فقط بررسی کن آیا کاربر از دستیار می‌خواهد روشنایی نمایشگر همین گوشی را تغییر دهد. «نور صفحه رو کم/زیاد کن» یا «روشنایی رو روی ۵۰ درصد بذار» تأیید می‌شوند. سؤال دربارهٔ فناوری صفحه، روشنایی یک عکس/اتاق، تنظیم دستگاهی دیگر، فرمان نقل‌شده یا نفی‌شده تأیید نمی‌شود. این مرحله فقط مسیر پیشنهادی را بررسی می‌کند.",
+                        Option("CONFIRM_ROUTE", "کاربر یک عمل روشن برای کم/زیاد یا تنظیم درصد روشنایی نمایشگر همین گوشی درخواست می‌کند. Explicit action on this device's screen brightness."),
+                        Option("REJECT_ROUTE", "درخواست اجرایی روشن برای تغییر روشنایی نمایشگر همین گوشی وجود ندارد؛ موضوع اطلاعاتی، مربوط به چیز دیگری، نقل‌قولی، نفی‌شده یا مبهم است. No explicit brightness action.")
                     )
                     else -> null
                 }
@@ -153,7 +153,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 val (instructions, confirmOption, rejectOption) = confirmation
                 val validation = choose(
                     decisionText,
-                    "$instructions\nمسیر پیشنهادی مرحلهٔ اول: ${domain.id}. در این مرحله از نو دسته‌بندی کلی نکن؛ فقط بررسی کن آیا متن کامل کاربر واقعاً همین مسیر پیشنهادی را تأیید می‌کند. متن کاربر را تغییر نده و به سابقهٔ مکالمه تکیه نکن. If uncertain, reject the proposed route.",
+                    "$instructions\nمسیر پیشنهادی مرحلهٔ اول: ${domain.id}. تمام متن اصلی کاربر را بررسی کن؛ آن را حذف، خلاصه یا بازنویسی نکن. فقط تأیید کن که همین پیام، در معنای واقعی و نه صرفاً با داشتن واژهٔ مشابه، همین عملیات را درخواست می‌کند. از مکالمهٔ قبلی یا حدس دربارهٔ نیت استفاده نکن. اگر درخواست صریح نیست، REJECT_ROUTE را انتخاب کن. Output only the best matching option.",
                     listOf(confirmOption, rejectOption),
                     minConfidence = 0.50,
                     minMaxProbability = 0.58,
@@ -173,13 +173,13 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 "GET_DATE" -> DinaCommand(DinaIntent.GET_DATE)
                 "CHAT" -> DinaCommand(DinaIntent.CHAT)
                 "AUDIO" -> {
-                    val operation = choose(decisionText, "کاربر برای صدای رسانه چه عملی می‌خواهد؟ Choose the media-volume operation.",
+                    val operation = choose(decisionText, "از متن کامل کاربر، عمل مشخصی را که برای صدای رسانهٔ همین گوشی درخواست شده انتخاب کن. منظور صدای رسانه است، نه صدای زنگ/تماس یا صدای یک فایل به‌عنوان موضوع گفتگو. اگر درخواست تغییر صدا روشن نیست، هیچ فرمانی را حدس نزن. Select the requested operation, not the topic.",
                         listOf(
-                            Option("INCREASE", "صدای رسانه را بیشتر کن یا بلندتر کن. Increase or turn up the volume."),
-                            Option("DECREASE", "صدای رسانه را کمتر کن یا آرام‌تر کن. Decrease or turn down the volume."),
-                            Option("SET", "صدای رسانه را روی سطح مشخص یا درصد معین تنظیم کن. Set a specific level or percentage."),
-                            Option("MUTE", "صدای رسانه را قطع یا بی‌صدا کن. Mute the sound."),
-                            Option("UNMUTE", "صدا را دوباره وصل کن و از حالت بی‌صدا خارج کن. Unmute or restore sound."),
+                            Option("INCREASE", "کاربر صریحاً می‌خواهد صدای رسانهٔ گوشی بلندتر شود؛ «صدا رو زیاد کن»، «بلندترش کن». Increase media volume."),
+                            Option("DECREASE", "کاربر صریحاً می‌خواهد صدای رسانهٔ گوشی پایین‌تر بیاید؛ «صدا رو کم کن»، «آروم‌ترش کن». Decrease media volume."),
+                            Option("SET", "کاربر سطح هدف مشخصی می‌خواهد؛ «صدا رو روی ۴۰ درصد بذار»، «بلندی رو روی ۵ از ۱۰ تنظیم کن». Set an explicit target level."),
+                            Option("MUTE", "کاربر می‌خواهد صدای رسانه قطع/بی‌صدا شود؛ «صدا رو قطع کن»، «بی‌صداش کن». Mute media audio."),
+                            Option("UNMUTE", "کاربر می‌خواهد صدای رسانه دوباره فعال شود؛ «صدا رو وصل کن»، «از بی‌صدا درش بیار». Restore media audio."),
                         )) ?: return@synchronized null
                     trace += "audio_operation=${operation.id} confidence=${"%.3f".format(Locale.US, operation.confidence)}"
                     when (operation.id) {
@@ -201,10 +201,10 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                             }
                             val level = choose(
                                 state,
-                                "مقدار دقیق صدای درخواستی را تعیین کن. اگر درصد گفته شده، خودت آن را به مقیاس ۰ تا ۱۰ تبدیل کن؛ اگر عدد مستقیم ۰ تا ۱۰ گفته شده همان را انتخاب کن. عدد را حدس نزن و اگر نامشخص است UNKNOWN را برگردان. Interpret the original request and choose its exact target level from 0 to 10.",
+                                "فقط مقدار هدفی را که کاربر درخواست کرده استخراج کن؛ سطح فعلی فقط اطلاعات زمینه‌ای است و هدف محسوب نمی‌شود. درصد را به نزدیک‌ترین گام ۱۰درصدی تبدیل کن (مثلاً ۴۷٪ → سطح ۵ از ۱۰؛ ۸۰٪ → سطح ۸). اگر عدد روی مقیاس ۰ تا ۱۰ گفته شده همان سطح را بگیر. از «بیشتر/کمتر» به‌تنهایی مقدار هدف نساز؛ اگر مقدار دقیق گفته نشده یا قابل تشخیص نیست UNKNOWN را انتخاب کن. Determine the requested target, never mistake the current level for the target.",
                                 (0..10).map { n ->
-                                    Option("LEVEL_$n", "سطح صدای درخواستی برابر $n از ۱۰ است. Exact target volume level is $n out of 10.")
-                                } + Option("UNKNOWN", "مقدار قابل تشخیص نیست؛ حدس نزن. Target level is unknown; do not guess.")
+                                    Option("LEVEL_$n", "هدف صدای درخواستی $n از ۱۰، معادل حدود ${n * 10}٪ است. فقط وقتی انتخاب کن که متن کاربر همین مقدار هدف را بیان کند. Target media volume: $n/10 (about ${n * 10}%).")
+                                } + Option("UNKNOWN", "کاربر سطح عددی مشخصی درخواست نکرده یا مقدار هدف از متن قابل تشخیص نیست؛ حدس نزن. No explicit numeric target.")
                             ) ?: return@synchronized null
                             trace += "volume_target=${level.id} confidence=${"%.3f".format(Locale.US, level.confidence)} current=${currentLevel ?: "unknown"}"
                             if (level.id == "UNKNOWN") return@synchronized null
@@ -216,11 +216,11 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                     }
                 }
                 "DISPLAY" -> {
-                    val operation = choose(decisionText, "کاربر برای روشنایی صفحه چه عملی می‌خواهد؟ Choose the screen-brightness operation.",
+                    val operation = choose(decisionText, "از متن کامل کاربر، عمل مشخصی را که برای روشنایی نمایشگر همین گوشی درخواست شده انتخاب کن. اگر فقط دربارهٔ روشنایی صحبت می‌کند و تغییر نمی‌خواهد، هیچ عملی را حدس نزن. Select the requested operation, not merely the topic.",
                         listOf(
-                            Option("INCREASE", "روشنایی صفحه را بیشتر کن. Increase screen brightness."),
-                            Option("DECREASE", "روشنایی صفحه را کمتر کن. Decrease screen brightness."),
-                            Option("SET", "روشنایی صفحه را روی درصد مشخص تنظیم کن. Set brightness to a percentage."),
+                            Option("INCREASE", "کاربر صریحاً می‌خواهد نمایشگر همین گوشی روشن‌تر شود؛ «نور صفحه رو زیاد کن». Increase screen brightness."),
+                            Option("DECREASE", "کاربر صریحاً می‌خواهد نمایشگر همین گوشی کم‌نورتر شود؛ «نور صفحه رو کم کن». Decrease screen brightness."),
+                            Option("SET", "کاربر درصد/سطح هدف مشخصی برای روشنایی می‌دهد؛ «روشنایی رو روی ۵۰ درصد بذار». Set an explicit target brightness."),
                         )) ?: return@synchronized null
                     trace += "display_operation=${operation.id} confidence=${"%.3f".format(Locale.US, operation.confidence)}"
                     when (operation.id) {
@@ -229,10 +229,10 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                         "SET" -> {
                             val target = choose(
                                 decisionText,
-                                "مقدار دقیق روشنایی درخواستی را از ۰ تا ۱۰۰ درصد تعیین کن. اگر مقدار مشخص نیست UNKNOWN برگردان و حدس نزن. Choose the exact requested brightness percentage from 0 to 100.",
+                                "فقط مقدار هدف روشنایی را از متن کاربر استخراج کن؛ سطح فعلی یا درصدی که در مثال/نقل‌قول آمده هدف نیست. این پیاده‌سازی مقدار را به نزدیک‌ترین گام ۱۰درصدی تبدیل می‌کند (مثلاً ۴۷٪ → ۵۰٪). اگر کاربر فقط «بیشتر/کمتر» می‌گوید، SET را انتخاب نکن؛ آن درخواست باید در مرحلهٔ عملیات تشخیص داده شود. اگر درصد هدف روشن نیست، UNKNOWN را انتخاب کن. Extract the requested target, not current state; do not guess.",
                                 (0..10).map { n ->
-                                    Option("LEVEL_$n", "روشنایی صفحه روی ${n * 10} درصد تنظیم شود. Set screen brightness to ${n * 10} percent.")
-                                } + Option("UNKNOWN", "مقدار روشنایی مشخص نیست؛ حدس نزن. Unknown target brightness.")
+                                    Option("LEVEL_$n", "هدف روشنایی ${n * 10}٪ است. فقط وقتی انتخاب کن که متن کاربر این مقدار یا مقداری نزدیک به آن را درخواست کند. Target screen brightness: ${n * 10}%.")
+                                } + Option("UNKNOWN", "درخواست درصدی مشخصی وجود ندارد یا هدف روشنایی از متن قابل تشخیص نیست؛ حدس نزن. No explicit numeric brightness target.")
                             ) ?: return@synchronized null
                             trace += "brightness_target=${target.id} confidence=${"%.3f".format(Locale.US, target.confidence)}"
                             if (target.id == "UNKNOWN") return@synchronized null
