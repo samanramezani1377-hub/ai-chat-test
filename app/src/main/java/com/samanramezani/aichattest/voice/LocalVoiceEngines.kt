@@ -28,6 +28,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicBoolean
 
 private fun normalizePersianTtsText(value: String): String =
@@ -68,10 +69,31 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
             "VOICE-TTS-006: tokens.txt قالب معتبر Piper ندارد (تعداد ردیف‌ها: $tokenLines)."
         }
 
+        // Piper publishes the voice's recommended inference values in its companion
+        // *.onnx.json file. Honor those official per-voice settings instead of silently
+        // relying on sherpa-onnx defaults, which can alter prosody/phoneme timing.
+        val piperConfigFile = sequenceOf(
+            File(entry.modelFile.parentFile, "\${entry.modelFile.name}.json"),
+            File(entry.directory, "model.onnx.json"),
+            File(entry.modelFile.parentFile, "model.onnx.json"),
+        ).firstOrNull { it.isFile && it.length() in 1L..(8L * 1024L * 1024L) }
+        val piperInference = runCatching {
+            piperConfigFile?.let { JSONObject(it.readText(Charsets.UTF_8)).optJSONObject("inference") }
+        }.getOrNull()
+        val piperNoiseScale = piperInference?.optDouble("noise_scale", 0.667)?.toFloat()
+            ?.takeIf { it.isFinite() && it in 0.0f..1.5f } ?: 0.667f
+        val piperNoiseScaleW = piperInference?.optDouble("noise_w", 0.8)?.toFloat()
+            ?.takeIf { it.isFinite() && it in 0.0f..1.5f } ?: 0.8f
+        val piperLengthScale = piperInference?.optDouble("length_scale", 1.0)?.toFloat()
+            ?.takeIf { it.isFinite() && it in 0.5f..1.5f } ?: 1.0f
+
         val vits = OfflineTtsVitsModelConfig().apply {
             model = entry.modelFile.absolutePath
             tokens = tokensFile.absolutePath
             dataDir = dataDirectory.absolutePath
+            noiseScale = piperNoiseScale
+            noiseScaleW = piperNoiseScaleW
+            lengthScale = piperLengthScale
         }
         val modelConfig = OfflineTtsModelConfig().apply {
             this.vits = vits
@@ -83,7 +105,9 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
             OfflineTts(config = OfflineTtsConfig().apply {
                 model = modelConfig
                 maxNumSentences = 1
-                silenceScale = 0.15f
+                // Keep Piper's normal inter-word silence; aggressively shrinking it can make
+                // short Persian phrases sound clipped or rushed.
+                silenceScale = 0.2f
             })
         } catch (t: Throwable) {
             throw IllegalArgumentException(
