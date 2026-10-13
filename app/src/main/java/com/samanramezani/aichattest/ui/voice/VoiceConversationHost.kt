@@ -327,6 +327,13 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             try {
                 pocketTtsStatus = withContext(Dispatchers.IO) { pocketTtsStore.importArchive(uri) }
                 pocketTtsReady = pocketTtsStore.isReady()
+                if (pocketTtsReady) {
+                    // A successfully validated Pocket bundle is a complete TTS engine option.
+                    // Select it immediately so users do not need a separate hidden/disabled action.
+                    pocketTtsSelected = true
+                    alwaysOnPrefs.edit().putBoolean("pocket_tts_selected", true).apply()
+                    pocketTtsStatus = "بستهٔ Pocket TTS معتبر است و برای پاسخ‌های مکالمه انتخاب شد."
+                }
                 updateVoiceStatus(pocketTtsStatus)
             } catch (t: Throwable) {
                 pocketTtsStatus = "POCKET-TTS-IMPORT: ${t.message ?: t.javaClass.simpleName}"
@@ -414,7 +421,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             } else {
                 pocketTtsSelected = selected
                 context.getSharedPreferences(AlwaysOnKoochikService.PREFS, Context.MODE_PRIVATE).edit().putBoolean("pocket_tts_selected", selected).apply()
-                updateVoiceStatus(if (selected) "موتور Pocket TTS برای پاسخ‌های مکالمه انتخاب شد." else "موتور Piper برای پاسخ‌های مکالمه انتخاب شد.")
+                updateVoiceStatus(if (selected) "موتور Pocket TTS برای پاسخ‌های مکالمه انتخاب شد؛ در شروع یا شروع مجدد مکالمه اجرا می‌شود." else "موتور Piper برای پاسخ‌های مکالمه انتخاب شد.")
             }
         },
         onDownloadPocketTts = { downloadPocketTtsBundle() },
