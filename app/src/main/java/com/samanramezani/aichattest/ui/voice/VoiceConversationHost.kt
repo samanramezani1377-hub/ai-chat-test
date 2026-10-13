@@ -312,6 +312,36 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         }
     }
 
+    fun downloadLayaModel() {
+        uiScope.launch {
+            busy = true
+            val downloadFinished = AtomicBoolean(false)
+            layaStatus = "در حال اتصال به Hugging Face و دریافت بستهٔ رسمی Laya INT4…"
+            updateVoiceStatus(layaStatus)
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    layaStore.downloadOfficialBundle { progress ->
+                        uiScope.launch(Dispatchers.Main.immediate) {
+                            if (!downloadFinished.get()) layaStatus = progress
+                        }
+                    }
+                }
+                downloadFinished.set(true)
+                layaReady = layaStore.isReady()
+                layaStatus = result
+                updateVoiceStatus(result)
+            } catch (t: Throwable) {
+                downloadFinished.set(true)
+                layaReady = layaStore.isReady()
+                layaStatus = "LAYA-DOWNLOAD: ${t.message ?: t.javaClass.simpleName}"
+                updateVoiceStatus(layaStatus)
+            } finally {
+                downloadFinished.set(true)
+                busy = false
+            }
+        }
+    }
+
     VoiceConversationPage(
         lines = lines,
         status = status,
@@ -328,6 +358,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         layaModelReady = layaReady,
         layaStatus = layaStatus,
         onImportLaya = { layaPicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
+        onDownloadLaya = { downloadLayaModel() },
         onBack = onBack,
         onImportStt = { sttPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-bzip2", "application/octet-stream")) },
         onImportKoochikModel = { koochikModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
