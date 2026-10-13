@@ -256,6 +256,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
 private class LayaTokenizer(file: File) {
     private val vocab = HashMap<String, Int>()
     private val merges = HashMap<String, Int>()
+    private val tokenScores = HashMap<String, Double>()
     private val modelType: String
     private val lowercase: Boolean
     private val byteLevel: Boolean
@@ -284,7 +285,11 @@ private class LayaTokenizer(file: File) {
             val arr = model.optJSONArray("vocab") ?: error("LAYA-TOKENIZER-003: واژگان پیدا نشد.")
             for (i in 0 until arr.length()) {
                 val item = arr.optJSONArray(i) ?: continue
-                if (item.length() >= 2) vocab[item.getString(0)] = i
+                if (item.length() >= 2) {
+                    val token = item.getString(0)
+                    vocab[token] = i
+                    tokenScores[token] = item.optDouble(1, -10.0)
+                }
             }
         }
         val mergesArray = model.optJSONArray("merges") ?: JSONArray()
@@ -298,7 +303,8 @@ private class LayaTokenizer(file: File) {
             if (pair != null) merges["${pair[0]} ${pair[1]}"] = i
         }
         val normalizer = root.optJSONObject("normalizer")
-        lowercase = normalizer?.optBoolean("lowercase", false) == true
+        lowercase = normalizer?.optBoolean("lowercase", false) == true ||
+            normalizer?.toString()?.contains("Lowercase") == true
         val pre = root.optJSONObject("pre_tokenizer")?.toString().orEmpty()
         byteLevel = pre.contains("ByteLevel")
         metaspace = pre.contains("Metaspace")
@@ -325,7 +331,8 @@ private class LayaTokenizer(file: File) {
 
     fun encode(raw: String, maxTokens: Int): List<Long> {
         if (maxTokens <= 0 || raw.isEmpty()) return emptyList()
-        val text = if (lowercase) raw.lowercase(Locale.ROOT) else raw
+        var text = raw.replace('ي', 'ی').replace('ك', 'ک')
+        if (lowercase) text = text.lowercase(Locale.ROOT)
         val tokens = when (modelType) {
             "WordPiece" -> encodeWordPiece(text)
             "BPE" -> encodeBpe(text)
@@ -391,25 +398,52 @@ private class LayaTokenizer(file: File) {
     }
 
     private fun encodeUnigram(text: String): List<String> {
-        // SentencePiece/Unigram: Viterbi over the actual vocabulary. Scores are optional in
-        // tokenizer.json; longest-match fallback is deterministic for bundles without scores.
+        // SentencePiece/Unigram tokenization uses a Viterbi path over scored vocabulary pieces.
+        val normalized = if (metaspace) {
+            val joined = text.replace(Regex("\\s+"), "▁")
+            if (!rootPrependNever && !joined.startsWith("▁")) "▁$joined" else joined
+        } else text
+        val n = normalized.length
+        if (n == 0) return emptyList()
+        val best = DoubleArray(n + 1) { Double.NEGATIVE_INFINITY }
+        val previous = IntArray(n + 1) { -1 }
+        val previousToken = arrayOfNulls<String>(n + 1)
+        best[0] = 0.0
         val pieces = vocab.keys.filter { it.isNotEmpty() }.sortedByDescending { it.length }
-        val output = ArrayList<String>()
-        val words = text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-        for ((index, word) in words.withIndex()) {
-            val normalizedWord = (if (metaspace && !(index == 0 && rootPrependNever)) "▁" else "") + word
-            var offset = 0
-            while (offset < normalizedWord.length) {
-                val found = pieces.firstOrNull { normalizedWord.startsWith(it, offset) }
-                if (found == null) {
-                    output += unkToken
-                    offset++
-                } else {
-                    output += found
-                    offset += found.length
+        for (start in 0 until n) {
+            if (best[start].isInfinite() && best[start] < 0) continue
+            var matched = false
+            for (piece in pieces) {
+                val end = start + piece.length
+                if (end > n || !normalized.startsWith(piece, start)) continue
+                val score = tokenScores[piece] ?: -10.0
+                val candidate = best[start] + score
+                if (candidate > best[end]) {
+                    best[end] = candidate
+                    previous[end] = start
+                    previousToken[end] = piece
+                }
+                matched = true
+            }
+            if (!matched) {
+                val end = start + 1
+                val candidate = best[start] - 100.0
+                if (candidate > best[end]) {
+                    best[end] = candidate
+                    previous[end] = start
+                    previousToken[end] = unkToken
                 }
             }
         }
+        if (previous[n] < 0) return listOf(unkToken)
+        val output = ArrayList<String>()
+        var cursor = n
+        while (cursor > 0) {
+            val token = previousToken[cursor] ?: return listOf(unkToken)
+            output += token
+            cursor = previous[cursor]
+        }
+        output.reverse()
         return output
     }
 
