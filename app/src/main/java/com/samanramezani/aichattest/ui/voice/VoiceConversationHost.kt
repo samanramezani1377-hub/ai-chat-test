@@ -112,7 +112,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
                 val tts = ttsModels.firstOrNull { it.id == activeTtsId } ?: ttsModels.firstOrNull()
                 check(stt != null && tts != null) { "ابتدا مدل Shenava Koochik و مدل TTS محلی را وارد کنید." }
                 alwaysOnPrefs.edit().putString(AlwaysOnKoochikService.PREF_STT_MODEL_ID, stt.id)
-                    .putString(AlwaysOnKoochikService.PREF_TTS_MODEL_ID, tts.id).apply()
+                    .putString(AlwaysOnKoochikService.PREF_TTS_MODEL_ID, tts?.id).apply()
                 AlwaysOnKoochikService.start(context)
                 alwaysOnEnabled = true
                 updateVoiceStatus(if (granted)
@@ -470,7 +470,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         onStart = {
             val stt = sttModels.firstOrNull { it.id == activeSttId }
             val tts = ttsModels.firstOrNull { it.id == activeTtsId }
-            if (stt == null || tts == null) updateVoiceStatus("VOICE-MODEL-001: ابتدا مدل‌های STT و TTS را وارد و انتخاب کنید.")
+            if (stt == null || (tts == null && !(pocketTtsSelected && pocketTtsReady))) updateVoiceStatus("VOICE-MODEL-001: ابتدا مدل‌های STT و TTS را وارد و انتخاب کنید.")
             else {
                 alwaysOnPrefs.edit()
                     .putString(AlwaysOnKoochikService.PREF_STT_MODEL_ID, stt.id)
