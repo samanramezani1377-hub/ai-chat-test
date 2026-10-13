@@ -3,6 +3,8 @@ package com.woogit.aicore.runtime.android
 import com.woogit.aicore.domain.ChatMessage
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class Qwen3PromptFormatterTest {
     @Test
@@ -37,6 +39,40 @@ class Qwen3PromptFormatterTest {
             "<|im_start|>user\nسلام<|im_end|>\n<|im_start|>assistant\n<|channel|>final\n",
             prompt,
         )
+        assertFalse(prompt.contains("<think>"))
+    }
+
+    @Test
+    fun noThinkingModeRemovesHistoricalReasoningAndKeepsFinalAnswer() {
+        val prompt = Qwen3PromptFormatter.format(
+            listOf(
+                ChatMessage(ChatMessage.Role.USER, "سوال قبلی"),
+                ChatMessage(
+                    ChatMessage.Role.ASSISTANT,
+                    "<think>private reasoning</think>پاسخ قبلی",
+                ),
+                ChatMessage(ChatMessage.Role.USER, "سوال جدید"),
+            ),
+            enableThinking = false,
+        )
+
+        assertFalse(prompt.contains("private reasoning"))
+        assertFalse(prompt.contains("<think>"))
+        assertTrue(prompt.contains("پاسخ قبلی"))
+        assertTrue(prompt.endsWith("<|im_start|>assistant\n<|channel|>final\n"))
+    }
+
+    @Test
+    fun noThinkingModeDropsUnclosedHistoricalReasoning() {
+        val prompt = Qwen3PromptFormatter.format(
+            listOf(
+                ChatMessage(ChatMessage.Role.ASSISTANT, "متن قبل <think>reasoning that never closed"),
+            ),
+            enableThinking = false,
+        )
+
+        assertFalse(prompt.contains("reasoning that never closed"))
+        assertFalse(prompt.contains("<think>"))
     }
 
     @Test
@@ -52,7 +88,7 @@ class Qwen3PromptFormatterTest {
     }
 
     @Test
-    fun preservesHistoricalReasoningWithoutCreatingEmptyThinkBlocks() {
+    fun preservesHistoricalReasoningWhenThinkingIsEnabled() {
         val prompt = Qwen3PromptFormatter.format(
             listOf(
                 ChatMessage(
