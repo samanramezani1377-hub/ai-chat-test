@@ -149,6 +149,20 @@ jobs:
           --console=plain
           --parallel
 
+      - name: Verify sherpa ONNX Runtime native linkage
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$apk"
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libsherpa-onnx-jni.so'
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime.so'
+          unzip -p "$apk" lib/arm64-v8a/libonnxruntime.so > "$RUNNER_TEMP/libonnxruntime.so"
+          if ! readelf --dyn-syms "$RUNNER_TEMP/libonnxruntime.so" | grep -q 'OrtGetApiBase'; then
+            echo "::error::Packaged libonnxruntime.so does not export OrtGetApiBase required by libsherpa-onnx-jni.so"
+            exit 1
+          fi
+          echo "Packaged sherpa JNI and ONNX Runtime are present; OrtGetApiBase is exported."
+
       - name: Verify OpenCL profiling and static backend linkage
         run: |
           set -euo pipefail
