@@ -5,10 +5,9 @@ import com.woogit.aicore.domain.ChatMessage
 /**
  * Qwen3.8/Qwen3.5-compatible text-only chat template.
  *
- * Historical assistant turns preserve real reasoning when it is present, but
- * do not inject an empty <think> block. This keeps serialized history stable
- * for prefix/KV-cache reuse. The active generation prompt still starts inside
- * <think>.
+ * Voice generation passes enableThinking=false: the active assistant prefix is
+ * explicitly routed to the final channel and historical reasoning blocks are
+ * omitted from the prompt. Normal chat keeps the model's normal thinking mode.
  */
 internal object Qwen3PromptFormatter {
     private const val IM_START = "<|im_start|>"
@@ -34,7 +33,7 @@ internal object Qwen3PromptFormatter {
                     }
                     ChatMessage.Role.ASSISTANT -> {
                         append(IM_START).append("assistant\n")
-                        appendAssistantHistory(message.content)
+                        appendAssistantHistory(message.content, includeReasoning = enableThinking)
                         append(IM_END).append('\n')
                     }
                     ChatMessage.Role.TOOL -> {
@@ -50,15 +49,13 @@ internal object Qwen3PromptFormatter {
             if (enableThinking) {
                 append("<think>\n")
             } else {
-                // Explicitly select the final channel for latency-sensitive voice turns.
-                // Leaving an open assistant prefix can make some Qwen variants spend the
-                // entire token budget in a non-final/reasoning channel.
+                // Qwen's explicit final channel disables reasoning for voice turns.
                 append("<|channel|>final\n")
             }
         }
     }
 
-    private fun StringBuilder.appendAssistantHistory(content: String) {
+    private fun StringBuilder.appendAssistantHistory(content: String, includeReasoning: Boolean) {
         val text = content.trim()
         val thinkStart = "<think>"
         val thinkEnd = "</think>"
@@ -69,14 +66,18 @@ internal object Qwen3PromptFormatter {
         if (end >= 0) {
             val reasoningStart = if (start >= 0) start + thinkStart.length else 0
             val reasoning = text.substring(reasoningStart, end).trim()
-            if (reasoning.isNotEmpty()) {
+            val finalText = text.substring(end + thinkEnd.length).trimStart()
+            if (includeReasoning && reasoning.isNotEmpty()) {
                 append("<think>\n")
                 append(reasoning)
                 append("\n</think>\n\n")
             }
-            append(text.substring(end + thinkEnd.length).trimStart())
-        } else {
+            append(finalText)
+        } else if (includeReasoning) {
             append(text)
+        } else {
+            // Avoid replaying unclosed reasoning or analysis text in no-think mode.
+            append(text.substringBefore("<think>").trim())
         }
     }
 }
