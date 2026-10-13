@@ -251,9 +251,9 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
                     val bytes=z.readBytes(); val major=bytes[6].toInt() and 255
                     val hlen=if(major>=2) ByteBuffer.wrap(bytes,8,4).order(ByteOrder.LITTLE_ENDIAN).int else ByteBuffer.wrap(bytes,8,2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 65535
                     val hs=if(major>=2)12 else 10; val header=String(bytes,hs,hlen,Charsets.US_ASCII)
-                    val dtype=Regex("""['"]descr['"]\\s*:\\s*['"]([^'"]+)""").find(header)?.groupValues?.get(1)?:error("NPY dtype missing")
+                    val dtype=Regex("""['"]descr['"]\s*:\s*['"]([^'"]+)""").find(header)?.groupValues?.get(1)?:error("NPY dtype missing")
                     require(dtype.endsWith("f4")||dtype.endsWith("f8")) { "Unsupported NPZ dtype $dtype" }
-                    val st=Regex("""['"]shape['"]\\s*:\\s*\\(([^)]*)""").find(header)?.groupValues?.get(1).orEmpty()
+                    val st=Regex("""['"]shape['"]\s*:\s*\(([^)]*)""").find(header)?.groupValues?.get(1).orEmpty()
                     val shape=st.split(',').mapNotNull { it.trim().toLongOrNull() }.toLongArray()
                     val n=if(shape.isEmpty())1L else shape.fold(1L){a,b->Math.multiplyExact(a,b)}
                     val bytesPer=if(dtype.endsWith("f8"))8 else 4; val pos=hs+hlen
