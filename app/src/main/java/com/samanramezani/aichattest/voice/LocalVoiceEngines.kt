@@ -101,12 +101,16 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
         cancelled: AtomicBoolean,
         onStarted: () -> Unit = {},
         onSynthesisComplete: (Long) -> Unit = {},
+        speed: Float = 1.0f,
+        playbackTailMs: Long = 0L,
     ) = withContext(Dispatchers.Default) {
         require(text.isNotBlank()) { "VOICE-TTS-002: متن گفتار خالی است." }
+        require(speed in 0.5f..1.5f) { "VOICE-TTS-008: سرعت گفتار خارج از محدودهٔ مجاز است." }
+        require(playbackTailMs in 0L..2000L) { "VOICE-TTS-009: مکث انتهایی خارج از محدودهٔ مجاز است." }
         val synthesisStartedAtMs = SystemClock.elapsedRealtime()
         val normalizedText = normalizePersianTtsText(text)
         // Normalize common Arabic-script variants before espeak phonemization.
-        val audio = engine.generate(text = normalizedText, sid = 0, speed = 1.0f)
+        val audio = engine.generate(text = normalizedText, sid = 0, speed = speed)
         onSynthesisComplete(SystemClock.elapsedRealtime() - synthesisStartedAtMs)
         if (cancelled.get()) throw CancellationException("TTS interrupted")
         val samples = audio.samples
@@ -135,7 +139,25 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
                 }
                 offset += count
             }
-            if (cancelled.get()) track.pause() else track.stop()
+            if (cancelled.get()) {
+                track.pause()
+            } else {
+                // Drain queued PCM before releasing AudioTrack; otherwise the final syllable can be clipped.
+                val framesToPlay = samples.size
+                val expectedPlaybackMs = (framesToPlay * 1000L / rate).coerceAtLeast(1L)
+                val drainDeadlineMs = SystemClock.elapsedRealtime() + expectedPlaybackMs + 1500L
+                while (!cancelled.get() && track.playbackHeadPosition.toLong() < framesToPlay &&
+                    SystemClock.elapsedRealtime() < drainDeadlineMs
+                ) {
+                    kotlinx.coroutines.delay(20)
+                }
+                if (!cancelled.get() && track.playbackHeadPosition.toLong() < framesToPlay) {
+                    error("VOICE-TTS-010: پخش صوت پیش از پایان بافر متوقف شد؛ playbackHead=" +
+                        track.playbackHeadPosition + "/" + framesToPlay)
+                }
+                if (!cancelled.get() && playbackTailMs > 0L) kotlinx.coroutines.delay(playbackTailMs)
+                if (!cancelled.get()) track.stop()
+            }
         } finally {
             runCatching { track.flush() }
             track.release()
