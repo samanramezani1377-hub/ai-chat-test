@@ -265,6 +265,7 @@ private class LayaTokenizer(file: File) {
     private val lowercase: Boolean
     private val byteLevel: Boolean
     private val metaspace: Boolean
+    private val rootPrependNever: Boolean
     private val unkToken: String
     val clsId: Long
     val sepId: Long
@@ -306,6 +307,7 @@ private class LayaTokenizer(file: File) {
         val pre = root.optJSONObject("pre_tokenizer")?.toString().orEmpty()
         byteLevel = pre.contains("ByteLevel")
         metaspace = pre.contains("Metaspace")
+        rootPrependNever = Regex("\\"prepend_scheme\\"\\s*:\\s*\\"never\\"").containsMatchIn(pre)
         unkToken = model.optString("unk_token", "<unk>")
         val special = root.optJSONArray("added_tokens") ?: JSONArray()
         val specialIds = HashMap<String, Int>()
@@ -365,7 +367,7 @@ private class LayaTokenizer(file: File) {
         val result = ArrayList<String>()
         val preTokens = if (metaspace) {
             text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.mapIndexed { i, word ->
-                (if (i == 0 && !text.startsWith(" ")) "" else "▁") + word
+                (if (i == 0 && rootPrependNever) "" else "▁") + word
             }
         } else {
             Regex("[\\p{L}\\p{M}]+|[\\p{N}]+|[^\\s\\p{L}\\p{M}\\p{N}]|\\s+")
@@ -397,10 +399,12 @@ private class LayaTokenizer(file: File) {
         // tokenizer.json; longest-match fallback is deterministic for bundles without scores.
         val pieces = vocab.keys.filter { it.isNotEmpty() }.sortedByDescending { it.length }
         val output = ArrayList<String>()
-        for (word in text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }) {
+        val words = text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        for ((index, word) in words.withIndex()) {
+            val normalizedWord = (if (metaspace && !(index == 0 && rootPrependNever)) "▁" else "") + word
             var offset = 0
-            while (offset < word.length) {
-                val found = pieces.firstOrNull { word.startsWith(it, offset) }
+            while (offset < normalizedWord.length) {
+                val found = pieces.firstOrNull { normalizedWord.startsWith(it, offset) }
                 if (found == null) {
                     output += unkToken
                     offset++
