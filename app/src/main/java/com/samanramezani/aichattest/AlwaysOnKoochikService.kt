@@ -445,12 +445,12 @@ class AlwaysOnKoochikService : Service() {
                     getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                         .putString(
                             PREF_LAST_DIAGNOSTIC,
-                            "ALWAYS_ON_TTS_ACK: text=single-utterance chars=11 speed=1.0 synthesisMs=$synthesisMs playback=completed",
+                            "ALWAYS_ON_TTS_ACK: text=single-utterance speed=1.0 synthesisMs=$synthesisMs playback=completed",
                         )
                         .apply()
                 }
                 acknowledgementPlayed.set(true)
-                Log.i(TAG, "Local TTS acknowledgement completed word-by-word")
+                Log.i(TAG, "Local TTS acknowledgement completed as one utterance")
             } catch (t: Throwable) {
                 Log.e(TAG, "Could not speak local wake acknowledgement", t)
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit()
