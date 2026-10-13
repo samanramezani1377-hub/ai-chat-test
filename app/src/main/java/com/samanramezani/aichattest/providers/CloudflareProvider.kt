@@ -65,6 +65,9 @@ class CloudflareProvider : ChatCompletionProvider {
         val startedAt = System.nanoTime()
         var firstTokenMs: Long? = null
         var outputTokens = 0L
+        var streamEvents = 0
+        var lastPayloadShape = "none"
+        var finishReason = "none"
         val output = StringBuilder()
         try {
             connection.requestMethod = "POST"
@@ -105,17 +108,45 @@ class CloudflareProvider : ChatCompletionProvider {
                         sawSse = true
                         val payload = line.removePrefix("data:").trim()
                         if (payload.isNotEmpty() && payload != "[DONE]") {
+                            streamEvents++
                             val json = runCatching { JSONObject(payload) }.getOrNull()
-                            val delta = json?.optJSONArray("choices")?.optJSONObject(0)
-                                ?.optJSONObject("delta")?.optString("content").orEmpty()
-                            if (delta.isNotEmpty()) {
-                                if (firstTokenMs == null) firstTokenMs = (System.nanoTime() - startedAt) / 1_000_000
-                                output.append(delta)
-                                outputTokens++
-                                onToken(delta)
+                            if (json == null) {
+                                lastPayloadShape = "invalid-json"
+                                continue
                             }
-                            val apiError = json?.optJSONObject("error")
-                            if (apiError != null) throw IllegalStateException("Cloudflare API: ${apiError.optString("message", payload)}")
+                            val apiError = json.optJSONObject("error")
+                            if (apiError != null) {
+                                throw IllegalStateException("Cloudflare API: ${apiError.optString("message", "stream error")}")
+                            }
+                            val choices = json.optJSONArray("choices")
+                            val choice = choices?.optJSONObject(0)
+                            val deltaObject = choice?.optJSONObject("delta")
+                            val messageObject = choice?.optJSONObject("message")
+                            finishReason = choice?.optString("finish_reason")?.takeIf { it.isNotBlank() && it != "null" } ?: finishReason
+                            val delta = contentText(deltaObject?.opt("content"))
+                                .ifBlank { contentText(messageObject?.opt("content")) }
+                            // Some Workers AI model families emit a native {response: ...}
+                            // terminal event, and may also send empty choices/usage heartbeats.
+                            val nativeResponse = contentText(json.opt("response"))
+                            lastPayloadShape = buildString {
+                                append("keys=").append(json.keys().asSequence().take(12).joinToString(","))
+                                append(";choices=").append(choices?.length() ?: 0)
+                                append(";deltaKeys=").append(deltaObject?.keys()?.asSequence()?.take(8)?.joinToString(",") ?: "-")
+                                append(";messageKeys=").append(messageObject?.keys()?.asSequence()?.take(8)?.joinToString(",") ?: "-")
+                                append(";responseChars=").append(nativeResponse.length)
+                                append(";finish=").append(finishReason)
+                            }
+                            val chunk = when {
+                                delta.isNotEmpty() -> delta
+                                output.isEmpty() && nativeResponse.isNotEmpty() -> nativeResponse
+                                else -> ""
+                            }
+                            if (chunk.isNotEmpty()) {
+                                if (firstTokenMs == null) firstTokenMs = (System.nanoTime() - startedAt) / 1_000_000
+                                output.append(chunk)
+                                outputTokens++
+                                onToken(chunk)
+                            }
                         }
                     } else if (!sawSse && line.isNotBlank()) {
                         fallback.append(line)
@@ -131,16 +162,27 @@ class CloudflareProvider : ChatCompletionProvider {
             }
             if (output.isEmpty() && responseText.isNotBlank()) {
                 val json = runCatching { JSONObject(responseText) }.getOrNull()
-                val choices = json?.optJSONArray("choices")
-                val content = choices?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
+                val choice = json?.optJSONArray("choices")?.optJSONObject(0)
+                val content = contentText(choice?.optJSONObject("message")?.opt("content"))
+                    .ifBlank { contentText(json?.opt("response")) }
                 if (content.isNotBlank()) {
                     output.append(content)
                     outputTokens = content.trim().split(Regex("\\s+")).size.toLong()
                     firstTokenMs = (System.nanoTime() - startedAt) / 1_000_000
                     onToken(content)
+                } else if (json != null) {
+                    lastPayloadShape = "jsonKeys=" + json.keys().asSequence().take(12).joinToString(",") +
+                        ";choices=" + (json.optJSONArray("choices")?.length() ?: 0) +
+                        ";responseChars=" + contentText(json.opt("response")).length
                 }
             }
-            if (output.isBlank()) throw IllegalStateException("CLOUDFLARE-EMPTY: پاسخ مدل خالی بود؛ شناسه مدل و دسترسی API را بررسی کن.")
+            if (output.isBlank()) {
+                throw IllegalStateException(
+                    "CLOUDFLARE-EMPTY: پاسخ متنی دریافت نشد؛ model=${config.model}; HTTP=${status}; " +
+                        "streamEvents=${streamEvents}; finish=${finishReason}; payload=${lastPayloadShape}. " +
+                        "شناسه مدل/دسترسی API یا خروجی غیرمتنی مدل را بررسی کن."
+                )
+            }
             GenerationResult(
                 text = output.toString(),
                 outputTokens = outputTokens,
@@ -151,6 +193,23 @@ class CloudflareProvider : ChatCompletionProvider {
             activeConnection.compareAndSet(connection, null)
             connection.disconnect()
         }
+    }
+
+    private fun contentText(value: Any?): String = when (value) {
+        null, JSONObject.NULL -> ""
+        is String -> value
+        is Number, is Boolean -> value.toString()
+        is JSONArray -> buildString {
+            for (i in 0 until value.length()) {
+                val item = value.opt(i)
+                when (item) {
+                    is JSONObject -> append(item.optString("text").takeIf { it != "null" }.orEmpty())
+                    is String, is Number, is Boolean -> append(item.toString())
+                }
+            }
+        }
+        is JSONObject -> value.optString("text").takeIf { it != "null" }.orEmpty()
+        else -> value.toString()
     }
 
     override suspend fun stopGeneration() {
