@@ -34,12 +34,14 @@ STT transcript (original text)
        │    └─ set → Laya choice: level 1..10 or OTHER_EXPLICIT_VALUE
        │         └─ explicit percentage/value is validated before execution
        ├─ DISPLAY   → choose increase / decrease / set → validate and execute
-       └─ CHAT      → send the exact original transcript to the local chat model
+       ├─ DISPLAY   → choose increase / decrease / set (target chosen by Laya)
+       ├─ APPLICATION / MEDIA / SYSTEM → reserved, currently inactive
+       └─ OTHER     → no local device action; forward original transcript unchanged
 ```
 
-For level-based volume changes, Laya receives the current media volume mapped to a 1–10 scale. A decrease request must select a lower level; an increase must select a higher one. Percentages and explicit values use a separate `OTHER_EXPLICIT_VALUE` decision and deterministic validation. The device executor clamps values to Android's supported range.
+For absolute volume, Laya chooses a target level from 0–10 itself; a percentage such as 50% must be mapped by Laya to level 5, then converted to 50% for the Android executor. Relative increase/decrease commands change the Android media stream by exactly one native volume step. The executor validates values against Android's supported range.
 
-The current Persian-safe command parser remains a conservative fallback if the model bundle is missing, the ONNX graph cannot load, or the decision does not clear the confidence/margin gates. A clear local command can therefore still be handled without crashing the voice conversation. This fallback does not modify or annotate the text sent to the chat model.
+Laya is the sole intent and value decision-maker. If the bundle is missing, ONNX inference fails, or Laya abstains, no device command is inferred by a regex/number parser; the original transcript is forwarded unchanged to the local chat model. APPLICATION, MEDIA, and SYSTEM are reserved and inactive until their executors are implemented.
 
 ## ONNX inputs and diagnostics
 
