@@ -57,9 +57,8 @@ android {
             excludes += setOf("sherpa-onnx/native/**")
         }
         jniLibs {
-            // Do not use pickFirst for libonnxruntime.so: the Microsoft AAR is
-            // unpacked as Java classes only, so sherpa's ABI-matched native
-            // runtime is the only ONNX Runtime .so packaged in the APK.
+            // ONNX Runtime and its JNI bridge come from the same Microsoft AAR;
+            // sherpa uses its static-link AAR to avoid a duplicate SONAME.
             // Keep native libraries uncompressed and avoid a second extracted copy on disk.
             useLegacyPackaging = false
         }
@@ -89,7 +88,6 @@ val downloadSherpaStaticAar by tasks.registering {
 }
 
 // Resolve ONNX Runtime's Java API and both matching native libraries from one AAR.
- // sherpa-onnx bundles the native ONNX Runtime version required by libsherpa-onnx-jni.so.
 val onnxRuntimeApiAar by configurations.creating {
     isCanBeConsumed = false
     isCanBeResolved = true
