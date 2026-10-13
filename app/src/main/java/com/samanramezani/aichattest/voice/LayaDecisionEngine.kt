@@ -99,7 +99,8 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                                 trace += "volume_target=${level.id} confidence=${"%.3f".format(Locale.US, level.confidence)} current=${currentLevel ?: "unknown"}"
                                 when {
                                     level.id == "OTHER_EXPLICIT_VALUE" && operation.id == "SET" &&
-                                        parsed.intent == DinaIntent.SET_VOLUME && parsed.value != null -> parsed
+                                        parsed.intent == DinaIntent.SET_VOLUME && parsed.value != null &&
+                                        (explicitPercent || parsed.value !in 1..10) -> parsed
                                     level.id.startsWith("LEVEL_") && !explicitPercent -> {
                                         val targetLevel = level.id.removePrefix("LEVEL_").toIntOrNull() ?: return@synchronized null
                                         if (operation.id == "INCREASE" && currentLevel != null && targetLevel <= currentLevel) return@synchronized null
@@ -364,7 +365,8 @@ private class LayaTokenizer(file: File) {
                 (if (i == 0 && rootPrependNever) "" else "▁") + word
             }
         } else {
-            Regex("[\\p{L}\\p{M}]+|[\\p{N}]+|[^\\s\\p{L}\\p{M}\\p{N}]|\\s+")
+            (if (byteLevel) Regex("\\s*[\\p{L}\\p{M}]+|\\s*[\\p{N}]+|\\s*[^\\s\\p{L}\\p{M}\\p{N}]+|\\s+")
+             else Regex("[\\p{L}\\p{M}]+|[\\p{N}]+|[^\\s\\p{L}\\p{M}\\p{N}]|\\s+"))
                 .findAll(text).map { it.value }.toList()
         }
         for (part in preTokens) {
