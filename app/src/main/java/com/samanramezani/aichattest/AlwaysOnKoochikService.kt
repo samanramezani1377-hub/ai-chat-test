@@ -299,7 +299,7 @@ class AlwaysOnKoochikService : Service() {
             )
             transitioningToConversation = false
             if (started) {
-                speakAcknowledgementAsync(promptSubmittedGate)
+                speakAcknowledgementAsync()
                 val ackThread = acknowledgementThread
                 Thread({
                     try {
@@ -360,17 +360,14 @@ class AlwaysOnKoochikService : Service() {
         }
     }
 
-    private fun speakAcknowledgementAsync(promptSubmittedGate: CompletableDeferred<Unit>? = null) {
+    private fun speakAcknowledgementAsync() {
         if (acknowledgementThread?.isAlive == true || acknowledgementPlayed.get()) return
         val engine = acknowledgementTts ?: return
         acknowledgementThread = Thread({
             try {
+                // The controller has already received the extracted command and starts model inference
+                // asynchronously. Speak the acknowledgement in parallel with that inference.
                 runBlocking {
-                    // Wait until processTurn has handed the complete utterance to session.send().
-                    // Bound the wait so a controller initialization failure cannot deadlock this service.
-                    kotlinx.coroutines.withTimeoutOrNull(15_000) {
-                        promptSubmittedGate?.await()
-                    }
                     engine.speak(
                         "متوجه شدم",
                         AtomicBoolean(false),
@@ -399,7 +396,6 @@ class AlwaysOnKoochikService : Service() {
         initialUtterance: String,
         acknowledgeWake: Boolean,
         speechStartGate: CompletableDeferred<Unit>? = null,
-        promptSubmittedGate: CompletableDeferred<Unit>? = null,
     ): Boolean {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         if (voiceController != null) return true
@@ -461,7 +457,6 @@ class AlwaysOnKoochikService : Service() {
                 initialUtterance = initialUtterance,
                 acknowledgeWake = acknowledgeWake,
                 speechStartGate = speechStartGate,
-                promptSubmittedGate = promptSubmittedGate,
             )
             true
         } catch (t: Throwable) {
