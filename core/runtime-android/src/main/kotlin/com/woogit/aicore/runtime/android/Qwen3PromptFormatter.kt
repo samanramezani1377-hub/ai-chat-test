@@ -47,7 +47,14 @@ internal object Qwen3PromptFormatter {
                 }
             }
             append(IM_START).append("assistant\n")
-            if (enableThinking) append("<think>\n")
+            if (enableThinking) {
+                append("<think>\n")
+            } else {
+                // Explicitly select the final channel for latency-sensitive voice turns.
+                // Leaving an open assistant prefix can make some Qwen variants spend the
+                // entire token budget in a non-final/reasoning channel.
+                append("<|channel|>final\n")
+            }
         }
     }
 
