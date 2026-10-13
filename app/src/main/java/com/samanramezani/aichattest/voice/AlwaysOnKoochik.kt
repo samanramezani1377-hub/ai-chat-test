@@ -14,7 +14,7 @@ internal fun extractDinaCommand(transcript: String): String? {
         .replace('ك', 'ک')
         .replace('ـ'.toString(), "")
         .lowercase()
-    val match = Regex("(?<![\\p{L}\\p{N}])(?:دینا|دينا|دينه|dina)(?![\\p{L}\\p{N}])")
+    val match = Regex("(?<![\\p{L}\\p{N}])(?:دینا|دينا|دينه|دینه|dina)(?![\\p{L}\\p{N}])")
         .find(normalized) ?: return null
     return normalized.substring(match.range.last + 1)
         .trim()
