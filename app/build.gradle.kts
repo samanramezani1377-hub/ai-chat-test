@@ -77,8 +77,11 @@ cargo {
     libname = "laya_tokenizers"
     targets = listOf("arm64")
     profile = "release"
-    targetDirectory = "src/main/jniLibs/"
-    prebuiltToolchains = true
+}
+
+// Ensure the JNI tokenizer is compiled before Android packages native libraries.
+tasks.named("preBuild").configure {
+    dependsOn("cargoBuild")
 }
 
 // sherpa-onnx's regular AAR exports ONNX Runtime as libonnxruntime.so, which
