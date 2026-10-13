@@ -473,6 +473,8 @@ internal class VoiceConversationController(
     private val lastTtsPlaybackAtMs = AtomicLong(0L)
     // Bounded queue preserves short consecutive user turns without unbounded memory growth.
     private val pendingUtterances = ConcurrentLinkedQueue<String>()
+    private val lastFinalizedUtterance = AtomicReference("")
+    private val lastFinalizedUtteranceAtMs = AtomicLong(0L)
     private val startInProgress = AtomicBoolean(false)
     private val lifecycleEpoch = AtomicLong(0L)
     @Volatile private var microphone: LocalMicrophone? = null
@@ -650,6 +652,16 @@ internal class VoiceConversationController(
                         if (update.endpoint && update.text.isNotBlank()) {
                             val utterance = update.text.trim()
                             if (utterance.isNotBlank()) {
+                                val finalizedAtMs = SystemClock.elapsedRealtime()
+                                val previousFinalized = lastFinalizedUtterance.get()
+                                if (utterance.equals(previousFinalized, ignoreCase = true) &&
+                                    finalizedAtMs - lastFinalizedUtteranceAtMs.get() in 0L..1800L
+                                ) {
+                                    onDiagnostic("VOICE-STT-DUPLICATE: duplicate finalized utterance suppressed; chars=${utterance.length}")
+                                    continue
+                                }
+                                lastFinalizedUtterance.set(utterance)
+                                lastFinalizedUtteranceAtMs.set(finalizedAtMs)
                                 // In an active dialogue, «دینا خاموش شو» returns control to the
                                 // always-on wake listener instead of being sent to the chat model.
                                 val wakeControl = extractDinaCommand(utterance)
@@ -668,15 +680,14 @@ internal class VoiceConversationController(
                                     onLine("شما", utterance)
                                     turnJob = scope.launch { processTurn(utterance) }
                                 } else {
-                                    // Keep the latest finalized utterance instead of silently dropping it
-                                    // while the previous generation is being cancelled.
-                                    if (pendingUtterances.size >= 4) {
-                                        pendingUtterances.poll()
-                                        onDiagnostic("VOICE-TURN-001: صف گفتارهای منتظر پر بود؛ قدیمی‌ترین درخواست حذف شد.")
-                                    }
+                                    // The newest finalized user turn supersedes stale generation immediately.
+                                    // Keep only the latest utterance to prevent a long decode from building
+                                    // a backlog and answering obsolete requests out of order.
+                                    pendingUtterances.clear()
                                     pendingUtterances.offer(utterance)
                                     onLine("شما", utterance)
-                                    onStatus("گفتار جدید دریافت شد؛ پس از توقف امن پاسخ قبلی پردازش می‌شود.")
+                                    onDiagnostic("VOICE-TURN-INTERRUPT: turnRunning=true; pending=1; previousGeneration=stop_requested")
+                                    interrupt("گفتار تازه دریافت شد؛ پاسخ قبلی متوقف و درخواست جدید پردازش می‌شود.")
                                 }
                             }
                         }
@@ -869,9 +880,22 @@ internal class VoiceConversationController(
                     onStatus(if (speaking.get()) "در حال پخش پاسخ…" else "پاسخ آماده است؛ می‌توانید صحبت کنید.")
                 } else {
                     val failure = modelFailure.get()
-                    val detail = failure ?: "موتور مدل خروجی متنی تولید نکرد؛ گزارش اجرای مدل را بررسی کنید."
-                    onDiagnostic("VOICE-LLM-002: empty_response outputTokens=${result.generation.outputTokens ?: "n/a"} generationMs=${result.generation.generationTimeMs ?: "n/a"} detail=$detail")
-                    onStatus(if (failure != null) "VOICE-LLM-001: $failure" else "VOICE-LLM-002: پاسخ خالی دریافت شد؛ تولید متن مدل ناموفق بود.")
+                    val raw = generation.text
+                    val rawHasFinalChannel = raw.contains("<|channel|>final", ignoreCase = true) ||
+                        raw.contains("<|channel|>answer", ignoreCase = true)
+                    val rawHasReasoningMarker = raw.contains("<think", ignoreCase = true) ||
+                        raw.contains("<|channel|>analysis", ignoreCase = true) ||
+                        raw.contains("<|channel|>reasoning", ignoreCase = true) ||
+                        raw.contains("<|channel|>thought", ignoreCase = true)
+                    val detail = failure ?: "پس از پاک‌سازی، متن قابل‌گفتار باقی نماند."
+                    onDiagnostic(
+                        "VOICE-LLM-002: empty_response rawChars=${raw.length} " +
+                            "outputTokens=${generation.outputTokens ?: "n/a"} " +
+                            "generationMs=${generation.generationTimeMs ?: "n/a"} " +
+                            "stopped=${generation.stopped} finalChannel=$rawHasFinalChannel " +
+                            "reasoningMarker=$rawHasReasoningMarker detail=$detail"
+                    )
+                    onStatus(if (failure != null) "VOICE-LLM-001: $failure" else "VOICE-LLM-002: مدل متن نهایی قابل‌گفتار تولید نکرد؛ جزئیات کانال خروجی ثبت شد.")
                 }
             } else {
                 queue.close()
@@ -932,11 +956,16 @@ internal class VoiceConversationController(
         if (speaking.get()) lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
         cancelledSpeech.get()?.set(true)
         speaking.set(false)
-        scope.launch { container.modelRuntime.stopGeneration() }
-        turnJob?.cancel(CancellationException("barge-in"))
-        turnJob = null
         speechJob?.cancel()
-        // Let processTurn.finally release the active turn and dispatch any newly finalized utterance.
+        // Signal native cancellation before cancelling the coroutine waiting on native decode.
+        // This lets the runtime release its generation mutex before the next turn starts.
+        val interruptedJob = turnJob
+        scope.launch {
+            runCatching { container.modelRuntime.stopGeneration() }
+            interruptedJob?.cancel(CancellationException("barge-in"))
+            if (turnJob === interruptedJob) turnJob = null
+        }
+        // processTurn.finally releases the active turn and dispatches the newest pending utterance.
         onStatus(message)
     }
 
