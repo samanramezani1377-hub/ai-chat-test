@@ -78,43 +78,32 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                     when (operation.id) {
                         "MUTE" -> DinaCommand(DinaIntent.MUTE)
                         "UNMUTE" -> DinaCommand(DinaIntent.UNMUTE)
-                        "INCREASE", "DECREASE", "SET" -> {
-                            val parsed = DinaCommandClassifier.classify(rawText)
-                            val explicitPercent = Regex("(?:%|درصد|percent)", RegexOption.IGNORE_CASE).containsMatchIn(rawText)
-                            run {
-                                val actual = currentVolume
-                                val maximum = maxVolume
-                                val currentLevel = if (actual != null && maximum != null && maximum > 0) {
-                                    (actual * 10.0 / maximum).toInt().coerceIn(0, 10)
-                                } else null
-                                val question = when (operation.id) {
-                                    "INCREASE" -> "کاربر صدای بلندتر می‌خواهد. سطح هدفی از ۱ تا ۱۰ انتخاب کن که از سطح فعلی بیشتر باشد. Choose a level higher than the current level."
-                                    "DECREASE" -> "کاربر صدای آرام‌تر می‌خواهد. سطح هدفی از ۱ تا ۱۰ انتخاب کن که از سطح فعلی کمتر باشد. Choose a level lower than the current level."
-                                    else -> "سطح دقیق صدای درخواستی کاربر را از ۱ تا ۱۰ انتخاب کن. اگر سطح مشخصی نگفته، حدس نزن. Choose the exact requested volume level from 1 to 10."
-                                }
-                                val state = buildString {
-                                    append(rawText)
-                                    if (currentLevel != null) append("\nCurrent media volume level: ").append(currentLevel).append(" of 10.")
-                                }
-                                val level = choose(state, question, (1..10).map { n ->
-                                    Option("LEVEL_$n", "صدای رسانه را روی سطح $n از ۱۰ تنظیم کن. Set media volume to level $n out of 10.")
-                                } + if (operation.id == "SET") listOf(
-                                    Option("OTHER_EXPLICIT_VALUE", "کاربر درصد مشخص یا عددی خارج از مقیاس سطح ۱ تا ۱۰ گفته است. Explicit percentage or numeric target outside levels 1–10.")
-                                ) else emptyList()) ?: return@synchronized null
-                                trace += "volume_target=${level.id} confidence=${"%.3f".format(Locale.US, level.confidence)} current=${currentLevel ?: "unknown"}"
-                                when {
-                                    level.id == "OTHER_EXPLICIT_VALUE" && operation.id == "SET" &&
-                                        parsed.intent == DinaIntent.SET_VOLUME && parsed.value != null &&
-                                        (explicitPercent || parsed.value !in 1..10) -> parsed
-                                    level.id.startsWith("LEVEL_") && !explicitPercent -> {
-                                        val targetLevel = level.id.removePrefix("LEVEL_").toIntOrNull() ?: return@synchronized null
-                                        if (operation.id == "INCREASE" && currentLevel != null && targetLevel <= currentLevel) return@synchronized null
-                                        if (operation.id == "DECREASE" && currentLevel != null && targetLevel >= currentLevel) return@synchronized null
-                                        DinaCommand(DinaIntent.SET_VOLUME, targetLevel * 10, valueIsPercent = true)
-                                    }
-                                    else -> return@synchronized null
-                                }
+                        "INCREASE" -> DinaCommand(DinaIntent.INCREASE_VOLUME)
+                        "DECREASE" -> DinaCommand(DinaIntent.DECREASE_VOLUME)
+                        "SET" -> {
+                            // The Laya model itself must interpret spoken numerals and percentages.
+                            // Do not call the legacy regex/number parser here.
+                            val actual = currentVolume
+                            val maximum = maxVolume
+                            val currentLevel = if (actual != null && maximum != null && maximum > 0) {
+                                (actual * 10.0 / maximum).toInt().coerceIn(0, 10)
+                            } else null
+                            val state = buildString {
+                                append(rawText)
+                                if (currentLevel != null) append("\nCurrent media volume level: ").append(currentLevel).append(" of 10.")
                             }
+                            val level = choose(
+                                state,
+                                "مقدار دقیق صدای درخواستی را تعیین کن. اگر درصد گفته شده، خودت آن را به مقیاس ۰ تا ۱۰ تبدیل کن؛ اگر عدد مستقیم ۰ تا ۱۰ گفته شده همان را انتخاب کن. عدد را حدس نزن و اگر نامشخص است UNKNOWN را برگردان. Interpret the original request and choose its exact target level from 0 to 10.",
+                                (0..10).map { n ->
+                                    Option("LEVEL_$n", "سطح صدای درخواستی برابر $n از ۱۰ است. Exact target volume level is $n out of 10.")
+                                } + Option("UNKNOWN", "مقدار قابل تشخیص نیست؛ حدس نزن. Target level is unknown; do not guess.")
+                            ) ?: return@synchronized null
+                            trace += "volume_target=${level.id} confidence=${"%.3f".format(Locale.US, level.confidence)} current=${currentLevel ?: "unknown"}"
+                            if (level.id == "UNKNOWN") return@synchronized null
+                            val targetLevel = level.id.removePrefix("LEVEL_").toIntOrNull()
+                                ?.takeIf { it in 0..10 } ?: return@synchronized null
+                            DinaCommand(DinaIntent.SET_VOLUME, targetLevel * 10, valueIsPercent = true)
                         }
                         else -> return@synchronized null
                     }
