@@ -26,7 +26,7 @@ import kotlin.math.*
  * ONNX Runtime implementation of the upstream Pocket TTS Farsi v2 pipeline.
  * Model inference is offline and CPU-backed, like the upstream reference script.
  */
-internal class PocketTtsFarsiEngine(private val dir: File) : LocalTtsEngine {
+internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
     private val env = OrtEnvironment.getEnvironment()
     private val opts = OrtSession.SessionOptions()
     private val flow: OrtSession
