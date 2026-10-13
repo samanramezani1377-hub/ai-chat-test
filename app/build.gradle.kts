@@ -6,7 +6,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
-    id("org.mozilla.rust-android-gradle.rust-android") version "0.9.6"
+    id("org.mozilla.rust-android-gradle.rust-android") version "0.10.0"
 }
 
 android {
