@@ -28,6 +28,9 @@ import com.samanramezani.aichattest.voice.VoiceModelStore
 import com.samanramezani.aichattest.voice.PiperComponent
 import com.samanramezani.aichattest.voice.SmallSttComponent
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
+import com.samanramezani.aichattest.voice.MiniLmIntentModelStore
+import com.samanramezani.aichattest.voice.DinaCommandClassifier
+import com.samanramezani.aichattest.voice.DinaDeviceCommandExecutor
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.domain.InferenceSettings
 import kotlinx.coroutines.CancellationException
@@ -54,6 +57,13 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     val context = LocalContext.current
     val uiScope = rememberCoroutineScope()
     val store = remember(context) { VoiceModelStore(context.contentResolver, File(context.filesDir, "voice-models")) }
+    val miniLmStore = remember(context) {
+        MiniLmIntentModelStore(context.contentResolver, File(context.filesDir, "voice-models/minilm-intent"))
+    }
+    var miniLmReady by remember { mutableStateOf(miniLmStore.isReady()) }
+    var miniLmStatus by remember {
+        mutableStateOf(if (miniLmStore.isReady()) "بسته MiniLM وارد شده است؛ فرمان‌های محلی امن فعال‌اند." else "مدل MiniLM اختیاری است؛ فرمان‌های محلی فارسی حتی بدون آن قابل استفاده‌اند.")
+    }
     var sttModels by remember { mutableStateOf(store.list(VoiceModelKind.STT)) }
     var ttsModels by remember { mutableStateOf(store.list(VoiceModelKind.TTS)) }
     var missingKoochikComponents by remember { mutableStateOf(store.missingKoochikComponents()) }
@@ -251,6 +261,21 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         }
     }
 
+    val miniLmPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) uiScope.launch {
+            busy = true
+            miniLmStatus = "در حال وارد کردن بسته محلی MiniLM…"
+            try {
+                miniLmStatus = withContext(Dispatchers.IO) { miniLmStore.importBundle(uri) }
+                miniLmReady = miniLmStore.isReady()
+                updateVoiceStatus(miniLmStatus)
+            } catch (t: Throwable) {
+                miniLmStatus = "MINILM-IMPORT: ${t.message ?: t.javaClass.simpleName}"
+                updateVoiceStatus(miniLmStatus)
+            } finally { busy = false }
+        }
+    }
+
     VoiceConversationPage(
         lines = lines,
         status = status,
@@ -264,6 +289,9 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         missingTtsComponents = missingTtsComponents,
         activeSttId = activeSttId,
         activeTtsId = activeTtsId,
+        miniLmModelReady = miniLmReady,
+        miniLmStatus = miniLmStatus,
+        onImportMiniLm = { miniLmPicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
         onBack = onBack,
         onImportStt = { sttPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-bzip2", "application/octet-stream")) },
         onImportKoochikModel = { koochikModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
@@ -674,6 +702,24 @@ internal class VoiceConversationController(
         }
 
         try {
+            onStatus("در حال بررسی درخواست فارسی روی دستگاه…")
+            val command = DinaCommandClassifier.classify(utterance)
+            if (command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) {
+                val localReply = runCatching { DinaDeviceCommandExecutor(context).execute(command) }
+                    .getOrElse { "انجام فرمان ناموفق بود: ${it.message ?: it.javaClass.simpleName}" }
+                    .orEmpty()
+                if (localReply.isNotBlank()) {
+                    onDiagnostic("DINA-LOCAL-COMMAND: intent=${command.intent.name} parameter=${command.value ?: "none"} model=local-device-executor")
+                    queue.trySend(localReply)
+                    queue.close()
+                    activeSpeechJob.join()
+                    if (!turnCancel.get()) {
+                        onLine("دستیار", localReply)
+                        onStatus("فرمان محلی اجرا شد؛ مدل گفت‌وگو فراخوانی نشد.")
+                    }
+                    return
+                }
+            }
             onStatus("در حال پردازش گفتار و تولید پاسخ محلی…")
             val id = conversationId ?: error("VOICE-CHAT-001: شناسه مکالمه ایجاد نشده است.")
             val modelFailure = AtomicReference<String?>(null)
