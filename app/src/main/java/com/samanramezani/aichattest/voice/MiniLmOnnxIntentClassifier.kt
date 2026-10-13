@@ -31,7 +31,7 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
         private const val MIN_MARGIN = 0.18
         private val ALLOWED_LABELS = setOf(
             "CHAT", "GET_TIME", "GET_DATE", "INCREASE_VOLUME", "DECREASE_VOLUME",
-            "SET_VOLUME", "INCREASE_BRIGHTNESS", "DECREASE_BRIGHTNESS", "SET_BRIGHTNESS",
+            "SET_VOLUME", "MUTE", "UNMUTE", "INCREASE_BRIGHTNESS", "DECREASE_BRIGHTNESS", "SET_BRIGHTNESS",
         )
 
         private fun encodeTokens(tokens: List<String>, vocab: Map<String, Int>, cls: String, sep: String, unk: String, pad: String, maxLength: Int): Encoded {
