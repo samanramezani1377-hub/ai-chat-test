@@ -50,18 +50,22 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
         if (bytes.isEmpty()) return ""
         val inputIds = LongArray(bytes.size) { (bytes[it].toInt() and 0xff).toLong() + 3L }
         val encoded = tensor(inputIds)
+        // Copy the encoder result before closing the Result. ONNX Runtime may expose
+        // a tensor's value as a nested primitive array (for example float[][][] / [[[F),
+        // rather than an OnnxTensor instance. The decoder needs an owned Tensor that
+        // remains valid after the encoder Result is closed.
         val hidden = try {
             encoder.run(mapOf("input_ids" to encoded)).use { result ->
                 val output = result[0].value
-                when (output) {
-                    is OnnxTensor -> output
-                    is OnnxSequence -> {
-                        // Some exported encoder graphs wrap the hidden-state tensor in
-                        // an ONNX sequence instead of exposing it as a direct tensor.
-                        output.value.firstOrNull { it is OnnxTensor } as? OnnxTensor
-                            ?: error("POCKET-TTS-G2P-002: خروجی sequence رمزگذار فاقد Tensor است؛ output index 0")
-                    }
-                    else -> error("POCKET-TTS-G2P-002: نوع خروجی رمزگذار پشتیبانی نمی‌شود؛ output index 0, valueClass=${output.javaClass.name}")
+                try {
+                    copyHiddenTensor(output)
+                } catch (t: Throwable) {
+                    throw IllegalStateException(
+                        "POCKET-TTS-G2P-002: خروجی رمزگذار قابل تبدیل به Tensor نیست؛ " +
+                            "output index 0, valueClass=${output.javaClass.name}, " +
+                            "outputName=${result[0].key}, outputInfo=${result[0].info}: ${t.message}",
+                        t
+                    )
                 }
             }
         } finally {
@@ -101,6 +105,22 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
         } finally {
             hidden.close()
         }
+    }
+
+    /**
+     * Materialize an independent tensor from the Java value representation returned by
+     * ONNX Runtime. This handles direct tensors, sequence-wrapped values, and primitive
+     * multidimensional arrays such as float[][][] (whose JVM class name is [[[F).
+     */
+    private fun copyHiddenTensor(value: Any): OnnxTensor = when (value) {
+        is OnnxTensor -> OnnxTensor.createTensor(env, value.value)
+        is OnnxSequence -> {
+            val first = value.value.firstOrNull()
+                ?: error("خروجی sequence رمزگذار خالی است")
+            copyHiddenTensor(first)
+        }
+        is Array<*> -> OnnxTensor.createTensor(env, value)
+        else -> error("نمایش خروجی برای ساخت Tensor پشتیبانی نمی‌شود: ${value.javaClass.name}")
     }
 
     private fun tensor(values: LongArray): OnnxTensor {
