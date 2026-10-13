@@ -82,40 +82,23 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
         var retainLoadedSession = false
         try {
             ensureLoaded()
-            val domain = choose(rawText, "درخواست کاربر به کدام دسته مربوط است؟ Choose the user's request category.",
+            // Use actionable top-level choices instead of a broad INFORMATION/SYSTEM
+            // split. The previous taxonomy confidently misrouted short Persian requests
+            // such as "ساعت چنده؟" to SYSTEM, preventing the local clock/date path from running.
+            // Laya still makes the decision; this is not a keyword/regex fallback.
+            val domain = choose(rawText, "درخواست کاربر را به دقیق‌ترین دسته انتخاب کن. اگر ساعت فعلی یا تاریخ امروز را می‌خواهد، همان گزینه را انتخاب کن؛ گفت‌وگوی معمولی باید CHAT باشد. Choose the user's request category.",
                 listOf(
-                    Option("AUDIO", "کنترل صدا: تنظیم، افزایش، کاهش، قطع یا وصل صدا. Audio volume control."),
-                    Option("DISPLAY", "کنترل نمایشگر و روشنایی صفحه. Display and brightness control."),
-                    Option("APPLICATION", "کنترل برنامه‌ها؛ این حوزه فعلاً غیرفعال است و نباید فرمانی اجرا کند. Application control, currently disabled."),
-                    Option("MEDIA", "پخش و کنترل رسانه؛ این حوزه فعلاً غیرفعال است و نباید فرمانی اجرا کند. Media playback and control, currently disabled."),
-                    Option("SYSTEM", "تنظیمات سیستم؛ این حوزه فعلاً غیرفعال است و نباید فرمانی اجرا کند. System settings, currently disabled."),
-                    Option("INFORMATION", "پرسش اطلاعاتی که باید به مدل مکالمه فرستاده شود. Information request for the chat model."),
-                    Option("OTHER", "سایر درخواست‌ها؛ بدون اجرای فرمان دستگاه. Other request, do not execute a device command."),
+                    Option("GET_TIME", "کاربر ساعت همین الان را می‌پرسد یا می‌خواهد بداند ساعت چند است. زمان فعلی دستگاه را اعلام کن. Current time now, what time is it."),
+                    Option("GET_DATE", "کاربر تاریخ امروز یا روز و ماه فعلی را می‌پرسد. تاریخ محلی دستگاه. Today's current date."),
+                    Option("AUDIO", "کنترل صدای رسانه: کم یا زیاد کردن، تنظیم مقدار، قطع یا وصل کردن صدا. Media volume control."),
+                    Option("DISPLAY", "کنترل روشنایی نمایشگر: کم یا زیاد کردن یا تنظیم درصد روشنایی. Screen brightness control."),
+                    Option("CHAT", "هر درخواست دیگر، پرسش دانشی، یا گفت‌وگوی معمولی که فرمان محلی ساعت، تاریخ، صدا یا روشنایی نیست. Normal chat or information request."),
                 )) ?: return@synchronized null
             trace += "domain=${domain.id} confidence=${"%.3f".format(Locale.US, domain.confidence)}"
             val command = when (domain.id) {
-                "INFORMATION" -> {
-                    // Keep the requested top-level taxonomy exact. Laya makes a second
-                    // decision to distinguish local clock/date actions from ordinary chat.
-                    val info = choose(
-                        rawText,
-                        "این درخواست اطلاعاتی است. آیا کاربر ساعت فعلی، تاریخ امروز یا پاسخ گفت‌وگویی معمولی می‌خواهد؟ فقط بهترین گزینه را انتخاب کن.",
-                        listOf(
-                            Option("GET_TIME", "کاربر ساعت فعلی دستگاه را می‌خواهد؛ زمان محلی را اعلام کن. Current local time."),
-                            Option("GET_DATE", "کاربر تاریخ امروز را می‌خواهد. Today's local date."),
-                            Option("CHAT", "پرسش اطلاعاتی معمولی است و باید به مدل گفت‌وگو برسد. Normal information request for chat.")
-                        )
-                    ) ?: return@synchronized null
-                    trace += "information_action=${info.id} confidence=${"%.3f".format(Locale.US, info.confidence)}"
-                    when (info.id) {
-                        "GET_TIME" -> DinaCommand(DinaIntent.GET_TIME)
-                        "GET_DATE" -> DinaCommand(DinaIntent.GET_DATE)
-                        else -> DinaCommand(DinaIntent.CHAT)
-                    }
-                }
-                "OTHER", "APPLICATION", "MEDIA", "SYSTEM" -> DinaCommand(DinaIntent.CHAT)
                 "GET_TIME" -> DinaCommand(DinaIntent.GET_TIME)
                 "GET_DATE" -> DinaCommand(DinaIntent.GET_DATE)
+                "CHAT" -> DinaCommand(DinaIntent.CHAT)
                 "AUDIO" -> {
                     val operation = choose(rawText, "کاربر برای صدای رسانه چه عملی می‌خواهد؟ Choose the media-volume operation.",
                         listOf(
