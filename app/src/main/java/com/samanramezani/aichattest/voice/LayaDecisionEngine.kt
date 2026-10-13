@@ -64,8 +64,26 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 )) ?: return@synchronized null
             trace += "domain=${domain.id} confidence=${"%.3f".format(Locale.US, domain.confidence)}"
             val command = when (domain.id) {
-                "INFORMATION", "OTHER", "APPLICATION", "MEDIA", "SYSTEM" ->
-                    DinaCommand(DinaIntent.CHAT)
+                "INFORMATION" -> {
+                    // Keep the requested top-level taxonomy exact. Laya makes a second
+                    // decision to distinguish local clock/date actions from ordinary chat.
+                    val info = choose(
+                        rawText,
+                        "این درخواست اطلاعاتی است. آیا کاربر ساعت فعلی، تاریخ امروز یا پاسخ گفت‌وگویی معمولی می‌خواهد؟ فقط بهترین گزینه را انتخاب کن.",
+                        listOf(
+                            Option("GET_TIME", "کاربر ساعت فعلی دستگاه را می‌خواهد؛ زمان محلی را اعلام کن. Current local time."),
+                            Option("GET_DATE", "کاربر تاریخ امروز را می‌خواهد. Today's local date."),
+                            Option("CHAT", "پرسش اطلاعاتی معمولی است و باید به مدل گفت‌وگو برسد. Normal information request for chat.")
+                        )
+                    ) ?: return@synchronized null
+                    trace += "information_action=${info.id} confidence=${"%.3f".format(Locale.US, info.confidence)}"
+                    when (info.id) {
+                        "GET_TIME" -> DinaCommand(DinaIntent.GET_TIME)
+                        "GET_DATE" -> DinaCommand(DinaIntent.GET_DATE)
+                        else -> DinaCommand(DinaIntent.CHAT)
+                    }
+                }
+                "OTHER", "APPLICATION", "MEDIA", "SYSTEM" -> DinaCommand(DinaIntent.CHAT)
                 "GET_TIME" -> DinaCommand(DinaIntent.GET_TIME)
                 "GET_DATE" -> DinaCommand(DinaIntent.GET_DATE)
                 "AUDIO" -> {
