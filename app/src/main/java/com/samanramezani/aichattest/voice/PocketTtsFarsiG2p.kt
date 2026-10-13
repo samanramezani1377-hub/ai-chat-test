@@ -59,9 +59,9 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
                         // Some exported encoder graphs wrap the hidden-state tensor in
                         // an ONNX sequence instead of exposing it as a direct tensor.
                         output.value.firstOrNull { it is OnnxTensor } as? OnnxTensor
-                            ?: error("POCKET-TTS-G2P-002: خروجی sequence رمزگذار فاقد Tensor است؛ output=${result[0].key}")
+                            ?: error("POCKET-TTS-G2P-002: خروجی sequence رمزگذار فاقد Tensor است؛ output index 0")
                     }
-                    else -> error("POCKET-TTS-G2P-002: نوع خروجی رمزگذار پشتیبانی نمی‌شود؛ output=${result[0].key}, valueClass=${output.javaClass.name}")
+                    else -> error("POCKET-TTS-G2P-002: نوع خروجی رمزگذار پشتیبانی نمی‌شود؛ output index 0, valueClass=${output.javaClass.name}")
                 }
             }
         } finally {
