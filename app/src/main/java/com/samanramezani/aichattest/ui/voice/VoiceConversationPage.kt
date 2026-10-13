@@ -43,6 +43,9 @@ internal fun VoiceConversationPage(
     missingTtsComponents: List<String>,
     activeSttId: String?,
     activeTtsId: String?,
+    miniLmModelReady: Boolean,
+    miniLmStatus: String,
+    onImportMiniLm: () -> Unit,
     onBack: () -> Unit,
     onImportStt: () -> Unit,
     onImportKoochikModel: () -> Unit,
@@ -102,7 +105,21 @@ internal fun VoiceConversationPage(
                 }
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("۱. تشخیص گفتار · STT", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("۱. فرمان‌های محلی فارسی · MiniLM", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "درخواست‌هایی مثل اعلام ساعت، کم‌وزیاد کردن صدا و تنظیم نور صفحه پیش از مدل گفت‌وگو بررسی می‌شوند. اجرای دستگاه جدا از تشخیص است؛ اگر درخواست فرمان شناخته‌شده نباشد، متن اصلی بدون افزودن دستور یا برچسب به مسیر گفت‌وگو می‌رود. فرمان‌های محلی در حال حاضر با طبقه‌بندی محافظه‌کارانهٔ روی دستگاه اجرا می‌شوند.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        OutlinedButton(onClick = onImportMiniLm, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (miniLmModelReady) "جایگزینی بسته مدل MiniLM" else "وارد کردن بسته مدل MiniLM · ZIP")
+                        }
+                        Text("بستهٔ سازگار باید شامل model.onnx، tokenizer.json و labels.json باشد. مدل عمومی sentence-embedding به‌تنهایی طبقه‌بند فرمان نیست؛ برای استنتاج MiniLM واقعی، مدل ONNX باید با برچسب‌ها و قرارداد ورودی/خروجی طبقه‌بندی سازگار باشد.", style = MaterialTheme.typography.bodySmall)
+                        Text(miniLmStatus, style = MaterialTheme.typography.bodySmall, color = if (miniLmModelReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("۲. تشخیص گفتار · STT", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text("مدل اصلی STT گفتار فارسی را به متن تبدیل می‌کند. در این برنامه Shenava Koochik مدل اصلی این مسیر است؛ فایل‌های model.onnx و tokens.txt لازم‌اند.", style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(
                             onClick = { uriHandler.openUri("https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx/resolve/main/model.onnx") },
@@ -139,7 +156,7 @@ internal fun VoiceConversationPage(
                 }
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("۲. شنود دائمی فارسی · «دینا»", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("۳. شنود دائمی فارسی · «دینا»", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text(
                             "به‌جای مدل بیدارباش جداگانه، همین مدل Shenava Koochik گفتار فارسی را در قطعه‌های محدود تشخیص می‌دهد. وقتی «دینا» در یک جمله تشخیص داده شود، فقط متن بعد از آن به مدل گفتگو فرستاده می‌شود؛ متن جملات دیگر و تاریخچهٔ دائمی شنود نگه‌داری نمی‌شود. پس از تشخیص، TTS محلی می‌گوید «متوجه شدم».",
                             style = MaterialTheme.typography.bodySmall,
@@ -165,7 +182,7 @@ internal fun VoiceConversationPage(
                 }
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("۳. تولید گفتار · TTS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("۴. تولید گفتار · TTS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text("مدل TTS پاسخ دستیار را به صدا تبدیل می‌کند. مدل Piper آماده‌شده باید فایل مدل، تنظیمات و داده‌های آواشناسی را داشته باشد.", style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(onClick = onImportTtsModel, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن مدل صوتی · ONNX") }
                         OutlinedButton(onClick = onImportTtsConfig, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن تنظیمات Piper · JSON") }
@@ -195,7 +212,7 @@ internal fun VoiceConversationPage(
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text("۴. عیب‌یابی مکالمه صوتی", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Text("۵. عیب‌یابی مکالمه صوتی", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                 Text("وضعیت فعلی، کد خطا و رخدادهای اخیر برای گزارش مشکل.", style = MaterialTheme.typography.bodySmall)
                             }
                             IconButton(onClick = {
