@@ -208,7 +208,7 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
             if (ch in PERSIAN_LETTERS || ch == '\u200c' || ch in KEPT_PUNCT || ch.isWhitespace()) ch else ' '
         }.joinToString("")
         text = text.replace(Regex("\\u200c+"), "\u200c")
-            .replace(Regex("\\s*\\u200c\\s*"), " ")
+            .replace(Regex("\\s*\\u200c\\s*")) { if (it.value.any(Char::isWhitespace)) " " else "\u200c" }
             .replace(Regex("(?<![$PERSIAN_LETTERS])\\u200c|\\u200c(?![$PERSIAN_LETTERS])"), "")
             .replace(Regex("\\s+([.،؛؟!:])"), "$1")
             .replace(Regex("([.،؛؟!:])\\1+"), "$1")
