@@ -51,8 +51,8 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
         if (bytes.isEmpty()) return ""
         val inputIds = LongArray(bytes.size) { (bytes[it].toInt() and 0xff).toLong() + 3L }
         val encoded = tensor(inputIds)
-        // Copy the encoder result before closing the Result. ONNX Runtime may expose
-        // a tensor's value as a nested primitive array (for example float[][][] / [[[F),
+        // Use the named ONNX output and copy it before closing Result; the encoder hidden state
+        // must remain owned after the Result is closed.
         // rather than an OnnxTensor instance. The decoder needs an owned Tensor that
         // remains valid after the encoder Result is closed.
         val hidden = try {
@@ -81,8 +81,8 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
                 val logits = try {
                     decoder.run(mapOf("decoder_input_ids" to ids, "encoder_hidden" to hidden)).use { result ->
                         require(result.size() > 0) { "گراف decoder هیچ خروجی‌ای برنگرداند" }
-                        // Read the ONNX value itself. Accessing result[0].value materializes
-                        // a JVM array (or another wrapper) and then incorrectly treats that
+                        // Select the named output (Result is a Map in the Java API; numeric
+                        // indexing selects an entry, not the ONNX tensor itself). Read its
                         // Java representation as the model output object. ONNX Runtime already
                         // owns the actual tensor in the Result; consume its typed buffer while
                         // the Result is open instead of round-tripping through value/createTensor.
@@ -295,7 +295,7 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
         private const val MAX_DECODE_TOKENS = 512
         private const val WINDOW_WORDS = 30
         private val CONJUNCTIONS = setOf("و", "یا", "ولی", "اما", "که", "زیرا", "چون", "پس", "سپس", "بنابراین", "همچنین")
-        private val PHONEME_REPLACEMENTS = mapOf('/' to 'a', 'a' to 'A', '@' to '?', '
+        private val PHONEME_REPLACEMENTS = mapOf('/' to 'a', 'a' to 'A', '@' to '?', '$' to 'S', 'c' to 'C')
         private val LATIN_WORD = Regex("[A-Za-z][A-Za-z'-]*")
         private val LATIN_EXCEPTIONS = mapOf(
             "echo" to "اکو", "state" to "استیت", "network" to "نت‌ورک",
@@ -334,7 +334,7 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
             '»' to ' ', '«' to ' ', '“' to ' ', '”' to ' ', '‘' to ' ', '’' to ' ',
             '"' to ' ', '\'' to ' ', '`' to ' ', '(' to ' ', ')' to ' ', '[' to ' ',
             ']' to ' ', '{' to ' ', '}' to ' ', '–' to ' ', '—' to ' ', '−' to ' ',
-            '-' to ' ', '‐' to ' ', '/' to ' ', '\\\\' to ' ', '*' to ' ', '_' to ' ',
+            '-' to ' ', '‐' to ' ', '/' to ' ', '\\' to ' ', '*' to ' ', '_' to ' ',
             '|' to ' ', '×' to ' ', '=' to ' ', '+' to ' '
         )
         private val KEPT_PUNCT = setOf('.', '،', '؛', '؟', '!', ':')
