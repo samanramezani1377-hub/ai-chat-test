@@ -70,6 +70,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     }
     var pocketTtsReady by remember { mutableStateOf(pocketTtsStore.isReady()) }
     var pocketTtsStatus by remember { mutableStateOf(pocketTtsStore.status()) }
+    var pocketTtsSelected by remember { mutableStateOf(context.getSharedPreferences(AlwaysOnKoochikService.PREFS, Context.MODE_PRIVATE).getBoolean("pocket_tts_selected", false)) }
     var sttModels by remember { mutableStateOf(store.list(VoiceModelKind.STT)) }
     var ttsModels by remember { mutableStateOf(store.list(VoiceModelKind.TTS)) }
     var missingKoochikComponents by remember { mutableStateOf(store.missingKoochikComponents()) }
@@ -406,6 +407,16 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         layaStatus = layaStatus,
         pocketTtsReady = pocketTtsReady,
         pocketTtsStatus = pocketTtsStatus,
+        pocketTtsSelected = pocketTtsSelected,
+        onPocketTtsSelectedChange = { selected ->
+            if (selected && !pocketTtsStore.isReady()) {
+                updateVoiceStatus("POCKET-TTS-SELECT-001: ابتدا بستهٔ Pocket TTS را دانلود و وارد کن.")
+            } else {
+                pocketTtsSelected = selected
+                context.getSharedPreferences(AlwaysOnKoochikService.PREFS, Context.MODE_PRIVATE).edit().putBoolean("pocket_tts_selected", selected).apply()
+                updateVoiceStatus(if (selected) "موتور Pocket TTS برای پاسخ‌های مکالمه انتخاب شد." else "موتور Piper برای پاسخ‌های مکالمه انتخاب شد.")
+            }
+        },
         onDownloadPocketTts = { downloadPocketTtsBundle() },
         onImportPocketTts = { pocketTtsPicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
         onImportLaya = { layaPicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
@@ -561,7 +572,7 @@ internal class VoiceConversationController(
     private val lifecycleEpoch = AtomicLong(0L)
     @Volatile private var microphone: LocalMicrophone? = null
     private var recognizer: LocalAsr? = null
-    private var tts: LocalPiperTts? = null
+    private var tts: com.samanramezani.aichattest.voice.LocalTtsEngine? = null
     private var frameJob: Job? = null
     private var turnJob: Job? = null
     private var speechJob: Job? = null
@@ -610,7 +621,16 @@ internal class VoiceConversationController(
                         else -> LocalStreamingAsr(stt)
                     }
                     try {
-                        asr to LocalPiperTts(ttsModel)
+                        val usePocket = context.getSharedPreferences(AlwaysOnKoochikService.PREFS, Context.MODE_PRIVATE)
+                            .getBoolean("pocket_tts_selected", false)
+                        val ttsEngine = if (usePocket) {
+                            val modelDir = File(context.filesDir, "voice-models/pocket-tts-farsi-v2")
+                            check(PocketTtsFarsiBundleStore(context.contentResolver, modelDir).isReady()) {
+                                "POCKET-TTS-SELECT-002: بستهٔ Pocket TTS نصب نیست یا ناقص است."
+                            }
+                            LocalPocketTts(modelDir)
+                        } else LocalPiperTts(ttsModel)
+                        asr to ttsEngine
                     } catch (t: Throwable) {
                         runCatching { asr.close() }
                         throw t
