@@ -97,10 +97,12 @@ internal class MiniLmIntentModelStore(
             val model = File(staging, "model.onnx")
             val tokenizer = File(staging, "tokenizer.json")
             val labels = File(staging, "labels.json")
-            require(model.isFile && model.length() > 1024 && tokenizer.isFile && tokenizer.length() > 0 && labels.isFile && labels.length() > 0) {
-                "MINILM-IMPORT-007: بسته باید هر سه فایل model.onnx، tokenizer.json و labels.json را داشته باشد."
-            }
             val decisionTrees = File(staging, "decision_trees.json")
+            val hasDecisionTrees = decisionTrees.isFile
+            require(model.isFile && model.length() > 1024 && tokenizer.isFile && tokenizer.length() > 0 &&
+                (hasDecisionTrees || labels.isFile && labels.length() > 0)) {
+                "MINILM-IMPORT-007: بسته باید model.onnx، tokenizer.json و یکی از labels.json یا decision_trees.json را داشته باشد."
+            }
             if (decisionTrees.isFile) {
                 require(decisionTrees.length() <= 256 * 1024) {
                     "MINILM-IMPORT-012: فایل decision_trees.json بیش از ۲۵۶ کیلوبایت است."
@@ -140,7 +142,7 @@ internal class MiniLmIntentModelStore(
                 error("MINILM-IMPORT-010: انتقال بسته مدل به پوشه نهایی ناموفق بود.")
             }
             if (hadPrevious) backup.deleteRecursively()
-            return if (decisionTrees.isFile) {
+            return if (hasDecisionTrees) {
                 "مدل تصمیم‌گیری مرحله‌ای وارد شد. توجه: all-MiniLM-L6-v2 انگلیسی است؛ فرمان‌های فارسی با قواعد امن دینا پردازش می‌شوند."
             } else {
                 "بسته طبقه‌بند MiniLM وارد شد؛ پیش‌بینی‌های نامطمئن به قواعد امن دینا برمی‌گردند."
