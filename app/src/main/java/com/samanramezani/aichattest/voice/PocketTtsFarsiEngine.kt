@@ -75,7 +75,7 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
         decInputs = dec.inputNames.toList(); decOutputs = dec.outputNames.toList()
         require(decInputs.size == states.size + 1) { "Mimi state/input count mismatch" }
         decoderInitial = states.values.map { A(it.name, it.shape, it.v, it.name.endsWith(".cache")) }
-        cacheSlots = init.indices.filter { decoderInitial[it].cache }
+        cacheSlots = decoderInitial.indices.filter { decoderInitial[it].cache }
         smallSlots = decoderInitial.indices.filterNot { it in cacheSlots }
         smallOutputs = decOutputs.indices.filter { decOutputs[it].endsWith("o") && decOutputs[it] != "audio" }
         kvOutputs = decOutputs.indices.filter { decOutputs[it].startsWith("kv") }
