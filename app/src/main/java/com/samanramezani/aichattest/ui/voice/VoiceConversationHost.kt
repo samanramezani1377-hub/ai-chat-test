@@ -29,6 +29,7 @@ import com.samanramezani.aichattest.voice.PiperComponent
 import com.samanramezani.aichattest.voice.SmallSttComponent
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
 import com.samanramezani.aichattest.voice.MiniLmIntentModelStore
+import com.samanramezani.aichattest.voice.MiniLmOnnxIntentClassifier
 import com.samanramezani.aichattest.voice.DinaCommandClassifier
 import com.samanramezani.aichattest.voice.DinaDeviceCommandExecutor
 import com.woogit.aicore.agent.AgentEvent
@@ -119,6 +120,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
 
     val controller = remember(container, context) {
         VoiceConversationController(context, container,
+            MiniLmOnnxIntentClassifier(File(context.filesDir, "voice-models/minilm-intent")),
             onStatus = { value -> uiScope.launch(Dispatchers.Main.immediate) { updateVoiceStatus(value) } },
             onDiagnostic = { value -> uiScope.launch(Dispatchers.Main.immediate) { diagnosticLogs = (diagnosticLogs + "[${System.currentTimeMillis()}] $value").takeLast(200) } },
             onListening = { value -> uiScope.launch(Dispatchers.Main.immediate) { listening = value; busy = false } },
@@ -402,6 +404,7 @@ private fun sanitizeAssistantVoiceText(raw: String): String {
 internal class VoiceConversationController(
     private val context: Context,
     private val container: AppContainer,
+    private val intentClassifier: MiniLmOnnxIntentClassifier,
     private val onStatus: (String) -> Unit,
     private val onDiagnostic: (String) -> Unit,
     private val onListening: (Boolean) -> Unit,
@@ -703,13 +706,19 @@ internal class VoiceConversationController(
 
         try {
             onStatus("در حال بررسی درخواست فارسی روی دستگاه…")
-            val command = DinaCommandClassifier.classify(utterance)
+            val modelCommand = runCatching { intentClassifier.classify(utterance) }.getOrNull()
+            // Only high-confidence ONNX predictions are accepted. If the model is unavailable,
+            // uncertain, or predicts CHAT, the conservative built-in rules remain the fallback.
+            val ruleCommand = DinaCommandClassifier.classify(utterance)
+            val command = if (modelCommand != null && modelCommand.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) {
+                modelCommand
+            } else ruleCommand
             if (command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) {
                 val localReply = runCatching { DinaDeviceCommandExecutor(context).execute(command) }
                     .getOrElse { "انجام فرمان ناموفق بود: ${it.message ?: it.javaClass.simpleName}" }
                     .orEmpty()
                 if (localReply.isNotBlank()) {
-                    onDiagnostic("DINA-LOCAL-COMMAND: intent=${command.intent.name} parameter=${command.value ?: "none"} model=local-device-executor")
+                    onDiagnostic("DINA-LOCAL-COMMAND: intent=${command.intent.name} parameter=${command.value ?: "none"} classifier=${if (modelCommand != null && modelCommand.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) "minilm-onnx" else "safe-rules"} model=local-device-executor")
                     queue.trySend(localReply)
                     queue.close()
                     activeSpeechJob.join()
@@ -869,6 +878,9 @@ internal class VoiceConversationController(
 
     fun close() {
         closed = true
-        stop().invokeOnCompletion { scope.cancel() }
+        stop().invokeOnCompletion {
+            intentClassifier.close()
+            scope.cancel()
+        }
     }
 }
