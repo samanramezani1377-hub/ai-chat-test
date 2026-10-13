@@ -156,18 +156,32 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 // Calibrate only these harmless routes more appropriately; device-changing
                 // actions keep the existing stricter confirmation thresholds.
                 val readOnlyTimeOrDate = domain.id == "GET_TIME" || domain.id == "GET_DATE"
+                val routeSpecificRule = when (domain.id) {
+                    "GET_TIME" -> "فقط اگر کاربر همین لحظه را می‌پرسد، CONFIRM_ROUTE؛ تاریخ امروز، ساعت کاری، مدت‌زمان، زمان رویداد یا تنظیم ساعت یعنی REJECT_ROUTE."
+                    "GET_DATE" -> "فقط اگر کاربر تاریخ امروز را می‌پرسد، CONFIRM_ROUTE؛ ساعت فعلی، تاریخ رویداد/گذشته/آینده یا برنامه‌ریزی یعنی REJECT_ROUTE."
+                    else -> "فقط درخواست صریح همین عملیات روی همین گوشی را تأیید کن؛ در غیر این صورت REJECT_ROUTE."
+                }
                 val validation = choose(
                     decisionText,
-                    "$instructions\nمسیر پیشنهادی: ${domain.id}. فقط همین درخواست فعلی را بررسی کن. اگر کاربر مستقیماً ساعت همین لحظه یا تاریخ امروز را می‌پرسد، CONFIRM_ROUTE را انتخاب کن؛ ساعت کاری، زمان رویداد، تنظیم ساعت، تاریخ غیرامروز، نقل‌قول، نفی یا ابهام REJECT_ROUTE است. متن درخواست را از روی سابقه حدس نزن.",
+                    "$instructions\nمسیر پیشنهادی: ${domain.id}. $routeSpecificRule فرمان نقل‌شده، فرضی، نفی‌شده یا مبهم را تأیید نکن. فقط متن همین نوبت را بسنج؛ در تردید REJECT_ROUTE.",
                     listOf(confirmOption, rejectOption),
                     minConfidence = if (readOnlyTimeOrDate) 0.20 else 0.50,
                     minMaxProbability = if (readOnlyTimeOrDate) 0.75 else 0.58,
                     minMargin = if (readOnlyTimeOrDate) 0.50 else 0.16,
                 )
                 if (validation?.id != "CONFIRM_ROUTE") {
-                    trace += "route_confirmation=${validation?.id ?: "ABSTAIN"} proposed=${domain.id} result=CHAT"
+                    val rejectedChoice = validation?.id ?: "ABSTAIN"
+                    val gateDiagnostic = lastError
+                        ?.takeIf { it.startsWith("LAYA-INFER-005") }
+                        ?.take(900)
+                    val scoreDiagnostic = lastTrace.lastOrNull { it.startsWith("stage=") }?.take(900)
+                    trace += "route_confirmation=$rejectedChoice proposed=${domain.id} result=CHAT"
                     lastTrace = trace.toList() + lastTrace
-                    lastError = "LAYA-INFER-008: مسیر ${domain.id} در تأیید مستقل تأیید نشد؛ متن اصلی به مدل گفت‌وگو فرستاده می‌شود."
+                    // Preserve the actual reason/score from the second-stage decision.
+                    // Previously this was overwritten by a generic error, hiding whether
+                    // Laya chose REJECT_ROUTE or abstained at a confidence threshold.
+                    val detail = gateDiagnostic ?: scoreDiagnostic ?: "no-score-details"
+                    lastError = "LAYA-INFER-008: تأیید مسیر ${domain.id} ناموفق بود؛ choice=$rejectedChoice; $detail"
                     return@synchronized null
                 }
                 trace += "route_confirmation=CONFIRM_ROUTE proposed=${domain.id} confidence=${"%.3f".format(Locale.US, validation.confidence)}"
