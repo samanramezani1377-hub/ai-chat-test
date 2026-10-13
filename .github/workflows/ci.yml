@@ -38,6 +38,11 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
+      - name: Set up Rust for the official Laya tokenizer
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -72,6 +77,11 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Rust for the official Laya tokenizer
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -256,6 +266,11 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Rust for the official Laya tokenizer
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
