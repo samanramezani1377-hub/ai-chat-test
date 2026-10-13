@@ -47,13 +47,13 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
         val trace = mutableListOf<String>()
         try {
             ensureLoaded()
-            val domain = choose(rawText, "Which action category best matches the user's intent?",
+            val domain = choose(rawText, "درخواست کاربر به کدام دسته مربوط است؟ Choose the user's request category.",
                 listOf(
-                    Option("GET_TIME", "The user asks for the current local clock time, asks what time it is, or says to announce the time."),
-                    Option("GET_DATE", "The user asks for today's date."),
-                    Option("AUDIO", "The user wants to change media volume, make sound louder or quieter, or mute/unmute."),
-                    Option("DISPLAY", "The user wants to change screen brightness."),
-                    Option("CHAT", "The user is asking a general question or wants a normal conversation, not a device action."),
+                    Option("GET_TIME", "کاربر ساعت همین لحظه را می‌پرسد یا می‌خواهد ساعت را اعلام کنی. Ask or announce the current local time."),
+                    Option("GET_DATE", "کاربر تاریخ امروز را می‌پرسد. Ask for today's date."),
+                    Option("AUDIO", "کاربر می‌خواهد صدای رسانه را کم یا زیاد کند، قطع کند یا وصل کند. Control media volume, mute, or unmute."),
+                    Option("DISPLAY", "کاربر می‌خواهد روشنایی صفحه را کم یا زیاد یا تنظیم کند. Change screen brightness."),
+                    Option("CHAT", "کاربر پرسش عادی دارد و گفت‌وگوی معمولی می‌خواهد، نه اجرای فرمان دستگاه. Normal chat or general question."),
                 )) ?: return@synchronized null
             trace += "domain=${domain.id} confidence=${"%.3f".format(Locale.US, domain.confidence)}"
             val command = when (domain.id) {
@@ -61,13 +61,13 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 "GET_DATE" -> DinaCommand(DinaIntent.GET_DATE)
                 "CHAT" -> DinaCommand(DinaIntent.CHAT)
                 "AUDIO" -> {
-                    val operation = choose(rawText, "Which media-volume operation does the user want?",
+                    val operation = choose(rawText, "کاربر برای صدای رسانه چه عملی می‌خواهد؟ Choose the media-volume operation.",
                         listOf(
-                            Option("INCREASE", "Increase the current media volume or make the sound louder."),
-                            Option("DECREASE", "Decrease the current media volume or make the sound quieter."),
-                            Option("SET", "Set media volume to a requested exact level or explicit percentage."),
-                            Option("MUTE", "Mute or silence media sound."),
-                            Option("UNMUTE", "Restore sound after mute."),
+                            Option("INCREASE", "صدای رسانه را بیشتر کن یا بلندتر کن. Increase or turn up the volume."),
+                            Option("DECREASE", "صدای رسانه را کمتر کن یا آرام‌تر کن. Decrease or turn down the volume."),
+                            Option("SET", "صدای رسانه را روی سطح مشخص یا درصد معین تنظیم کن. Set a specific level or percentage."),
+                            Option("MUTE", "صدای رسانه را قطع یا بی‌صدا کن. Mute the sound."),
+                            Option("UNMUTE", "صدا را دوباره وصل کن و از حالت بی‌صدا خارج کن. Unmute or restore sound."),
                         )) ?: return@synchronized null
                     trace += "audio_operation=${operation.id} confidence=${"%.3f".format(Locale.US, operation.confidence)}"
                     when (operation.id) {
@@ -83,18 +83,18 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                                     (actual * 10.0 / maximum).toInt().coerceIn(0, 10)
                                 } else null
                                 val question = when (operation.id) {
-                                    "INCREASE" -> "The user requests louder sound. Choose a target level on a 1-10 scale, greater than the current level."
-                                    "DECREASE" -> "The user requests quieter sound. Choose a target level on a 1-10 scale, lower than the current level."
-                                    else -> "Choose the exact target media volume level from 1 to 10 requested by the user. If no level is specified, do not guess."
+                                    "INCREASE" -> "کاربر صدای بلندتر می‌خواهد. سطح هدفی از ۱ تا ۱۰ انتخاب کن که از سطح فعلی بیشتر باشد. Choose a level higher than the current level."
+                                    "DECREASE" -> "کاربر صدای آرام‌تر می‌خواهد. سطح هدفی از ۱ تا ۱۰ انتخاب کن که از سطح فعلی کمتر باشد. Choose a level lower than the current level."
+                                    else -> "سطح دقیق صدای درخواستی کاربر را از ۱ تا ۱۰ انتخاب کن. اگر سطح مشخصی نگفته، حدس نزن. Choose the exact requested volume level from 1 to 10."
                                 }
                                 val state = buildString {
                                     append(rawText)
                                     if (currentLevel != null) append("\nCurrent media volume level: ").append(currentLevel).append(" of 10.")
                                 }
                                 val level = choose(state, question, (1..10).map { n ->
-                                    Option("LEVEL_$n", "Set the target media volume to level $n out of 10.")
+                                    Option("LEVEL_$n", "صدای رسانه را روی سطح $n از ۱۰ تنظیم کن. Set media volume to level $n out of 10.")
                                 } + if (operation.id == "SET") listOf(
-                                    Option("OTHER_EXPLICIT_VALUE", "The user explicitly gave a percentage or a numeric target that is not a level from 1 to 10.")
+                                    Option("OTHER_EXPLICIT_VALUE", "کاربر درصد مشخص یا عددی خارج از مقیاس سطح ۱ تا ۱۰ گفته است. Explicit percentage or numeric target outside levels 1–10.")
                                 ) else emptyList()) ?: return@synchronized null
                                 trace += "volume_target=${level.id} confidence=${"%.3f".format(Locale.US, level.confidence)} current=${currentLevel ?: "unknown"}"
                                 when {
@@ -115,11 +115,11 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                     }
                 }
                 "DISPLAY" -> {
-                    val operation = choose(rawText, "Which screen-brightness operation does the user want?",
+                    val operation = choose(rawText, "کاربر برای روشنایی صفحه چه عملی می‌خواهد؟ Choose the screen-brightness operation.",
                         listOf(
-                            Option("INCREASE", "Increase screen brightness."),
-                            Option("DECREASE", "Decrease screen brightness."),
-                            Option("SET", "Set screen brightness to a specified percentage."),
+                            Option("INCREASE", "روشنایی صفحه را بیشتر کن. Increase screen brightness."),
+                            Option("DECREASE", "روشنایی صفحه را کمتر کن. Decrease screen brightness."),
+                            Option("SET", "روشنایی صفحه را روی درصد مشخص تنظیم کن. Set brightness to a percentage."),
                         )) ?: return@synchronized null
                     trace += "display_operation=${operation.id} confidence=${"%.3f".format(Locale.US, operation.confidence)}"
                     val parsed = DinaCommandClassifier.classify(rawText)
