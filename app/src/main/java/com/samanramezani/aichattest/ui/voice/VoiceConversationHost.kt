@@ -474,7 +474,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             else {
                 alwaysOnPrefs.edit()
                     .putString(AlwaysOnKoochikService.PREF_STT_MODEL_ID, stt.id)
-                    .putString(AlwaysOnKoochikService.PREF_TTS_MODEL_ID, tts.id)
+                    .putString(AlwaysOnKoochikService.PREF_TTS_MODEL_ID, tts?.id)
                     .apply()
                 if (alwaysOnEnabled && alwaysOnPrefs.getBoolean(AlwaysOnKoochikService.PREF_ENABLED, false)) {
                     updateVoiceStatus("شنود دائمی از قبل روشن است؛ برای شروع مکالمه فقط «دینا» را بگو. مدل شنوا دوباره بارگذاری نمی‌شود.")
