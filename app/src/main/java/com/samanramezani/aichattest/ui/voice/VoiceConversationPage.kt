@@ -47,11 +47,8 @@ internal fun VoiceConversationPage(
     onImportStt: () -> Unit,
     onImportKoochikModel: () -> Unit,
     onImportKoochikTokens: () -> Unit,
-    wakeWordModel: com.samanramezani.aichattest.voice.WakeWordModelEntry?,
-    wakeWordEnabled: Boolean,
-    wakeWordArmed: Boolean,
-    onImportWakeWord: () -> Unit,
-    onToggleWakeWord: (Boolean) -> Unit,
+    alwaysOnEnabled: Boolean,
+    onToggleAlwaysOn: (Boolean) -> Unit,
     onImportTts: () -> Unit,
     onImportTtsModel: () -> Unit,
     onImportTtsConfig: () -> Unit,
@@ -69,16 +66,16 @@ internal fun VoiceConversationPage(
     var permissionGranted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
     }
-    var pendingWakeEnable by remember { mutableStateOf(false) }
+    var pendingAlwaysOnEnable by remember { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         permissionGranted = granted
         if (granted) {
-            if (pendingWakeEnable) {
-                pendingWakeEnable = false
-                onToggleWakeWord(true)
+            if (pendingAlwaysOnEnable) {
+                pendingAlwaysOnEnable = false
+                onToggleAlwaysOn(true)
             } else onStart()
         } else {
-            pendingWakeEnable = false
+            pendingAlwaysOnEnable = false
         }
     }
 
@@ -142,36 +139,26 @@ internal fun VoiceConversationPage(
                 }
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("۲. بیدارباش صوتی · «دینا»", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text("بستهٔ کامل sherpa-onnx KWS را با ZIP یا TAR.BZ2 وارد کن. بسته باید encoder/decoder/joiner مدل ONNX و tokens.txt داشته باشد. برای مدل رسمی کوچک zh-en، برنامه keywords.txt را با تقریب آوایی «دینا» می‌سازد؛ چون مدل اصلی چینی/انگلیسی است، دقت فارسی تضمین نیست. مدل آموزش‌دیدهٔ فارسی می‌تواند keywords.txt اختصاصی خود را داشته باشد.", style = MaterialTheme.typography.bodySmall)
-                        OutlinedButton(
-                            onClick = { uriHandler.openUri("https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models") },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("دریافت مدل‌های کوچک آمادهٔ بیدارباش") }
-                        OutlinedButton(onClick = onImportWakeWord, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                            Text(if (wakeWordModel == null) "انتخاب و وارد کردن مدل بیدارباش · ZIP / TAR.BZ2" else "انتخاب مدل بیدارباش دیگر · ZIP / TAR.BZ2")
-                        }
+                        Text("۲. شنود دائمی فارسی · «دینا»", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text(
-                            wakeWordModel?.let { "مدل انتخاب‌شده: ${it.title}" } ?: "هنوز مدل بیدارباشی وارد نشده است.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (wakeWordModel == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                            "به‌جای مدل بیدارباش جداگانه، همین مدل Shenava Koochik گفتار فارسی را در قطعه‌های محدود تشخیص می‌دهد. وقتی «دینا» در یک جمله تشخیص داده شود، فقط متن بعد از آن به مدل گفتگو فرستاده می‌شود؛ متن جملات دیگر و تاریخچهٔ دائمی شنود نگه‌داری نمی‌شود. پس از تشخیص، TTS محلی می‌گوید «متوجه شدم».",
+                            style = MaterialTheme.typography.bodySmall,
                         )
                         Button(
                             onClick = {
-                                if (!wakeWordEnabled && !permissionGranted) {
-                                    pendingWakeEnable = true
+                                if (!alwaysOnEnabled && !permissionGranted) {
+                                    pendingAlwaysOnEnable = true
                                     permission.launch(Manifest.permission.RECORD_AUDIO)
-                                } else onToggleWakeWord(!wakeWordEnabled)
+                                } else onToggleAlwaysOn(!alwaysOnEnabled)
                             },
-                            enabled = !busy && !listening && (wakeWordModel != null || wakeWordEnabled),
+                            enabled = !busy && !listening,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text(if (wakeWordEnabled) "خاموش کردن بیدارباش «دینا»" else "روشن کردن بیدارباش «دینا»")
+                            Text(if (alwaysOnEnabled) "خاموش کردن شنود دائمی فارسی" else "روشن کردن شنود دائمی فارسی")
                         }
                         Text(
-                            if (wakeWordEnabled) "شنود محلی فعال است و اعلان دائمی اندروید نمایش داده می‌شود."
-                            else if (wakeWordArmed && listening) "بیدارباش مسلح است؛ هنگام مکالمه موقتاً متوقف می‌شود و پس از توقف مکالمه دوباره فعال خواهد شد."
-                            else "برای کارکرد در پس‌زمینه، بیدارباش را روشن کن. فعال‌سازی خودکار صفحه به محدودیت‌های نسخهٔ اندروید و سازندهٔ گوشی وابسته است.",
+                            if (alwaysOnEnabled) "شنود دائمی محلی فعال است؛ اعلان سرویس باید در نوار اعلان‌ها دیده شود."
+                            else "برای فعال‌سازی، مدل Shenava Koochik و مدل TTS باید وارد شده باشند. شنود در پس‌زمینه به مجوز میکروفون و محدودیت‌های اندروید وابسته است.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
