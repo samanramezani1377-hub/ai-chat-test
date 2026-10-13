@@ -334,7 +334,7 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
             '»' to ' ', '«' to ' ', '“' to ' ', '”' to ' ', '‘' to ' ', '’' to ' ',
             '"' to ' ', '\'' to ' ', '`' to ' ', '(' to ' ', ')' to ' ', '[' to ' ',
             ']' to ' ', '{' to ' ', '}' to ' ', '–' to ' ', '—' to ' ', '−' to ' ',
-            '-' to ' ', '‐' to ' ', '/' to ' ', '\\' to ' ', '*' to ' ', '_' to ' ',
+            '-' to ' ', '‐' to ' ', '/' to ' ', '*' to ' ', '_' to ' ',
             '|' to ' ', '×' to ' ', '=' to ' ', '+' to ' '
         )
         private val KEPT_PUNCT = setOf('.', '،', '؛', '؟', '!', ':')
