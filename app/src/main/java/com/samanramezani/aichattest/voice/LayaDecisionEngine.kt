@@ -145,7 +145,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                                 rawText,
                                 "مقدار دقیق روشنایی درخواستی را از ۰ تا ۱۰۰ درصد تعیین کن. اگر مقدار مشخص نیست UNKNOWN برگردان و حدس نزن. Choose the exact requested brightness percentage from 0 to 100.",
                                 (0..10).map { n ->
-                                    Option("LEVEL_$n", "روشنایی صفحه روی $n۰ درصد تنظیم شود. Set screen brightness to ${n * 10} percent.")
+                                    Option("LEVEL_$n", "روشنایی صفحه روی ${n * 10} درصد تنظیم شود. Set screen brightness to ${n * 10} percent.")
                                 } + Option("UNKNOWN", "مقدار روشنایی مشخص نیست؛ حدس نزن. Unknown target brightness.")
                             ) ?: return@synchronized null
                             trace += "brightness_target=${target.id} confidence=${"%.3f".format(Locale.US, target.confidence)}"
