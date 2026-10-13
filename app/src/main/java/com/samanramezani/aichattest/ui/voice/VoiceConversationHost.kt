@@ -572,15 +572,15 @@ internal class VoiceConversationController(
                         }
                     }
                 }
-                if (acknowledgeWake) {
-                    val initial = initialUtterance?.trim().orEmpty()
-                    if (initial.isNotBlank()) {
-                        onLine("شما", initial)
-                        turnRunning.set(true)
-                        turnJob = scope.launch { processTurn(initial, acknowledgeWake = true, speechStartGate = speechStartGate) }
-                    } else {
-                        scope.launch { speakWakeAcknowledgement() }
+                val initial = initialUtterance?.trim().orEmpty()
+                if (initial.isNotBlank()) {
+                    onLine("شما", initial)
+                    turnRunning.set(true)
+                    turnJob = scope.launch {
+                        processTurn(initial, acknowledgeWake = acknowledgeWake, speechStartGate = speechStartGate)
                     }
+                } else if (acknowledgeWake) {
+                    scope.launch { speakWakeAcknowledgement() }
                 }
             } catch (t: Throwable) {
                 startInProgress.set(false)
