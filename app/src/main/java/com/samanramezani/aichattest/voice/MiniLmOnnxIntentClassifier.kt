@@ -33,6 +33,21 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
             "CHAT", "GET_TIME", "GET_DATE", "INCREASE_VOLUME", "DECREASE_VOLUME",
             "SET_VOLUME", "INCREASE_BRIGHTNESS", "DECREASE_BRIGHTNESS", "SET_BRIGHTNESS",
         )
+
+        private fun encodeTokens(tokens: List<String>, vocab: Map<String, Int>, cls: String, sep: String, unk: String, pad: String, maxLength: Int): Encoded {
+            val bounded = ArrayList<String>()
+            bounded += cls
+            bounded.addAll(tokens.take(maxLength - 2))
+            bounded += sep
+            val ids = LongArray(maxLength) { vocab.getValue(pad).toLong() }
+            val mask = LongArray(maxLength)
+            val types = LongArray(maxLength)
+            for (i in 0 until minOf(bounded.size, maxLength)) {
+                ids[i] = (vocab[bounded[i]] ?: vocab.getValue(unk)).toLong()
+                mask[i] = 1L
+            }
+            return Encoded(ids, mask, types)
+        }
     }
 
     private val lock = Any()
@@ -216,21 +231,6 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
     private data class Encoded(val ids: LongArray, val mask: LongArray, val typeIds: LongArray)
     private interface TextTokenizer {
         fun encode(input: String, maxLength: Int): Encoded
-    }
-
-    private fun encodeTokens(tokens: List<String>, vocab: Map<String, Int>, cls: String, sep: String, unk: String, pad: String, maxLength: Int): Encoded {
-        val bounded = ArrayList<String>()
-        bounded += cls
-        bounded.addAll(tokens.take(maxLength - 2))
-        bounded += sep
-        val ids = LongArray(maxLength) { vocab.getValue(pad).toLong() }
-        val mask = LongArray(maxLength)
-        val types = LongArray(maxLength)
-        for (i in 0 until minOf(bounded.size, maxLength)) {
-            ids[i] = (vocab[bounded[i]] ?: vocab.getValue(unk)).toLong()
-            mask[i] = 1L
-        }
-        return Encoded(ids, mask, types)
     }
 
     private class WordPieceTokenizer(
