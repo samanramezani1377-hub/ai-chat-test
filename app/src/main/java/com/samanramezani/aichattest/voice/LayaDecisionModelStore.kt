@@ -90,12 +90,31 @@ internal class LayaDecisionModelStore(
             val sourceRoot = staging.walkTopDown().maxDepth(5).firstOrNull { candidate ->
                 candidate.isDirectory && REQUIRED.all { File(candidate, it).isFile }
             } ?: error("LAYA-IMPORT-007: ZIP باید شامل مدل و فایل data، tokenizer/tokenizer_config، encoder/config.json و rl_agent_config.json باشد.")
-            val tokenizer = JSONObject(File(sourceRoot, "tokenizer/tokenizer.json").readText(Charsets.UTF_8))
-            JSONObject(File(sourceRoot, "tokenizer/tokenizer_config.json").readText(Charsets.UTF_8))
+            val tokenizerJsonFile = File(sourceRoot, "tokenizer/tokenizer.json")
+            val tokenizer = JSONObject(tokenizerJsonFile.readText(Charsets.UTF_8))
+            val tokenizerConfig = JSONObject(File(sourceRoot, "tokenizer/tokenizer_config.json").readText(Charsets.UTF_8))
             JSONObject(File(sourceRoot, "encoder/config.json").readText(Charsets.UTF_8))
             JSONObject(File(sourceRoot, "rl_agent_config.json").readText(Charsets.UTF_8))
             require(tokenizer.optJSONObject("model") != null) {
                 "LAYA-IMPORT-008: tokenizer/tokenizer.json ساختار نامعتبر دارد."
+            }
+            // Validate with the same official native tokenizer used at inference before replacing
+            // the previously working model bundle. JSON parsing alone does not prove parity.
+            val nativeTokenizer = LayaNativeTokenizer(tokenizerJsonFile.readBytes())
+            try {
+                for (key in listOf("cls_token", "sep_token", "mask_token")) {
+                    val raw = tokenizerConfig.opt(key)
+                    val token = when (raw) {
+                        is String -> raw
+                        is JSONObject -> raw.optString("content").ifBlank { raw.optString("token") }
+                        else -> ""
+                    }
+                    require(token.isNotBlank() && nativeTokenizer.tokenId(token) != null) {
+                        "LAYA-IMPORT-008: توکن ویژه '$key' در tokenizer_config.json یا tokenizer.json معتبر نیست."
+                    }
+                }
+            } finally {
+                nativeTokenizer.close()
             }
             val graph = File(sourceRoot, MODEL_FILE)
             require(graph.length() > 16_000 && File(sourceRoot, "$MODEL_FILE.data").length() > 100_000_000L) {
