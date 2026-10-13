@@ -9,7 +9,9 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
+import java.text.Normalizer
 import kotlin.math.exp
+import kotlin.math.ln
 
 /**
  * Laya's typed-choice ONNX runner. It performs all decisions on-device and never generates
@@ -21,9 +23,12 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
 
     companion object {
         private const val MODEL_FILE = LayaDecisionModelStore.MODEL_FILE
-        private const val MAX_SEQUENCE = 512
+        private const val DEFAULT_MAX_SEQUENCE = 1024
+        private const val DEFAULT_HEAD_MAX_SEQUENCE = 256
         private const val MIN_CONFIDENCE = 0.43
         private const val MIN_MARGIN = 0.09
+        private const val MIN_TEMPERATURE = 0.5
+        private const val MAX_TEMPERATURE = 5.0
     }
 
     @Volatile var lastError: String? = null
@@ -36,6 +41,11 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
     private var session: OrtSession? = null
     private var tokenizer: LayaTokenizer? = null
     private var cachedModelKey: String? = null
+    private var maxSequence = DEFAULT_MAX_SEQUENCE
+    private var headMaxSequence = DEFAULT_HEAD_MAX_SEQUENCE
+    private var choiceTemperature = 1.0
+    private var temperatureSource = "missing; neutral fallback 1.0"
+    private val optionTemperatures = mutableMapOf<String, Double>()
 
     fun isReady(): Boolean = File(root, MODEL_FILE).isFile &&
         File(root, "$MODEL_FILE.data").isFile &&
@@ -190,22 +200,38 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
         val env = environment ?: error("محیط ONNX آماده نیست.")
         val active = session ?: error("نشست ONNX آماده نیست.")
         val tok = tokenizer ?: error("توکن‌ساز Laya آماده نیست.")
-        val ids = ArrayList<Long>()
-        val markers = ArrayList<Long>()
+        // Match the multilingual checkpoint's two-budget layout: the question and option
+        // descriptions are bounded by head_max_len; only the remaining room is used by state.
+        // Each option keeps its marker and at least a small label budget, rather than letting
+        // verbose descriptions silently consume the user's actual request.
+        val optionTokenBudget = minOf(48, maxOf(4, (headMaxSequence - 16) / options.size))
+        val optionTokens = options.map { option ->
+            tok.encode(" ${option.id}: ${option.description}", optionTokenBudget - 1)
+        }
+        val fixedHeadTokens = 1 + 1 + options.indices.sumOf { 1 + optionTokens[it].size } + 1
+        val instructionBudget = (headMaxSequence - fixedHeadTokens).coerceAtLeast(8)
+        val instructionTokens = tok.encode("choice question: $instructions", instructionBudget)
+        val ids = ArrayList<Long>(maxSequence)
+        val markers = ArrayList<Long>(options.size)
         ids += tok.clsId
-        ids += tok.encode("choice question: $instructions", MAX_SEQUENCE)
+        ids += instructionTokens
         ids += tok.sepId
-        for (option in options) {
+        for (index in options.indices) {
             markers += ids.size.toLong()
             ids += tok.maskId
-            ids += tok.encode(" ${option.id}: ${option.description}", MAX_SEQUENCE)
-            if (ids.size >= MAX_SEQUENCE - 2) error("LAYA-QUESTION-002: سربرگ گزینه‌ها از ظرفیت مدل بیشتر شد.")
+            ids += optionTokens[index]
         }
         ids += tok.sepId
-        val remaining = (MAX_SEQUENCE - ids.size - 1).coerceAtLeast(0)
-        ids += tok.encode(state, remaining)
+        require(ids.size <= headMaxSequence) {
+            "LAYA-QUESTION-002: سربرگ گزینه‌ها از بودجه head_max_len عبور کرد؛ head=${ids.size}, budget=$headMaxSequence, options=${options.size}"
+        }
+        val remaining = (maxSequence - ids.size - 1).coerceAtLeast(0)
+        val stateIds = tok.encode(state, remaining)
+        ids += stateIds
         ids += tok.sepId
-        require(markers.isNotEmpty() && ids.size <= MAX_SEQUENCE) { "LAYA-QUESTION-003: طول ورودی نامعتبر است." }
+        require(markers.isNotEmpty() && ids.size <= maxSequence) {
+            "LAYA-QUESTION-003: طول ورودی نامعتبر است؛ total=${ids.size}, max_len=$maxSequence, head=${instructionTokens.size + fixedHeadTokens}"
+        }
 
         val feeds = linkedMapOf<String, OnnxTensor>()
         try {
@@ -228,15 +254,33 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 require(logits.size == options.size) {
                     "LAYA-INFER-004: خروجی choice با تعداد گزینه‌ها همخوان نیست؛ output=${logits.size}, options=${options.size}, shape=${output.info.shape.contentToString()}"
                 }
+                require(logits.all { it.isFinite() }) {
+                    "LAYA-INFER-007: خروجی مدل شامل امتیاز NaN یا بی‌نهایت است."
+                }
                 val max = logits.maxOrNull() ?: return null
-                val exps = logits.map { exp((it - max).coerceIn(-80f, 80f).toDouble()) }
-                val sum = exps.sum().takeIf { it > 0.0 } ?: return null
+                // Apply the official checkpoint's choice temperature and per-option bucket if
+                // present. The published multilingual bundle has no fitted temperatures; in that
+                // case this remains a raw softmax score and is explicitly reported as uncalibrated.
+                val bucket = if (options.size >= 11) "choice:11+" else "choice:${options.size}"
+                val bucketTemperature = optionTemperatures[bucket]
+                val activeTemperature = (bucketTemperature ?: choiceTemperature).coerceIn(MIN_TEMPERATURE, MAX_TEMPERATURE)
+                val activeCalibration = if (bucketTemperature != null) "rl_agent_config.json:$bucket" else temperatureSource
+                val scaled = logits.map { (it.toDouble() / activeTemperature).coerceIn(-80.0, 80.0) }
+                val scaledMax = scaled.maxOrNull() ?: return null
+                val exps = scaled.map { exp(it - scaledMax) }
+                val sum = exps.sum().takeIf { it.isFinite() && it > 0.0 } ?: return null
                 val probs = exps.map { it / sum }
                 val ranked = probs.indices.sortedByDescending { probs[it] }
                 val best = ranked.first()
-                val margin = probs[best] - (ranked.getOrNull(1)?.let { probs[it] } ?: 0.0)
+                val second = ranked.getOrNull(1)
+                val margin = probs[best] - (second?.let { probs[it] } ?: 0.0)
+                val top = ranked.take(3).joinToString(";") { index ->
+                    "${options[index].id}:logit=${"%.4f".format(Locale.US, logits[index])},score=${"%.4f".format(Locale.US, probs[index])}"
+                }
+                val detail = "stage=${instructions.take(48).replace(Regex("\\s+"), " ")} options=${options.size} inputTokens=${ids.size} stateTokens=${stateIds.size} headTokens=${ids.size - stateIds.size - 1} temperature=${"%.3f".format(Locale.US, activeTemperature)} calibration=$activeCalibration top=[$top]"
+                lastTrace = lastTrace + detail
                 if (probs[best] < MIN_CONFIDENCE || margin < MIN_MARGIN) {
-                    lastError = "LAYA-INFER-005: تصمیم کم‌اطمینان؛ confidence=${"%.3f".format(Locale.US, probs[best])}, margin=${"%.3f".format(Locale.US, margin)}"
+                    lastError = "LAYA-INFER-005: تصمیم کم‌اطمینان؛ score=${"%.3f".format(Locale.US, probs[best])}, margin=${"%.3f".format(Locale.US, margin)}, threshold=${MIN_CONFIDENCE}/${MIN_MARGIN}; $detail"
                     return null
                 }
                 return Ranked(options[best].id, probs[best])
@@ -256,9 +300,12 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
 
     private fun ensureLoaded() {
         val model = File(root, MODEL_FILE)
-        val key = "${model.absolutePath}:${model.length()}:${model.lastModified()}:${File(root, "$MODEL_FILE.data").length()}"
+        val configFile = File(root, "rl_agent_config.json")
+        val tokenizerFile = File(root, "tokenizer/tokenizer.json")
+        val key = "${model.absolutePath}:${model.length()}:${model.lastModified()}:${File(root, "$MODEL_FILE.data").length()}:${configFile.lastModified()}:${tokenizerFile.lastModified()}"
         if (session != null && cachedModelKey == key) return
         closeLoaded()
+        loadRuntimeConfig(configFile)
         val env = OrtEnvironment.getEnvironment()
         val options = OrtSession.SessionOptions()
         try {
@@ -279,6 +326,35 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
         cachedModelKey = key
     }
 
+    private fun loadRuntimeConfig(configFile: File) {
+        val cfg = JSONObject(configFile.readText(Charsets.UTF_8))
+        maxSequence = cfg.optInt("max_len", DEFAULT_MAX_SEQUENCE)
+            .coerceIn(128, 8192)
+        headMaxSequence = cfg.optInt("head_max_len", DEFAULT_HEAD_MAX_SEQUENCE)
+            .coerceIn(64, maxSequence - 16)
+        val temperatures = cfg.optJSONArray("temperature")
+        val rawTemperature = temperatures?.optDouble(0, Double.NaN) ?: Double.NaN
+        val bucketMap = cfg.optJSONObject("temperature_by_options")
+        val temperatureByOptions = mutableMapOf<String, Double>()
+        if (bucketMap != null) {
+            val keys = bucketMap.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val value = bucketMap.optDouble(key, Double.NaN)
+                if (value.isFinite() && value > 0.0) temperatureByOptions[key] = value
+            }
+        }
+        val selected = if (rawTemperature.isFinite() && rawTemperature > 0.0) rawTemperature else Double.NaN
+        choiceTemperature = if (selected.isFinite()) selected.coerceIn(MIN_TEMPERATURE, MAX_TEMPERATURE) else 1.0
+        temperatureSource = if (selected.isFinite()) {
+            "rl_agent_config.json:temperature[choice]; bucket calibration checked per option count"
+        } else {
+            "missing; neutral fallback 1.0 (uncalibrated)"
+        }
+        optionTemperatures.clear()
+        optionTemperatures.putAll(temperatureByOptions)
+    }
+
     private fun closeLoaded() {
         runCatching { session?.close() }
         session = null
@@ -294,6 +370,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
 
 /** Small tokenizer implementation for the WordPiece/BPE tokenizer formats used by Laya bundles. */
 private class LayaTokenizer(file: File) {
+    private val rootTokenizerPath = file.absolutePath
     private val vocab = HashMap<String, Int>()
     private val merges = HashMap<String, Int>()
     private val tokenScores = HashMap<String, Double>()
@@ -384,7 +461,7 @@ private class LayaTokenizer(file: File) {
 
     private fun encodeWordPiece(text: String): List<String> {
         val result = ArrayList<String>()
-        for (word in text.trim().split(Regex("\\s+"))) {
+        for (word in splitBertPreTokens(normalizeBertText(text))) {
             if (word.isEmpty()) continue
             var start = 0
             val pieces = ArrayList<String>()
@@ -402,6 +479,62 @@ private class LayaTokenizer(file: File) {
             }
             result += pieces
         }
+        return result
+    }
+
+    private fun normalizeBertText(raw: String): String {
+        var value = raw.replace('ي', 'ی').replace('ك', 'ک')
+        if (lowercase) value = value.lowercase(Locale.ROOT)
+        // BertNormalizer strips combining marks for accent-insensitive matching. This also
+        // handles optional Arabic vowel marks in Persian input without altering base letters.
+        val stripAccents = lowercase ||
+            rootNormalizerContains("StripAccents")
+        if (stripAccents) {
+            value = Normalizer.normalize(value, Normalizer.Form.NFD)
+                .filterNot { Character.getType(it) == Character.NON_SPACING_MARK.toInt() }
+                .let { Normalizer.normalize(it, Normalizer.Form.NFC) }
+        }
+        return value.filterNot { it == '\u0000' || it == '\uFFFD' }
+    }
+
+    private fun rootNormalizerContains(needle: String): Boolean = runCatching {
+        // Keep the serialized normalizer's declared operations; no locale-specific heuristics.
+        JSONObject(File(rootTokenizerPath).readText(Charsets.UTF_8))
+            .optJSONObject("normalizer")?.toString()?.contains(needle) == true
+    }.getOrDefault(false)
+
+    private fun splitBertPreTokens(text: String): List<String> {
+        val result = ArrayList<String>()
+        val current = StringBuilder()
+        fun flush() {
+            if (current.isNotEmpty()) {
+                result += current.toString()
+                current.setLength(0)
+            }
+        }
+        var index = 0
+        while (index < text.length) {
+            val cp = text.codePointAt(index)
+            val ch = String(Character.toChars(cp))
+            val type = Character.getType(cp)
+            val punctuation = type == Character.CONNECTOR_PUNCTUATION.toInt() ||
+                type == Character.DASH_PUNCTUATION.toInt() ||
+                type == Character.START_PUNCTUATION.toInt() ||
+                type == Character.END_PUNCTUATION.toInt() ||
+                type == Character.INITIAL_QUOTE_PUNCTUATION.toInt() ||
+                type == Character.FINAL_QUOTE_PUNCTUATION.toInt() ||
+                type == Character.OTHER_PUNCTUATION.toInt()
+            if (Character.isWhitespace(cp) || Character.isSpaceChar(cp)) {
+                flush()
+            } else if (punctuation) {
+                flush()
+                result += ch
+            } else {
+                current.append(ch)
+            }
+            index += Character.charCount(cp)
+        }
+        flush()
         return result
     }
 
