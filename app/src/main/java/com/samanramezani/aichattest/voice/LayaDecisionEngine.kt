@@ -9,9 +9,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
-import java.text.Normalizer
 import kotlin.math.exp
-import kotlin.math.ln
 
 /**
  * Laya's typed-choice ONNX runner. It performs all decisions on-device and never generates
@@ -207,33 +205,39 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
         // descriptions are bounded by head_max_len; only the remaining room is used by state.
         // Each option keeps its marker and at least a small label budget, rather than letting
         // verbose descriptions silently consume the user's actual request.
-        val optionTokenBudget = minOf(48, maxOf(4, (headMaxSequence - 16) / options.size))
+        // Match convaiinnovations/laya rl_common.py build_sequence:
+        // [CLS] "choice question: ..." [SEP] [MASK] option ... [SEP] state [SEP].
         val optionTokens = options.map { option ->
-            tok.encode(" ${option.id}: ${option.description}", optionTokenBudget - 1)
+            listOf(tok.maskId) + tok.encode(" ${option.id}: ${option.description}".replace(tok.maskToken, " "), 48)
+        }.toMutableList()
+        var optionBudget = headMaxSequence - optionTokens.sumOf { it.size }
+        if (optionBudget < 16) {
+            val perOptionBudget = maxOf(4, (headMaxSequence - 16) / optionTokens.size)
+            for (index in optionTokens.indices) optionTokens[index] = optionTokens[index].take(perOptionBudget)
+            optionBudget = headMaxSequence - optionTokens.sumOf { it.size }
         }
-        val fixedHeadTokens = 1 + 1 + options.indices.sumOf { 1 + optionTokens[it].size } + 1
-        val instructionBudget = (headMaxSequence - fixedHeadTokens).coerceAtLeast(8)
-        val instructionTokens = tok.encode("choice question: $instructions", instructionBudget)
+        val instructionTokens = tok.encode("choice question: ${instructions.replace(tok.maskToken, " ")}", maxOf(8, optionBudget))
         val ids = ArrayList<Long>(maxSequence)
         val markers = ArrayList<Long>(options.size)
         ids += tok.clsId
-        ids += instructionTokens
+        ids += instructionTokens.take(maxOf(8, optionBudget))
         ids += tok.sepId
-        for (index in options.indices) {
+        for (option in optionTokens) {
             markers += ids.size.toLong()
-            ids += tok.maskId
-            ids += optionTokens[index]
+            ids += option
         }
         ids += tok.sepId
-        require(ids.size <= headMaxSequence) {
-            "LAYA-QUESTION-002: سربرگ گزینه‌ها از بودجه head_max_len عبور کرد؛ head=${ids.size}, budget=$headMaxSequence, options=${options.size}"
+        // Upstream reserves head_max_len for instruction + option token content, excluding
+        // the structural [CLS]/[SEP] markers. It does not assert this intermediate length.
+        require(markers.size == options.size && ids.size <= maxSequence) {
+            "LAYA-QUESTION-002: سربرگ گزینه‌ها نامعتبر است؛ head=${ids.size}, max_len=$maxSequence, options=${options.size}"
         }
         val remaining = (maxSequence - ids.size - 1).coerceAtLeast(0)
-        val stateIds = tok.encode(state, remaining)
+        val stateIds = tok.encode(state.replace(tok.maskToken, " "), remaining)
         ids += stateIds
         ids += tok.sepId
-        require(markers.isNotEmpty() && ids.size <= maxSequence) {
-            "LAYA-QUESTION-003: طول ورودی نامعتبر است؛ total=${ids.size}, max_len=$maxSequence, head=${instructionTokens.size + fixedHeadTokens}"
+        require(ids.size <= maxSequence) {
+            "LAYA-QUESTION-003: طول ورودی نامعتبر است؛ total=${ids.size}, max_len=$maxSequence, head=${ids.size - stateIds.size - 1}"
         }
 
         val feeds = linkedMapOf<String, OnnxTensor>()
@@ -260,11 +264,14 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 require(logits.all { it.isFinite() }) {
                     "LAYA-INFER-007: خروجی مدل شامل امتیاز NaN یا بی‌نهایت است."
                 }
-                val max = logits.maxOrNull() ?: return null
-                // Apply the official checkpoint's choice temperature and per-option bucket if
-                // present. The published multilingual bundle has no fitted temperatures; in that
-                // case this remains a raw softmax score and is explicitly reported as uncalibrated.
-                val bucket = if (options.size >= 11) "choice:11+" else "choice:${options.size}"
+                // Official Laya ONNX outputs are logits [1, options] and act_logits [1, 2].
+                // Match rl_agent_api.py temperature bucket naming and entropy confidence.
+                val bucket = when {
+                    options.size <= 2 -> "choice:2"
+                    options.size <= 5 -> "choice:3-5"
+                    options.size <= 10 -> "choice:6-10"
+                    else -> "choice:11+"
+                }
                 val bucketTemperature = optionTemperatures[bucket]
                 val activeTemperature = (bucketTemperature ?: choiceTemperature).coerceIn(MIN_TEMPERATURE, MAX_TEMPERATURE)
                 val activeCalibration = if (bucketTemperature != null) "rl_agent_config.json:$bucket" else temperatureSource
@@ -277,16 +284,28 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 val best = ranked.first()
                 val second = ranked.getOrNull(1)
                 val margin = probs[best] - (second?.let { probs[it] } ?: 0.0)
+                val entropy = -probs.sumOf { p -> if (p > 0.0) p * kotlin.math.ln(p) else 0.0 }
+                val confidence = (1.0 - entropy / kotlin.math.ln(options.size.toDouble())).coerceIn(0.0, 1.0)
+                val actTensor = result.toList().getOrNull(1)?.value as? OnnxTensor
+                val actSummary = actTensor?.let { tensor ->
+                    val values = tensor.floatBuffer.let { b -> FloatArray(b.remaining()).also(b::get) }
+                    if (values.size >= 2 && values.all { it.isFinite() }) {
+                        val m = maxOf(values[0].toDouble(), values[1].toDouble())
+                        val e0 = kotlin.math.exp(values[0] - m)
+                        val e1 = kotlin.math.exp(values[1] - m)
+                        " actProbability=${"%.3f".format(Locale.US, e1 / (e0 + e1))}"
+                    } else ""
+                }.orEmpty()
                 val top = ranked.take(3).joinToString(";") { index ->
-                    "${options[index].id}:logit=${"%.4f".format(Locale.US, logits[index])},score=${"%.4f".format(Locale.US, probs[index])}"
+                    "${options[index].id}:logit=${"%.4f".format(Locale.US, logits[index])},p=${"%.4f".format(Locale.US, probs[index])}"
                 }
-                val detail = "stage=${instructions.take(48).replace(Regex("\\s+"), " ")} options=${options.size} inputTokens=${ids.size} stateTokens=${stateIds.size} headTokens=${ids.size - stateIds.size - 1} temperature=${"%.3f".format(Locale.US, activeTemperature)} calibration=$activeCalibration top=[$top]"
+                val detail = "stage=${instructions.take(48).replace(Regex("\\s+"), " ")} options=${options.size} inputTokens=${ids.size} stateTokens=${stateIds.size} headTokens=${ids.size - stateIds.size - 1} temperature=${"%.3f".format(Locale.US, activeTemperature)} calibration=$activeCalibration confidence=${"%.3f".format(Locale.US, confidence)} margin=${"%.3f".format(Locale.US, margin)}$actSummary top=[$top]"
                 lastTrace = lastTrace + detail
-                if (probs[best] < MIN_CONFIDENCE || margin < MIN_MARGIN) {
-                    lastError = "LAYA-INFER-005: تصمیم کم‌اطمینان؛ score=${"%.3f".format(Locale.US, probs[best])}, margin=${"%.3f".format(Locale.US, margin)}, threshold=${MIN_CONFIDENCE}/${MIN_MARGIN}; $detail"
+                if (confidence < MIN_CONFIDENCE || margin < MIN_MARGIN) {
+                    lastError = "LAYA-INFER-005: تصمیم کم‌اطمینان؛ confidence=${"%.3f".format(Locale.US, confidence)}, maxProbability=${"%.3f".format(Locale.US, probs[best])}, margin=${"%.3f".format(Locale.US, margin)}, threshold=${MIN_CONFIDENCE}/${MIN_MARGIN}; $detail"
                     return null
                 }
-                return Ranked(options[best].id, probs[best])
+                return Ranked(options[best].id, confidence)
             }
         } finally {
             feeds.values.forEach { runCatching { it.close() } }
@@ -305,7 +324,8 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
         val model = File(root, MODEL_FILE)
         val configFile = File(root, "rl_agent_config.json")
         val tokenizerFile = File(root, "tokenizer/tokenizer.json")
-        val key = "${model.absolutePath}:${model.length()}:${model.lastModified()}:${File(root, "$MODEL_FILE.data").length()}:${configFile.lastModified()}:${tokenizerFile.lastModified()}"
+        val tokenizerConfigFile = File(root, "tokenizer/tokenizer_config.json")
+        val key = "${model.absolutePath}:${model.length()}:${model.lastModified()}:${File(root, "$MODEL_FILE.data").length()}:${configFile.lastModified()}:${tokenizerFile.lastModified()}:${tokenizerConfigFile.lastModified()}"
         if (session != null && cachedModelKey == key) return
         closeLoaded()
         loadRuntimeConfig(configFile)
@@ -320,7 +340,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
             options.close()
         }
         environment = env
-        tokenizer = LayaTokenizer(File(root, "tokenizer/tokenizer.json"))
+        tokenizer = LayaTokenizer(File(root, "tokenizer/tokenizer.json"), tokenizerConfigFile)
         val names = session!!.inputNames
         val required = setOf("input_ids", "attention_mask", "marker_pos", "marker_mask", "qtype")
         require(names.containsAll(required)) {
@@ -361,6 +381,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
     private fun closeLoaded() {
         runCatching { session?.close() }
         session = null
+        runCatching { tokenizer?.close() }
         tokenizer = null
         cachedModelKey = null
     }
@@ -371,280 +392,41 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
     }
 }
 
-/** Small tokenizer implementation for the WordPiece/BPE tokenizer formats used by Laya bundles. */
-private class LayaTokenizer(file: File) {
-    private val vocab = HashMap<String, Int>()
-    private val merges = HashMap<String, Int>()
-    private val tokenScores = HashMap<String, Double>()
-    private val modelType: String
-    private val lowercase: Boolean
-    private val byteLevel: Boolean
-    private val metaspace: Boolean
-    private val rootPrependNever: Boolean
-    private val unkToken: String
-    private var normalizerConfig: String = ""
-    val clsId: Long
-    val sepId: Long
-    val maskId: Long
+/**
+ * Adapter over the official Hugging Face Tokenizers Rust pipeline.
+ * tokenizer.json is authoritative; no custom Persian normalization or algorithm fallback.
+ */
+private class LayaTokenizer(tokenizerFile: File, tokenizerConfigFile: File) : AutoCloseable {
+    private val native = LayaNativeTokenizer(tokenizerFile.readBytes())
+    private val config = JSONObject(tokenizerConfigFile.readText(Charsets.UTF_8))
 
-    init {
-        val root = JSONObject(file.readText(Charsets.UTF_8))
-        val model = root.optJSONObject("model") ?: error("LAYA-TOKENIZER-001: tokenizer model گم شده است.")
-        modelType = model.optString("type")
-        require(modelType in setOf("BPE", "WordPiece", "Unigram")) {
-            "LAYA-TOKENIZER-002: نوع tokenizer پشتیبانی نمی‌شود: $modelType"
+    private fun configuredToken(name: String): String {
+        val raw = config.opt(name)
+        val value = when (raw) {
+            is String -> raw
+            is JSONObject -> raw.optString("content").ifBlank { raw.optString("token") }
+            else -> ""
         }
-        val rawVocab = model.optJSONObject("vocab")
-        if (rawVocab != null) {
-            val keys = rawVocab.keys()
-            while (keys.hasNext()) {
-                val key = keys.next()
-                vocab[key] = rawVocab.getInt(key)
-            }
-        } else {
-            val arr = model.optJSONArray("vocab") ?: error("LAYA-TOKENIZER-003: واژگان پیدا نشد.")
-            for (i in 0 until arr.length()) {
-                val item = arr.optJSONArray(i) ?: continue
-                if (item.length() >= 2) {
-                    val token = item.getString(0)
-                    vocab[token] = i
-                    tokenScores[token] = item.optDouble(1, -10.0)
-                }
-            }
+        require(value.isNotBlank()) {
+            "LAYA-TOKENIZER-012: توکن ویژه '$name' در tokenizer_config.json وجود ندارد."
         }
-        val mergesArray = model.optJSONArray("merges") ?: JSONArray()
-        for (i in 0 until mergesArray.length()) {
-            val merge = mergesArray.opt(i)
-            val pair = when (merge) {
-                is String -> merge.trim().split(Regex("\\s+"), limit = 2).takeIf { it.size == 2 }
-                is JSONArray -> if (merge.length() >= 2) listOf(merge.getString(0), merge.getString(1)) else null
-                else -> null
-            }
-            if (pair != null) merges["${pair[0]} ${pair[1]}"] = i
-        }
-        val normalizer = root.opt("normalizer")
-        normalizerConfig = normalizer?.toString().orEmpty()
-        lowercase = normalizerConfig.contains("Lowercase") ||
-            (normalizer as? JSONObject)?.optBoolean("lowercase", false) == true
-        val pre = root.opt("pre_tokenizer")?.toString().orEmpty()
-        byteLevel = pre.contains("ByteLevel")
-        metaspace = pre.contains("Metaspace")
-        rootPrependNever = pre.contains("prepend_scheme") && pre.contains("never")
-        unkToken = model.optString("unk_token", "<unk>")
-        val special = root.optJSONArray("added_tokens") ?: JSONArray()
-        val specialIds = HashMap<String, Int>()
-        for (i in 0 until special.length()) {
-            val item = special.optJSONObject(i) ?: continue
-            val content = item.optString("content")
-            if (content.isNotEmpty()) specialIds[content] = item.optInt("id", vocab[content] ?: -1)
-        }
-        fun id(vararg candidates: String): Long {
-            for (candidate in candidates) {
-                val found = vocab[candidate] ?: specialIds[candidate]
-                if (found != null && found >= 0) return found.toLong()
-            }
-            error("LAYA-TOKENIZER-004: توکن ویژه پیدا نشد: ${candidates.joinToString()}")
-        }
-        clsId = id("<s>", "[CLS]", "<|begin_of_text|>")
-        sepId = id("</s>", "[SEP]", "<|end_of_text|>")
-        maskId = id("<mask>", "[MASK]", "<|mask|>")
+        return value
     }
+
+    val clsToken: String = configuredToken("cls_token")
+    val sepToken: String = configuredToken("sep_token")
+    val maskToken: String = configuredToken("mask_token")
+    val clsId: Long = native.tokenId(clsToken)
+        ?: error("LAYA-TOKENIZER-013: شناسهٔ cls_token در tokenizer.json پیدا نشد: $clsToken")
+    val sepId: Long = native.tokenId(sepToken)
+        ?: error("LAYA-TOKENIZER-014: شناسهٔ sep_token در tokenizer.json پیدا نشد: $sepToken")
+    val maskId: Long = native.tokenId(maskToken)
+        ?: error("LAYA-TOKENIZER-015: شناسهٔ mask_token در tokenizer.json پیدا نشد: $maskToken")
 
     fun encode(raw: String, maxTokens: Int): List<Long> {
         if (maxTokens <= 0 || raw.isEmpty()) return emptyList()
-        var text = raw.replace('ي', 'ی').replace('ك', 'ک')
-        if (lowercase) text = text.lowercase(Locale.ROOT)
-        val tokens = when (modelType) {
-            "WordPiece" -> encodeWordPiece(text)
-            "BPE" -> encodeBpe(text)
-            "Unigram" -> encodeUnigram(text)
-            else -> emptyList()
-        }
-        return tokens.take(maxTokens).map { (vocab[it] ?: vocab[unkToken] ?: 0).toLong() }
+        return native.encode(raw, addSpecialTokens = false).asList().take(maxTokens)
     }
 
-    private fun encodeWordPiece(text: String): List<String> {
-        val result = ArrayList<String>()
-        for (word in splitBertPreTokens(normalizeBertText(text))) {
-            if (word.isEmpty()) continue
-            var start = 0
-            val pieces = ArrayList<String>()
-            while (start < word.length) {
-                var end = word.length
-                var match: String? = null
-                while (end > start) {
-                    val candidate = (if (start == 0) "" else "##") + word.substring(start, end)
-                    if (candidate in vocab) { match = candidate; break }
-                    end--
-                }
-                if (match == null) { pieces.clear(); pieces += unkToken; break }
-                pieces += match
-                start = end
-            }
-            result += pieces
-        }
-        return result
-    }
-
-    private fun normalizeBertText(raw: String): String {
-        var value = raw.replace('ي', 'ی').replace('ك', 'ک')
-        if (lowercase) value = value.lowercase(Locale.ROOT)
-        // BertNormalizer strips combining marks for accent-insensitive matching. This also
-        // handles optional Arabic vowel marks in Persian input without altering base letters.
-        val stripAccents = lowercase ||
-            rootNormalizerContains("StripAccents")
-        if (stripAccents) {
-            value = Normalizer.normalize(value, Normalizer.Form.NFD)
-                .filterNot { Character.getType(it) == Character.NON_SPACING_MARK.toInt() }
-                .let { Normalizer.normalize(it, Normalizer.Form.NFC) }
-        }
-        return value.filterNot { it == '\u0000' || it == '\uFFFD' }
-    }
-
-    private fun rootNormalizerContains(needle: String): Boolean {
-        if (normalizerConfig.contains(needle, ignoreCase = true)) return true
-        // BertNormalizer stores strip_accents as a boolean, while tokenizer pipelines store
-        // the same operation as a "StripAccents" stage. Support both JSON representations.
-        return needle.equals("StripAccents", ignoreCase = true) &&
-            Regex("\"strip_accents\"\\s*:\\s*true", RegexOption.IGNORE_CASE)
-                .containsMatchIn(normalizerConfig)
-    }
-
-    private fun splitBertPreTokens(text: String): List<String> {
-        val result = ArrayList<String>()
-        val current = StringBuilder()
-        fun flush() {
-            if (current.isNotEmpty()) {
-                result += current.toString()
-                current.setLength(0)
-            }
-        }
-        var index = 0
-        while (index < text.length) {
-            val cp = text.codePointAt(index)
-            val ch = String(Character.toChars(cp))
-            val type = Character.getType(cp)
-            val punctuation = type == Character.CONNECTOR_PUNCTUATION.toInt() ||
-                type == Character.DASH_PUNCTUATION.toInt() ||
-                type == Character.START_PUNCTUATION.toInt() ||
-                type == Character.END_PUNCTUATION.toInt() ||
-                type == Character.INITIAL_QUOTE_PUNCTUATION.toInt() ||
-                type == Character.FINAL_QUOTE_PUNCTUATION.toInt() ||
-                type == Character.OTHER_PUNCTUATION.toInt()
-            if (Character.isWhitespace(cp) || Character.isSpaceChar(cp)) {
-                flush()
-            } else if (punctuation) {
-                flush()
-                result += ch
-            } else {
-                current.append(ch)
-            }
-            index += Character.charCount(cp)
-        }
-        flush()
-        return result
-    }
-
-    private fun encodeBpe(text: String): List<String> {
-        val result = ArrayList<String>()
-        val preTokens = if (metaspace) {
-            text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.mapIndexed { i, word ->
-                (if (i == 0 && rootPrependNever) "" else "▁") + word
-            }
-        } else {
-            (if (byteLevel) Regex("\\s*[\\p{L}\\p{M}]+|\\s*[\\p{N}]+|\\s*[^\\s\\p{L}\\p{M}\\p{N}]+|\\s+")
-             else Regex("[\\p{L}\\p{M}]+|[\\p{N}]+|[^\\s\\p{L}\\p{M}\\p{N}]|\\s+"))
-                .findAll(text).map { it.value }.toList()
-        }
-        for (part in preTokens) {
-            if (part.isBlank()) continue
-            val symbols = if (byteLevel) byteEncode(part).map { it.toString() } else part.map { it.toString() }
-            if (symbols.isEmpty()) continue
-            val pieces = symbols.toMutableList()
-            while (pieces.size > 1) {
-                var bestRank = Int.MAX_VALUE
-                var bestIndex = -1
-                for (i in 0 until pieces.lastIndex) {
-                    val rank = merges["${pieces[i]} ${pieces[i + 1]}"] ?: Int.MAX_VALUE
-                    if (rank < bestRank) { bestRank = rank; bestIndex = i }
-                }
-                if (bestIndex < 0) break
-                pieces[bestIndex] = pieces[bestIndex] + pieces[bestIndex + 1]
-                pieces.removeAt(bestIndex + 1)
-            }
-            result += pieces
-        }
-        return result
-    }
-
-    private fun encodeUnigram(text: String): List<String> {
-        // SentencePiece/Unigram tokenization uses a Viterbi path over scored vocabulary pieces.
-        val normalized = if (metaspace) {
-            val joined = text.replace(Regex("\\s+"), "▁")
-            if (!rootPrependNever && !joined.startsWith("▁")) "▁$joined" else joined
-        } else text
-        val n = normalized.length
-        if (n == 0) return emptyList()
-        val best = DoubleArray(n + 1) { Double.NEGATIVE_INFINITY }
-        val previous = IntArray(n + 1) { -1 }
-        val previousToken = arrayOfNulls<String>(n + 1)
-        best[0] = 0.0
-        for (start in 0 until n) {
-            if (best[start].isInfinite() && best[start] < 0) continue
-            var matched = false
-            // Tokenizer vocabularies can contain hundreds of thousands of entries. Scan a
-            // bounded character window instead of iterating the entire vocabulary per position.
-            for (end in minOf(n, start + 32) downTo start + 1) {
-                val piece = normalized.substring(start, end)
-                if (piece !in vocab) continue
-                val score = tokenScores[piece] ?: -10.0
-                val candidate = best[start] + score
-                if (candidate > best[end]) {
-                    best[end] = candidate
-                    previous[end] = start
-                    previousToken[end] = piece
-                }
-                matched = true
-            }
-            if (!matched) {
-                val end = start + 1
-                val candidate = best[start] - 100.0
-                if (candidate > best[end]) {
-                    best[end] = candidate
-                    previous[end] = start
-                    previousToken[end] = unkToken
-                }
-            }
-        }
-        if (previous[n] < 0) return listOf(unkToken)
-        val output = ArrayList<String>()
-        var cursor = n
-        while (cursor > 0) {
-            val token = previousToken[cursor] ?: return listOf(unkToken)
-            output += token
-            cursor = previous[cursor]
-        }
-        output.reverse()
-        return output
-    }
-
-    private fun byteEncode(text: String): String {
-        val bytes = text.toByteArray(Charsets.UTF_8)
-        val result = StringBuilder(bytes.size)
-        val visible = ArrayList<Int>()
-        for (b in 33..126) visible += b
-        for (b in 161..172) visible += b
-        for (b in 174..255) visible += b
-        val mapped = HashMap<Int, Char>()
-        var extra = 0
-        for (b in 0..255) {
-            val code = if (b in visible) b else {
-                while (visible.contains(256 + extra)) extra++
-                256 + extra++
-            }
-            mapped[b] = code.toChar()
-        }
-        for (byte in bytes) result.append(mapped[byte.toInt() and 0xff])
-        return result.toString()
-    }
+    override fun close() = native.close()
 }
