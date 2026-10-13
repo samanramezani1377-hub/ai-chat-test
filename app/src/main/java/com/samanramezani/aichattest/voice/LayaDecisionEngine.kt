@@ -54,17 +54,20 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
             ensureLoaded()
             val domain = choose(rawText, "درخواست کاربر به کدام دسته مربوط است؟ Choose the user's request category.",
                 listOf(
-                    Option("GET_TIME", "کاربر ساعت همین لحظه را می‌پرسد یا می‌خواهد ساعت را اعلام کنی. Ask or announce the current local time."),
-                    Option("GET_DATE", "کاربر تاریخ امروز را می‌پرسد. Ask for today's date."),
-                    Option("AUDIO", "کاربر می‌خواهد صدای رسانه را کم یا زیاد کند، قطع کند یا وصل کند. Control media volume, mute, or unmute."),
-                    Option("DISPLAY", "کاربر می‌خواهد روشنایی صفحه را کم یا زیاد یا تنظیم کند. Change screen brightness."),
-                    Option("CHAT", "کاربر پرسش عادی دارد و گفت‌وگوی معمولی می‌خواهد، نه اجرای فرمان دستگاه. Normal chat or general question."),
+                    Option("AUDIO", "کنترل صدا: تنظیم، افزایش، کاهش، قطع یا وصل صدا. Audio volume control."),
+                    Option("DISPLAY", "کنترل نمایشگر و روشنایی صفحه. Display and brightness control."),
+                    Option("APPLICATION", "کنترل برنامه‌ها؛ این حوزه فعلاً غیرفعال است و نباید فرمانی اجرا کند. Application control, currently disabled."),
+                    Option("MEDIA", "پخش و کنترل رسانه؛ این حوزه فعلاً غیرفعال است و نباید فرمانی اجرا کند. Media playback and control, currently disabled."),
+                    Option("SYSTEM", "تنظیمات سیستم؛ این حوزه فعلاً غیرفعال است و نباید فرمانی اجرا کند. System settings, currently disabled."),
+                    Option("INFORMATION", "پرسش اطلاعاتی که باید به مدل مکالمه فرستاده شود. Information request for the chat model."),
+                    Option("OTHER", "سایر درخواست‌ها؛ بدون اجرای فرمان دستگاه. Other request, do not execute a device command."),
                 )) ?: return@synchronized null
             trace += "domain=${domain.id} confidence=${"%.3f".format(Locale.US, domain.confidence)}"
             val command = when (domain.id) {
+                "INFORMATION", "OTHER", "APPLICATION", "MEDIA", "SYSTEM" ->
+                    DinaCommand(DinaIntent.CHAT)
                 "GET_TIME" -> DinaCommand(DinaIntent.GET_TIME)
                 "GET_DATE" -> DinaCommand(DinaIntent.GET_DATE)
-                "CHAT" -> DinaCommand(DinaIntent.CHAT)
                 "AUDIO" -> {
                     val operation = choose(rawText, "کاربر برای صدای رسانه چه عملی می‌خواهد؟ Choose the media-volume operation.",
                         listOf(
@@ -116,11 +119,23 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                             Option("SET", "روشنایی صفحه را روی درصد مشخص تنظیم کن. Set brightness to a percentage."),
                         )) ?: return@synchronized null
                     trace += "display_operation=${operation.id} confidence=${"%.3f".format(Locale.US, operation.confidence)}"
-                    val parsed = DinaCommandClassifier.classify(rawText)
                     when (operation.id) {
                         "INCREASE" -> DinaCommand(DinaIntent.INCREASE_BRIGHTNESS)
                         "DECREASE" -> DinaCommand(DinaIntent.DECREASE_BRIGHTNESS)
-                        "SET" -> parsed.takeIf { it.intent == DinaIntent.SET_BRIGHTNESS && it.value != null } ?: return@synchronized null
+                        "SET" -> {
+                            val target = choose(
+                                rawText,
+                                "مقدار دقیق روشنایی درخواستی را از ۰ تا ۱۰۰ درصد تعیین کن. اگر مقدار مشخص نیست UNKNOWN برگردان و حدس نزن. Choose the exact requested brightness percentage from 0 to 100.",
+                                (0..10).map { n ->
+                                    Option("LEVEL_$n", "روشنایی صفحه روی $n۰ درصد تنظیم شود. Set screen brightness to ${n * 10} percent.")
+                                } + Option("UNKNOWN", "مقدار روشنایی مشخص نیست؛ حدس نزن. Unknown target brightness.")
+                            ) ?: return@synchronized null
+                            trace += "brightness_target=${target.id} confidence=${"%.3f".format(Locale.US, target.confidence)}"
+                            if (target.id == "UNKNOWN") return@synchronized null
+                            val level = target.id.removePrefix("LEVEL_").toIntOrNull()
+                                ?.takeIf { it in 0..10 } ?: return@synchronized null
+                            DinaCommand(DinaIntent.SET_BRIGHTNESS, level * 10, valueIsPercent = true)
+                        }
                         else -> return@synchronized null
                     }
                 }
