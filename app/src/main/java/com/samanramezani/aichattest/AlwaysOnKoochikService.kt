@@ -44,7 +44,7 @@ internal fun isDinaSleepCommand(rawCommand: String): Boolean {
         .replace('‌', ' ')
         .trim()
         .replace(Regex("""[.!؟?،,؛;]+$"""), "")
-        .replace(Regex("""\\s+"""), " ")
+        .replace(Regex("""\s+"""), " ")
     return normalized in setOf("خاموش شو", "خاموش", "برو بخواب", "فعلا خاموش شو")
 }
 
