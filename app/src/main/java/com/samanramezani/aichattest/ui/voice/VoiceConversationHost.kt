@@ -87,6 +87,9 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         diagnosticLogs = (diagnosticLogs + "[${System.currentTimeMillis()}] $value").takeLast(200)
     }
     var listening by remember { mutableStateOf(false) }
+    var serviceOwnsConversation by remember { mutableStateOf(false) }
+    var lastServiceStatus by remember { mutableStateOf("") }
+    var lastServiceDiagnostic by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var pendingAlwaysOnEnable by remember { mutableStateOf(false) }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -132,6 +135,37 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         }
     }
 
+    DisposableEffect(alwaysOnPrefs, serviceOwnsConversation) {
+        if (serviceOwnsConversation) {
+            fun syncServiceState() {
+                listening = alwaysOnPrefs.getBoolean(AlwaysOnKoochikService.PREF_MIC_LISTENING, false)
+                val latestStatus = alwaysOnPrefs.getString(AlwaysOnKoochikService.PREF_LAST_STATUS, "").orEmpty()
+                if (latestStatus.isNotBlank() && latestStatus != lastServiceStatus) {
+                    lastServiceStatus = latestStatus
+                    status = latestStatus
+                    diagnosticLogs = (diagnosticLogs + "[${System.currentTimeMillis()}] SERVICE: $latestStatus").takeLast(200)
+                }
+                val latestDiagnostic = alwaysOnPrefs.getString(AlwaysOnKoochikService.PREF_LAST_DIAGNOSTIC, "").orEmpty()
+                if (latestDiagnostic.isNotBlank() && latestDiagnostic != lastServiceDiagnostic) {
+                    lastServiceDiagnostic = latestDiagnostic
+                    diagnosticLogs = (diagnosticLogs + latestDiagnostic).takeLast(200)
+                }
+            }
+            val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                if (key == null || key == AlwaysOnKoochikService.PREF_MIC_LISTENING ||
+                    key == AlwaysOnKoochikService.PREF_CONVERSATION_STATE ||
+                    key == AlwaysOnKoochikService.PREF_LAST_STATUS ||
+                    key == AlwaysOnKoochikService.PREF_LAST_DIAGNOSTIC
+                ) syncServiceState()
+            }
+            syncServiceState()
+            alwaysOnPrefs.registerOnSharedPreferenceChangeListener(listener)
+            onDispose { alwaysOnPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
+        } else {
+            onDispose { }
+        }
+    }
+
     LaunchedEffect(Unit) {
         val activity = context as? Activity
         val openedByAlwaysOn = activity?.intent?.getBooleanExtra(AlwaysOnKoochikService.EXTRA_OPEN_VOICE_FROM_ALWAYS_ON, false) == true
@@ -140,7 +174,8 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             activity?.intent?.removeExtra(AlwaysOnKoochikService.EXTRA_OPEN_VOICE_FROM_ALWAYS_ON)
             activity?.intent?.removeExtra(AlwaysOnKoochikService.EXTRA_CONVERSATION_STARTED_IN_SERVICE)
             if (audioStartedInService) {
-                updateVoiceStatus("دینا تشخیص داده شد؛ درخواست شروع مکالمه به سرویس پس‌زمینه داده شده است. فعال‌شدن واقعی پس از آماده‌شدن موتور و میکروفون در وضعیت تشخیص‌ها تأیید می‌شود.")
+                serviceOwnsConversation = true
+                updateVoiceStatus("دینا تشخیص داده شد؛ وضعیت واقعی میکروفون و موتور مکالمه از سرویس پس‌زمینه دنبال می‌شود.")
             } else {
                 val stt = sttModels.firstOrNull { it.id == activeSttId }
                 val ttsModel = ttsModels.firstOrNull { it.id == activeTtsId }
