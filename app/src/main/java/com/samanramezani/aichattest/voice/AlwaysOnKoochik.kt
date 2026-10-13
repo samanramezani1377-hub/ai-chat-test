@@ -19,5 +19,6 @@ internal fun extractDinaCommand(transcript: String): String? {
     return normalized.substring(match.range.last + 1)
         .trim()
         .trimStart('،', ',', ':', ';', '؛', '؟', '?', '!', '.', '-', '—')
+        .replace(Regex("^(?:متوجه\\s+شدم)[،,;:!؟?\\s]*"), "")
         .trim()
 }
