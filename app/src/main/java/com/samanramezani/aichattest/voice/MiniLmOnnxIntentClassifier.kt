@@ -15,7 +15,7 @@ import kotlin.math.exp
  *
  * Bundle contract:
  * - model.onnx: logits output [1, number_of_labels]
- * - tokenizer.json: Hugging Face fast-tokenizer JSON with a WordPiece model vocab
+ * - tokenizer.json: Hugging Face fast-tokenizer JSON with WordPiece or SentencePiece-style BPE vocab
  * - labels.json: {"labels":["CHAT","GET_TIME",...]} in the same order as model logits,
  *   or {"0":"CHAT","1":"GET_TIME",...}.
  *
