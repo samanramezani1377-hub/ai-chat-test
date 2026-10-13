@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import com.samanramezani.aichattest.AppContainer
 import com.samanramezani.aichattest.AlwaysOnKoochikService
+import com.samanramezani.aichattest.isDinaSleepCommand
 import com.samanramezani.aichattest.ui.voice.VoiceConversationPage
 import com.samanramezani.aichattest.voice.LocalMicrophone
 import com.samanramezani.aichattest.voice.VoiceAudioInputGuard
@@ -31,6 +32,7 @@ import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
 import com.samanramezani.aichattest.voice.LayaDecisionModelStore
 import com.samanramezani.aichattest.voice.LayaDecisionEngine
 import com.samanramezani.aichattest.voice.DinaDeviceCommandExecutor
+import com.samanramezani.aichattest.voice.extractDinaCommand
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.domain.InferenceSettings
 import kotlinx.coroutines.CancellationException
@@ -457,6 +459,7 @@ class VoiceConversationController(
     private val onDiagnostic: (String) -> Unit,
     private val onListening: (Boolean) -> Unit,
     private val onLine: (String, String) -> Unit,
+    private val onWakeShutdown: () -> Unit = {},
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val cancelledSpeech = AtomicReference<AtomicBoolean?>(null)
@@ -647,6 +650,14 @@ class VoiceConversationController(
                         if (update.endpoint && update.text.isNotBlank()) {
                             val utterance = update.text.trim()
                             if (utterance.isNotBlank()) {
+                                // In an active dialogue, «دینا خاموش شو» returns control to the
+                                // always-on wake listener instead of being sent to the chat model.
+                                val wakeControl = extractDinaCommand(utterance)
+                                if (wakeControl != null && isDinaSleepCommand(wakeControl)) {
+                                    onStatus("فرمان «دینا خاموش شو» دریافت شد؛ مکالمه متوقف و شنود بیدارباش دوباره فعال می‌شود.")
+                                    onWakeShutdown()
+                                    return@launch
+                                }
                                 if (turnRunning.compareAndSet(false, true)) {
                                     bargeInTriggered.set(false)
                                     bargeInCapturePending.set(false)
