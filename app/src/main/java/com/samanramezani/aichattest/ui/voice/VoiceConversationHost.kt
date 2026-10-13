@@ -459,7 +459,7 @@ class VoiceConversationController(
     private val onDiagnostic: (String) -> Unit,
     private val onListening: (Boolean) -> Unit,
     private val onLine: (String, String) -> Unit,
-    private val onWakeShutdown: () -> Unit = {},
+    private val onWakeShutdown: (LocalAsr?) -> Unit = {},
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val cancelledSpeech = AtomicReference<AtomicBoolean?>(null)
@@ -655,7 +655,11 @@ class VoiceConversationController(
                                 val wakeControl = extractDinaCommand(utterance)
                                 if (wakeControl != null && isDinaSleepCommand(wakeControl)) {
                                     onStatus("فرمان «دینا خاموش شو» دریافت شد؛ مکالمه متوقف و شنود بیدارباش دوباره فعال می‌شود.")
-                                    onWakeShutdown()
+                                    // Transfer ownership back to the always-on service so the same
+                                    // Shenava instance remains loaded across conversation boundaries.
+                                    val loadedAsr = recognizer
+                                    recognizer = null
+                                    onWakeShutdown(loadedAsr)
                                     return@launch
                                 }
                                 if (turnRunning.compareAndSet(false, true)) {
