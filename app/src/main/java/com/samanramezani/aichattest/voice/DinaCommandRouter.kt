@@ -26,6 +26,22 @@ internal object DinaCommandClassifier {
         .replace('٨', '8').replace('٩', '9')
         .lowercase(Locale.ROOT).replace(Regex("[\\u0640\\s]+"), " ").trim()
 
+    private fun parsePersianNumberPhrase(raw: String): Int? {
+        val units = mapOf(
+            "صفر" to 0, "یک" to 1, "یه" to 1, "یکی" to 1, "دو" to 2, "سه" to 3,
+            "چهار" to 4, "پنج" to 5, "شش" to 6, "هفت" to 7, "هشت" to 8, "نه" to 9,
+            "ده" to 10, "یازده" to 11, "دوازده" to 12, "سیزده" to 13, "چهارده" to 14,
+            "پانزده" to 15, "شانزده" to 16, "هفده" to 17, "هجده" to 18, "نوزده" to 19,
+            "بیست" to 20, "سی" to 30, "چهل" to 40, "پنجاه" to 50, "شصت" to 60,
+            "هفتاد" to 70, "هشتاد" to 80, "نود" to 90, "صد" to 100, "یکصد" to 100,
+            "دویست" to 200, "سیصد" to 300, "چهارصد" to 400, "پانصد" to 500,
+            "ششصد" to 600, "هفتصد" to 700, "هشتصد" to 800, "نهصد" to 900,
+        )
+        val parts = raw.split(Regex("\\s+و\\s+")).map { it.trim() }
+        if (parts.isEmpty() || parts.any { it !in units }) return null
+        return parts.sumOf { units.getValue(it) }
+    }
+
     fun classify(raw: String): DinaCommand {
         val text = normalize(raw)
         if (text.isBlank()) return DinaCommand(DinaIntent.CHAT)
@@ -45,10 +61,17 @@ internal object DinaCommandClassifier {
         val increase = Regex("(زیاد کن|بیشتر کن|بالا ببر|افزایش بده|ببر بالا|زیاد شه|بیشتر شه|زیادش کن|increase|turn up)").containsMatchIn(text)
         val targetMatch = Regex("(?:روی|رو|به)\\s*(\\d{1,3})\\s*(درصد|درجه)?").find(text)
             ?: Regex("(?:بذار|بزار|بگذار|تنظیم(?:ش)? کن|قرار بده|set)\\s+(?:[^0-9]{0,24})?(\\d{1,3})\\s*(درصد|درجه)?").find(text)
+        val numberWords = "(?:صفر|یک|یه|یکی|دو|سه|چهار|پنج|شش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پانزده|شانزده|هفده|هجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد|یکصد|دویست|سیصد|چهارصد|پانصد|ششصد|هفتصد|هشتصد|نهصد)"
+        val numberPhrase = "$numberWords(?:\\s+و\\s+$numberWords)*"
+        val wordTargetMatch = Regex("(?:روی|رو|به)\\s*($numberPhrase)\\s*(درصد|درجه)?").find(text)
+            ?: Regex("(?:بذار|بزار|بگذار|تنظیم(?:ش)? کن|قرار بده)\\s+(?:[^0-9]{0,24})?($numberPhrase)\\s*(درصد|درجه)?").find(text)
         val target = targetMatch?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: wordTargetMatch?.groupValues?.getOrNull(1)?.let(::parsePersianNumberPhrase)
         val explicitPercent = targetMatch?.groupValues?.getOrNull(2) == "درصد" ||
-            Regex("\\d{1,3}\\s*درصد").containsMatchIn(text)
-        val hasSetCue = Regex("(بذار|بزار|بگذار|تنظیم|قرار بده|روی\\s*\\d|رو\\s*\\d|به\\s*\\d|set\\s)").containsMatchIn(text)
+            wordTargetMatch?.groupValues?.getOrNull(2) == "درصد" ||
+            Regex("\\d{1,3}\\s*درصد").containsMatchIn(text) ||
+            Regex("$numberPhrase\\s*درصد").containsMatchIn(text)
+        val hasSetCue = Regex("(بذار|بزار|بگذار|تنظیم|قرار بده|روی\\s*\\d|رو\\s*\\d|به\\s*\\d|روی\\s*$numberWords|رو\\s*$numberWords|به\\s*$numberWords|set\\s)").containsMatchIn(text)
 
         if (volume) {
             if (unmute) return DinaCommand(DinaIntent.UNMUTE)
