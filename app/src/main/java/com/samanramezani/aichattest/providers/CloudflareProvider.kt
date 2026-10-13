@@ -66,6 +66,7 @@ class CloudflareProvider : ChatCompletionProvider {
         var firstTokenMs: Long? = null
         var outputTokens = 0L
         var streamEvents = 0
+        var reasoningChars = 0
         var lastPayloadShape = "none"
         var finishReason = "none"
         val output = StringBuilder()
@@ -129,6 +130,12 @@ class CloudflareProvider : ChatCompletionProvider {
                             val deltaObject = choice?.optJSONObject("delta")
                             val messageObject = choice?.optJSONObject("message")
                             finishReason = choice?.optString("finish_reason")?.takeIf { it.isNotBlank() && it != "null" } ?: finishReason
+                            // Never fall back to reasoning/reasoning_content: only user-facing content is eligible for speech.
+                            val reasoning = contentText(deltaObject?.opt("reasoning_content"))
+                                .ifBlank { contentText(deltaObject?.opt("reasoning")) }
+                                .ifBlank { contentText(messageObject?.opt("reasoning_content")) }
+                                .ifBlank { contentText(messageObject?.opt("reasoning")) }
+                            reasoningChars += reasoning.length
                             val delta = contentText(deltaObject?.opt("content"))
                                 .ifBlank { contentText(messageObject?.opt("content")) }
                             // Some Workers AI model families emit a native {response: ...}
@@ -140,6 +147,7 @@ class CloudflareProvider : ChatCompletionProvider {
                                 append(";deltaKeys=").append(deltaObject?.keys()?.asSequence()?.take(8)?.joinToString(",") ?: "-")
                                 append(";messageKeys=").append(messageObject?.keys()?.asSequence()?.take(8)?.joinToString(",") ?: "-")
                                 append(";responseChars=").append(nativeResponse.length)
+                                append(";reasoningChars=").append(reasoning.length)
                                 append(";finish=").append(finishReason)
                             }
                             val chunk = when {
@@ -185,7 +193,7 @@ class CloudflareProvider : ChatCompletionProvider {
             if (output.isBlank()) {
                 throw IllegalStateException(
                     "CLOUDFLARE-EMPTY: پاسخ متنی دریافت نشد؛ model=${config.model}; HTTP=${status}; " +
-                        "streamEvents=${streamEvents}; finish=${finishReason}; payload=${lastPayloadShape}. " +
+                        "streamEvents=${streamEvents}; finish=${finishReason}; reasoningChars=${reasoningChars}; payload=${lastPayloadShape}. " +
                         "شناسه مدل/دسترسی API یا خروجی غیرمتنی مدل را بررسی کن."
                 )
             }
