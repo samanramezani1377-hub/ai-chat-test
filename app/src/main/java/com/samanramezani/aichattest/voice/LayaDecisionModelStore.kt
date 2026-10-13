@@ -125,17 +125,25 @@ internal class LayaDecisionModelStore(
      * Large weights are streamed to private storage; they are never buffered in memory or APK assets.
      */
     fun downloadOfficialBundle(onProgress: (String) -> Unit = {}): String {
-        // Never re-download when the validated private installation is already usable.
-        if (isReady()) {
-            onProgress("مدل Laya از قبل نصب است؛ دانلود مجدد انجام نشد.")
-            return "مدل Laya Multilingual INT4 از قبل نصب و آماده است؛ دانلود مجدد لازم نیست."
-        }
-
         root.parentFile?.mkdirs()
+
+        // If an older app version installed Laya without retaining the original bundle,
+        // create the Downloads backup from the already-installed files instead of re-fetching.
+        val existingCache = findCachedBundleUri()
+        if (isReady()) {
+            val retained = existingCache != null || runCatching { saveCachedBundle(root) }.isSuccess
+            onProgress(if (retained) "مدل Laya از قبل نصب است؛ نسخهٔ دانلودی نگه‌داری شد و دانلود مجدد انجام نشد."
+                else "مدل Laya از قبل نصب است؛ دانلود مجدد انجام نشد، اما ذخیره در Downloads ناموفق بود.")
+            return if (retained) {
+                "مدل Laya Multilingual INT4 از قبل نصب است و دانلود مجدد انجام نشد. نسخهٔ اصلی در Downloads/AI Chat Test/Laya/$CACHE_FILE نگه‌داری می‌شود."
+            } else {
+                "مدل Laya Multilingual INT4 از قبل نصب و آماده است؛ دانلود مجدد لازم نیست، اما ساخت نسخهٔ پشتیبان در Downloads ناموفق بود."
+            }
+        }
 
         // The bundle ZIP is kept in the public Downloads folder (Android 10+) so it
         // survives app updates and reinstalls. Restore it before contacting Hugging Face.
-        val cachedUri = findCachedBundleUri()
+        val cachedUri = existingCache
         if (cachedUri != null) {
             val staging = newStagingDirectory()
             try {
@@ -172,11 +180,19 @@ internal class LayaDecisionModelStore(
 
             // Cache a single portable bundle before moving the extracted files into the
             // app-private runtime directory. A cache-write failure must not block install.
-            runCatching { saveCachedBundle(staging) }
-                .onFailure { onProgress("هشدار: ذخیرهٔ نسخهٔ پشتیبان در Downloads ناموفق بود: ${it.message ?: "خطای ناشناخته"}") }
+            val retained = runCatching { saveCachedBundle(staging) }.fold(
+                onSuccess = { true },
+                onFailure = {
+                    onProgress("هشدار: ذخیرهٔ نسخهٔ پشتیبان در Downloads ناموفق بود: ${it.message ?: "خطای ناشناخته"}")
+                    false
+                }
+            )
 
-            return validateAndInstall(staging, staging) +
+            return validateAndInstall(staging, staging) + if (retained) {
                 "\nنسخهٔ قابل‌بازیابی بسته در Downloads/AI Chat Test/Laya/$CACHE_FILE ذخیره شد."
+            } else {
+                "\nهشدار: نصب انجام شد، اما نگه‌داری بسته در Downloads موفق نبود."
+            }
         } catch (t: Throwable) {
             staging.deleteRecursively()
             throw t
