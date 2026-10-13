@@ -43,8 +43,13 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
 
     fun classify(rawText: String, currentVolume: Int? = null, maxVolume: Int? = null): Decision? = synchronized(lock) {
         lastTrace = emptyList()
-        if (rawText.isBlank() || !isReady()) return@synchronized null
+        if (rawText.isBlank()) return@synchronized null
+        if (!isReady()) {
+            closeLoaded()
+            return@synchronized null
+        }
         val trace = mutableListOf<String>()
+        var retainLoadedSession = false
         try {
             ensureLoaded()
             val domain = choose(rawText, "درخواست کاربر به کدام دسته مربوط است؟ Choose the user's request category.",
@@ -134,11 +139,16 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
             }
             lastTrace = trace.toList()
             lastError = null
+            // Laya's resident memory is large. Keep it warm only after local device actions;
+            // close the session before the chat model is loaded, and also on every abstention.
+            retainLoadedSession = command.intent != DinaIntent.CHAT
             Decision(command, domain.id, trace.lastOrNull()?.substringAfter("confidence=")?.toDoubleOrNull() ?: 1.0, trace.toList())
         } catch (t: Throwable) {
             lastError = "LAYA-INFER-001: ${t.message ?: t.javaClass.simpleName}"
             lastTrace = trace.toList()
             null
+        } finally {
+            if (!retainLoadedSession) closeLoaded()
         }
     }
 
