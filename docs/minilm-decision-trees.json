@@ -4,7 +4,7 @@
   "min_similarity": 0.42,
   "min_margin": 0.035,
   "language": "en",
-  "notes": "all-MiniLM-L6-v2 is English-trained. Persian/Arabic-script utterances are intentionally routed to Dina's safe Persian rules.",
+  "notes": "all-MiniLM-L6-v2 is English-trained. Persian/Arabic-script utterances are intentionally routed to Dina's safe Persian rules. The volume_level node selects levels 1-10 directly from semantic choices; only OTHER_EXPLICIT_VALUE uses deterministic value parsing.",
   "nodes": {
     "domain": {
       "prompt": "Choose the user's request domain.",
@@ -12,27 +12,48 @@
         {
           "id": "GET_TIME",
           "description": "The user asks for the current local clock time.",
-          "examples": ["What time is it?", "Tell me the current time.", "Current time please."]
+          "examples": [
+            "What time is it?",
+            "Tell me the current time.",
+            "Current time please."
+          ]
         },
         {
           "id": "GET_DATE",
           "description": "The user asks for today's calendar date.",
-          "examples": ["What is today's date?", "Tell me the date today.", "Which date is it?"]
+          "examples": [
+            "What is today's date?",
+            "Tell me the date today.",
+            "Which date is it?"
+          ]
         },
         {
           "id": "AUDIO",
           "description": "The user wants to control media volume or sound level.",
-          "examples": ["Turn the volume up.", "Lower the sound.", "Set the volume to fifty percent.", "Mute the audio."]
+          "examples": [
+            "Turn the volume up.",
+            "Lower the sound.",
+            "Set the volume to fifty percent.",
+            "Mute the audio."
+          ]
         },
         {
           "id": "DISPLAY",
           "description": "The user wants to control screen brightness.",
-          "examples": ["Increase screen brightness.", "Dim the display.", "Set brightness to fifty percent."]
+          "examples": [
+            "Increase screen brightness.",
+            "Dim the display.",
+            "Set brightness to fifty percent."
+          ]
         },
         {
           "id": "CHAT",
           "description": "The user asks a general question or wants conversation rather than a device command.",
-          "examples": ["Explain how this works.", "Tell me a story.", "Can you help me understand this?"]
+          "examples": [
+            "Explain how this works.",
+            "Tell me a story.",
+            "Can you help me understand this?"
+          ]
         }
       ]
     },
@@ -42,27 +63,46 @@
         {
           "id": "INCREASE_VOLUME",
           "description": "Increase or turn up the media volume.",
-          "examples": ["Make it louder.", "Turn the volume up.", "Increase the sound."]
+          "examples": [
+            "Make it louder.",
+            "Turn the volume up.",
+            "Increase the sound."
+          ]
         },
         {
           "id": "DECREASE_VOLUME",
           "description": "Decrease or turn down the media volume.",
-          "examples": ["Make it quieter.", "Turn the volume down.", "Lower the sound."]
+          "examples": [
+            "Make it quieter.",
+            "Turn the volume down.",
+            "Lower the sound."
+          ]
         },
         {
           "id": "SET_VOLUME",
-          "description": "Set the media volume to a specific target value or percentage.",
-          "examples": ["Set volume to fifty percent.", "Put the volume at level five.", "Set the sound to 30 percent."]
+          "description": "Set media volume to a specific level from one to ten, or to an explicit percentage/value.",
+          "examples": [
+            "Set volume to level five out of ten.",
+            "Set the volume to 5.",
+            "Set volume to fifty percent.",
+            "Set the sound to 30 percent."
+          ]
         },
         {
           "id": "MUTE",
           "description": "Mute or silence the media audio.",
-          "examples": ["Mute the sound.", "Silence the audio."]
+          "examples": [
+            "Mute the sound.",
+            "Silence the audio."
+          ]
         },
         {
           "id": "UNMUTE",
           "description": "Unmute or restore the media audio.",
-          "examples": ["Unmute the sound.", "Turn the sound back on."]
+          "examples": [
+            "Unmute the sound.",
+            "Turn the sound back on."
+          ]
         }
       ]
     },
@@ -72,17 +112,131 @@
         {
           "id": "INCREASE_BRIGHTNESS",
           "description": "Increase or brighten the screen.",
-          "examples": ["Make the screen brighter.", "Increase display brightness."]
+          "examples": [
+            "Make the screen brighter.",
+            "Increase display brightness."
+          ]
         },
         {
           "id": "DECREASE_BRIGHTNESS",
           "description": "Decrease or dim the screen.",
-          "examples": ["Dim the screen.", "Lower display brightness."]
+          "examples": [
+            "Dim the screen.",
+            "Lower display brightness."
+          ]
         },
         {
           "id": "SET_BRIGHTNESS",
           "description": "Set screen brightness to a specific target percentage.",
-          "examples": ["Set brightness to 50 percent.", "Set the screen brightness to 30 percent."]
+          "examples": [
+            "Set brightness to 50 percent.",
+            "Set the screen brightness to 30 percent."
+          ]
+        }
+      ]
+    },
+    "volume_level": {
+      "prompt": "For a set-volume request, choose the exact requested level from one to ten. Choose OTHER_EXPLICIT_VALUE for percentages or explicit values outside this one-to-ten scale.",
+      "choices": [
+        {
+          "id": "LEVEL_1",
+          "description": "Set media volume to level 1 on a scale from one to ten.",
+          "examples": [
+            "Set volume to level 1 out of ten.",
+            "Set the volume to 1 on a scale of ten.",
+            "Volume level 1."
+          ]
+        },
+        {
+          "id": "LEVEL_2",
+          "description": "Set media volume to level 2 on a scale from one to ten.",
+          "examples": [
+            "Set volume to level 2 out of ten.",
+            "Set the volume to 2 on a scale of ten.",
+            "Volume level 2."
+          ]
+        },
+        {
+          "id": "LEVEL_3",
+          "description": "Set media volume to level 3 on a scale from one to ten.",
+          "examples": [
+            "Set volume to level 3 out of ten.",
+            "Set the volume to 3 on a scale of ten.",
+            "Volume level 3."
+          ]
+        },
+        {
+          "id": "LEVEL_4",
+          "description": "Set media volume to level 4 on a scale from one to ten.",
+          "examples": [
+            "Set volume to level 4 out of ten.",
+            "Set the volume to 4 on a scale of ten.",
+            "Volume level 4."
+          ]
+        },
+        {
+          "id": "LEVEL_5",
+          "description": "Set media volume to level 5 on a scale from one to ten.",
+          "examples": [
+            "Set volume to level 5 out of ten.",
+            "Set the volume to 5 on a scale of ten.",
+            "Volume level 5."
+          ]
+        },
+        {
+          "id": "LEVEL_6",
+          "description": "Set media volume to level 6 on a scale from one to ten.",
+          "examples": [
+            "Set volume to level 6 out of ten.",
+            "Set the volume to 6 on a scale of ten.",
+            "Volume level 6."
+          ]
+        },
+        {
+          "id": "LEVEL_7",
+          "description": "Set media volume to level 7 on a scale from one to ten.",
+          "examples": [
+            "Set volume to level 7 out of ten.",
+            "Set the volume to 7 on a scale of ten.",
+            "Volume level 7."
+          ]
+        },
+        {
+          "id": "LEVEL_8",
+          "description": "Set media volume to level 8 on a scale from one to ten.",
+          "examples": [
+            "Set volume to level 8 out of ten.",
+            "Set the volume to 8 on a scale of ten.",
+            "Volume level 8."
+          ]
+        },
+        {
+          "id": "LEVEL_9",
+          "description": "Set media volume to level 9 on a scale from one to ten.",
+          "examples": [
+            "Set volume to level 9 out of ten.",
+            "Set the volume to 9 on a scale of ten.",
+            "Volume level 9."
+          ]
+        },
+        {
+          "id": "LEVEL_10",
+          "description": "Set media volume to level 10 on a scale from one to ten.",
+          "examples": [
+            "Set volume to level 10 out of ten.",
+            "Set the volume to 10 on a scale of ten.",
+            "Volume level 10."
+          ]
+        },
+        {
+          "id": "OTHER_EXPLICIT_VALUE",
+          "description": "The user explicitly requests a percentage or a target value that is not a one-to-ten volume level.",
+          "examples": [
+            "Set volume to fifty percent.",
+            "Set the volume to 30 percent.",
+            "Set volume to 12 out of 15.",
+            "Set volume to 70 percent."
+          ]
         }
       ]
     }
