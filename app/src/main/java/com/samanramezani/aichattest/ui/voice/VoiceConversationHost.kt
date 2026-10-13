@@ -424,17 +424,17 @@ internal fun sanitizeAssistantVoiceText(raw: String): String {
         .replace(Regex("(?is)</?think\\\\b[^>]*>"), " ")
         .replace(Regex("(?is)<(analysis|reasoning|scratchpad)\\\\b[^>]*>.*?</\\\\1\\\\s*>"), " ")
         .replace(Regex("(?is)<\\\\|(?:turn|end_of_turn|endofturn|im_end|fim_suffix)\\\\|?>.*$"), " ")
-        .replace(Regex("(?m)^\\\\s*`{3,}[^\\\\n]*"), " ")
+        .replace(Regex("\\n{3,}")) { "\n\n" }
         .replace(Regex("(?m)^\\\\s*#{1,6}\\\\s*"), "")
-        .replace(Regex("(?m)^\\\\s*(?:[-*_]\\\\s*){3,}$"), " ")
+        .replace(Regex("\\n{3,}")) { "\n\n" }
         .replace(Regex("(?m)^\\\\s*[-*+]\\\\s+"), "")
         .replace(Regex("(?m)^\\\\s*\\\\d+[.)]\\\\s+"), "")
         .replace(Regex("(?<!\\\\w)(?:\\\\*\\\\*|__)(?=\\\\S)|(?<=\\\\S)(?:\\\\*\\\\*|__)"), "")
         .replace(Regex("(?<!\\\\w)[*_~](?=\\\\S)|(?<=\\\\S)[*_~](?!\\\\w)"), "")
         .replace(Regex("(?is)<[^>]+>"), " ")
         .replace(Regex("[ \\\\t]+"), " ")
-        .replace(Regex(" *\\\\n *")) { "\\n" }
-        .replace(Regex("\\\\n{3,}")) { "\\n\\n" }
+        .replace(Regex(" *\\n *")) { "\n" }
+        .replace(Regex("\\n{3,}")) { "\n\n" }
         .trim()
     return text
 }
