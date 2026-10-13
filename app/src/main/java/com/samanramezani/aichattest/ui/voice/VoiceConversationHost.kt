@@ -424,7 +424,6 @@ internal class VoiceConversationController(
         initialUtterance: String? = null,
         acknowledgeWake: Boolean = false,
         speechStartGate: CompletableDeferred<Unit>? = null,
-        promptSubmittedGate: CompletableDeferred<Unit>? = null,
     ) {
         if (closed || microphone != null || !startInProgress.compareAndSet(false, true)) return
         val startEpoch = lifecycleEpoch.get()
@@ -582,7 +581,6 @@ internal class VoiceConversationController(
                             initial,
                             acknowledgeWake = acknowledgeWake,
                             speechStartGate = speechStartGate,
-                            promptSubmittedGate = promptSubmittedGate,
                         )
                     }
                 } else if (acknowledgeWake) {
@@ -607,7 +605,6 @@ internal class VoiceConversationController(
         utterance: String,
         acknowledgeWake: Boolean = false,
         speechStartGate: CompletableDeferred<Unit>? = null,
-        promptSubmittedGate: CompletableDeferred<Unit>? = null,
     ) {
         // A cancelled native TTS call may finish its current ONNX inference before returning.
         // Never enter the same native TTS object concurrently for a barge-in replacement turn.
@@ -690,8 +687,6 @@ internal class VoiceConversationController(
             }, includeAgentTools = false) ?: error("VOICE-CHAT-002: نشست مدل محلی در دسترس نیست.")
             // Voice is latency-sensitive: skip Qwen reasoning, cap response length, and keep
             // a short rolling history so each decode step attends to less accumulated KV state.
-            // Signal only once the complete command has reached the model-session handoff.
-            promptSubmittedGate?.complete(Unit)
             val result = session.send(
                 utterance,
                 InferenceSettings(maxNewTokens = 384, recentMessages = 12, enableThinking = false),
@@ -742,7 +737,6 @@ internal class VoiceConversationController(
             onDiagnostic("VOICE-CHAT-003\n${t.stackTraceToString()}")
             onStatus("VOICE-CHAT-003: اجرای مکالمه ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
         } finally {
-            promptSubmittedGate?.complete(Unit)
             speaking.set(false)
             cancelledSpeech.compareAndSet(turnCancel, null)
             // Keep a cancelled TTS job referenced until it actually completes; the next turn joins it
