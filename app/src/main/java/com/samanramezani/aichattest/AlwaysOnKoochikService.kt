@@ -322,6 +322,9 @@ class AlwaysOnKoochikService : Service() {
                     })
                 }.onFailure { Log.i(TAG, "UI launch not allowed; background voice session remains active", it) }
             } else {
+                runCatching { acknowledgementTts?.close() }
+                acknowledgementTts = null
+                speechGate.complete(Unit)
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                     .putString(PREF_LAST_STATUS, "مدل مکالمه آماده نشد؛ شنود دوباره شروع می‌شود.")
                     .apply()
