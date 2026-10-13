@@ -116,16 +116,20 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
             }
             trace += "domain=${domain.id} confidence=${"%.3f".format(Locale.US, domain.confidence)}"
 
-            // A second, independent typed-choice question acts as a false-positive guard
-            // before any local device action. If Laya is unsure whether the current utterance
-            // explicitly requests a device action, abstain to ordinary chat instead.
-            if (domain.id != "CHAT") {
+            // GET_TIME and GET_DATE are read-only answers, not device mutations.
+            // Requiring a second differently worded classifier question was causing clear
+            // requests such as «ساعت چنده؟» to be rejected after the domain classifier had
+            // already selected GET_TIME. Keep the independent confirmation only for actions
+            // that change device state (volume/brightness).
+            if (domain.id == "GET_TIME" || domain.id == "GET_DATE") {
+                trace += "local_action_validation=SKIPPED_READ_ONLY route=${domain.id}"
+            } else if (domain.id == "AUDIO" || domain.id == "DISPLAY") {
                 val validation = choose(
                     decisionText,
-                    "آیا آخرین پیام کاربر به‌طور صریح یک اقدام محلی روی دستگاه می‌خواهد (ساعت فعلی، تاریخ امروز، کنترل صدای رسانه یا روشنایی صفحه)؟ درخواست مسیر، سفر، آدرس، اطلاعات عمومی، سلام یا گفت‌وگوی عادی اقدام دستگاه نیست. بر اساس همین پیام فعلی پاسخ بده، نه متن قبلی. Does this current utterance explicitly request one of the listed local device actions?",
+                    "آیا آخرین پیام کاربر به‌طور صریح تغییر در تنظیمات دستگاه می‌خواهد (کنترل صدای رسانه یا روشنایی صفحه)؟ درخواست مسیر، سفر، آدرس، اطلاعات عمومی، ساعت، تاریخ یا گفت‌وگوی عادی اقدام تغییردهنده نیست. بر اساس همین پیام فعلی پاسخ بده، نه متن قبلی. Does this current utterance explicitly request a device-state change?",
                     listOf(
-                        Option("LOCAL_ACTION", "درخواست صریح برای ساعت فعلی، تاریخ امروز، کنترل صدای رسانه یا روشنایی صفحه. Explicit local device action."),
-                        Option("CHAT", "هر درخواست دیگر یا هر مورد مبهم؛ مسیر و سفر، آدرس، اطلاعات عمومی، سلام یا گفت‌وگو. Normal chat or uncertain request."),
+                        Option("LOCAL_ACTION", "درخواست صریح برای تغییر صدای رسانه یا روشنایی صفحه. Explicit device-state change."),
+                        Option("CHAT", "هر درخواست دیگر یا هر مورد مبهم؛ ساعت، تاریخ، مسیر، سفر، آدرس، اطلاعات عمومی یا گفت‌وگو. Normal chat or uncertain request."),
                     ),
                     minConfidence = 0.50,
                     minMaxProbability = 0.58,
@@ -134,7 +138,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 if (validation?.id != "LOCAL_ACTION") {
                     trace += "local_action_validation=${validation?.id ?: "ABSTAIN"} result=CHAT"
                     lastTrace = trace.toList() + lastTrace
-                    lastError = "LAYA-INFER-008: تصمیم محلی در مرحلهٔ تأیید مستقل رد شد؛ متن اصلی به مدل گفت‌وگو فرستاده می‌شود."
+                    lastError = "LAYA-INFER-008: تأیید مستقل تغییر تنظیمات دستگاه رد شد؛ متن اصلی به مدل گفت‌وگو فرستاده می‌شود."
                     return@synchronized null
                 }
                 trace += "local_action_validation=LOCAL_ACTION confidence=${"%.3f".format(Locale.US, validation.confidence)}"
