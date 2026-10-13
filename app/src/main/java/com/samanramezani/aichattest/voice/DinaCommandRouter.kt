@@ -110,8 +110,8 @@ internal class DinaDeviceCommandExecutor(private val context: Context) {
             else "الان ساعت ${persianNumber(hour)} و ${persianNumber(minute)} دقیقه است."
         }
         DinaIntent.GET_DATE -> "تاریخ امروز ${SimpleDateFormat("d MMMM yyyy", Locale("fa", "IR")).format(Date())} است."
-        DinaIntent.INCREASE_VOLUME -> changeVolume(2)
-        DinaIntent.DECREASE_VOLUME -> changeVolume(-2)
+        DinaIntent.INCREASE_VOLUME -> changeVolume(1)
+        DinaIntent.DECREASE_VOLUME -> changeVolume(-1)
         DinaIntent.SET_VOLUME -> setVolume(requireNotNull(command.value), command.valueIsPercent)
         DinaIntent.MUTE -> muteAudio(true)
         DinaIntent.UNMUTE -> muteAudio(false)
