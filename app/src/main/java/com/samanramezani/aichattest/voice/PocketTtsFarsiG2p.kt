@@ -109,7 +109,7 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
         val word = match.value
         val lower = word.lowercase(java.util.Locale.ROOT)
         LATIN_EXCEPTIONS[lower] ?: if (word.length in 2..5 && word.all { it.isUpperCase() }) {
-            word.lowercase(java.util.Locale.ROOT).map { LETTER_NAMES[it] ?: "" }.joinToString("\\u200c")
+            word.lowercase(java.util.Locale.ROOT).map { LETTER_NAMES[it] ?: "" }.joinToString("\u200c")
         } else {
             val out = StringBuilder()
             var i = 0
@@ -157,8 +157,37 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
         private const val MAX_DECODE_TOKENS = 512
         private const val WINDOW_WORDS = 30
         private val CONJUNCTIONS = setOf("و", "یا", "ولی", "اما", "که", "زیرا", "چون", "پس", "سپس", "بنابراین", "همچنین")
-        private val PHONEME_REPLACEMENTS = mapOf('/' to 'a', 'a' to 'A', '@' to '?', '    }
+        private val PHONEME_REPLACEMENTS = mapOf('/' to 'a', 'a' to 'A', '@' to '?', '\ to 'S', 'c' to 'C')
+        private val LATIN_WORD = Regex("[A-Za-z][A-Za-z'-]*")
+        private val LATIN_EXCEPTIONS = mapOf(
+            "echo" to "اکو", "state" to "استیت", "network" to "نت‌ورک",
+            "windows" to "ویندوز", "notebook" to "نوت‌بوک", "photoshop" to "فتوشاپ",
+            "python" to "پایتون", "recurrency" to "ریکارانسی"
+        )
+        private val LATIN_DIGRAPHS = mapOf(
+            "sh" to "ش", "ch" to "چ", "th" to "ث", "ph" to "ف", "gh" to "غ",
+            "kh" to "خ", "wh" to "و", "ck" to "ک", "qu" to "کو", "oo" to "و",
+            "ee" to "ی", "ea" to "ی", "ou" to "او", "au" to "او", "ai" to "ای",
+            "ay" to "ای", "ey" to "ای", "oi" to "اوی", "oy" to "اوی"
+        )
+        private val LATIN_CHARS = mapOf(
+            'a' to "ا", 'b' to "ب", 'c' to "ک", 'd' to "د", 'e' to "", 'f' to "ف",
+            'g' to "گ", 'h' to "ه", 'i' to "ی", 'j' to "ج", 'k' to "ک", 'l' to "ل",
+            'm' to "م", 'n' to "ن", 'o' to "او", 'p' to "پ", 'q' to "ق", 'r' to "ر",
+            's' to "س", 't' to "ت", 'u' to "و", 'v' to "و", 'w' to "و", 'x' to "کس",
+            'y' to "ی", 'z' to "ز"
+        )
+        private val LETTER_NAMES = mapOf(
+            'a' to "ای", 'b' to "بی", 'c' to "سی", 'd' to "دی", 'e' to "ای",
+            'f' to "اف", 'g' to "جی", 'h' to "اچ", 'i' to "آی", 'j' to "جی",
+            'k' to "کی", 'l' to "ال", 'm' to "ام", 'n' to "ان", 'o' to "او",
+            'p' to "پی", 'q' to "کیو", 'r' to "آر", 's' to "اس", 't' to "تی",
+            'u' to "یو", 'v' to "وی", 'w' to "دبلیو", 'x' to "ایکس", 'y' to "وای", 'z' to "زد"
+        )
+        private val CLUSTER_START = setOf('پ','ت','ک','ب','ج','چ','ذ','ژ','ز','ص','ض','ث','ف','گ','س','ش')
+    }
 }
+ to 'S', 'c' to 'C')
  to 'S', 'c' to 'C')
         private val LATIN_WORD = Regex("[A-Za-z][A-Za-z'-]*")
         private val LATIN_EXCEPTIONS = mapOf(
