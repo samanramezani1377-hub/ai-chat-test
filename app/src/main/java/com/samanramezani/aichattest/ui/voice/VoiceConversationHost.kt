@@ -437,7 +437,16 @@ internal fun sanitizeAssistantVoiceText(raw: String): String {
         .trim()
 }
 
-internal class VoiceConversationController(
+internal internal fun shouldInterruptForVoiceBargeIn(
+    turnRunning: Boolean,
+    assistantSpeaking: Boolean,
+    speech: Boolean,
+    rms: Float,
+    threshold: Float,
+    aecActive: Boolean,
+): Boolean = turnRunning && assistantSpeaking && speech && rms > threshold && aecActive
+
+class VoiceConversationController(
     private val context: Context,
     private val container: AppContainer,
     private val decisionEngine: LayaDecisionEngine,
@@ -551,8 +560,17 @@ internal class VoiceConversationController(
                     // Barge-in during speaker playback is enabled only when platform AEC is
                     // actually active. Without AEC, loudspeaker echo is indistinguishable from
                     // a user voice using RMS alone, so fail closed instead of spawning false turns.
-                    val candidate = turnRunning.get() && frame.speech && frame.rms > threshold &&
-                        (!assistantAudioActive || aecActive)
+                    // Never cancel LLM generation because of ambient noise. Barge-in is only
+                    // meaningful while assistant audio is actually playing, and only when Android
+                    // confirms AEC is active so speaker leakage is less likely to be mistaken for speech.
+                    val candidate = shouldInterruptForVoiceBargeIn(
+                        turnRunning = turnRunning.get(),
+                        assistantSpeaking = speaking.get(),
+                        speech = frame.speech,
+                        rms = frame.rms,
+                        threshold = threshold,
+                        aecActive = aecActive,
+                    )
                     if (candidate) {
                         if (loudSpeechFrames.incrementAndGet() >= requiredFrames &&
                             bargeInTriggered.compareAndSet(false, true)) {
