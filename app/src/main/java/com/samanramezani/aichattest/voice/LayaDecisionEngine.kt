@@ -308,7 +308,7 @@ private class LayaTokenizer(file: File) {
         val pre = root.optJSONObject("pre_tokenizer")?.toString().orEmpty()
         byteLevel = pre.contains("ByteLevel")
         metaspace = pre.contains("Metaspace")
-        rootPrependNever = Regex("\\"prepend_scheme\\"\\s*:\\s*\\"never\\"").containsMatchIn(pre)
+        rootPrependNever = pre.contains("prepend_scheme") && pre.contains("never")
         unkToken = model.optString("unk_token", "<unk>")
         val special = root.optJSONArray("added_tokens") ?: JSONArray()
         val specialIds = HashMap<String, Int>()
