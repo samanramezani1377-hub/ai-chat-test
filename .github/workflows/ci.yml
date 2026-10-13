@@ -38,6 +38,12 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
+      - name: Set up Android SDK and the pinned NDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install the project's Android NDK
+        run: sdkmanager "ndk;27.2.12479018" "platforms;android-36"
+
       - name: Set up Rust for the official Laya tokenizer
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -77,6 +83,12 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Android SDK and the pinned NDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install the project's Android NDK
+        run: sdkmanager "ndk;27.2.12479018" "platforms;android-36"
 
       - name: Set up Rust for the official Laya tokenizer
         uses: dtolnay/rust-toolchain@stable
@@ -266,6 +278,12 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Android SDK and the pinned NDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install the project's Android NDK
+        run: sdkmanager "ndk;27.2.12479018" "platforms;android-36"
 
       - name: Set up Rust for the official Laya tokenizer
         uses: dtolnay/rust-toolchain@stable
