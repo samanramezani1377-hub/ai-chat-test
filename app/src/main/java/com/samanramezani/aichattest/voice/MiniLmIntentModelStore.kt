@@ -1,6 +1,7 @@
 package com.samanramezani.aichattest.voice
 
 import android.content.ContentResolver
+import android.content.res.AssetManager
 import android.net.Uri
 import android.provider.OpenableColumns
 import java.io.File
@@ -20,6 +21,21 @@ internal class MiniLmIntentModelStore(
     private val resolver: ContentResolver,
     private val root: File,
 ) {
+    /**
+     * Seeds the editable app-private decision tree from the version-controlled asset.
+     * Never overwrites an existing file: imported/customized trees survive app restarts.
+     */
+    fun ensureDefaultDecisionTree(assets: AssetManager) {
+        val target = File(root, "decision_trees.json")
+        if (target.isFile) return
+        if (!root.exists() && !root.mkdirs()) {
+            throw IllegalStateException("MINILM-TREE-INIT-001: پوشهٔ تنظیمات درخت تصمیم ساخته نشد.")
+        }
+        assets.open("minilm/decision_trees.json").use { input ->
+            target.outputStream().use { output -> input.copyTo(output) }
+        }
+    }
+
     fun isReady(): Boolean {
         val modelReady = File(root, "model.onnx").let { it.isFile && it.length() > 1024 }
         val tokenizerReady = File(root, "tokenizer.json").let { it.isFile && it.length() > 0 }
