@@ -416,6 +416,7 @@ class AlwaysOnKoochikService : Service() {
             val controller = VoiceConversationController(
                 context = this,
                 container = container,
+                intentClassifier = MiniLmOnnxIntentClassifier(File(filesDir, "voice-models/minilm-intent")),
                 onStatus = { status ->
                     val state = when {
                         status.contains("VOICE-START-001") || status.contains("VOICE-CHAT-003") ||
