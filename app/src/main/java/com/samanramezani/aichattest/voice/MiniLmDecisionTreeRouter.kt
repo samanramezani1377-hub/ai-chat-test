@@ -87,12 +87,13 @@ internal class MiniLmDecisionTreeRouter(private val root: File) : AutoCloseable 
             "SET_VOLUME" -> {
                 // The decision tree selects levels 1-10 itself; no number extraction is needed
                 // for this common scale. Explicit percentages/other scales retain safe parsing.
-                val level = choose("volume_level", query)
+                val level = if (nodes?.optJSONObject("volume_level") != null) choose("volume_level", query) else null
                 val selected = level?.takeIf { it.startsWith("LEVEL_") }
                     ?.removePrefix("LEVEL_")?.toIntOrNull()
                 when {
-                    selected in 1..10 -> DinaCommand(DinaIntent.SET_VOLUME, selected!! * 10, valueIsPercent = true)
-                    level == "OTHER_EXPLICIT_VALUE" -> parsed.takeIf { it.intent == DinaIntent.SET_VOLUME && it.value != null }
+                    selected != null && selected in 1..10 -> DinaCommand(DinaIntent.SET_VOLUME, selected * 10, valueIsPercent = true)
+                    level == "OTHER_EXPLICIT_VALUE" || level == null ->
+                        parsed.takeIf { it.intent == DinaIntent.SET_VOLUME && it.value != null }
                     else -> null
                 }
             }
@@ -163,7 +164,7 @@ internal class MiniLmDecisionTreeRouter(private val root: File) : AutoCloseable 
         minSimilarity = config.optDouble("min_similarity", DEFAULT_MIN_SIMILARITY).toFloat()
         minMargin = config.optDouble("min_margin", DEFAULT_MIN_MARGIN).toFloat()
         require(minSimilarity in -1f..1f && minMargin >= 0f) { "آستانه‌های شباهت نامعتبرند." }
-        for (nodeId in listOf("domain", "audio", "display", "volume_level")) {
+        for (nodeId in listOf("domain", "audio", "display")) {
             require(nodes?.optJSONObject(nodeId)?.optJSONArray("choices")?.length()?.let { it > 0 } == true) {
                 "درخت تصمیم گره معتبر '$nodeId' را ندارد."
             }
