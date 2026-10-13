@@ -53,8 +53,10 @@ android {
             excludes += setOf("sherpa-onnx/native/**")
         }
         jniLibs {
-            // sherpa-onnx 1.13.8 ships ONNX Runtime 1.28.2; Maven Central publishes the matching 1.28.0 Java API artifact.
-            // Keep one ABI-compatible runtime library rather than packaging duplicate .so files.
+            // Both AARs contain libonnxruntime.so. sherpa-onnx 1.13.8's JNI
+            // library is linked against its bundled ONNX Runtime 1.28.2, so
+            // keep sherpa's native runtime first and use the Microsoft AAR for
+            // the Java API classes. Do not let the 1.28.0 native binary shadow it.
             pickFirsts += "**/libonnxruntime.so"
             // Keep native libraries uncompressed and avoid a second extracted copy on disk.
             useLegacyPackaging = false
@@ -74,12 +76,14 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     // Local-only ASR/TTS engines; no network inference or cloud API.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0")
+    // sherpa AAR first so pickFirst keeps the native ORT binary it was linked against.
     implementation("com.github.k2-fsa:sherpa-onnx:v1.13.8") {
         // The Android AAR already bundles the sherpa Kotlin/JVM API classes.
         // Exclude the duplicate JVM jar published as a transitive dependency.
         exclude(group = "com.github.k2-fsa.sherpa-onnx", module = "sherpa-onnx-jvm")
     }
+    // Supplies the ONNX Runtime Java API for Laya; native .so is selected from sherpa above.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0")
     implementation("org.apache.commons:commons-compress:1.28.0")
 
     // Keep all Compose artifacts on Google's stable BOM so Gradle cannot resolve
