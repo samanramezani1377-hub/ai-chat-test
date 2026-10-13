@@ -28,8 +28,8 @@ import com.samanramezani.aichattest.voice.VoiceModelStore
 import com.samanramezani.aichattest.voice.PiperComponent
 import com.samanramezani.aichattest.voice.SmallSttComponent
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
-import com.samanramezani.aichattest.voice.MiniLmIntentModelStore
-import com.samanramezani.aichattest.voice.MiniLmOnnxIntentClassifier
+import com.samanramezani.aichattest.voice.LayaDecisionModelStore
+import com.samanramezani.aichattest.voice.LayaDecisionEngine
 import com.samanramezani.aichattest.voice.DinaCommandClassifier
 import com.samanramezani.aichattest.voice.DinaDeviceCommandExecutor
 import com.woogit.aicore.agent.AgentEvent
@@ -58,16 +58,11 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     val context = LocalContext.current
     val uiScope = rememberCoroutineScope()
     val store = remember(context) { VoiceModelStore(context.contentResolver, File(context.filesDir, "voice-models")) }
-    val miniLmStore = remember(context) {
-        MiniLmIntentModelStore(context.contentResolver, File(context.filesDir, "voice-models/minilm-intent")).also {
-            // Copy the version-controlled default once. A user/imported tree is never overwritten.
-            runCatching { it.ensureDefaultDecisionTree(context.assets) }
-        }
+    val layaStore = remember(context) {
+        LayaDecisionModelStore(context.contentResolver, File(context.filesDir, "voice-models/laya-int4"))
     }
-    var miniLmReady by remember { mutableStateOf(miniLmStore.isReady()) }
-    var miniLmStatus by remember {
-        mutableStateOf(if (miniLmStore.isReady()) "بسته MiniLM وارد شده است؛ فرمان‌های محلی امن فعال‌اند." else "مدل MiniLM اختیاری است؛ فرمان‌های محلی فارسی حتی بدون آن قابل استفاده‌اند.")
-    }
+    var layaReady by remember { mutableStateOf(layaStore.isReady()) }
+    var layaStatus by remember { mutableStateOf(layaStore.status()) }
     var sttModels by remember { mutableStateOf(store.list(VoiceModelKind.STT)) }
     var ttsModels by remember { mutableStateOf(store.list(VoiceModelKind.TTS)) }
     var missingKoochikComponents by remember { mutableStateOf(store.missingKoochikComponents()) }
@@ -123,7 +118,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
 
     val controller = remember(container, context) {
         VoiceConversationController(context, container,
-            MiniLmOnnxIntentClassifier(File(context.filesDir, "voice-models/minilm-intent")),
+            LayaDecisionEngine(File(context.filesDir, "voice-models/laya-int4")),
             onStatus = { value -> uiScope.launch(Dispatchers.Main.immediate) { updateVoiceStatus(value) } },
             onDiagnostic = { value -> uiScope.launch(Dispatchers.Main.immediate) { diagnosticLogs = (diagnosticLogs + "[${System.currentTimeMillis()}] $value").takeLast(200) } },
             onListening = { value -> uiScope.launch(Dispatchers.Main.immediate) { listening = value; busy = false } },
@@ -266,17 +261,17 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         }
     }
 
-    val miniLmPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+    val layaPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) uiScope.launch {
             busy = true
-            miniLmStatus = "در حال وارد کردن بسته محلی MiniLM…"
+            layaStatus = "در حال وارد کردن و اعتبارسنجی مدل محلی Laya INT4…"
             try {
-                miniLmStatus = withContext(Dispatchers.IO) { miniLmStore.importBundle(uri) }
-                miniLmReady = miniLmStore.isReady()
-                updateVoiceStatus(miniLmStatus)
+                layaStatus = withContext(Dispatchers.IO) { layaStore.importBundle(uri) }
+                layaReady = layaStore.isReady()
+                updateVoiceStatus(layaStatus)
             } catch (t: Throwable) {
-                miniLmStatus = "MINILM-IMPORT: ${t.message ?: t.javaClass.simpleName}"
-                updateVoiceStatus(miniLmStatus)
+                layaStatus = "LAYA-IMPORT: ${t.message ?: t.javaClass.simpleName}"
+                updateVoiceStatus(layaStatus)
             } finally { busy = false }
         }
     }
@@ -294,9 +289,9 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         missingTtsComponents = missingTtsComponents,
         activeSttId = activeSttId,
         activeTtsId = activeTtsId,
-        miniLmModelReady = miniLmReady,
-        miniLmStatus = miniLmStatus,
-        onImportMiniLm = { miniLmPicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
+        layaModelReady = layaReady,
+        layaStatus = layaStatus,
+        onImportLaya = { layaPicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
         onBack = onBack,
         onImportStt = { sttPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-bzip2", "application/octet-stream")) },
         onImportKoochikModel = { koochikModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
@@ -407,7 +402,7 @@ private fun sanitizeAssistantVoiceText(raw: String): String {
 internal class VoiceConversationController(
     private val context: Context,
     private val container: AppContainer,
-    private val intentClassifier: MiniLmOnnxIntentClassifier,
+    private val decisionEngine: LayaDecisionEngine,
     private val onStatus: (String) -> Unit,
     private val onDiagnostic: (String) -> Unit,
     private val onListening: (Boolean) -> Unit,
@@ -710,25 +705,37 @@ internal class VoiceConversationController(
 
         try {
             onStatus("در حال بررسی درخواست فارسی روی دستگاه…")
-            val modelCommand = runCatching { intentClassifier.classify(utterance) }.getOrNull()
-            intentClassifier.lastError?.let { modelError ->
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val layaDecision = runCatching {
+                decisionEngine.classify(
+                    utterance,
+                    audioManager.getStreamVolume(AudioManager.STREAM_MUSIC),
+                    audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
+                )
+            }.getOrNull()
+            decisionEngine.lastError?.let { modelError ->
                 if (lastLoggedIntentModelError != modelError) {
                     lastLoggedIntentModelError = modelError
-                    onDiagnostic(modelError + "؛ فرمان‌ها با قواعد امن ادامه می‌یابند.")
+                    onDiagnostic(modelError + "؛ در صورت نامطمئن بودن، مسیر امن محلی استفاده می‌شود.")
                 }
             }
-            // Only high-confidence ONNX predictions are accepted. If the model is unavailable,
-            // uncertain, or predicts CHAT, the conservative built-in rules remain the fallback.
+            layaDecision?.trace?.forEach { onDiagnostic("LAYA-DECISION: $it") }
+            // Laya's confident non-chat choice takes priority. The existing Persian rule parser
+            // remains a deterministic safety net when Laya is absent/uncertain or misses a clear
+            // local command. The original utterance is passed to the chat model unchanged below.
             val ruleCommand = DinaCommandClassifier.classify(utterance)
-            val command = if (modelCommand != null && modelCommand.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) {
-                modelCommand
-            } else ruleCommand
+            val command = when {
+                layaDecision != null && layaDecision.command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT ->
+                    layaDecision.command
+                ruleCommand.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT -> ruleCommand
+                else -> com.samanramezani.aichattest.voice.DinaCommand(com.samanramezani.aichattest.voice.DinaIntent.CHAT)
+            }
             if (command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) {
                 val localReply = runCatching { DinaDeviceCommandExecutor(context).execute(command) }
                     .getOrElse { "انجام فرمان ناموفق بود: ${it.message ?: it.javaClass.simpleName}" }
                     .orEmpty()
                 if (localReply.isNotBlank()) {
-                    onDiagnostic("DINA-LOCAL-COMMAND: intent=${command.intent.name} parameter=${command.value ?: "none"} classifier=${if (modelCommand != null && modelCommand.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) "minilm-onnx" else "safe-rules"} model=local-device-executor")
+                    onDiagnostic("DINA-LOCAL-COMMAND: intent=${command.intent.name} parameter=${command.value ?: "none"} classifier=${if (layaDecision != null && layaDecision.command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) "laya-multilingual-int4" else "safe-rules"} model=local-device-executor")
                     queue.trySend(localReply)
                     queue.close()
                     activeSpeechJob.join()
@@ -889,7 +896,7 @@ internal class VoiceConversationController(
     fun close() {
         closed = true
         stop().invokeOnCompletion {
-            intentClassifier.close()
+            decisionEngine.close()
             scope.cancel()
         }
     }
