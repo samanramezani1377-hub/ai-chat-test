@@ -288,7 +288,7 @@ class AlwaysOnKoochikService : Service() {
         if (detectedCommand != null) {
             val command = detectedCommand.orEmpty()
             val ackThread = acknowledgementThread
-            val ackAlreadyPlayed = acknowledgementPlayed.get()
+            var ackAlreadyPlayed = acknowledgementPlayed.get()
             val ackStillPlaying = ackThread?.isAlive == true
             val speechGate = if (ackStillPlaying) CompletableDeferred<Unit>() else null
             if (ackStillPlaying) {
@@ -305,6 +305,7 @@ class AlwaysOnKoochikService : Service() {
                 }
             } else {
                 if (ackThread != null) runCatching { ackThread.join() }
+                ackAlreadyPlayed = acknowledgementPlayed.get()
                 runCatching { acknowledgementTts?.close() }
                 acknowledgementTts = null
             }
