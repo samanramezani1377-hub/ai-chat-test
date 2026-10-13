@@ -157,7 +157,7 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
         private const val MAX_DECODE_TOKENS = 512
         private const val WINDOW_WORDS = 30
         private val CONJUNCTIONS = setOf("و", "یا", "ولی", "اما", "که", "زیرا", "چون", "پس", "سپس", "بنابراین", "همچنین")
-        private val PHONEME_REPLACEMENTS = mapOf('/' to 'a', 'a' to 'A', '@' to '?', '\ to 'S', 'c' to 'C')
+        private val PHONEME_REPLACEMENTS = mapOf('/' to 'a', 'a' to 'A', '@' to '?', '$' to 'S', 'c' to 'C')
         private val LATIN_WORD = Regex("[A-Za-z][A-Za-z'-]*")
         private val LATIN_EXCEPTIONS = mapOf(
             "echo" to "اکو", "state" to "استیت", "network" to "نت‌ورک",
