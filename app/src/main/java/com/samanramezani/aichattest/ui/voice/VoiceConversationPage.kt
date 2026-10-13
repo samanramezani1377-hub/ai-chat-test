@@ -107,7 +107,7 @@ internal fun VoiceConversationPage(
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("۱. تصمیم‌گیری محلی فارسی · Laya INT4", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "مدل تصمیم‌گیری Laya چندمرحله‌ای و کاملاً محلی است: ابتدا نوع درخواست، سپس عملیات دستگاه و در صورت نیاز سطح هدف را انتخاب می‌کند. فرمان‌های ساعت، تاریخ، صدا و روشنایی پیش از مدل گفت‌وگو اجرا می‌شوند. اگر تصمیم مدل مطمئن نباشد، مسیر قواعد امن فارسی استفاده می‌شود. متن درخواست عادی بدون افزودن برچسب تصمیم‌گیری به مدل گفت‌وگو فرستاده می‌شود.",
+                            "مدل تصمیم‌گیری Laya چندمرحله‌ای و کاملاً محلی است: ابتدا نوع درخواست، سپس عملیات دستگاه و در صورت نیاز سطح هدف را انتخاب می‌کند. فرمان‌های ساعت، تاریخ، صدا و روشنایی پیش از مدل گفت‌وگو اجرا می‌شوند. اگر تصمیم مدل مطمئن نباشد، فرمان دستگاه اجرا نمی‌شود و متن اصلی بدون تغییر به مدل گفت‌وگو فرستاده می‌شود. متن درخواست عادی بدون افزودن برچسب تصمیم‌گیری به مدل گفت‌وگو فرستاده می‌شود.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         OutlinedButton(onClick = onImportLaya, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
