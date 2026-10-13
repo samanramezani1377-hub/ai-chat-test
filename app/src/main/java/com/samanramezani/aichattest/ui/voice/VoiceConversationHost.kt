@@ -381,9 +381,12 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
                     .putString(AlwaysOnKoochikService.PREF_STT_MODEL_ID, stt.id)
                     .putString(AlwaysOnKoochikService.PREF_TTS_MODEL_ID, tts.id)
                     .apply()
-                if (alwaysOnEnabled) { AlwaysOnKoochikService.stop(context); alwaysOnEnabled = false }
-                busy = true
-                controller.start(stt, tts)
+                if (alwaysOnEnabled && alwaysOnPrefs.getBoolean(AlwaysOnKoochikService.PREF_ENABLED, false)) {
+                    updateVoiceStatus("شنود دائمی از قبل روشن است؛ برای شروع مکالمه فقط «دینا» را بگو. مدل شنوا دوباره بارگذاری نمی‌شود.")
+                } else {
+                    busy = true
+                    controller.start(stt, tts)
+                }
             }
         },
         onStop = {
@@ -501,14 +504,20 @@ class VoiceConversationController(
         initialUtterance: String? = null,
         acknowledgeWake: Boolean = false,
         speechStartGate: CompletableDeferred<Unit>? = null,
+        preloadedAsr: LocalAsr? = null,
     ) {
-        if (closed || microphone != null || !startInProgress.compareAndSet(false, true)) return
+        if (closed || microphone != null || !startInProgress.compareAndSet(false, true)) {
+            if (preloadedAsr != null) runCatching { preloadedAsr.close() }
+            return
+        }
         val startEpoch = lifecycleEpoch.get()
         scope.launch {
             try {
                 onStatus("در حال آماده‌سازی موتورهای محلی صوت…")
                 val engines = withContext(Dispatchers.IO) {
-                    val asr = when (stt.asrMode) {
+                    // Reuse the always-on listener's loaded Shenava instance after wake detection.
+                    // Manual conversation starts still create their own recognizer as before.
+                    val asr = preloadedAsr ?: when (stt.asrMode) {
                         "qwen3-asr" -> LocalQwen3Asr(stt)
                         "nemo-ctc" -> LocalNemoCtcAsr(stt)
                         else -> LocalStreamingAsr(stt)
