@@ -28,6 +28,7 @@ import java.io.File
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -286,11 +287,33 @@ class AlwaysOnKoochikService : Service() {
 
         if (detectedCommand != null) {
             val command = detectedCommand.orEmpty()
-            runCatching { acknowledgementThread?.join() }
-            val acknowledgeInController = !acknowledgementPlayed.get()
-            runCatching { acknowledgementTts?.close() }
-            acknowledgementTts = null
-            val started = startVoiceConversationInService(command, acknowledgeWake = acknowledgeInController)
+            val ackThread = acknowledgementThread
+            val ackAlreadyPlayed = acknowledgementPlayed.get()
+            val ackStillPlaying = ackThread?.isAlive == true
+            val speechGate = if (ackStillPlaying) CompletableDeferred<Unit>() else null
+            if (ackStillPlaying) {
+                val gate = requireNotNull(speechGate)
+                Thread({
+                    runCatching { ackThread?.join() }
+                    // Keep the preloaded TTS alive until its acknowledgement playback has ended.
+                    runCatching { acknowledgementTts?.close() }
+                    acknowledgementTts = null
+                    gate.complete(Unit)
+                }, "Dina-Acknowledgement-Cleanup").apply {
+                    isDaemon = true
+                    start()
+                }
+            } else {
+                if (ackThread != null) runCatching { ackThread.join() }
+                runCatching { acknowledgementTts?.close() }
+                acknowledgementTts = null
+            }
+            val acknowledgeInController = ackThread == null || (!ackAlreadyPlayed && !ackStillPlaying)
+            val started = startVoiceConversationInService(
+                command,
+                acknowledgeWake = acknowledgeInController,
+                speechStartGate = speechGate,
+            )
             transitioningToConversation = false
             if (started) {
                 notifyStatus("«دینا» شنیده شد؛ «متوجه شدم» با TTS محلی گفته می‌شود و درخواست پردازش می‌شود.")
@@ -365,7 +388,11 @@ class AlwaysOnKoochikService : Service() {
         }
     }
 
-    private fun startVoiceConversationInService(initialUtterance: String, acknowledgeWake: Boolean): Boolean {
+    private fun startVoiceConversationInService(
+        initialUtterance: String,
+        acknowledgeWake: Boolean,
+        speechStartGate: CompletableDeferred<Unit>? = null,
+    ): Boolean {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         if (voiceController != null) return true
         return try {
@@ -420,7 +447,7 @@ class AlwaysOnKoochikService : Service() {
                 },
             )
             voiceController = controller
-            controller.start(stt, tts, initialUtterance = initialUtterance, acknowledgeWake = acknowledgeWake)
+            controller.start(stt, tts, initialUtterance = initialUtterance, acknowledgeWake = acknowledgeWake, speechStartGate = speechStartGate)
             true
         } catch (t: Throwable) {
             Log.e(TAG, "Could not start voice conversation after Dina", t)
