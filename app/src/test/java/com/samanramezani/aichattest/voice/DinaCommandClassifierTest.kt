@@ -43,4 +43,11 @@ class DinaCommandClassifierTest {
         assertEquals(DinaIntent.CHAT, DinaCommandClassifier.classify("درباره صدای پرنده‌ها توضیح بده").intent)
     }
 
+    @Test fun recognizesMuteCommandLocally() {
+        assertEquals(DinaIntent.MUTE, DinaCommandClassifier.classify("دینا صدا رو قطع کن").intent)
+    }
+
+    @Test fun recognizesUnmuteCommandLocally() {
+        assertEquals(DinaIntent.UNMUTE, DinaCommandClassifier.classify("دینا صدا رو وصل کن").intent)
+    }
 }
