@@ -269,7 +269,7 @@ internal fun VoiceConversationPage(
                                     appendLine("Status: $status")
                                     appendLine("Listening: $listening")
                                     appendLine("STT: ${sttModels.firstOrNull { it.id == activeSttId }?.title ?: "not selected"}")
-                                    appendLine("TTS: ${ttsModels.firstOrNull { it.id == activeTtsId }?.title ?: "not selected"}")
+                                    appendLine("TTS: ${if (pocketTtsSelected && pocketTtsReady) "Pocket TTS Farsi v2" else ttsModels.firstOrNull { it.id == activeTtsId }?.title ?: "not selected"}")
                                     appendLine()
                                     diagnosticLogs.forEach { appendLine(it) }
                                 }))
@@ -295,7 +295,7 @@ internal fun VoiceConversationPage(
                                     appendLine("Status: $status")
                                     appendLine("Listening: $listening")
                                     appendLine("STT: ${sttModels.firstOrNull { it.id == activeSttId }?.title ?: "not selected"}")
-                                    appendLine("TTS: ${ttsModels.firstOrNull { it.id == activeTtsId }?.title ?: "not selected"}")
+                                    appendLine("TTS: ${if (pocketTtsSelected && pocketTtsReady) "Pocket TTS Farsi v2" else ttsModels.firstOrNull { it.id == activeTtsId }?.title ?: "not selected"}")
                                     appendLine()
                                     diagnosticLogs.forEach { appendLine(it) }
                                 }))
