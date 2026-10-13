@@ -28,4 +28,19 @@ class DinaCommandClassifierTest {
     @Test fun unknownRequestFallsThroughToChatUnchanged() {
         assertEquals(DinaIntent.CHAT, DinaCommandClassifier.classify("دینا درباره تاریخ ایران توضیح بده").intent)
     }
+    @Test fun recognizesDateLocally() {
+        assertEquals(DinaIntent.GET_DATE, DinaCommandClassifier.classify("دینا تاریخ امروز رو بگو").intent)
+    }
+
+    @Test fun keepsExplicitVolumePercentAsPercent() {
+        val command = DinaCommandClassifier.classify("دینا صدا رو بذار روی ۳۰ درصد")
+        assertEquals(DinaIntent.SET_VOLUME, command.intent)
+        assertEquals(30, command.value)
+        assertEquals(true, command.valueIsPercent)
+    }
+
+    @Test fun ordinarySentenceAboutSoundIsNotADeviceCommand() {
+        assertEquals(DinaIntent.CHAT, DinaCommandClassifier.classify("درباره صدای پرنده‌ها توضیح بده").intent)
+    }
+
 }
