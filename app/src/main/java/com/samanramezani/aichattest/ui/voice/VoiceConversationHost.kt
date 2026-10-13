@@ -628,7 +628,7 @@ internal class VoiceConversationController(
                             check(PocketTtsFarsiBundleStore(context.contentResolver, modelDir).isReady()) {
                                 "POCKET-TTS-SELECT-002: بستهٔ Pocket TTS نصب نیست یا ناقص است."
                             }
-                            LocalPocketTts(modelDir)
+                            com.samanramezani.aichattest.voice.LocalPocketTts(modelDir)
                         } else LocalPiperTts(ttsModel)
                         asr to ttsEngine
                     } catch (t: Throwable) {
