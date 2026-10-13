@@ -14,7 +14,7 @@ import kotlin.math.exp
 /**
  * Laya's typed-choice ONNX runner. It performs all decisions on-device and never generates
  * assistant text. A decision is accepted only when its softmax confidence and margin clear
- * conservative thresholds; otherwise the caller may use the existing safe command parser.
+ * conservative thresholds; otherwise no device action is inferred and the original text is routed to chat.
  */
 internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
     data class Decision(val command: DinaCommand, val route: String, val confidence: Double, val trace: List<String>)
