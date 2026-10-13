@@ -232,7 +232,7 @@ class CloudflareProvider : ChatCompletionProvider {
 
     suspend fun listModels(config: CloudflareConfig): List<ProviderModel> = withContext(Dispatchers.IO) {
         require(config.accountId.isNotBlank() && config.apiToken.isNotBlank()) { "ابتدا شناسه حساب و توکن Cloudflare را وارد کن." }
-        val url = URL("https://api.cloudflare.com/client/v4/accounts/${config.accountId}/ai/models/search?task=Text%20Generation&per_page=100&hide_experimental=true")
+        val url = URL("https://api.cloudflare.com/client/v4/accounts/${config.accountId}/ai/models/search?task=Text%20Generation&per_page=100&hide_experimental=true&include_deprecated=false")
         val connection = url.openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "GET"
@@ -247,6 +247,9 @@ class CloudflareProvider : ChatCompletionProvider {
             val result = JSONObject(text).optJSONArray("result") ?: JSONArray()
             (0 until result.length()).mapNotNull { index ->
                 val item = result.optJSONObject(index) ?: return@mapNotNull null
+                // The API query excludes deprecated models; also defensively reject deprecated
+                // entries in case Cloudflare returns inconsistent metadata for an account.
+                if (isDeprecatedModel(item)) return@mapNotNull null
                 val name = item.optString("name").takeIf { it.startsWith("@cf/") }
                     ?: item.optString("id").takeIf { it.startsWith("@cf/") }
                     ?: return@mapNotNull null
@@ -258,14 +261,34 @@ class CloudflareProvider : ChatCompletionProvider {
         }
     }
 
+    private fun isDeprecatedModel(item: JSONObject): Boolean {
+        if (item.optBoolean("deprecated", false)) return true
+        val status = item.optString("status").lowercase()
+        if (status == "deprecated" || status == "removed" || status == "retired") return true
+        val retiredAt = sequenceOf("deprecated_at", "deprecation_date", "removed_at")
+            .map { item.optString(it) }
+            .firstOrNull { it.isNotBlank() && it != "null" }
+            ?: return false
+        // Future planned retirement dates do not count as deprecated. Only reject a model
+        // when Cloudflare reports an actual retirement date that has already passed.
+        val timestamp = runCatching {
+            java.time.Instant.parse(retiredAt).toEpochMilli()
+        }.getOrElse {
+            runCatching {
+                java.time.LocalDate.parse(retiredAt.take(10))
+                    .atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+            }.getOrNull()
+        } ?: return false
+        return timestamp <= System.currentTimeMillis()
+    }
+
     companion object {
-        const val DEFAULT_MODEL = "@cf/meta/llama-3.1-8b-instruct"
+        // Current active text-generation model; the previous Llama 3.1 ID was deprecated.
+        const val DEFAULT_MODEL = "@cf/zai-org/glm-4.7-flash"
         val suggestedModels = listOf(
-            ProviderModel("@cf/meta/llama-3.1-8b-instruct", "Llama 3.1 · 8B"),
-            ProviderModel("@cf/qwen/qwen3-30b-a3b-fp8", "Qwen3 · 30B-A3B"),
             ProviderModel("@cf/zai-org/glm-4.7-flash", "GLM 4.7 Flash"),
-            ProviderModel("@cf/google/gemma-3-12b-it", "Gemma 3 · 12B"),
-            ProviderModel("@cf/openai/gpt-oss-20b", "GPT-OSS · 20B"),
+            ProviderModel("@cf/google/gemma-4-26b-a4b-it", "Gemma 4 · 26B A4B"),
+            ProviderModel("@cf/moonshotai/kimi-k2.6", "Kimi K2.6"),
         )
     }
 }
