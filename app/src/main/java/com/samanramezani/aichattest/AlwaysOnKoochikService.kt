@@ -192,20 +192,24 @@ class AlwaysOnKoochikService : Service() {
             val sttModels = store.list(VoiceModelKind.STT)
             val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
             val selectedId = prefs.getString(PREF_STT_MODEL_ID, null)
-            val stt = sttModels.firstOrNull { it.id == selectedId && it.asrMode == "nemo-ctc" }
-                ?: sttModels.firstOrNull { it.id.startsWith("stt-shenava-koochik-") && it.asrMode == "nemo-ctc" }
-                ?: error("VOICE-ALWAYS-003: مدل فارسی Shenava Koochik آماده نیست؛ model.onnx و tokens.txt را وارد کنید.")
+            val stt = sttModels.firstOrNull {
+                it.id == selectedId && it.id.startsWith("stt-shenava-koochik-") && it.asrMode == "nemo-ctc"
+            } ?: sttModels.firstOrNull {
+                it.id.startsWith("stt-shenava-koochik-") && it.asrMode == "nemo-ctc"
+            } ?: error("VOICE-ALWAYS-003: مدل فارسی Shenava Koochik آماده نیست؛ model.onnx و tokens.txt را وارد کنید.")
             val ttsModels = store.list(VoiceModelKind.TTS)
             val selectedTtsId = prefs.getString(PREF_TTS_MODEL_ID, null)
             val tts = ttsModels.firstOrNull { it.id == selectedTtsId } ?: ttsModels.firstOrNull()
                 ?: error("VOICE-ALWAYS-005: مدل TTS محلی آماده نیست.")
             acknowledgementPlayed.set(false)
             acknowledgementTts = LocalPiperTts(tts)
-            recognizer = LocalNemoCtcAsr(stt)
+            val activeRecognizer = LocalNemoCtcAsr(stt)
+            recognizer = activeRecognizer
             val frames = ArrayBlockingQueue<LocalMicrophone.Frame>(256)
-            mic = LocalMicrophone()
-            microphone = mic
-            mic.start { frame ->
+            val activeMic = LocalMicrophone()
+            mic = activeMic
+            microphone = activeMic
+            activeMic.start { frame ->
                 if (!frames.offer(frame)) {
                     frames.poll()
                     frames.offer(frame)
@@ -221,7 +225,7 @@ class AlwaysOnKoochikService : Service() {
                 val frame = frames.poll(300, TimeUnit.MILLISECONDS) ?: continue
                 appendRolling(frame.samples)
                 if (frame.speech) speechSinceProbe += frame.samples.size
-                val update = recognizer.accept(frame.samples, 16000, frame.speech)
+                val update = activeRecognizer.accept(frame.samples, 16000, frame.speech)
 
                 // Shenava Koochik is an offline CTC recognizer, not a streaming partial decoder.
                 // Probe only the last 3 seconds once per ~1 second of speech; audio history stays
@@ -230,7 +234,7 @@ class AlwaysOnKoochikService : Service() {
                     rollingCount >= 24000 && speechSinceProbe >= 16000
                 ) {
                     speechSinceProbe = 0
-                    val probe = recognizer.recognizeWindow(rollingSnapshot())
+                    val probe = activeRecognizer.recognizeWindow(rollingSnapshot())
                     val commandCandidate = extractDinaCommand(probe)
                     if (commandCandidate != null) {
                         wakeSeenInRollingWindow = true
@@ -434,6 +438,10 @@ class AlwaysOnKoochikService : Service() {
         runCatching { voiceController?.close() }
         voiceController = null
         transitioningToConversation = false
+        runCatching { acknowledgementThread?.interrupt() }
+        runCatching { acknowledgementTts?.close() }
+        acknowledgementTts = null
+        acknowledgementThread = null
         runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
         wakeLock = null
         stopForeground(STOP_FOREGROUND_REMOVE)
