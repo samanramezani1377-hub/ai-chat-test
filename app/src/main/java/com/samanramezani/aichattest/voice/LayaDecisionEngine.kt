@@ -203,7 +203,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                         "DECREASE" -> DinaCommand(DinaIntent.DECREASE_BRIGHTNESS)
                         "SET" -> {
                             val target = choose(
-                                rawText,
+                                decisionText,
                                 "مقدار دقیق روشنایی درخواستی را از ۰ تا ۱۰۰ درصد تعیین کن. اگر مقدار مشخص نیست UNKNOWN برگردان و حدس نزن. Choose the exact requested brightness percentage from 0 to 100.",
                                 (0..10).map { n ->
                                     Option("LEVEL_$n", "روشنایی صفحه روی ${n * 10} درصد تنظیم شود. Set screen brightness to ${n * 10} percent.")
