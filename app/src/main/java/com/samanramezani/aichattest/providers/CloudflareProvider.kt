@@ -290,6 +290,15 @@ class CloudflareProvider : ChatCompletionProvider {
             ProviderModel("@cf/google/gemma-4-26b-a4b-it", "Gemma 4 · 26B A4B"),
             ProviderModel("@cf/moonshotai/kimi-k2.6", "Kimi K2.6"),
         )
+        private val deprecatedModelIds = setOf(
+            "@cf/meta/infire-llama-3.1-8b-instruct",
+            "@cf/meta/llama-3.1-8b-instruct",
+            "@cf/meta/llama-3.1-8b-instruct-awq",
+            "@cf/meta/llama-3-8b-instruct",
+            "@cf/google/gemma-3-12b-it",
+        )
+        fun isKnownDeprecatedModelId(id: String): Boolean =
+            id.trim().lowercase() in deprecatedModelIds
     }
 }
 
