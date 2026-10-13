@@ -74,7 +74,7 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
         val states = npz(File(dir, "decode_state_init.npz"))
         decInputs = dec.inputNames.toList(); decOutputs = dec.outputNames.toList()
         require(decInputs.size == states.size + 1) { "Mimi state/input count mismatch" }
-        decoderInitial = states.values.map { A(it.name, it.shape, it.v, it.name.endsWith(".cache")) }
+        decoderInitial = states.values.map { A(it.name, it.shape, it.v, it.name.endsWith(".cache"), it.dtype, it.lv) }
         cacheSlots = decoderInitial.indices.filter { decoderInitial[it].cache }
         smallSlots = decoderInitial.indices.filterNot { it in cacheSlots }
         smallOutputs = decOutputs.indices.filter { decOutputs[it].endsWith("o") && decOutputs[it] != "audio" }
@@ -220,13 +220,13 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
             val stateTensors=mutableListOf<OnnxTensor>()
             try {
                 val feeds=LinkedHashMap<String,OnnxTensor>(); feeds[decInputs[0]]=lt
-                states.forEachIndexed { i,s -> tensor(s.v,s.shape).also { stateTensors+=it; feeds[decInputs[i+1]]=it } }
+                states.forEachIndexed { i,s -> tensor(s).also { stateTensors+=it; feeds[decInputs[i+1]]=it } }
                 dec.run(feeds).use { r ->
                     val ai=decOutputs.indexOf("audio").let { if(it<0) 0 else it }
                     audio += floats(r[ai].value as OnnxTensor)
                     smallOutputs.forEachIndexed { j,oi ->
                         val slot=smallSlots[j]; val ot=r[oi].value as OnnxTensor
-                        states[slot]=A(states[slot].name,ot.info.shape,floats(ot),false)
+                        states[slot]=stateFromTensor(states[slot].name, ot, false)
                     }
                     kvOutputs.forEachIndexed { j,oi ->
                         val slot=cacheSlots[j]; val ot=r[oi].value as OnnxTensor; val out=floats(ot)
@@ -242,7 +242,7 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
         return concat(audio)
     }
 
-    private data class A(val name:String,val shape:LongArray,val v:FloatArray,val cache:Boolean)
+    private data class A(val name:String,val shape:LongArray,val v:FloatArray,val cache:Boolean,val dtype:String = "<f4",val lv:LongArray? = null)
     private fun npz(file:File):LinkedHashMap<String,A> {
         val out=LinkedHashMap<String,A>()
         ZipInputStream(file.inputStream().buffered()).use { z ->
@@ -253,25 +253,30 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
                     val hs=if(major>=2)12 else 10; val header=String(bytes,hs,hlen,Charsets.US_ASCII)
                     val dtype=Regex("""['"]descr['"]\s*:\s*['"]([^'"]+)""").find(header)?.groupValues?.get(1)?:error("NPY dtype missing")
                     val isBool = dtype == "|b1" || dtype == "?b1"
-                    require(dtype.endsWith("f4") || dtype.endsWith("f8") || isBool) {
+                    val isInt64 = dtype.endsWith("i8")
+                    require(dtype.endsWith("f4") || dtype.endsWith("f8") || isBool || isInt64) {
                         "Unsupported NPZ dtype $dtype in ${file.name}:${e.name}"
                     }
                     val st=Regex("""['"]shape['"]\s*:\s*\(([^)]*)""").find(header)?.groupValues?.get(1).orEmpty()
                     val shape=st.split(',').mapNotNull { it.trim().toLongOrNull() }.toLongArray()
                     val n=if(shape.isEmpty())1L else shape.fold(1L){a,b->Math.multiplyExact(a,b)}
-                    val bytesPer=when { isBool -> 1; dtype.endsWith("f8") -> 8; else -> 4 }
+                    val bytesPer=when { isBool -> 1; dtype.endsWith("f8") || isInt64 -> 8; else -> 4 }
                     val pos=hs+hlen
-                    require(n <= Int.MAX_VALUE && pos.toLong()+n*bytesPer<=bytes.size) { "NPY payload truncated or too large" }
-                    val bb=ByteBuffer.wrap(bytes,pos,(n*bytesPer).toInt()).order(ByteOrder.LITTLE_ENDIAN)
-                    val values=FloatArray(n.toInt()) {
+                    require(n <= Int.MAX_VALUE && pos.toLong()+n*bytesPer<=bytes.size) {
+                        "NPY payload truncated or too large: ${e.name} shape=${shape.contentToString()} dtype=$dtype"
+                    }
+                    val byteOrder = if (dtype.startsWith(">")) ByteOrder.BIG_ENDIAN else ByteOrder.LITTLE_ENDIAN
+                    val bb=ByteBuffer.wrap(bytes,pos,(n*bytesPer).toInt()).order(byteOrder)
+                    val values = if (isInt64) FloatArray(0) else FloatArray(n.toInt()) {
                         when {
                             isBool -> if (bb.get().toInt() != 0) 1f else 0f
                             bytesPer==4 -> bb.float
                             else -> bb.double.toFloat()
                         }
                     }
+                    val longs = if (isInt64) LongArray(n.toInt()) { bb.long } else null
                     val name=e.name.removeSuffix(".npy")
-                    out[name]=A(name,shape,values,name.endsWith(".cache"))
+                    out[name]=A(name,shape,values,name.endsWith(".cache"),dtype,longs)
                 }
                 z.closeEntry()
             }
@@ -296,7 +301,23 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
 
     private fun noise()=FloatArray(ld){val u=max(1e-7,rng.nextDouble());(sqrt(-2*ln(u))*cos(2*PI*rng.nextDouble())*temp).toFloat()}
     private fun tensor(v:FloatArray,s:LongArray)=OnnxTensor.createTensor(env,FloatBuffer.wrap(v),s)
+    private fun tensor(state:A):OnnxTensor = if (state.dtype.endsWith("i8") || state.lv != null) {
+        val values = state.lv ?: error("Integer state ${state.name} has no integer payload")
+        val buffer = ByteBuffer.allocate(values.size * 8).order(ByteOrder.nativeOrder()).asLongBuffer()
+        buffer.put(values); buffer.flip()
+        OnnxTensor.createTensor(env, buffer, state.shape)
+    } else tensor(state.v, state.shape)
     private fun floats(t:OnnxTensor):FloatArray { val b=t.floatBuffer.duplicate();return FloatArray(b.remaining()).also{b.get(it)} }
+    private fun stateFromTensor(name:String,t:OnnxTensor,cache:Boolean):A {
+        val shape=t.info.shape
+        return if (t.info.type == OnnxJavaType.INT64) {
+            val b=t.longBuffer.duplicate()
+            val values=LongArray(b.remaining()).also { b.get(it) }
+            A(name,shape,FloatArray(0),cache,"<i8",values)
+        } else {
+            A(name,shape,floats(t),cache,"<f4",null)
+        }
+    }
     private fun concat(a:List<FloatArray>):FloatArray { val out=FloatArray(a.sumOf{it.size});var p=0;for(x in a){x.copyInto(out,p);p+=x.size};return out }
     override fun close(){runCatching{g2p.close()};runCatching{flow.close()};runCatching{enc.close()};runCatching{dec.close()};opts.close()}
 }
