@@ -65,10 +65,15 @@ internal object DinaCommandClassifier {
         val numberPhrase = "$numberWords(?:\\s+و\\s+$numberWords)*"
         val wordTargetMatch = Regex("(?:روی|رو|به)\\s*($numberPhrase)\\s*(درصد|درجه)?").find(text)
             ?: Regex("(?:بذار|بزار|بگذار|تنظیم(?:ش)? کن|قرار بده)\\s+(?:[^0-9]{0,24})?($numberPhrase)\\s*(درصد|درجه)?").find(text)
-        val target = targetMatch?.groupValues?.getOrNull(1)?.toIntOrNull()
-            ?: wordTargetMatch?.groupValues?.getOrNull(1)?.let(::parsePersianNumberPhrase)
+        // Percent/degree phrases are also parsed independently: this handles natural speech
+        // such as "صدا رو بذار روی پنجاه درصد" even if the preceding words confuse cue matching.
+        val spokenUnitTarget = Regex("($numberPhrase)\\s*(درصد|درجه)").find(text)
+        val wordValue = wordTargetMatch?.groupValues?.getOrNull(1)?.let(::parsePersianNumberPhrase)
+            ?: spokenUnitTarget?.groupValues?.getOrNull(1)?.let(::parsePersianNumberPhrase)
+        val target = targetMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: wordValue
         val explicitPercent = targetMatch?.groupValues?.getOrNull(2) == "درصد" ||
             wordTargetMatch?.groupValues?.getOrNull(2) == "درصد" ||
+            spokenUnitTarget?.groupValues?.getOrNull(2) == "درصد" ||
             Regex("\\d{1,3}\\s*درصد").containsMatchIn(text) ||
             Regex("$numberPhrase\\s*درصد").containsMatchIn(text)
         val hasSetCue = Regex("(بذار|بزار|بگذار|تنظیم|قرار بده|روی\\s*\\d|رو\\s*\\d|به\\s*\\d|روی\\s*$numberWords|رو\\s*$numberWords|به\\s*$numberWords|set\\s)").containsMatchIn(text)
