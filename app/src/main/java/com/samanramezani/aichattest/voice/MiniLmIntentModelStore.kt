@@ -112,10 +112,10 @@ internal class MiniLmIntentModelStore(
                     "MINILM-IMPORT-013: model_type در decision_trees.json باید sentence_embedding باشد."
                 }
                 val nodes = config.optJSONObject("nodes")
-                require(nodes != null && listOf("domain", "time_date", "audio", "display").all { id ->
+                require(nodes != null && listOf("domain", "audio", "display").all { id ->
                     nodes.optJSONObject(id)?.optJSONArray("choices")?.length()?.let { it > 0 } == true
                 }) {
-                    "MINILM-IMPORT-014: درخت تصمیم باید گره‌های domain، time_date، audio و display را داشته باشد."
+                    "MINILM-IMPORT-014: درخت تصمیم باید گره‌های domain، audio و display را داشته باشد."
                 }
                 require(model.length() <= 100L * 1024 * 1024) {
                     "MINILM-IMPORT-015: فایل مدل تصمیم‌گیری باید حداکثر ۱۰۰ مگابایت باشد."
