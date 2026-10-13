@@ -55,7 +55,7 @@ internal class LayaDecisionModelStore(
                         val entry = zip.nextEntry ?: break
                         entries++
                         require(entries <= MAX_ENTRIES) { "LAYA-IMPORT-004: تعداد فایل‌های ZIP بیش از حد مجاز است." }
-                        val relative = entry.name.replace('\\', '/').trimStart('./')
+                        val relative = entry.name.replace('\\', '/').trimStart('.', '/')
                         require(relative.isNotBlank() && !relative.startsWith("/") &&
                             relative.split('/').none { it == ".." || it.isBlank() }) {
                             "LAYA-IMPORT-005: مسیر ناامن در ZIP مدل وجود دارد."
