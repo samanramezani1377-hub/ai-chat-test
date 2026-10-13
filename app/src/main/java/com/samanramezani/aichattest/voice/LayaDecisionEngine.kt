@@ -299,8 +299,11 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 }
                 val detail = "stage=${instructions.take(48).replace(Regex("\\s+"), " ")} options=${options.size} inputTokens=${ids.size} stateTokens=${stateIds.size} headTokens=${ids.size - stateIds.size - 1} temperature=${"%.3f".format(Locale.US, activeTemperature)} calibration=$activeCalibration confidence=${"%.3f".format(Locale.US, confidence)} margin=${"%.3f".format(Locale.US, margin)}$actSummary top=[$top]"
                 lastTrace = lastTrace + detail
-                if (confidence < MIN_CONFIDENCE || margin < MIN_MARGIN) {
-                    lastError = "LAYA-INFER-005: تصمیم کم‌اطمینان؛ confidence=${"%.3f".format(Locale.US, confidence)}, maxProbability=${"%.3f".format(Locale.US, probs[best])}, margin=${"%.3f".format(Locale.US, margin)}, threshold=${MIN_CONFIDENCE}/${MIN_MARGIN}; $detail"
+                // Keep the app's conservative action gate on the top probability and margin.
+                // Entropy confidence is the official Laya confidence metric, but it is not
+                // interchangeable with the old max-probability threshold.
+                if (probs[best] < MIN_CONFIDENCE || margin < MIN_MARGIN) {
+                    lastError = "LAYA-INFER-005: تصمیم کم‌اطمینان؛ confidence=${"%.3f".format(Locale.US, confidence)}, maxProbability=${"%.3f".format(Locale.US, probs[best])}, margin=${"%.3f".format(Locale.US, margin)}, maxProbabilityThreshold=$MIN_CONFIDENCE, marginThreshold=$MIN_MARGIN; $detail"
                     return null
                 }
                 return Ranked(options[best].id, confidence)
