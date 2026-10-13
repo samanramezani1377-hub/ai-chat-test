@@ -1,8 +1,8 @@
 # AI Chat Test
 
-> Prototype / Technical Feasibility Test برای Local AI روی Android و Agent قابل‌اعتماد
+> Prototype / Technical Feasibility Test برای Chat چندمنبعی روی Android؛ با انتخاب اجرای مدل محلی یا Provider راه‌دور، به‌همراه Agent قابل‌اعتماد
 
-این repository محیط آزمایشی برای بررسی اجرای Local AI روی Android، Chat فارسی، Streaming، Agent، Action، Verification و AI Workspace است تا معماری و قابلیت‌ها پیش از انتقال به WooGit اعتبارسنجی شوند.
+این repository محیط آزمایشی برای بررسی Chat فارسی، Streaming، Agent، Action، Verification و AI Workspace است. کاربر می‌تواند منبع Inference را انتخاب کند: مدل محلی روی دستگاه یا یک Provider راه‌دور که در برنامه پیکربندی و پشتیبانی شده باشد. هدف، اعتبارسنجی معماری و قابلیت‌ها پیش از انتقال به WooGit است.
 
 ## نقشه مستندات
 
@@ -61,6 +61,9 @@ UI
 └── AI Workspace
         ↓
      AI Core
+     ├── Inference Routing / Provider Selection
+     ├── Local Runtime Adapter
+     ├── Remote Provider Adapter
      ├── Model / Inference
      ├── Context / Conversation
      ├── Agent
@@ -159,8 +162,15 @@ CI پایه از ابتدا فعال است: Build، Unit Test، Integration Tes
 
 تست‌های سخت‌گیرانه Action/Recovery از نظر زیرساخت آماده می‌شوند، اما تا رسیدن پروژه به آخرین سطح آمادگی و تأیید کیفیت اپ توسط مالک پروژه، Hard Gate اجباری نیستند.
 
-## Baseline
+## Inference Source و Baseline
 
-Baseline فعلی Prototype، **Qwen3-1.7B در GGUF/Q6_K با llama.cpp** است. این انتخاب برای Prototype فعلی مبناست و Runtime/Model همچنان باید قابل تعویض بماند.
+کاربر باید بتواند منبع پاسخ‌گویی را از تنظیمات انتخاب کند:
+
+- **Local model:** اجرای مدل واردشده روی خود دستگاه از طریق Runtime محلی پشتیبانی‌شده؛ مسیر محلی باید بدون اینترنت هم قابل استفاده باشد، مشروط به آماده‌بودن مدل و Runtime.
+- **Provider:** ارسال درخواست به Provider راه‌دور پیکربندی‌شده، با تنظیمات لازم مانند endpoint، شناسه مدل و اعتبارنامه. این مسیر به شبکه و دسترسی معتبر Provider وابسته است.
+
+انتخاب منبع باید صریح و قابل مشاهده باشد؛ برنامه نباید بی‌اجازه از Local به Provider یا برعکس fallback کند. داده‌های ارسالی به Provider از دستگاه خارج می‌شوند، بنابراین وضعیت و مرز حریم خصوصی باید روشن باشد. قابلیت‌ها و تنظیمات وابسته به هر مسیر باید براساس پشتیبانی واقعی همان Adapter نمایش داده شوند.
+
+مدل مرجع تاریخی Prototype، **Qwen3-1.7B در GGUF/Q6_K با llama.cpp** بوده است؛ این مدل الزام معماری یا تنها مسیر اجرا نیست. Runtime و Provider باید قابل تعویض بمانند.
 
 **مرجع اصلی تصمیم‌های فنی:** [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md)
