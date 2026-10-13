@@ -31,6 +31,7 @@ import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.domain.InferenceSettings
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -422,6 +423,7 @@ internal class VoiceConversationController(
         ttsModel: VoiceModelEntry,
         initialUtterance: String? = null,
         acknowledgeWake: Boolean = false,
+        speechStartGate: CompletableDeferred<Unit>? = null,
     ) {
         if (closed || microphone != null || !startInProgress.compareAndSet(false, true)) return
         val startEpoch = lifecycleEpoch.get()
@@ -575,7 +577,7 @@ internal class VoiceConversationController(
                     if (initial.isNotBlank()) {
                         onLine("شما", initial)
                         turnRunning.set(true)
-                        turnJob = scope.launch { processTurn(initial, acknowledgeWake = true) }
+                        turnJob = scope.launch { processTurn(initial, acknowledgeWake = true, speechStartGate = speechStartGate) }
                     } else {
                         scope.launch { speakWakeAcknowledgement() }
                     }
@@ -595,7 +597,11 @@ internal class VoiceConversationController(
         }
     }
 
-    private suspend fun processTurn(utterance: String, acknowledgeWake: Boolean = false) {
+    private suspend fun processTurn(
+        utterance: String,
+        acknowledgeWake: Boolean = false,
+        speechStartGate: CompletableDeferred<Unit>? = null,
+    ) {
         // A cancelled native TTS call may finish its current ONNX inference before returning.
         // Never enter the same native TTS object concurrently for a barge-in replacement turn.
         speechJob?.takeIf { !it.isCompleted }?.join()
@@ -605,6 +611,10 @@ internal class VoiceConversationController(
         val activeSpeechJob = scope.launch {
             try {
                 for (segment in queue) {
+                    if (turnCancel.get()) break
+                    // The local wake acknowledgement can play while the LLM starts decoding.
+                    // Gate only response playback so assistant speech never overlaps the acknowledgement.
+                    speechStartGate?.await()
                     if (turnCancel.get()) break
                     val engine = tts ?: break
                     val segmentPlaybackStarted = AtomicBoolean(false)
