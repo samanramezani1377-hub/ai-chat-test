@@ -12,7 +12,7 @@ import org.json.JSONObject
 /**
  * Stores a user-supplied, fine-tuned MiniLM intent-classifier bundle locally.
  * Expected ZIP entries: model.onnx, tokenizer.json, labels.json.
- * A generic sentence-embedding MiniLM is not an intent classifier by itself.
+ * A generic sentence-embedding MiniLM is not an intent classifier by itself. WordPiece and SentencePiece-style BPE tokenizer JSONs are supported by the runtime.
  */
 internal class MiniLmIntentModelStore(
     private val resolver: ContentResolver,
