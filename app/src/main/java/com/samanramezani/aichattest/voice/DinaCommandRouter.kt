@@ -10,7 +10,7 @@ import java.util.Date
 import java.util.Locale
 
 internal enum class DinaIntent {
-    CHAT, GET_TIME, GET_DATE, INCREASE_VOLUME, DECREASE_VOLUME, SET_VOLUME,
+    CHAT, GET_TIME, GET_DATE, INCREASE_VOLUME, DECREASE_VOLUME, SET_VOLUME, MUTE, UNMUTE,
     INCREASE_BRIGHTNESS, DECREASE_BRIGHTNESS, SET_BRIGHTNESS
 }
 internal data class DinaCommand(val intent: DinaIntent, val value: Int? = null, val valueIsPercent: Boolean = false)
@@ -39,6 +39,8 @@ internal object DinaCommandClassifier {
 
         val volume = Regex("(صدا|ولوم|volume|بلندی صدا)").containsMatchIn(text)
         val brightness = Regex("(نور صفحه|روشنایی صفحه|نور نمایشگر|روشنایی|brightness)").containsMatchIn(text)
+        val mute = Regex("(قطع صدا|صدا رو قطع|بی.?صدا|ساکت کن|mute|silence)").containsMatchIn(text)
+        val unmute = Regex("(وصل صدا|صدا رو وصل|از بی.?صدا|از سکوت خارج|unmute|unsilence)").containsMatchIn(text)
         val decrease = Regex("(کم کن|کمتر کن|پایین بیار|کاهش بده|بیار پایین|کم شه|کمتر شه|کمش کن|decrease|turn down)").containsMatchIn(text)
         val increase = Regex("(زیاد کن|بیشتر کن|بالا ببر|افزایش بده|ببر بالا|زیاد شه|بیشتر شه|زیادش کن|increase|turn up)").containsMatchIn(text)
         val targetMatch = Regex("(?:روی|رو|به)\\s*(\\d{1,3})\\s*(درصد|درجه)?").find(text)
@@ -49,6 +51,8 @@ internal object DinaCommandClassifier {
         val hasSetCue = Regex("(بذار|بزار|بگذار|تنظیم|قرار بده|روی\\s*\\d|رو\\s*\\d|به\\s*\\d|set\\s)").containsMatchIn(text)
 
         if (volume) {
+            if (unmute) return DinaCommand(DinaIntent.UNMUTE)
+            if (mute) return DinaCommand(DinaIntent.MUTE)
             if (hasSetCue && target != null && target in 0..100) {
                 return DinaCommand(DinaIntent.SET_VOLUME, target, explicitPercent)
             }
@@ -78,6 +82,8 @@ internal class DinaDeviceCommandExecutor(private val context: Context) {
         DinaIntent.INCREASE_VOLUME -> changeVolume(2)
         DinaIntent.DECREASE_VOLUME -> changeVolume(-2)
         DinaIntent.SET_VOLUME -> setVolume(requireNotNull(command.value), command.valueIsPercent)
+        DinaIntent.MUTE -> muteAudio(true)
+        DinaIntent.UNMUTE -> muteAudio(false)
         DinaIntent.INCREASE_BRIGHTNESS -> changeBrightness(0.10f)
         DinaIntent.DECREASE_BRIGHTNESS -> changeBrightness(-0.10f)
         DinaIntent.SET_BRIGHTNESS -> setBrightness(requireNotNull(command.value))
@@ -90,6 +96,16 @@ internal class DinaDeviceCommandExecutor(private val context: Context) {
         val target = (current + delta).coerceIn(0, max)
         audio.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
         return "صدای رسانه از ${persianNumber(current)} به ${persianNumber(target)} از ${persianNumber(max)} تغییر کرد."
+    }
+
+    private fun muteAudio(mute: Boolean): String {
+        val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audio.adjustStreamVolume(
+            AudioManager.STREAM_MUSIC,
+            if (mute) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE,
+            0,
+        )
+        return if (mute) "صدای رسانه قطع شد." else "صدای رسانه از حالت بی‌صدا خارج شد."
     }
 
     private fun setVolume(requested: Int, isPercent: Boolean): String {
