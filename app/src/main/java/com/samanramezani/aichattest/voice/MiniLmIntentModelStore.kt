@@ -6,6 +6,8 @@ import android.provider.OpenableColumns
 import java.io.File
 import java.io.FileOutputStream
 import java.util.zip.ZipInputStream
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Stores a user-supplied, fine-tuned MiniLM intent-classifier bundle locally.
@@ -19,6 +21,27 @@ internal class MiniLmIntentModelStore(
     fun isReady(): Boolean = File(root, "model.onnx").let { it.isFile && it.length() > 1024 } &&
         File(root, "tokenizer.json").let { it.isFile && it.length() > 0 } &&
         File(root, "labels.json").let { it.isFile && it.length() > 0 }
+
+    private fun parseLabels(raw: String): List<String> {
+        val text = raw.trim()
+        val labels = when {
+            text.startsWith("[") -> {
+                val array = JSONArray(text)
+                (0 until array.length()).map { array.getString(it).uppercase(java.util.Locale.ROOT) }
+            }
+            else -> {
+                val obj = JSONObject(text)
+                val array = obj.optJSONArray("labels")
+                if (array != null) {
+                    (0 until array.length()).map { array.getString(it).uppercase(java.util.Locale.ROOT) }
+                } else {
+                    (0 until obj.length()).map { obj.optString(it.toString()).uppercase(java.util.Locale.ROOT) }
+                }
+            }
+        }
+        require(labels.distinct().size == labels.size) { "MINILM-IMPORT-011: labels.json برچسب تکراری دارد." }
+        return labels
+    }
 
     fun importBundle(uri: Uri): String {
         val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
@@ -72,13 +95,24 @@ internal class MiniLmIntentModelStore(
                 "MINILM-IMPORT-007: بسته باید هر سه فایل model.onnx، tokenizer.json و labels.json را داشته باشد."
             }
             val labelText = labels.readText(Charsets.UTF_8)
-            require(listOf("CHAT", "GET_TIME", "INCREASE_VOLUME", "DECREASE_VOLUME", "SET_VOLUME",
-                "INCREASE_BRIGHTNESS", "DECREASE_BRIGHTNESS", "SET_BRIGHTNESS").all { labelText.contains(it) }) {
-                "MINILM-IMPORT-008: labels.json باید برچسب‌های فرمان‌های پشتیبانی‌شده و CHAT را تعریف کند."
+            val parsedLabels = parseLabels(labelText)
+            val allowedLabels = setOf("CHAT", "GET_TIME", "GET_DATE", "INCREASE_VOLUME", "DECREASE_VOLUME",
+                "SET_VOLUME", "INCREASE_BRIGHTNESS", "DECREASE_BRIGHTNESS", "SET_BRIGHTNESS")
+            require(parsedLabels.isNotEmpty() && parsedLabels.contains("CHAT") && parsedLabels.all { it in allowedLabels }) {
+                "MINILM-IMPORT-008: labels.json باید CHAT و برچسب‌های معتبر فرمان‌های پشتیبانی‌شده را تعریف کند."
             }
-            root.deleteRecursively()
-            check(staging.renameTo(root)) { "MINILM-IMPORT-009: انتقال بسته مدل به پوشه نهایی ناموفق بود." }
-            return "بسته MiniLM وارد شد. فرمان‌های فارسی محلی فعال‌اند؛ فایل‌های مدل فقط پس از تطبیق قرارداد ورودی/خروجی ONNX قابل استفاده برای طبقه‌بندی مدل‌محور خواهند بود."
+            // Replace atomically where possible; retain the previous working bundle if promotion fails.
+            val backup = File(root.parentFile, ".minilm-backup-${System.currentTimeMillis()}")
+            val hadPrevious = root.exists()
+            if (hadPrevious) check(root.renameTo(backup)) {
+                "MINILM-IMPORT-009: مدل قبلی برای جایگزینی امن کنار گذاشته نشد."
+            }
+            if (!staging.renameTo(root)) {
+                if (hadPrevious) backup.renameTo(root)
+                error("MINILM-IMPORT-010: انتقال بسته مدل به پوشه نهایی ناموفق بود.")
+            }
+            if (hadPrevious) backup.deleteRecursively()
+            return "بسته وارد شد. استنتاج MiniLM فقط وقتی فعال می‌شود که model.onnx یک طبقه‌بند سازگار با WordPiece و برچسب‌های labels.json باشد؛ در غیر این صورت فرمان‌های امن قاعده‌محور ادامه می‌یابند."
         } catch (t: Throwable) {
             staging.deleteRecursively()
             throw t
