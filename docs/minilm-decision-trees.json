@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "model_type": "sentence_embedding",
+  "min_similarity": 0.42,
+  "min_margin": 0.035,
+  "language": "en",
+  "notes": "all-MiniLM-L6-v2 is English-trained. Persian/Arabic-script utterances are intentionally routed to Dina's safe Persian rules.",
+  "nodes": {
+    "domain": {
+      "prompt": "Choose the user's request domain.",
+      "choices": [
+        {
+          "id": "TIME_DATE",
+          "description": "The user asks for the current time, clock time, today's date, or calendar date.",
+          "examples": ["What time is it?", "Tell me the current time.", "What is today's date?", "Give me today's date."]
+        },
+        {
+          "id": "AUDIO",
+          "description": "The user wants to control media volume or sound level.",
+          "examples": ["Turn the volume up.", "Lower the sound.", "Set the volume to fifty percent.", "Mute the audio."]
+        },
+        {
+          "id": "DISPLAY",
+          "description": "The user wants to control screen brightness.",
+          "examples": ["Increase screen brightness.", "Dim the display.", "Set brightness to fifty percent."]
+        },
+        {
+          "id": "CHAT",
+          "description": "The user asks a general question or wants conversation rather than a device command.",
+          "examples": ["Explain how this works.", "Tell me a story.", "Can you help me understand this?"]
+        }
+      ]
+    },
+    "time_date": {
+      "prompt": "Choose which time or date information the user requests.",
+      "choices": [
+        {
+          "id": "GET_TIME",
+          "description": "Return the current local clock time.",
+          "examples": ["What time is it now?", "Tell me the time.", "Current time please."]
+        },
+        {
+          "id": "GET_DATE",
+          "description": "Return today's calendar date.",
+          "examples": ["What is today's date?", "Tell me the date today.", "Which date is it?"]
+        }
+      ]
+    },
+    "audio": {
+      "prompt": "Choose the requested audio or volume operation.",
+      "choices": [
+        {
+          "id": "INCREASE_VOLUME",
+          "description": "Increase or turn up the media volume.",
+          "examples": ["Make it louder.", "Turn the volume up.", "Increase the sound."]
+        },
+        {
+          "id": "DECREASE_VOLUME",
+          "description": "Decrease or turn down the media volume.",
+          "examples": ["Make it quieter.", "Turn the volume down.", "Lower the sound."]
+        },
+        {
+          "id": "SET_VOLUME",
+          "description": "Set the media volume to a specific target value or percentage.",
+          "examples": ["Set volume to fifty percent.", "Put the volume at level five.", "Set the sound to 30 percent."]
+        },
+        {
+          "id": "MUTE",
+          "description": "Mute or silence the media audio.",
+          "examples": ["Mute the sound.", "Silence the audio."]
+        },
+        {
+          "id": "UNMUTE",
+          "description": "Unmute or restore the media audio.",
+          "examples": ["Unmute the sound.", "Turn the sound back on."]
+        }
+      ]
+    },
+    "display": {
+      "prompt": "Choose the requested screen brightness operation.",
+      "choices": [
+        {
+          "id": "INCREASE_BRIGHTNESS",
+          "description": "Increase or brighten the screen.",
+          "examples": ["Make the screen brighter.", "Increase display brightness."]
+        },
+        {
+          "id": "DECREASE_BRIGHTNESS",
+          "description": "Decrease or dim the screen.",
+          "examples": ["Dim the screen.", "Lower display brightness."]
+        },
+        {
+          "id": "SET_BRIGHTNESS",
+          "description": "Set screen brightness to a specific target percentage.",
+          "examples": ["Set brightness to 50 percent.", "Set the screen brightness to 30 percent."]
+        }
+      ]
+    }
+  }
+}
