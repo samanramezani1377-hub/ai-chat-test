@@ -16,7 +16,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Push and pull_request events for the same branch share one concurrency group.
+  # This prevents two full Android/native builds for a single commit.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -96,6 +98,10 @@ jobs:
     name: Android debug build
     runs-on: ubuntu-22.04
     timeout-minutes: 25
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPILERCHECK: content
     steps:
       - name: Checkout
         uses: actions/checkout@v5
