@@ -8,8 +8,8 @@ import java.util.zip.ZipFile
 
 /**
  * Validates the actual ONNX graphs and external-data packaging before a bundle can be
- * treated as executable. This is deliberately a preflight only: it does not claim to
- * synthesize audio or replace LocalPiperTts.
+ * treated as executable. This is a preflight check; actual synthesis and playback are
+ * verified by LocalPocketTts when it runs.
  */
 internal class PocketTtsFarsiRuntimeProbe(private val modelDir: File) {
     data class Report(
@@ -110,7 +110,7 @@ internal class PocketTtsFarsiRuntimeProbe(private val modelDir: File) {
             }
             Report(
                 true,
-                "POCKET-TTS-PREFLIGHT-OK: هر پنج گراف ONNX بارگذاری شدند؛ آرایه‌های NPZ، manifest و WAV بررسی شدند. این آزمون فقط سلامت بسته را تأیید می‌کند و تولید صوت هنوز باید توسط موتور استنتاج پیاده‌سازی شود.",
+                "POCKET-TTS-PREFLIGHT-OK: هر پنج گراف ONNX بارگذاری شدند؛ آرایه‌های NPZ، manifest و WAV بررسی شدند. این مرحله سلامت بسته را تأیید می‌کند؛ موفقیت تولید و پخش صدا در اجرای واقعی موتور ثبت می‌شود.",
                 inputs,
             )
         } catch (t: Throwable) {
