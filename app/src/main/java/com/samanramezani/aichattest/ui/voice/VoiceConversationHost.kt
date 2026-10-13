@@ -56,8 +56,8 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     var sttModels by remember { mutableStateOf(store.list(VoiceModelKind.STT)) }
     var ttsModels by remember { mutableStateOf(store.list(VoiceModelKind.TTS)) }
     var missingKoochikComponents by remember { mutableStateOf(store.missingKoochikComponents()) }
-    val wakePrefs = remember(context) { context.getSharedPreferences(AlwaysOnKoochikService.PREFS, Context.MODE_PRIVATE) }
-    var alwaysOnEnabled by remember { mutableStateOf(wakePrefs.getBoolean(AlwaysOnKoochikService.PREF_ENABLED, false)) }
+    val alwaysOnPrefs = remember(context) { context.getSharedPreferences(AlwaysOnKoochikService.PREFS, Context.MODE_PRIVATE) }
+    var alwaysOnEnabled by remember { mutableStateOf(alwaysOnPrefs.getBoolean(AlwaysOnKoochikService.PREF_ENABLED, false)) }
     var missingTtsComponents by remember { mutableStateOf(store.missingPiperComponents()) }
     var activeSttId by remember { mutableStateOf(sttModels.firstOrNull { it.id.startsWith("stt-shenava-koochik-") }?.id ?: sttModels.firstOrNull()?.id) }
     var activeTtsId by remember { mutableStateOf(ttsModels.firstOrNull()?.id) }
@@ -67,9 +67,9 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         mutableStateOf(
             buildList {
                 add("[${System.currentTimeMillis()}] صفحه مکالمه صوتی باز شد.")
-                wakePrefs.getString(AlwaysOnKoochikService.PREF_CONVERSATION_STATE, null)?.let { add("DINA STATE: $it") }
-                wakePrefs.getString(AlwaysOnKoochikService.PREF_LAST_STATUS, null)?.let { add("DINA LAST STATUS: $it") }
-                wakePrefs.getString(AlwaysOnKoochikService.PREF_LAST_DIAGNOSTIC, null)?.let { add(it) }
+                alwaysOnPrefs.getString(AlwaysOnKoochikService.PREF_CONVERSATION_STATE, null)?.let { add("ALWAYS-ON STATE: $it") }
+                alwaysOnPrefs.getString(AlwaysOnKoochikService.PREF_LAST_STATUS, null)?.let { add("ALWAYS-ON LAST STATUS: $it") }
+                alwaysOnPrefs.getString(AlwaysOnKoochikService.PREF_LAST_DIAGNOSTIC, null)?.let { add(it) }
             }.takeLast(200)
         )
     }
@@ -90,7 +90,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
                     ?: sttModels.firstOrNull { it.id.startsWith("stt-shenava-koochik-") && it.asrMode == "nemo-ctc" }
                 val tts = ttsModels.firstOrNull { it.id == activeTtsId } ?: ttsModels.firstOrNull()
                 check(stt != null && tts != null) { "ابتدا مدل Shenava Koochik و مدل TTS محلی را وارد کنید." }
-                wakePrefs.edit().putString(AlwaysOnKoochikService.PREF_STT_MODEL_ID, stt.id)
+                alwaysOnPrefs.edit().putString(AlwaysOnKoochikService.PREF_STT_MODEL_ID, stt.id)
                     .putString(AlwaysOnKoochikService.PREF_TTS_MODEL_ID, tts.id).apply()
                 AlwaysOnKoochikService.start(context)
                 alwaysOnEnabled = true
@@ -124,10 +124,10 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
 
     LaunchedEffect(Unit) {
         val activity = context as? Activity
-        val openedByWakeWord = activity?.intent?.getBooleanExtra(AlwaysOnKoochikService.EXTRA_OPEN_VOICE_FROM_WAKE, false) == true
+        val openedByAlwaysOn = activity?.intent?.getBooleanExtra(AlwaysOnKoochikService.EXTRA_OPEN_VOICE_FROM_ALWAYS_ON, false) == true
         val audioStartedInService = activity?.intent?.getBooleanExtra(AlwaysOnKoochikService.EXTRA_CONVERSATION_STARTED_IN_SERVICE, false) == true
-        if (openedByWakeWord) {
-            activity?.intent?.removeExtra(AlwaysOnKoochikService.EXTRA_OPEN_VOICE_FROM_WAKE)
+        if (openedByAlwaysOn) {
+            activity?.intent?.removeExtra(AlwaysOnKoochikService.EXTRA_OPEN_VOICE_FROM_ALWAYS_ON)
             activity?.intent?.removeExtra(AlwaysOnKoochikService.EXTRA_CONVERSATION_STARTED_IN_SERVICE)
             if (audioStartedInService) {
                 updateVoiceStatus("دینا تشخیص داده شد؛ درخواست شروع مکالمه به سرویس پس‌زمینه داده شده است. فعال‌شدن واقعی پس از آماده‌شدن موتور و میکروفون در وضعیت تشخیص‌ها تأیید می‌شود.")
@@ -148,7 +148,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     }
 
     LaunchedEffect(activeSttId, activeTtsId) {
-        wakePrefs.edit()
+        alwaysOnPrefs.edit()
             .putString(AlwaysOnKoochikService.PREF_STT_MODEL_ID, activeSttId)
             .putString(AlwaysOnKoochikService.PREF_TTS_MODEL_ID, activeTtsId)
             .apply()
@@ -286,7 +286,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
                 } else {
                     try {
                         if (enabled) {
-                            wakePrefs.edit()
+                            alwaysOnPrefs.edit()
                                 .putString(AlwaysOnKoochikService.PREF_STT_MODEL_ID, stt!!.id)
                                 .putString(AlwaysOnKoochikService.PREF_TTS_MODEL_ID, tts!!.id)
                                 .apply()
@@ -307,14 +307,14 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         onImportTtsModel = { ttsModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
         onImportTtsConfig = { ttsConfigPicker.launch(arrayOf("application/json", "text/json", "text/plain", "*/*")) },
         onImportEspeakData = { espeakPicker.launch(arrayOf("application/x-bzip2", "application/zip", "application/octet-stream", "*/*")) },
-        onSelectStt = { activeSttId = it; wakePrefs.edit().putString(AlwaysOnKoochikService.PREF_STT_MODEL_ID, it).apply() },
-        onSelectTts = { activeTtsId = it; wakePrefs.edit().putString(AlwaysOnKoochikService.PREF_TTS_MODEL_ID, it).apply() },
+        onSelectStt = { activeSttId = it; alwaysOnPrefs.edit().putString(AlwaysOnKoochikService.PREF_STT_MODEL_ID, it).apply() },
+        onSelectTts = { activeTtsId = it; alwaysOnPrefs.edit().putString(AlwaysOnKoochikService.PREF_TTS_MODEL_ID, it).apply() },
         onStart = {
             val stt = sttModels.firstOrNull { it.id == activeSttId }
             val tts = ttsModels.firstOrNull { it.id == activeTtsId }
             if (stt == null || tts == null) updateVoiceStatus("VOICE-MODEL-001: ابتدا مدل‌های STT و TTS را وارد و انتخاب کنید.")
             else {
-                wakePrefs.edit()
+                alwaysOnPrefs.edit()
                     .putString(AlwaysOnKoochikService.PREF_STT_MODEL_ID, stt.id)
                     .putString(AlwaysOnKoochikService.PREF_TTS_MODEL_ID, tts.id)
                     .apply()
@@ -325,8 +325,8 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         },
         onStop = {
             controller.stop()
-            val serviceOwnedState = wakePrefs.getBoolean(AlwaysOnKoochikService.PREF_ENABLED, false) &&
-                wakePrefs.getString(AlwaysOnKoochikService.PREF_CONVERSATION_STATE, "").orEmpty() in
+            val serviceOwnedState = alwaysOnPrefs.getBoolean(AlwaysOnKoochikService.PREF_ENABLED, false) &&
+                alwaysOnPrefs.getString(AlwaysOnKoochikService.PREF_CONVERSATION_STATE, "").orEmpty() in
                 setOf("CONVERSATION_ACTIVE", "CONVERSATION_STARTING", "CONVERSATION_START_REQUESTED", "DINA_DETECTED")
             if (serviceOwnedState) {
                 runCatching {
