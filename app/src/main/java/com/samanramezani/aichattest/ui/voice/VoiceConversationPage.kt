@@ -208,7 +208,7 @@ internal fun VoiceConversationPage(
                             Text("وارد کردن بستهٔ ZIP از حافظه")
                         }
                         Text(
-                            if (pocketTtsReady) "✓ فایل‌های بسته نصب و اعتبارسنجی شده‌اند؛ موتور اجرا هنوز به مکالمه متصل نشده است."
+                            if (pocketTtsReady) "✓ بسته معتبر است؛ موتور Pocket TTS در مسیر مکالمه قابل انتخاب و اجراست."
                             else "بسته هنوز نصب نشده است.",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (pocketTtsReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -217,7 +217,11 @@ internal fun VoiceConversationPage(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text("استفاده از Pocket TTS در مکالمه")
-                                Text("پس از نصب کامل بسته، پاسخ‌های صوتی از این موتور تولید می‌شوند.", style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    if (pocketTtsSelected) "فعال است؛ پس از شروع یا شروع مجدد مکالمه، پاسخ‌ها با Pocket TTS تولید می‌شوند."
+                                    else "پس از نصب، این گزینه را روشن کن؛ با انتخاب موفق بسته به‌صورت خودکار فعال می‌شود.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
                             }
                             Switch(checked = pocketTtsSelected, onCheckedChange = onPocketTtsSelectedChange, enabled = pocketTtsReady && !busy)
                         }
@@ -373,7 +377,8 @@ internal fun VoiceConversationPage(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Button(
                     onClick = { if (permissionGranted) onStart() else permission.launch(Manifest.permission.RECORD_AUDIO) },
-                    enabled = !busy && !listening && activeSttId != null && activeTtsId != null,
+                    enabled = !busy && !listening && activeSttId != null &&
+                        (activeTtsId != null || (pocketTtsReady && pocketTtsSelected)),
                     modifier = Modifier.weight(1f).heightIn(min = 54.dp),
                 ) {
                     Icon(Icons.Default.Mic, null)
