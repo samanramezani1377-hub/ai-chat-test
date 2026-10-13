@@ -89,13 +89,17 @@ jobs:
           path: |
             core/runtime-android/.cxx
             core/runtime-android/src/.cxx
+            rs-laya-tokenizers/target
           key: >-
             native-${{ runner.os }}-
             ${{ hashFiles(
               'gradle.properties',
               'settings.gradle.kts',
               'build.gradle.kts',
+              'app/build.gradle.kts',
               'gradle/libs.versions.toml',
+              'rs-laya-tokenizers/Cargo.toml',
+              'rs-laya-tokenizers/src/**',
               'core/runtime-android/build.gradle.kts',
               'core/runtime-android/src/main/cpp/**',
               'core/runtime-android/src/main/cpp/cmake/**',
@@ -157,6 +161,7 @@ jobs:
           unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libsherpa-onnx-jni.so'
           unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime.so'
           unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime4j_jni.so'
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/liblaya_tokenizers.so'
           unzip -p "$apk" lib/arm64-v8a/libonnxruntime4j_jni.so > "$RUNNER_TEMP/libonnxruntime4j_jni.so"
           readelf -d --wide "$RUNNER_TEMP/libonnxruntime4j_jni.so" | grep -F 'libonnxruntime.so'
           unzip -p "$apk" lib/arm64-v8a/libonnxruntime.so > "$RUNNER_TEMP/libonnxruntime.so"
