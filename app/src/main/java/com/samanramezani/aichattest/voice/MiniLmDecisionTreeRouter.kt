@@ -88,6 +88,8 @@ internal class MiniLmDecisionTreeRouter(private val root: File) : AutoCloseable 
             "INCREASE_VOLUME" -> DinaCommand(DinaIntent.INCREASE_VOLUME)
             "DECREASE_VOLUME" -> DinaCommand(DinaIntent.DECREASE_VOLUME)
             "SET_VOLUME" -> parsed.takeIf { it.intent == DinaIntent.SET_VOLUME && it.value != null }
+            "MUTE" -> DinaCommand(DinaIntent.MUTE)
+            "UNMUTE" -> DinaCommand(DinaIntent.UNMUTE)
             "INCREASE_BRIGHTNESS" -> DinaCommand(DinaIntent.INCREASE_BRIGHTNESS)
             "DECREASE_BRIGHTNESS" -> DinaCommand(DinaIntent.DECREASE_BRIGHTNESS)
             "SET_BRIGHTNESS" -> parsed.takeIf { it.intent == DinaIntent.SET_BRIGHTNESS && it.value != null }
