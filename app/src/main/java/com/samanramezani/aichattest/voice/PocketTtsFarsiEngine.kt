@@ -212,7 +212,7 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
     }
 
     private fun decode(latents: List<FloatArray>): FloatArray {
-        val states=decoderInitial.map { A(it.name,it.shape,it.v.copyOf(),it.cache) }.toMutableList()
+        val states=decoderInitial.map { A(it.name,it.shape,it.v.copyOf(),it.cache,it.dtype,it.lv?.copyOf()) }.toMutableList()
         val audio=mutableListOf<FloatArray>(); var offset=0
         for(latent in latents) {
             val un=FloatArray(ld) { i -> latent.getOrElse(i){0f}*std.getOrElse(i){1f}+mean.getOrElse(i){0f} }
