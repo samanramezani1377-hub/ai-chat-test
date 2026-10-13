@@ -171,7 +171,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 }
                 else -> return@synchronized null
             }
-            lastTrace = trace.toList()
+            lastTrace = trace.toList() + lastTrace
             lastError = null
             // Laya's resident memory is large. Keep it warm only after local device actions;
             // close the session before the chat model is loaded, and also on every abstention.
@@ -346,10 +346,10 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
         }
         val selected = if (rawTemperature.isFinite() && rawTemperature > 0.0) rawTemperature else Double.NaN
         choiceTemperature = if (selected.isFinite()) selected.coerceIn(MIN_TEMPERATURE, MAX_TEMPERATURE) else 1.0
-        temperatureSource = if (selected.isFinite()) {
+        temperatureSource = if (selected.isFinite() && kotlin.math.abs(selected - 1.0) > 1e-6) {
             "rl_agent_config.json:temperature[choice]; bucket calibration checked per option count"
         } else {
-            "missing; neutral fallback 1.0 (uncalibrated)"
+            "neutral temperature 1.0; calibration not established"
         }
         optionTemperatures.clear()
         optionTemperatures.putAll(temperatureByOptions)
@@ -380,6 +380,7 @@ private class LayaTokenizer(file: File) {
     private val metaspace: Boolean
     private val rootPrependNever: Boolean
     private val unkToken: String
+    private var normalizerConfig: String = ""
     val clsId: Long
     val sepId: Long
     val maskId: Long
@@ -419,10 +420,11 @@ private class LayaTokenizer(file: File) {
             }
             if (pair != null) merges["${pair[0]} ${pair[1]}"] = i
         }
-        val normalizer = root.optJSONObject("normalizer")
-        lowercase = normalizer?.optBoolean("lowercase", false) == true ||
-            normalizer?.toString()?.contains("Lowercase") == true
-        val pre = root.optJSONObject("pre_tokenizer")?.toString().orEmpty()
+        val normalizer = root.opt("normalizer")
+        normalizerConfig = normalizer?.toString().orEmpty()
+        lowercase = normalizerConfig.contains("Lowercase") ||
+            (normalizer as? JSONObject)?.optBoolean("lowercase", false) == true
+        val pre = root.opt("pre_tokenizer")?.toString().orEmpty()
         byteLevel = pre.contains("ByteLevel")
         metaspace = pre.contains("Metaspace")
         rootPrependNever = pre.contains("prepend_scheme") && pre.contains("never")
@@ -497,11 +499,8 @@ private class LayaTokenizer(file: File) {
         return value.filterNot { it == '\u0000' || it == '\uFFFD' }
     }
 
-    private fun rootNormalizerContains(needle: String): Boolean = runCatching {
-        // Keep the serialized normalizer's declared operations; no locale-specific heuristics.
-        JSONObject(File(rootTokenizerPath).readText(Charsets.UTF_8))
-            .optJSONObject("normalizer")?.toString()?.contains(needle) == true
-    }.getOrDefault(false)
+    private fun rootNormalizerContains(needle: String): Boolean =
+        normalizerConfig.contains(needle)
 
     private fun splitBertPreTokens(text: String): List<String> {
         val result = ArrayList<String>()
