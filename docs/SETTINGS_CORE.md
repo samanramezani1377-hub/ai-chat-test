@@ -6,7 +6,9 @@
 
 ```text
 Central Settings Core
-├── Model
+├── Inference Source (Local / Provider)
+├── Local Model / Runtime
+├── Provider Configuration
 ├── Inference
 ├── Context
 ├── Agent
@@ -36,6 +38,15 @@ Setting {
 ```
 
 `constraints` فقط محدودیت واقعی Runtime/Device/Platform یا Policy را بیان می‌کند؛ Default به‌تنهایی محدودیت نیست. تنظیمات User، System/Runtime و Policy باید از نظر Source قابل تشخیص باشند و precedence آن‌ها در Contract مشخص باشد.
+
+## Inference Source و Provider Settings
+
+کاربر باید بتواند منبع پاسخ را به‌صورت صریح انتخاب کند:
+
+- `LOCAL`: استفاده از مدل و Runtime محلی انتخاب‌شده؛ آماده‌بودن مدل و سازگاری Runtime باید بررسی شود.
+- `PROVIDER`: استفاده از Provider راه‌دور پیکربندی‌شده؛ وضعیت اتصال، endpoint و شناسه مدل باید اعتبارسنجی شوند.
+
+انتخاب منبع ذخیره شود و در UI قابل مشاهده باشد. خطای منبع انتخاب‌شده باید به کاربر گزارش شود؛ جابه‌جایی خودکار به منبع دیگر ممنوع است مگر اینکه کاربر آن را صریحاً فعال کند. Secretها نباید به‌صورت متن آشکار در گزارش‌ها یا Error Center ثبت شوند.
 
 ## Versioning / Migration
 
