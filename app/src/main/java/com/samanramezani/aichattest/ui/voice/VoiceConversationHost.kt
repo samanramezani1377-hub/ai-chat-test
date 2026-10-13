@@ -35,6 +35,7 @@ import com.samanramezani.aichattest.voice.LayaDecisionEngine
 import com.samanramezani.aichattest.voice.DinaDeviceCommandExecutor
 import com.samanramezani.aichattest.voice.extractDinaCommand
 import com.woogit.aicore.agent.AgentEvent
+import com.woogit.aicore.conversation.ConversationMessage
 import com.woogit.aicore.domain.InferenceSettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -656,7 +657,10 @@ internal class VoiceConversationController(
                 recognizer = engines.first
                 tts = engines.second
                 enterCommunicationAudioMode()
-                if (conversationId == null) conversationId = container.conversationHistory.create("مکالمه صوتی").id
+                if (conversationId == null) {
+                    conversationId = container.conversationHistory.create("مکالمه صوتی").id
+                    onDiagnostic("VOICE-SESSION-START: conversationId=$conversationId; one session is retained across turns until «دینا خاموش شو».")
+                }
                 // Keep capture independent from ASR. The queue is bounded to avoid seconds of
                 // stale microphone audio accumulating while an offline recognizer is decoding.
                 val frames = Channel<LocalMicrophone.Frame>(capacity = 128)
@@ -780,6 +784,7 @@ internal class VoiceConversationController(
                                 // always-on wake listener instead of being sent to the chat model.
                                 val wakeControl = extractDinaCommand(utterance)
                                 if (wakeControl != null && isDinaSleepCommand(wakeControl)) {
+                                    onDiagnostic("VOICE-SESSION-END: conversationId=$conversationId; reason=DINA_SLEEP; next wake starts a fresh conversation.")
                                     onStatus("فرمان «دینا خاموش شو» دریافت شد؛ مکالمه متوقف و شنود بیدارباش دوباره فعال می‌شود.")
                                     // Transfer ownership back to the always-on service so the same
                                     // Shenava instance remains loaded across conversation boundaries.
@@ -942,6 +947,7 @@ internal class VoiceConversationController(
                     queue.close()
                     activeSpeechJob.join()
                     if (!turnCancel.get()) {
+                        persistAssistantReplyIfMissing(localReply)
                         onLine("دستیار", localReply)
                         onStatus("فرمان محلی اجرا شد؛ مدل گفت‌وگو فراخوانی نشد.")
                     }
@@ -968,6 +974,7 @@ internal class VoiceConversationController(
             )
             if (!turnCancel.get()) {
                 val generation = result.generation
+                persistAssistantReplyIfMissing(generation.text)
                 val answer = sanitizeAssistantVoiceText(generation.text)
                 if (answer.isNotBlank()) enqueueCompleteSentences(answer, flush = true)
                 queue.close()
@@ -1037,6 +1044,31 @@ internal class VoiceConversationController(
                 turnJob = scope.launch { processTurn(pending) }
             }
         }
+    }
+
+    /**
+     * AgentSession normally persists the final answer. Verify that invariant before showing
+     * it in the live transcript; also covers local-device replies, which bypass AgentSession.
+     * The last-message check prevents duplicate rows when the normal persistence path succeeded.
+     */
+    private suspend fun persistAssistantReplyIfMissing(content: String) {
+        val id = conversationId ?: error("VOICE-CHAT-001: شناسه مکالمه ایجاد نشده است.")
+        if (content.isBlank()) return
+        val last = container.conversationHistory.messages(id).lastOrNull()
+        if (last?.role == ConversationMessage.Role.ASSISTANT && last.content == content) return
+        val now = System.currentTimeMillis()
+        val saved = container.conversationHistory.append(
+            id,
+            ConversationMessage(
+                id = java.util.UUID.randomUUID().toString(),
+                role = ConversationMessage.Role.ASSISTANT,
+                content = content,
+                timestampEpochMs = now,
+            ),
+            now,
+        )
+        check(saved) { "VOICE-HISTORY-001: پاسخ دستیار در تاریخچهٔ گفتگو ذخیره نشد." }
+        onDiagnostic("VOICE-HISTORY-SAVED: conversationId=$id; chars=${content.length}")
     }
 
     private suspend fun speakWakeAcknowledgement() {
