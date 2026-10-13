@@ -73,7 +73,7 @@ class LocalPiperTts(private val entry: VoiceModelEntry) {
         // *.onnx.json file. Honor those official per-voice settings instead of silently
         // relying on sherpa-onnx defaults, which can alter prosody/phoneme timing.
         val piperConfigFile = sequenceOf(
-            File(entry.modelFile.parentFile, "\${entry.modelFile.name}.json"),
+            File(entry.modelFile.parentFile, "${entry.modelFile.name}.json"),
             File(entry.directory, "model.onnx.json"),
             File(entry.modelFile.parentFile, "model.onnx.json"),
         ).firstOrNull { it.isFile && it.length() in 1L..(8L * 1024L * 1024L) }
