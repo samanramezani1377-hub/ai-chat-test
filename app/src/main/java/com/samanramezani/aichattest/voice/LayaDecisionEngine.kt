@@ -31,14 +31,13 @@ internal fun extractCurrentLayaTurn(rawText: String): String {
         text = text.substring(lastUser.range.last + 1, nextRole?.range?.first ?: text.length).trim()
     }
 
-    // Imported diagnostics sometimes serialize turns as "۱. ... ۲. ... ۳. current".
-    // Keep only the latest numbered segment and remove a single leading turn number too.
-    val turnMarker = Regex("""(?<!\S)[0-9۰-۹٠-٩]{1,3}[.)]\s*""")
+    // Numbering at the start of a user's actual message is user-authored content
+    // (for example, "۳. ساعت چنده؟") and must be preserved. Only when multiple
+    // numbered turns are present do we isolate the final segment; retain its number.
+    val turnMarker = Regex("""(?<!\\S)[0-9۰-۹٠-٩]{1,3}[.)]\\s*""")
     val markers = turnMarker.findAll(text).toList()
     if (markers.size >= 2) {
-        text = text.substring(markers.last().range.last + 1).trim()
-    } else if (markers.size == 1 && markers.single().range.first == 0) {
-        text = text.substring(markers.single().range.last + 1).trim()
+        text = text.substring(markers.last().range.first).trim()
     }
     return text
 }
