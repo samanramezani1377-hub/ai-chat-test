@@ -71,6 +71,7 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     // Local-only ASR/TTS engines; no network inference or cloud API.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
     implementation("com.github.k2-fsa:sherpa-onnx:v1.13.8") {
         // The Android AAR already bundles the sherpa Kotlin/JVM API classes.
         // Exclude the duplicate JVM jar published as a transitive dependency.
