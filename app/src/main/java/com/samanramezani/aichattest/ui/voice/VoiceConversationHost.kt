@@ -942,6 +942,7 @@ internal class VoiceConversationController(
                     .getOrElse { "انجام فرمان ناموفق بود: ${it.message ?: it.javaClass.simpleName}" }
                     .orEmpty()
                 if (localReply.isNotBlank()) {
+                    persistUserMessageIfMissing(utterance)
                     onDiagnostic("DINA-LOCAL-COMMAND: intent=${command.intent.name} parameter=${command.value ?: "none"} classifier=${if (layaDecision != null && layaDecision.command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) "laya-multilingual-int4" else "safe-rules"} model=local-device-executor")
                     queue.trySend(localReply)
                     queue.close()
@@ -1044,6 +1045,25 @@ internal class VoiceConversationController(
                 turnJob = scope.launch { processTurn(pending) }
             }
         }
+    }
+
+    private suspend fun persistUserMessageIfMissing(content: String) {
+        val id = conversationId ?: error("VOICE-CHAT-001: شناسه مکالمه ایجاد نشده است.")
+        if (content.isBlank()) return
+        val last = container.conversationHistory.messages(id).lastOrNull()
+        if (last?.role == ConversationMessage.Role.USER && last.content == content) return
+        val now = System.currentTimeMillis()
+        val saved = container.conversationHistory.append(
+            id,
+            ConversationMessage(
+                id = java.util.UUID.randomUUID().toString(),
+                role = ConversationMessage.Role.USER,
+                content = content,
+                timestampEpochMs = now,
+            ),
+            now,
+        )
+        check(saved) { "VOICE-HISTORY-002: پیام کاربر در تاریخچهٔ گفتگو ذخیره نشد." }
     }
 
     /**
