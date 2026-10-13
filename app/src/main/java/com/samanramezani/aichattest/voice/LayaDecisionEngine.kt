@@ -166,7 +166,13 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
             retainLoadedSession = command.intent != DinaIntent.CHAT
             Decision(command, domain.id, trace.lastOrNull()?.substringAfter("confidence=")?.toDoubleOrNull() ?: 1.0, trace.toList())
         } catch (t: Throwable) {
-            lastError = "LAYA-INFER-001: ${t.message ?: t.javaClass.simpleName}"
+            val causes = generateSequence(t as Throwable?) { it.cause }
+                .take(8)
+                .joinToString(" <- ") { cause ->
+                    cause.javaClass.name + (cause.message?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: "")
+                }
+            val origin = t.stackTrace.firstOrNull()?.let { " at $it" }.orEmpty()
+            lastError = "LAYA-INFER-001: $causes$origin"
             lastTrace = trace.toList()
             null
         } finally {
