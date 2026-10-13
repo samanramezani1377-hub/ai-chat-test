@@ -598,7 +598,7 @@ internal class VoiceConversationController(
 
     fun start(
         stt: VoiceModelEntry,
-        ttsModel: VoiceModelEntry,
+        ttsModel: VoiceModelEntry?,
         initialUtterance: String? = null,
         acknowledgeWake: Boolean = false,
         speechStartGate: CompletableDeferred<Unit>? = null,
@@ -629,7 +629,7 @@ internal class VoiceConversationController(
                                 "POCKET-TTS-SELECT-002: بستهٔ Pocket TTS نصب نیست یا ناقص است."
                             }
                             com.samanramezani.aichattest.voice.LocalPocketTts(modelDir)
-                        } else LocalPiperTts(ttsModel)
+                        } else LocalPiperTts(requireNotNull(ttsModel) { "VOICE-TTS-001: مدل Piper انتخاب نشده است." })
                         asr to ttsEngine
                     } catch (t: Throwable) {
                         runCatching { asr.close() }
