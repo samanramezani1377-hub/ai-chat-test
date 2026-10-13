@@ -431,6 +431,7 @@ internal class VoiceConversationController(
     private var turnJob: Job? = null
     private var speechJob: Job? = null
     private var conversationId: String? = null
+    @Volatile private var lastLoggedIntentModelError: String? = null
     private var previousAudioMode: Int? = null
     @Volatile private var closed = false
 
@@ -707,6 +708,12 @@ internal class VoiceConversationController(
         try {
             onStatus("در حال بررسی درخواست فارسی روی دستگاه…")
             val modelCommand = runCatching { intentClassifier.classify(utterance) }.getOrNull()
+            intentClassifier.lastError?.let { modelError ->
+                if (lastLoggedIntentModelError != modelError) {
+                    lastLoggedIntentModelError = modelError
+                    onDiagnostic(modelError + "؛ فرمان‌ها با قواعد امن ادامه می‌یابند.")
+                }
+            }
             // Only high-confidence ONNX predictions are accepted. If the model is unavailable,
             // uncertain, or predicts CHAT, the conservative built-in rules remain the fallback.
             val ruleCommand = DinaCommandClassifier.classify(utterance)
