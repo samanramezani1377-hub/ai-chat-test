@@ -1,6 +1,7 @@
 package com.samanramezani.aichattest.voice
 
 import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OnnxSequence
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import java.io.Closeable
@@ -51,8 +52,17 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
         val encoded = tensor(inputIds)
         val hidden = try {
             encoder.run(mapOf("input_ids" to encoded)).use { result ->
-                (result[0].value as? OnnxTensor)
-                    ?: error("POCKET-TTS-G2P-002: خروجی encoder از نوع Tensor نیست؛ output=${result[0].key}, valueClass=${result[0].value.javaClass.name}")
+                val output = result[0].value
+                when (output) {
+                    is OnnxTensor -> output
+                    is OnnxSequence -> {
+                        // Some exported encoder graphs wrap the hidden-state tensor in
+                        // an ONNX sequence instead of exposing it as a direct tensor.
+                        output.value.firstOrNull { it is OnnxTensor } as? OnnxTensor
+                            ?: error("POCKET-TTS-G2P-002: خروجی sequence رمزگذار فاقد Tensor است؛ output=${result[0].key}")
+                    }
+                    else -> error("POCKET-TTS-G2P-002: نوع خروجی رمزگذار پشتیبانی نمی‌شود؛ output=${result[0].key}, valueClass=${output.javaClass.name}")
+                }
             }
         } finally {
             encoded.close()
