@@ -94,11 +94,27 @@ class CloudflareProvider : ChatCompletionProvider {
                 .put("temperature", request.settings.temperature)
                 .put("max_tokens", request.settings.maxNewTokens.coerceIn(1, 8192))
                 .put("stream", true)
-            // Gemma 4's default thinking mode can consume the entire voice reply
-            // token budget before emitting user-visible content. Cloudflare's
-            // supported chat_template_kwargs flag disables that hidden budget.
-            if (config.model.trim().equals("@cf/google/gemma-4-26b-a4b-it", ignoreCase = true)) {
-                body.put("chat_template_kwargs", JSONObject().put("enable_thinking", false))
+            // Voice calls set enableThinking=false. Forward that setting to Workers AI's
+            // reasoning-capable models; otherwise GLM-4.7-Flash can spend the entire
+            // max_tokens budget in reasoning_content and finish with no user-visible text.
+            // Workers AI explicitly supports reasoning_effort=null and chat_template_kwargs
+            // for GLM-4.7-Flash, Gemma 4, Kimi K2.x, GPT-OSS, and QwQ.
+            val modelId = config.model.trim().lowercase()
+            val supportsReasoningControls =
+                modelId in setOf(
+                    "@cf/zai-org/glm-4.7-flash",
+                    "@cf/google/gemma-4-26b-a4b-it",
+                    "@cf/moonshotai/kimi-k2.5",
+                    "@cf/moonshotai/kimi-k2.6",
+                ) || modelId.contains("gpt-oss") || modelId.contains("/qwq")
+            if (!request.settings.enableThinking && supportsReasoningControls) {
+                body.put("reasoning_effort", JSONObject.NULL)
+                body.put(
+                    "chat_template_kwargs",
+                    JSONObject()
+                        .put("enable_thinking", false)
+                        .put("clear_thinking", true),
+                )
             }
             request.settings.topP?.let { body.put("top_p", it) }
             request.settings.stopSequences.takeIf { it.isNotEmpty() }?.let { body.put("stop", JSONArray(it)) }
