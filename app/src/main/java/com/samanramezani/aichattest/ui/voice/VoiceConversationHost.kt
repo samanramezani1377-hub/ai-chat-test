@@ -407,16 +407,13 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
  */
 internal fun sanitizeAssistantVoiceText(raw: String): String {
     val channelMarker = Regex("(?i)<\\\\|channel\\\\|?>\\\\s*(analysis|thought|reasoning|final|answer|commentary)\\\\b")
-    val channelMatches = channelMarker.findAll(raw).toList()
+    val channels = channelMarker.findAll(raw).toList()
     var source = raw
-    if (channelMatches.isNotEmpty()) {
-        val finalChannel = channelMatches.lastOrNull {
-            it.groupValues[1].equals("final", true) || it.groupValues[1].equals("answer", true)
-        }
+    if (channels.isNotEmpty()) {
+        val finalChannel = channels.lastOrNull { it.groupValues[1].equals("final", true) || it.groupValues[1].equals("answer", true) }
         if (finalChannel == null) return ""
         source = raw.substring(finalChannel.range.last + 1)
-        val nextChannel = channelMarker.find(source)?.range?.first ?: source.length
-        source = source.substring(0, nextChannel)
+        source = source.substring(0, channelMarker.find(source)?.range?.first ?: source.length)
     }
     var text = source
         .replace(Regex("(?is)<think\\\\b(?!\\\\s*/)[^>]*>.*?(?:</think\\\\s*>|<think\\\\s*/\\\\s*>|$)"), " ")
@@ -424,17 +421,16 @@ internal fun sanitizeAssistantVoiceText(raw: String): String {
         .replace(Regex("(?is)</?think\\\\b[^>]*>"), " ")
         .replace(Regex("(?is)<(analysis|reasoning|scratchpad)\\\\b[^>]*>.*?</\\\\1\\\\s*>"), " ")
         .replace(Regex("(?is)<\\\\|(?:turn|end_of_turn|endofturn|im_end|fim_suffix)\\\\|?>.*$"), " ")
-        .replace(Regex("\\n{3,}")) { "\n\n" }
         .replace(Regex("(?m)^\\\\s*#{1,6}\\\\s*"), "")
-        .replace(Regex("\\n{3,}")) { "\n\n" }
+        .replace(Regex("(?m)^\\\\s*(?:[-*_]\\\\s*){3,}$"), " ")
         .replace(Regex("(?m)^\\\\s*[-*+]\\\\s+"), "")
         .replace(Regex("(?m)^\\\\s*\\\\d+[.)]\\\\s+"), "")
         .replace(Regex("(?<!\\\\w)(?:\\\\*\\\\*|__)(?=\\\\S)|(?<=\\\\S)(?:\\\\*\\\\*|__)"), "")
         .replace(Regex("(?<!\\\\w)[*_~](?=\\\\S)|(?<=\\\\S)[*_~](?!\\\\w)"), "")
         .replace(Regex("(?is)<[^>]+>"), " ")
         .replace(Regex("[ \\\\t]+"), " ")
-        .replace(Regex(" *\\n *")) { "\n" }
-        .replace(Regex("\\n{3,}")) { "\n\n" }
+        .replace(Regex(" *\\\\n *")) { "\\n" }
+        .replace(Regex("\\\\n{3,}")) { "\\n\\n" }
         .trim()
     return text
 }
