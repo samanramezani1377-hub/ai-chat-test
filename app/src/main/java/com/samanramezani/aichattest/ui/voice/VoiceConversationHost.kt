@@ -79,14 +79,14 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     }
     var listening by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
-    var pendingWakeEnable by remember { mutableStateOf(false) }
+    var pendingAlwaysOnEnable by remember { mutableStateOf(false) }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (pendingWakeEnable) {
-            pendingWakeEnable = false
+        if (pendingAlwaysOnEnable) {
+            pendingAlwaysOnEnable = false
             try {
-                val stt = sttModels.firstOrNull { it.id == activeSttId && it.asrMode == "nemo-ctc" }
+                val stt = sttModels.firstOrNull { it.id == activeSttId && it.id.startsWith("stt-shenava-koochik-") && it.asrMode == "nemo-ctc" }
                     ?: sttModels.firstOrNull { it.id.startsWith("stt-shenava-koochik-") && it.asrMode == "nemo-ctc" }
                 val tts = ttsModels.firstOrNull { it.id == activeTtsId } ?: ttsModels.firstOrNull()
                 check(stt != null && tts != null) { "ابتدا مدل Shenava Koochik و مدل TTS محلی را وارد کنید." }
@@ -271,7 +271,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             if (enabled && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 updateVoiceStatus("VOICE-ALWAYS-002: برای شنود دائمی ابتدا مجوز میکروفون را بده.")
             } else {
-                val stt = sttModels.firstOrNull { it.id == activeSttId && it.asrMode == "nemo-ctc" }
+                val stt = sttModels.firstOrNull { it.id == activeSttId && it.id.startsWith("stt-shenava-koochik-") && it.asrMode == "nemo-ctc" }
                     ?: sttModels.firstOrNull { it.id.startsWith("stt-shenava-koochik-") && it.asrMode == "nemo-ctc" }
                 val tts = ttsModels.firstOrNull { it.id == activeTtsId } ?: ttsModels.firstOrNull()
                 if (enabled && stt == null) {
@@ -281,7 +281,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
                 } else if (enabled && Build.VERSION.SDK_INT >= 33 &&
                     ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
                 ) {
-                    pendingWakeEnable = true
+                    pendingAlwaysOnEnable = true
                     notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 } else {
                     try {
