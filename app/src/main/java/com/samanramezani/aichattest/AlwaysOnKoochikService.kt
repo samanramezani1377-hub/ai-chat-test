@@ -430,7 +430,9 @@ class AlwaysOnKoochikService : Service() {
                 // asynchronously. Speak the acknowledgement in parallel with that inference.
                 runBlocking {
                     engine.speak(
-                        "متوجه شدم",
+                        // Add Persian vowel marks so the local phonemizer pronounces both words clearly;
+                        // keep the phrase semantically identical to the requested «متوجه شدم».
+                        "مُتَوَجِّه شُدَم",
                         AtomicBoolean(false),
                         onSynthesisComplete = { duration ->
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
@@ -438,8 +440,8 @@ class AlwaysOnKoochikService : Service() {
                                 .apply()
                         },
                         // Speak the complete acknowledgement more slowly and leave a short audible tail.
-                        speed = 0.80f,
-                        playbackTailMs = 800L,
+                        speed = 0.72f,
+                        playbackTailMs = 1200L,
                     )
                 }
                 acknowledgementPlayed.set(true)
