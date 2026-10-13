@@ -429,23 +429,37 @@ class AlwaysOnKoochikService : Service() {
                 // The controller has already received the extracted command and starts model inference
                 // asynchronously. Speak the acknowledgement in parallel with that inference.
                 runBlocking {
+                    // Synthesize the two words independently. Some Piper/espeak voices truncate
+                    // or swallow the final word in a short two-word phrase, even when AudioTrack
+                    // drains correctly. Separate synthesis and playback makes «شدم» a complete
+                    // utterance of its own; no diacritics are injected into the model's tokenizer.
+                    val cancelled = AtomicBoolean(false)
+                    var firstSynthesisMs = -1L
+                    var secondSynthesisMs = -1L
                     engine.speak(
-                        // Add Persian vowel marks so the local phonemizer pronounces both words clearly;
-                        // keep the phrase semantically identical to the requested «متوجه شدم».
-                        "مُتَوَجِّه شُدَم",
-                        AtomicBoolean(false),
-                        onSynthesisComplete = { duration ->
-                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                                .putString(PREF_LAST_DIAGNOSTIC, "ALWAYS_ON_TTS_ACK: synthesisMs=$duration")
-                                .apply()
-                        },
-                        // Speak the complete acknowledgement more slowly and leave a short audible tail.
-                        speed = 0.72f,
-                        playbackTailMs = 1200L,
+                        "متوجه",
+                        cancelled,
+                        onSynthesisComplete = { firstSynthesisMs = it },
+                        speed = 0.78f,
+                        playbackTailMs = 180L,
                     )
+                    kotlinx.coroutines.delay(100L)
+                    engine.speak(
+                        "شدم.",
+                        cancelled,
+                        onSynthesisComplete = { secondSynthesisMs = it },
+                        speed = 0.78f,
+                        playbackTailMs = 900L,
+                    )
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                        .putString(
+                            PREF_LAST_DIAGNOSTIC,
+                            "ALWAYS_ON_TTS_ACK: firstWordSynthesisMs=$firstSynthesisMs secondWordSynthesisMs=$secondSynthesisMs secondWordPlayback=completed",
+                        )
+                        .apply()
                 }
                 acknowledgementPlayed.set(true)
-                Log.i(TAG, "Local TTS acknowledgement completed")
+                Log.i(TAG, "Local TTS acknowledgement completed word-by-word")
             } catch (t: Throwable) {
                 Log.e(TAG, "Could not speak local wake acknowledgement", t)
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit()
