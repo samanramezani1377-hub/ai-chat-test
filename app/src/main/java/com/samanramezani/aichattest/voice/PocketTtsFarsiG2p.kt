@@ -34,7 +34,10 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
     @Synchronized
     fun phonemise(input: String): String {
         val text = normalize(transliterate(input))
-        if (text.isBlank()) return ""
+        if (text.isBlank()) {
+            if (input.isNotBlank()) throw IllegalArgumentException("POCKET-TTS-G2P-004: نرمال‌سازی متن را خالی کرد؛ ورودی فارسی/فونم معتبر نیست.")
+            return ""
+        }
         val windows = splitWindows(text)
         return windows.mapNotNull { window -> decodeWindow(window).takeIf { it.isNotBlank() } }
             .joinToString(" ")
@@ -53,7 +56,6 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
         val encoded = tensor(inputIds)
         // Use the named ONNX output and copy it before closing Result; the encoder hidden state
         // must remain owned after the Result is closed.
-        // rather than an OnnxTensor instance. The decoder needs an owned Tensor that
         // remains valid after the encoder Result is closed.
         val hidden = try {
             encoder.run(mapOf("input_ids" to encoded)).use { result ->
