@@ -110,7 +110,10 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
                 val stt = sttModels.firstOrNull { it.id == activeSttId && it.id.startsWith("stt-shenava-koochik-") && it.asrMode == "nemo-ctc" }
                     ?: sttModels.firstOrNull { it.id.startsWith("stt-shenava-koochik-") && it.asrMode == "nemo-ctc" }
                 val tts = ttsModels.firstOrNull { it.id == activeTtsId } ?: ttsModels.firstOrNull()
-                check(stt != null && tts != null) { "ابتدا مدل Shenava Koochik و مدل TTS محلی را وارد کنید." }
+                val pocketCanSpeak = pocketTtsSelected && pocketTtsStore.isReady()
+                check(stt != null && (tts != null || pocketCanSpeak)) {
+                    "ابتدا Shenava Koochik و یک موتور TTS محلی معتبر را انتخاب کنید."
+                }
                 alwaysOnPrefs.edit().putString(AlwaysOnKoochikService.PREF_STT_MODEL_ID, stt.id)
                     .putString(AlwaysOnKoochikService.PREF_TTS_MODEL_ID, tts?.id).apply()
                 AlwaysOnKoochikService.start(context)
@@ -188,10 +191,11 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             } else {
                 val stt = sttModels.firstOrNull { it.id == activeSttId }
                 val ttsModel = ttsModels.firstOrNull { it.id == activeTtsId }
+                val pocketCanSpeak = pocketTtsSelected && pocketTtsStore.isReady()
                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                     updateVoiceStatus("VOICE-ALWAYS-002: دینا تشخیص داده شد، اما مجوز میکروفون برای شروع مکالمه در دسترس نیست.")
-                } else if (stt == null || ttsModel == null) {
-                    updateVoiceStatus("VOICE-ALWAYS-003: دینا تشخیص داده شد؛ برای شروع مکالمه ابتدا مدل اصلی Shenava Koochik و مدل TTS را وارد و انتخاب کن.")
+                } else if (stt == null || (ttsModel == null && !pocketCanSpeak)) {
+                    updateVoiceStatus("VOICE-ALWAYS-003: دینا تشخیص داده شد؛ ابتدا Shenava Koochik و یک موتور TTS محلی معتبر را انتخاب کن.")
                 } else {
                     busy = true
                     updateVoiceStatus("عبارت «دینا» تشخیص داده شد؛ در حال شروع مکالمهٔ صوتی…")
@@ -439,10 +443,11 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
                 val stt = sttModels.firstOrNull { it.id == activeSttId && it.id.startsWith("stt-shenava-koochik-") && it.asrMode == "nemo-ctc" }
                     ?: sttModels.firstOrNull { it.id.startsWith("stt-shenava-koochik-") && it.asrMode == "nemo-ctc" }
                 val tts = ttsModels.firstOrNull { it.id == activeTtsId } ?: ttsModels.firstOrNull()
+                val pocketCanSpeak = pocketTtsSelected && pocketTtsStore.isReady()
                 if (enabled && stt == null) {
                     updateVoiceStatus("VOICE-ALWAYS-003: برای شنود دائمی باید مدل Shenava Koochik فارسی را وارد کنی.")
-                } else if (enabled && tts == null) {
-                    updateVoiceStatus("VOICE-ALWAYS-005: برای گفتن «متوجه شدم» و پاسخ صوتی، مدل TTS محلی را وارد کن.")
+                } else if (enabled && tts == null && !pocketCanSpeak) {
+                    updateVoiceStatus("VOICE-ALWAYS-005: برای گفتن «متوجه شدم» و پاسخ صوتی، یک موتور TTS محلی معتبر انتخاب کن.")
                 } else if (enabled && Build.VERSION.SDK_INT >= 33 &&
                     ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
                 ) {
@@ -453,7 +458,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
                         if (enabled) {
                             alwaysOnPrefs.edit()
                                 .putString(AlwaysOnKoochikService.PREF_STT_MODEL_ID, stt!!.id)
-                                .putString(AlwaysOnKoochikService.PREF_TTS_MODEL_ID, tts!!.id)
+                                .putString(AlwaysOnKoochikService.PREF_TTS_MODEL_ID, tts?.id)
                                 .apply()
                             AlwaysOnKoochikService.start(context)
                         } else AlwaysOnKoochikService.stop(context)
