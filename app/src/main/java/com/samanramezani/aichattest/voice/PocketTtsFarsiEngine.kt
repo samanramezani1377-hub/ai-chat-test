@@ -1,6 +1,15 @@
 package com.samanramezani.aichattest.voice
 
 import ai.onnxruntime.*
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
+import android.os.SystemClock
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import com.sentencepiece.Model
 import com.sentencepiece.Scoring
 import com.sentencepiece.SentencePieceAlgorithm
@@ -17,7 +26,7 @@ import kotlin.math.*
  * ONNX Runtime implementation of the upstream Pocket TTS Farsi v2 pipeline.
  * Model inference is offline and CPU-backed, like the upstream reference script.
  */
-internal class PocketTtsFarsiEngine(private val dir: File) : Closeable {
+internal class PocketTtsFarsiEngine(private val dir: File) : LocalTtsEngine {
     private val env = OrtEnvironment.getEnvironment()
     private val opts = OrtSession.SessionOptions()
     private val flow: OrtSession
