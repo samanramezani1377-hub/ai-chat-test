@@ -17,7 +17,7 @@ import kotlin.math.exp
  * if a transcript was accidentally supplied upstream. It does not infer user intent.
  */
 internal fun extractCurrentLayaTurn(rawText: String): String {
-    var text = rawText.replace('\\u0000', ' ').trim()
+    var text = rawText.filter { it != 0.toChar() }.trim()
     if (text.isBlank()) return ""
 
     val roleMarker = Regex("""(?im)^\s*(user|کاربر|شما|assistant|دستیار)\s*[:：]\s*""")
