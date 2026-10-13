@@ -163,18 +163,23 @@ jobs:
           # Do not pipe readelf directly into grep -q under pipefail: grep may
           # exit early and cause readelf to receive SIGPIPE, producing a false failure.
           readelf --dyn-syms --wide "$RUNNER_TEMP/libonnxruntime.so" > "$RUNNER_TEMP/onnxruntime-symbols.txt"
-          if ! grep -F 'OrtGetApiBase' "$RUNNER_TEMP/onnxruntime-symbols.txt" > /dev/null; then
-            echo "::error::Packaged libonnxruntime.so does not export OrtGetApiBase required by libsherpa-onnx-jni.so"
-            echo "ONNX Runtime dynamic symbols containing 'Ort':"
-            grep -F 'Ort' "$RUNNER_TEMP/onnxruntime-symbols.txt" | head -n 40 || true
-            unzip -p "$apk" lib/arm64-v8a/libsherpa-onnx-jni.so > "$RUNNER_TEMP/libsherpa-onnx-jni.so"
-            echo "JNI dynamic dependencies:"
-            readelf -d --wide "$RUNNER_TEMP/libsherpa-onnx-jni.so" | grep -E 'NEEDED|SONAME' || true
-            echo "JNI unresolved ONNX Runtime API symbols:"
-            readelf --dyn-syms --wide "$RUNNER_TEMP/libsherpa-onnx-jni.so" | grep -F 'OrtGetApiBase' || true
+          # Match only a DEFINED dynamic symbol. A plain grep also matches UND
+          # entries and previously let a broken runtime/JNI pairing pass CI.
+          if ! awk '$7 != "UND" && $8 ~ /^OrtGetApiBase([@].*)?$/ { found=1 } END { exit !found }' "$RUNNER_TEMP/onnxruntime-symbols.txt"; then
+            echo "::error::Packaged libonnxruntime.so does not DEFINE OrtGetApiBase required by libonnxruntime4j_jni.so"
+            echo "ONNX Runtime dynamic symbols containing 'OrtGetApiBase':"
+            grep -F 'OrtGetApiBase' "$RUNNER_TEMP/onnxruntime-symbols.txt" || true
+            unzip -p "$apk" lib/arm64-v8a/libonnxruntime4j_jni.so > "$RUNNER_TEMP/libonnxruntime4j_jni.so"
+            echo "ONNX Runtime JNI dynamic dependencies:"
+            readelf -d --wide "$RUNNER_TEMP/libonnxruntime4j_jni.so" | grep -E 'NEEDED|SONAME' || true
             exit 1
           fi
-          echo "Packaged sherpa JNI and ONNX Runtime are present; OrtGetApiBase is exported."
+          unzip -p "$apk" lib/arm64-v8a/libsherpa-onnx-jni.so > "$RUNNER_TEMP/libsherpa-onnx-jni.so"
+          if readelf -d --wide "$RUNNER_TEMP/libsherpa-onnx-jni.so" | grep -F 'Shared library: [libonnxruntime.so]' > /dev/null; then
+            echo "::error::sherpa JNI still dynamically depends on libonnxruntime.so; static-link AAR was not used"
+            exit 1
+          fi
+          echo "Verified: Laya JNI and its defined OrtGetApiBase are from the same ORT AAR; sherpa ORT is statically linked."
 
       - name: Verify OpenCL profiling and static backend linkage
         run: |
