@@ -93,6 +93,12 @@ class CloudflareProvider : ChatCompletionProvider {
                 .put("temperature", request.settings.temperature)
                 .put("max_tokens", request.settings.maxNewTokens.coerceIn(1, 8192))
                 .put("stream", true)
+            // Gemma 4's default thinking mode can consume the entire voice reply
+            // token budget before emitting user-visible content. Cloudflare's
+            // supported chat_template_kwargs flag disables that hidden budget.
+            if (config.model.trim().equals("@cf/google/gemma-4-26b-a4b-it", ignoreCase = true)) {
+                body.put("chat_template_kwargs", JSONObject().put("enable_thinking", false))
+            }
             request.settings.topP?.let { body.put("top_p", it) }
             request.settings.stopSequences.takeIf { it.isNotEmpty() }?.let { body.put("stop", JSONArray(it)) }
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
