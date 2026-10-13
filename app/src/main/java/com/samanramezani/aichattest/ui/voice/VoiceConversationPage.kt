@@ -113,7 +113,7 @@ internal fun VoiceConversationPage(
                         OutlinedButton(onClick = onImportLaya, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                             Text(if (layaModelReady) "جایگزینی مدل Laya INT4" else "وارد کردن مدل Laya INT4 · ZIP")
                         }
-                        Text("بسته ZIP باید شامل laya-multilingual-int4-layer32-vocab128.onnx و فایل هم‌نام .data، پوشه tokenizer/، و rl_agent_config.json باشد. مدل را داخل APK قرار نمی‌دهیم؛ واردسازی در حافظه خصوصی برنامه انجام می‌شود. عملیات عددی روی دستگاه اعتبارسنجی می‌شود و پاسخ نهایی فقط از TTS یا مدل گفت‌وگوی جداگانه می‌آید.", style = MaterialTheme.typography.bodySmall)
+                        Text("بسته ZIP باید شامل laya-multilingual-int4-layer32-vocab128.onnx و فایل هم‌نام .data، tokenizer/tokenizer.json، tokenizer/tokenizer_config.json، encoder/config.json و rl_agent_config.json باشد. پوشهٔ بالادستی Laya/ مجاز است. مدل را داخل APK قرار نمی‌دهیم؛ واردسازی در حافظه خصوصی برنامه انجام می‌شود. عملیات عددی روی دستگاه اعتبارسنجی می‌شود و پاسخ نهایی فقط از TTS یا مدل گفت‌وگوی جداگانه می‌آید.", style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(
                             onClick = { uriHandler.openUri("https://huggingface.co/androidli/laya-multilingual-onnx-int4/tree/main") },
                             modifier = Modifier.fillMaxWidth(),
