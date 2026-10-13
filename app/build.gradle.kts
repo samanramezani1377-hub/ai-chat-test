@@ -12,9 +12,9 @@ plugins {
 android {
     namespace = "com.samanramezani.aichattest"
     compileSdk = 36
+    ndkVersion = "29.0.13113456"
 
     defaultConfig {
-        ndkVersion = "29.0.13113456"
         applicationId = "com.samanramezani.aichattest"
         minSdk = 29
         targetSdk = 35
