@@ -179,17 +179,101 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
         }
     }
 
-    private fun normalize(raw: String): String = raw
-        .replace('ي', 'ی')
-        .replace('ى', 'ی')
-        .replace('ك', 'ک')
-        .replace('ۀ', 'ه')
-        .replace('ة', 'ه')
-        .replace('\u0640'.toString(), "")
-        .replace(Regex("[\\u064B-\\u065F\\u0670]"), "")
-        .replace(Regex("[؟?:]+"), " ")
-        .replace(Regex("\\s+"), " ")
-        .trim()
+    /**
+     * Kotlin port of normalize_fa.normalize_for_model() from the upstream
+     * ParSiGo/Pocket-TTS Farsi v2 pipeline. Keep this before ByT5 encoding:
+     * digits and Arabic letter variants are otherwise silently lost by G2P.
+     */
+    private fun normalize(raw: String): String {
+        if (raw.none { it in PERSIAN_LETTERS } && raw.any { it.code < 128 && it.isLetter() }) {
+            return raw.trim() // upstream normalize_for_model passes phoneme strings through
+        }
+        var text = java.text.Normalizer.normalize(raw, java.text.Normalizer.Form.NFC)
+        text = text.replace(INVISIBLES, "")
+            .replace(Regex("[\\u064B-\\u0655\\u0670\\u06D6-\\u06ED]"), "")
+        text = text.map { CHAR_MAP[it] ?: it }.joinToString("")
+        text = text.map { ch ->
+            when (ch) {
+                in '۰'..'۹' -> ('0'.code + (ch.code - '۰'.code)).toChar()
+                in '٠'..'٩' -> ('0'.code + (ch.code - '٠'.code)).toChar()
+                else -> ch
+            }
+        }.joinToString("")
+            .replace("٬", "")
+            .replace("٫", ".")
+            .replace(Regex("[٪%]"), " درصد ")
+        text = spellNumbers(text)
+        text = text.map { PUNCT_MAP[it] ?: it }.joinToString("")
+        text = text.map { ch ->
+            if (ch in PERSIAN_LETTERS || ch == '\u200c' || ch in KEPT_PUNCT || ch.isWhitespace()) ch else ' '
+        }.joinToString("")
+        text = text.replace(Regex("\\u200c+"), "\u200c")
+            .replace(Regex("\\s*\\u200c\\s*"), " ")
+            .replace(Regex("(?<![$PERSIAN_LETTERS])\\u200c|\\u200c(?![$PERSIAN_LETTERS])"), "")
+            .replace(Regex("\\s+([.،؛؟!:])"), "$1")
+            .replace(Regex("([.،؛؟!:])\\1+"), "$1")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .trimStart('.', '،', '؛', '؟', '!', ':', ' ')
+        return text.replace(Regex("[؟?:]"), "").replace(Regex("\\s+"), " ").trim()
+    }
+
+    private fun spellNumbers(input: String): String {
+        val compact = input.replace(Regex("(?<=\\d),(?=\\d{3}\\b)"), "")
+        return Regex("(\\d+)(?:[.](\\d+))?").replace(compact) { match ->
+            val whole = match.groupValues[1]
+            var fraction = match.groupValues.getOrElse(2) { "" }
+            if (whole.length > 12 || (whole.startsWith('0') && whole.length > 1)) {
+                val digits = whole.map(::digitWord).joinToString(" ")
+                val frac = if (fraction.isEmpty()) "" else " " + fraction.map(::digitWord).joinToString(" ")
+                " $digits$frac "
+            } else {
+                var words = numberToWords((whole.trimStart('0').ifEmpty { "0" }).toLong())
+                fraction = fraction.trimEnd('0')
+                if (fraction.isNotEmpty()) {
+                    val unit = when (fraction.length) { 1 -> "دهم"; 2 -> "صدم"; 3 -> "هزارم"; else -> "" }
+                    words += if (unit.isNotEmpty()) " ممیز ${numberToWords(fraction.toLong())} $unit"
+                    else " ممیز " + fraction.map(::digitWord).joinToString(" ")
+                }
+                " $words "
+            }
+        }
+    }
+
+    private fun digitWord(digit: Char): String = when (digit) {
+        '0' -> "صفر"; '1' -> "یک"; '2' -> "دو"; '3' -> "سه"; '4' -> "چهار"
+        '5' -> "پنج"; '6' -> "شش"; '7' -> "هفت"; '8' -> "هشت"; else -> "نه"
+    }
+
+    private fun numberToWords(value: Long): String {
+        if (value == 0L) return "صفر"
+        val ones = listOf("", "یک", "دو", "سه", "چهار", "پنج", "شش", "هفت", "هشت", "نه")
+        val teens = listOf("ده", "یازده", "دوازده", "سیزده", "چهارده", "پانزده", "شانزده", "هفده", "هجده", "نوزده")
+        val tens = listOf("", "", "بیست", "سی", "چهل", "پنجاه", "شصت", "هفتاد", "هشتاد", "نود")
+        val hundreds = listOf("", "صد", "دویست", "سیصد", "چهارصد", "پانصد", "ششصد", "هفتصد", "هشتصد", "نهصد")
+        fun underThousand(number: Int): String {
+            var n = number
+            val parts = mutableListOf<String>()
+            if (n >= 100) { parts += hundreds[n / 100]; n %= 100 }
+            if (n >= 20) { parts += tens[n / 10]; n %= 10 }
+            if (n in 10..19) { parts += teens[n - 10]; n = 0 }
+            if (n > 0) parts += ones[n]
+            return parts.joinToString(" و ")
+        }
+        var n = value
+        val parts = mutableListOf<String>()
+        val scales = listOf(1_000_000_000_000L to "تریلیون", 1_000_000_000L to "میلیارد", 1_000_000L to "میلیون", 1_000L to "هزار")
+        for ((scale, name) in scales) {
+            if (n >= scale) {
+                val count = n / scale
+                n %= scale
+                val head = if (count == 1L && scale == 1_000L) "" else underThousand(count.toInt()) + " "
+                parts += (head + name).trim()
+            }
+        }
+        if (n > 0) parts += underThousand(n.toInt())
+        return parts.joinToString(" و ")
+    }
 
     private fun splitWindows(text: String): List<String> {
         val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
@@ -238,6 +322,22 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
             'p' to "پی", 'q' to "کیو", 'r' to "آر", 's' to "اس", 't' to "تی",
             'u' to "یو", 'v' to "وی", 'w' to "دبلیو", 'x' to "ایکس", 'y' to "وای", 'z' to "زد"
         )
+        private const val PERSIAN_LETTERS = "آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهیئ"
+        private val INVISIBLES = Regex("[\\u200b\\u200d\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069\\ufeff\\u00ad]")
+        private val CHAR_MAP = mapOf(
+            'ي' to 'ی', 'ى' to 'ی', 'ۍ' to 'ی', 'ې' to 'ی', 'ك' to 'ک', 'ڪ' to 'ک',
+            'ة' to 'ه', 'ۀ' to 'ه', 'أ' to 'ا', 'إ' to 'ا', 'ٱ' to 'ا', 'ٲ' to 'ا',
+            'ٳ' to 'ا', 'ؤ' to 'و', 'ۂ' to 'ه', 'ۃ' to 'ه', 'ء' to ' ', 'ـ' to ' '
+        )
+        private val PUNCT_MAP = mapOf(
+            ',' to '،', '?' to '؟', ';' to '؛', '٬' to ' ', '٫' to '.', '…' to '.',
+            '»' to ' ', '«' to ' ', '“' to ' ', '”' to ' ', '‘' to ' ', '’' to ' ',
+            '"' to ' ', '\'' to ' ', '`' to ' ', '(' to ' ', ')' to ' ', '[' to ' ',
+            ']' to ' ', '{' to ' ', '}' to ' ', '–' to ' ', '—' to ' ', '−' to ' ',
+            '-' to ' ', '‐' to ' ', '/' to ' ', '\\\\' to ' ', '*' to ' ', '_' to ' ',
+            '|' to ' ', '×' to ' ', '=' to ' ', '+' to ' '
+        )
+        private val KEPT_PUNCT = setOf('.', '،', '؛', '؟', '!', ':')
         private val CLUSTER_START = setOf('پ','ت','ک','ب','ج','چ','ذ','ژ','ز','ص','ض','ث','ف','گ','س','ش')
     }
 }
