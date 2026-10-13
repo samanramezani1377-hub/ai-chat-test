@@ -30,7 +30,6 @@ import com.samanramezani.aichattest.voice.SmallSttComponent
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
 import com.samanramezani.aichattest.voice.LayaDecisionModelStore
 import com.samanramezani.aichattest.voice.LayaDecisionEngine
-import com.samanramezani.aichattest.voice.DinaCommandClassifier
 import com.samanramezani.aichattest.voice.DinaDeviceCommandExecutor
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.domain.InferenceSettings
@@ -720,16 +719,13 @@ internal class VoiceConversationController(
                 }
             }
             layaDecision?.trace?.forEach { onDiagnostic("LAYA-DECISION: $it") }
-            // Laya's confident non-chat choice takes priority. The existing Persian rule parser
-            // remains a deterministic safety net when Laya is absent/uncertain or misses a clear
-            // local command. The original utterance is passed to the chat model unchanged below.
-            val ruleCommand = DinaCommandClassifier.classify(utterance)
-            val command = when {
-                layaDecision != null && layaDecision.command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT ->
-                    layaDecision.command
-                ruleCommand.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT -> ruleCommand
-                else -> com.samanramezani.aichattest.voice.DinaCommand(com.samanramezani.aichattest.voice.DinaIntent.CHAT)
-            }
+            // Laya is the sole decision-maker for local voice actions.
+            // Never infer an intent or extract a number with a parallel rule/regex parser.
+            // If Laya is unavailable or abstains, forward the exact original transcript to chat.
+            val command = layaDecision?.command
+                ?: com.samanramezani.aichattest.voice.DinaCommand(
+                    com.samanramezani.aichattest.voice.DinaIntent.CHAT
+                )
             if (command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) {
                 val localReply = runCatching { DinaDeviceCommandExecutor(context).execute(command) }
                     .getOrElse { "انجام فرمان ناموفق بود: ${it.message ?: it.javaClass.simpleName}" }
