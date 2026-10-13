@@ -3,7 +3,6 @@ package com.samanramezani.aichattest.voice
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.nio.ByteBuffer
@@ -25,8 +24,6 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
         private const val DEFAULT_HEAD_MAX_SEQUENCE = 256
         private const val MIN_CONFIDENCE = 0.43
         private const val MIN_MARGIN = 0.09
-        private const val MIN_TEMPERATURE = 0.5
-        private const val MAX_TEMPERATURE = 5.0
     }
 
     @Volatile var lastError: String? = null
@@ -273,7 +270,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                     else -> "choice:11+"
                 }
                 val bucketTemperature = optionTemperatures[bucket]
-                val activeTemperature = (bucketTemperature ?: choiceTemperature).coerceIn(MIN_TEMPERATURE, MAX_TEMPERATURE)
+                val activeTemperature = bucketTemperature?.takeIf { it.isFinite() && it > 0.0 } ?: choiceTemperature
                 val activeCalibration = if (bucketTemperature != null) "rl_agent_config.json:$bucket" else temperatureSource
                 val scaled = logits.map { (it.toDouble() / activeTemperature).coerceIn(-80.0, 80.0) }
                 val scaledMax = scaled.maxOrNull() ?: return null
@@ -293,7 +290,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                         val m = maxOf(values[0].toDouble(), values[1].toDouble())
                         val e0 = kotlin.math.exp(values[0] - m)
                         val e1 = kotlin.math.exp(values[1] - m)
-                        " actProbability=${"%.3f".format(Locale.US, e1 / (e0 + e1))}"
+                        " actProbability=${"%.3f".format(Locale.US, e0 / (e0 + e1))}"
                     } else ""
                 }.orEmpty()
                 val top = ranked.take(3).joinToString(";") { index ->
@@ -368,7 +365,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
             }
         }
         val selected = if (rawTemperature.isFinite() && rawTemperature > 0.0) rawTemperature else Double.NaN
-        choiceTemperature = if (selected.isFinite()) selected.coerceIn(MIN_TEMPERATURE, MAX_TEMPERATURE) else 1.0
+        choiceTemperature = if (selected.isFinite() && selected > 0.0) selected else 1.0
         temperatureSource = if (selected.isFinite() && kotlin.math.abs(selected - 1.0) > 1e-6) {
             "rl_agent_config.json:temperature[choice]; bucket calibration checked per option count"
         } else {
