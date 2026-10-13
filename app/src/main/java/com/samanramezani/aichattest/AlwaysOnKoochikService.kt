@@ -44,15 +44,14 @@ class AlwaysOnKoochikService : Service() {
         const val ACTION_START = "com.samanramezani.aichattest.action.START_DINA_ALWAYS_ON"
         const val ACTION_STOP = "com.samanramezani.aichattest.action.STOP_DINA_ALWAYS_ON"
         const val ACTION_STOP_CONVERSATION = "com.samanramezani.aichattest.action.STOP_DINA_CONVERSATION"
-        const val EXTRA_OPEN_VOICE_FROM_WAKE = "open_voice_from_wake_word"
+        const val EXTRA_OPEN_VOICE_FROM_ALWAYS_ON = "open_voice_from_always_on"
         const val EXTRA_CONVERSATION_STARTED_IN_SERVICE = "dina_conversation_started_in_service"
 
-        const val PREFS = "dina_wake_word"
+        const val PREFS = "dina_always_on"
         const val PREF_STT_MODEL_ID = "voice_stt_model_id"
         const val PREF_TTS_MODEL_ID = "voice_tts_model_id"
         const val PREF_CONVERSATION_STATE = "conversation_state"
         const val PREF_WAKE_STATE = "wake_detection_state"
-        const val PREF_UI_STATE = "conversation_ui_state"
         const val PREF_LAST_STATUS = "conversation_last_status"
         const val PREF_LAST_DIAGNOSTIC = "conversation_last_diagnostic"
         const val PREF_ENABLED = "enabled"
@@ -294,7 +293,7 @@ class AlwaysOnKoochikService : Service() {
                 runCatching {
                     startActivity(Intent(this, MainActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        putExtra(EXTRA_OPEN_VOICE_FROM_WAKE, true)
+                        putExtra(EXTRA_OPEN_VOICE_FROM_ALWAYS_ON, true)
                         putExtra(EXTRA_CONVERSATION_STARTED_IN_SERVICE, true)
                     })
                 }.onFailure { Log.i(TAG, "UI launch not allowed; background voice session remains active", it) }
@@ -465,7 +464,7 @@ class AlwaysOnKoochikService : Service() {
         val openIntent = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra(EXTRA_OPEN_VOICE_FROM_WAKE, true)
+                putExtra(EXTRA_OPEN_VOICE_FROM_ALWAYS_ON, true)
                 putExtra(EXTRA_CONVERSATION_STARTED_IN_SERVICE, voiceController != null)
             }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
