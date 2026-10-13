@@ -176,6 +176,12 @@ internal class PocketTtsFarsiBundleStore(private val resolver: ContentResolver, 
             require(runCatching { JSONObject(File(stage, "manifest.json").readText()).length() > 0 }.getOrDefault(false)) {
                 "POCKET-TTS-IMPORT-009: manifest.json نامعتبر است."
             }
+            // Do not mark a bundle as installed merely because the files exist.
+            // Load all ONNX graphs (including external tensor data) before swapping
+            // it into the live model directory, so malformed bundles fail atomically.
+            onProgress("آزمایش بارگذاری گراف‌های ONNX و داده‌های خارجی…")
+            val runtimeCheck = PocketTtsFarsiRuntimeProbe(stage).inspect()
+            require(runtimeCheck.ok) { runtimeCheck.detail }
             val backup = File(root.parentFile, ".pocket-tts-backup-${System.currentTimeMillis()}")
             val hadOld = root.exists()
             if (hadOld) check(root.renameTo(backup)) { "POCKET-TTS-IMPORT-010: نسخه قبلی کنار گذاشته نشد." }
