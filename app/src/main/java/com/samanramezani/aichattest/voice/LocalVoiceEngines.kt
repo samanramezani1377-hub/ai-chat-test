@@ -231,6 +231,23 @@ class LocalNemoCtcAsr(private val entry: VoiceModelEntry) : LocalAsr {
         })
     }
 
+    /**
+     * Bounded rolling-window probe used only to spot "دینا" before the current utterance ends.
+     * It creates a temporary stream and never appends probe samples to the persistent utterance buffer.
+     */
+    fun recognizeWindow(samples: FloatArray, sampleRate: Int = 16000): String {
+        require(sampleRate == 16000) { "VOICE-STT-CTC-003: مدل Shenava به صدای ۱۶ کیلوهرتز نیاز دارد." }
+        if (samples.size < 8000) return ""
+        val stream = recognizer.createStream()
+        return try {
+            stream.acceptWaveform(samples, sampleRate)
+            recognizer.decode(stream)
+            recognizer.getResult(stream).text.trim()
+        } finally {
+            stream.release()
+        }
+    }
+
     override fun accept(samples: FloatArray, sampleRate: Int, speech: Boolean): AsrUpdate {
         require(sampleRate == 16000) { "VOICE-STT-CTC-003: مدل Shenava به صدای ۱۶ کیلوهرتز نیاز دارد." }
         if (speech) {
