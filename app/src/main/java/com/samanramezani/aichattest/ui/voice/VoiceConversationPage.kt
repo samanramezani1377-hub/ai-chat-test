@@ -47,6 +47,8 @@ internal fun VoiceConversationPage(
     layaStatus: String,
     pocketTtsReady: Boolean,
     pocketTtsStatus: String,
+    pocketTtsSelected: Boolean,
+    onPocketTtsSelectedChange: (Boolean) -> Unit,
     onDownloadPocketTts: () -> Unit,
     onImportPocketTts: () -> Unit,
     onImportLaya: () -> Unit,
@@ -212,6 +214,13 @@ internal fun VoiceConversationPage(
                             color = if (pocketTtsReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(pocketTtsStatus, style = MaterialTheme.typography.bodySmall)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("استفاده از Pocket TTS در مکالمه")
+                                Text("پس از نصب کامل بسته، پاسخ‌های صوتی از این موتور تولید می‌شوند.", style = MaterialTheme.typography.bodySmall)
+                            }
+                            Switch(checked = pocketTtsSelected, onCheckedChange = onPocketTtsSelectedChange, enabled = pocketTtsReady && !busy)
+                        }
                         Text("مجوز مدل: CC-BY-NC-4.0 (غیرتجاری).", style = MaterialTheme.typography.bodySmall)
                     }
                 }
