@@ -198,7 +198,7 @@ internal fun VoiceConversationPage(
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("بستهٔ Pocket TTS Farsi v2 · ONNX", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "دریافت همهٔ گراف‌ها و وزن‌های موردنیاز در یک ZIP حدود ۴۹۱ مگابایتی؛ فایل در پوشهٔ Downloads ذخیره می‌شود و بعداً می‌توانی همان ZIP را وارد کنی. این بسته با Piper متفاوت است و ورود فایل‌ها به‌تنهایی موتور را فعال نمی‌کند.",
+                            "دریافت همهٔ گراف‌ها و وزن‌های موردنیاز در یک ZIP حدود ۴۹۱ مگابایتی؛ فایل در Downloads ذخیره می‌شود. پس از وارد کردن و اعتبارسنجی ZIP، موتور Pocket TTS به‌صورت خودکار انتخاب می‌شود؛ برای اعمال آن، مکالمه را دوباره شروع کن.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Button(onClick = onDownloadPocketTts, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
