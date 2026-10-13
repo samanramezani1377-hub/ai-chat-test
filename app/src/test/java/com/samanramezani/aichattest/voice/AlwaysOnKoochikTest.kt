@@ -17,6 +17,7 @@ class AlwaysOnKoochikTest {
         assertEquals("سلام", extractDinaCommand("دينا سلام"))
         assertEquals("سلام", extractDinaCommand("دينه سلام"))
         assertEquals("hello", extractDinaCommand("Dina, hello"))
+        assertEquals("سلام", extractDinaCommand("دینا متوجه شدم سلام"))
     }
 
     @Test
