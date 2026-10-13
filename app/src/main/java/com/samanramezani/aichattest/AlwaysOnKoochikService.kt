@@ -240,7 +240,8 @@ class AlwaysOnKoochikService : Service() {
                     .getOrNull()
             }
 
-            val activeRecognizer = LocalNemoCtcAsr(stt)
+            val activeRecognizer = pendingConversationRecognizer ?: LocalNemoCtcAsr(stt)
+            pendingConversationRecognizer = null
             recognizer = activeRecognizer
             val frames = ArrayBlockingQueue<LocalMicrophone.Frame>(256)
             val activeMic = LocalMicrophone()
@@ -295,7 +296,8 @@ class AlwaysOnKoochikService : Service() {
                 if (finalCommand != null) {
                     if (isDinaSleepCommand(finalCommand)) {
                         // This is a conversation-level stop command, not a request to disable
-                        // always-on mode. Tear down the current turn and re-arm the wake listener.
+                        // always-on mode. Keep the recognizer loaded while re-arming the listener.
+                        pendingConversationRecognizer = activeRecognizer
                         detectedCommand = null
                         transitioningToConversation = false
                         running.set(false)
@@ -515,7 +517,8 @@ class AlwaysOnKoochikService : Service() {
                         .putLong("last_voice_line_at", System.currentTimeMillis())
                         .apply()
                 },
-                onWakeShutdown = {
+                onWakeShutdown = { loadedAsr ->
+                    pendingConversationRecognizer = loadedAsr as? LocalNemoCtcAsr
                     startService(
                         Intent(this, AlwaysOnKoochikService::class.java)
                             .setAction(ACTION_STOP_CONVERSATION),
