@@ -20,7 +20,6 @@ import androidx.core.content.ContextCompat
 import com.samanramezani.aichattest.ui.voice.VoiceConversationController
 import com.samanramezani.aichattest.voice.LocalMicrophone
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
-import com.samanramezani.aichattest.voice.LocalPiperTts
 import com.samanramezani.aichattest.voice.LayaDecisionEngine
 import com.samanramezani.aichattest.voice.VoiceModelKind
 import com.samanramezani.aichattest.voice.VoiceModelStore
@@ -29,8 +28,6 @@ import java.io.File
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.runBlocking
 
 /**
  * Wake-word control phrase: stop the current dialogue without disabling always-on wake listening.
@@ -101,12 +98,9 @@ class AlwaysOnKoochikService : Service() {
     @Volatile private var voiceController: VoiceConversationController? = null
     @Volatile private var transitioningToConversation = false
     @Volatile private var wakeLock: PowerManager.WakeLock? = null
-    @Volatile private var acknowledgementTts: LocalPiperTts? = null
-    @Volatile private var acknowledgementThread: Thread? = null
     // Transfer the already-loaded wake recognizer into the conversation controller instead of
     // loading the same large Shenava model a second time immediately after wake detection.
     @Volatile private var pendingConversationRecognizer: LocalNemoCtcAsr? = null
-    private val acknowledgementPlayed = AtomicBoolean(false)
 
     override fun onCreate() {
         super.onCreate()
@@ -219,27 +213,9 @@ class AlwaysOnKoochikService : Service() {
             } ?: sttModels.firstOrNull {
                 it.id.startsWith("stt-shenava-koochik-") && it.asrMode == "nemo-ctc"
             } ?: error("VOICE-ALWAYS-003: مدل فارسی Shenava Koochik آماده نیست؛ model.onnx و tokens.txt را وارد کنید.")
-            val ttsModels = store.list(VoiceModelKind.TTS)
-            val selectedTtsId = prefs.getString(PREF_TTS_MODEL_ID, null)
-            val tts = ttsModels.firstOrNull { it.id == selectedTtsId } ?: ttsModels.firstOrNull()
-            acknowledgementPlayed.set(false)
-
-            // TTS is optional for wake detection: a broken/incompatible voice model must not
-            // prevent the recognizer from starting and opening the microphone.
-            acknowledgementTts = tts?.let { selectedTts ->
-                runCatching { LocalPiperTts(selectedTts) }
-                    .onFailure { error ->
-                        Log.e(TAG, "Local TTS unavailable; continuing wake detection without spoken acknowledgement", error)
-                        prefs.edit()
-                            .putString(
-                                PREF_LAST_DIAGNOSTIC,
-                                "VOICE-TTS-OPTIONAL: wake detection continues without TTS: ${error.stackTraceToString()}",
-                            )
-                            .apply()
-                    }
-                    .getOrNull()
-            }
-
+            // Do not construct a separate ONNX/Piper engine for the wake acknowledgement.
+            // The conversation controller speaks the acknowledgement through the exact TTS
+            // engine selected in settings (Piper or Pocket TTS), avoiding a hidden fallback.
             val activeRecognizer = pendingConversationRecognizer ?: LocalNemoCtcAsr(stt)
             pendingConversationRecognizer = null
             recognizer = activeRecognizer
@@ -350,32 +326,16 @@ class AlwaysOnKoochikService : Service() {
 
         if (detectedCommand != null) {
             val command = detectedCommand.orEmpty()
-            // Start the dialogue turn first so the command is submitted to the model. Gate assistant
-            // speech until the local acknowledgement finishes, preventing the two voices from overlapping.
-            val speechGate = CompletableDeferred<Unit>()
+            // Hand the wake acknowledgement to the same controller/engine that speaks the
+            // answer. Its speech queue places "متوجه شدم" before the response, so the configured
+            // TTS selection is honored and the two utterances cannot overlap.
             val started = startVoiceConversationInService(
                 command,
-                acknowledgeWake = false,
-                speechStartGate = speechGate,
+                acknowledgeWake = true,
+                speechStartGate = null,
             )
             transitioningToConversation = false
             if (started) {
-                speakAcknowledgementAsync()
-                val ackThread = acknowledgementThread
-                Thread({
-                    try {
-                        if (ackThread != null) ackThread.join()
-                    } catch (_: InterruptedException) {
-                        Thread.currentThread().interrupt()
-                    } finally {
-                        runCatching { acknowledgementTts?.close() }
-                        acknowledgementTts = null
-                        speechGate.complete(Unit)
-                    }
-                }, "Dina-Acknowledgement-Cleanup").apply {
-                    isDaemon = true
-                    start()
-                }
                 notifyStatus("«دینا» شنیده شد؛ جمله به مدل گفت‌وگو ارسال شد و سپس «متوجه شدم» با TTS محلی پخش می‌شود.")
                 runCatching {
                     startActivity(Intent(this, MainActivity::class.java).apply {
@@ -385,17 +345,12 @@ class AlwaysOnKoochikService : Service() {
                     })
                 }.onFailure { Log.i(TAG, "UI launch not allowed; background voice session remains active", it) }
             } else {
-                runCatching { acknowledgementTts?.close() }
-                acknowledgementTts = null
-                speechGate.complete(Unit)
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                     .putString(PREF_LAST_STATUS, "مدل مکالمه آماده نشد؛ شنود دوباره شروع می‌شود.")
                     .apply()
                 startListenerIfNeeded()
             }
         } else if (failure != null) {
-            runCatching { acknowledgementTts?.close() }
-            acknowledgementTts = null
             val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
             updateStatus(
                 "VOICE-ALWAYS-004: شنود فارسی متوقف شد: ${failure.message ?: failure.javaClass.simpleName}",
@@ -421,48 +376,6 @@ class AlwaysOnKoochikService : Service() {
         }
     }
 
-    private fun speakAcknowledgementAsync() {
-        if (acknowledgementThread?.isAlive == true || acknowledgementPlayed.get()) return
-        val engine = acknowledgementTts ?: return
-        acknowledgementThread = Thread({
-            try {
-                // The controller has already received the extracted command and starts model inference
-                // asynchronously. Speak the acknowledgement in parallel with that inference.
-                runBlocking {
-                    // Synthesize the acknowledgement as ONE complete Persian phrase. Generating
-                    // each word separately resets Piper's prosody and can make the second word
-                    // unnaturally slow or leave a repeated-consonant tail. Use the model's normal
-                    // speaking rate and let LocalPiperTts drain the full PCM before returning.
-                    val cancelled = AtomicBoolean(false)
-                    var synthesisMs = -1L
-                    engine.speak(
-                        "متوجه شدم.",
-                        cancelled,
-                        onSynthesisComplete = { synthesisMs = it },
-                        speed = 1.0f,
-                        playbackTailMs = 100L,
-                    )
-                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                        .putString(
-                            PREF_LAST_DIAGNOSTIC,
-                            "ALWAYS_ON_TTS_ACK: text=single-utterance speed=1.0 synthesisMs=$synthesisMs playback=completed",
-                        )
-                        .apply()
-                }
-                acknowledgementPlayed.set(true)
-                Log.i(TAG, "Local TTS acknowledgement completed as one utterance")
-            } catch (t: Throwable) {
-                Log.e(TAG, "Could not speak local wake acknowledgement", t)
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .putString(PREF_LAST_DIAGNOSTIC, "ALWAYS_ON_TTS_ACK_FAILED: ${t.stackTraceToString()}")
-                    .apply()
-            }
-        }, "Dina-Local-TTS-Acknowledgement").apply {
-            isDaemon = true
-            start()
-        }
-    }
-
     private fun startVoiceConversationInService(
         initialUtterance: String,
         acknowledgeWake: Boolean,
@@ -478,12 +391,19 @@ class AlwaysOnKoochikService : Service() {
             val ttsModels = store.list(VoiceModelKind.TTS)
             val selectedTtsId = prefs.getString(PREF_TTS_MODEL_ID, null)
             val tts = ttsModels.firstOrNull { it.id == selectedTtsId } ?: ttsModels.firstOrNull()
-                ?: error("VOICE-ALWAYS-005: مدل TTS محلی آماده نیست.")
+            val usePocketTts = prefs.getBoolean("pocket_tts_selected", false)
+            if (usePocketTts) {
+                check(com.samanramezani.aichattest.voice.PocketTtsFarsiBundleStore(
+                    contentResolver, File(filesDir, "voice-models/pocket-tts-farsi-v2"),
+                ).isReady()) { "POCKET-TTS-SELECT-002: بستهٔ Pocket TTS نصب نیست یا ناقص است." }
+            } else {
+                check(tts != null) { "VOICE-ALWAYS-005: مدل TTS محلی انتخاب نشده است." }
+            }
             val container = (application as? AIChatApplication)?.container
                 ?: error("VOICE-ALWAYS-006: مخزن برنامه در دسترس نیست.")
             prefs.edit()
                 .putString(PREF_STT_MODEL_ID, stt.id)
-                .putString(PREF_TTS_MODEL_ID, tts.id)
+                .putString(PREF_TTS_MODEL_ID, tts?.id)
                 .putString(PREF_CONVERSATION_STATE, "CONVERSATION_START_REQUESTED")
                 .putBoolean(PREF_MIC_LISTENING, false)
                 .apply()
@@ -565,10 +485,6 @@ class AlwaysOnKoochikService : Service() {
             .putBoolean(PREF_MIC_LISTENING, false)
             .apply()
         transitioningToConversation = false
-        runCatching { acknowledgementThread?.interrupt() }
-        runCatching { acknowledgementTts?.close() }
-        acknowledgementTts = null
-        acknowledgementThread = null
         runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
         wakeLock = null
         stopForeground(STOP_FOREGROUND_REMOVE)
