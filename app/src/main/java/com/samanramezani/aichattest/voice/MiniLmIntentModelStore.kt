@@ -27,12 +27,40 @@ internal class MiniLmIntentModelStore(
      */
     fun ensureDefaultDecisionTree(assets: AssetManager) {
         val target = File(root, "decision_trees.json")
-        if (target.isFile) return
         if (!root.exists() && !root.mkdirs()) {
             throw IllegalStateException("MINILM-TREE-INIT-001: پوشهٔ تنظیمات درخت تصمیم ساخته نشد.")
         }
-        assets.open("minilm/decision_trees.json").use { input ->
-            target.outputStream().use { output -> input.copyTo(output) }
+        val bundled = assets.open("minilm/decision_trees.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        if (!target.isFile) {
+            target.writeText(bundled, Charsets.UTF_8)
+            return
+        }
+
+        // Upgrade older app-managed/imported trees without overwriting any existing custom choices.
+        // New nodes are added only when absent, so a user-edited volume_level node is preserved.
+        runCatching {
+            val current = JSONObject(target.readText(Charsets.UTF_8))
+            val defaults = JSONObject(bundled)
+            val currentNodes = current.optJSONObject("nodes") ?: JSONObject().also { current.put("nodes", it) }
+            val defaultNodes = defaults.optJSONObject("nodes") ?: return@runCatching
+            val keys = defaultNodes.keys()
+            var changed = false
+            while (keys.hasNext()) {
+                val key = keys.next()
+                if (!currentNodes.has(key)) {
+                    currentNodes.put(key, defaultNodes.getJSONObject(key))
+                    changed = true
+                }
+            }
+            if (changed) {
+                current.put("version", maxOf(current.optInt("version", 1), defaults.optInt("version", 1)))
+                val temp = File(root, "decision_trees.json.tmp")
+                temp.writeText(current.toString(2), Charsets.UTF_8)
+                if (!temp.renameTo(target)) {
+                    temp.copyTo(target, overwrite = true)
+                    temp.delete()
+                }
+            }
         }
     }
 
