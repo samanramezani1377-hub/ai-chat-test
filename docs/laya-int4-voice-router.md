@@ -26,17 +26,16 @@ Model source: [androidli/laya-multilingual-onnx-int4](https://huggingface.co/and
 ```text
 STT transcript (original text)
   └─ Laya choice: request category
-       ├─ GET_TIME  → read device clock → Persian number words → local TTS
-       ├─ GET_DATE  → read device date → local TTS
-       ├─ AUDIO     → choose mute / unmute / increase / decrease / set
-       │    ├─ increase/decrease → read actual media volume
-       │    │    └─ Laya choice: target level 1..10 → apply target volume
-       │    └─ set → Laya choice: level 1..10 or OTHER_EXPLICIT_VALUE
-       │         └─ explicit percentage/value is validated before execution
-       ├─ DISPLAY   → choose increase / decrease / set → validate and execute
-       ├─ DISPLAY   → choose increase / decrease / set (target chosen by Laya)
-       ├─ APPLICATION / MEDIA / SYSTEM → reserved, currently inactive
-       └─ OTHER     → no local device action; forward original transcript unchanged
+       ├─ AUDIO       → Laya chooses operation
+       │    ├─ INCREASE / DECREASE → change Android media volume by one native step
+       │    ├─ MUTE / UNMUTE        → apply the selected action
+       │    └─ SET_VOLUME           → Laya chooses target level 0–10; executor applies percentage
+       ├─ DISPLAY     → Laya chooses operation; for SET, Laya chooses target percentage
+       ├─ INFORMATION → Laya chooses GET_TIME / GET_DATE / CHAT
+       │    ├─ GET_TIME / GET_DATE → local device value → Persian text → local TTS
+       │    └─ CHAT                → forward the exact original transcript
+       ├─ APPLICATION / MEDIA / SYSTEM → reserved and inactive; no device action
+       └─ OTHER       → no device action; forward the exact original transcript
 ```
 
 For absolute volume, Laya chooses a target level from 0–10 itself; a percentage such as 50% must be mapped by Laya to level 5, then converted to 50% for the Android executor. Relative increase/decrease commands change the Android media stream by exactly one native volume step. The executor validates values against Android's supported range.
