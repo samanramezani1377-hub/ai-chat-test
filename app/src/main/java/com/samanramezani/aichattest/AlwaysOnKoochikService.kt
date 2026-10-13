@@ -429,32 +429,23 @@ class AlwaysOnKoochikService : Service() {
                 // The controller has already received the extracted command and starts model inference
                 // asynchronously. Speak the acknowledgement in parallel with that inference.
                 runBlocking {
-                    // Synthesize the two words independently. Some Piper/espeak voices truncate
-                    // or swallow the final word in a short two-word phrase, even when AudioTrack
-                    // drains correctly. Separate synthesis and playback makes «شدم» a complete
-                    // utterance of its own; no diacritics are injected into the model's tokenizer.
+                    // Synthesize the acknowledgement as ONE complete Persian phrase. Generating
+                    // each word separately resets Piper's prosody and can make the second word
+                    // unnaturally slow or leave a repeated-consonant tail. Use the model's normal
+                    // speaking rate and let LocalPiperTts drain the full PCM before returning.
                     val cancelled = AtomicBoolean(false)
-                    var firstSynthesisMs = -1L
-                    var secondSynthesisMs = -1L
+                    var synthesisMs = -1L
                     engine.speak(
-                        "متوجه",
+                        "متوجه شدم.",
                         cancelled,
-                        onSynthesisComplete = { firstSynthesisMs = it },
-                        speed = 0.78f,
-                        playbackTailMs = 180L,
-                    )
-                    kotlinx.coroutines.delay(100L)
-                    engine.speak(
-                        "شدم.",
-                        cancelled,
-                        onSynthesisComplete = { secondSynthesisMs = it },
-                        speed = 0.78f,
-                        playbackTailMs = 900L,
+                        onSynthesisComplete = { synthesisMs = it },
+                        speed = 1.0f,
+                        playbackTailMs = 100L,
                     )
                     getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                         .putString(
                             PREF_LAST_DIAGNOSTIC,
-                            "ALWAYS_ON_TTS_ACK: firstWordSynthesisMs=$firstSynthesisMs secondWordSynthesisMs=$secondSynthesisMs secondWordPlayback=completed",
+                            "ALWAYS_ON_TTS_ACK: text=single-utterance chars=11 speed=1.0 synthesisMs=$synthesisMs playback=completed",
                         )
                         .apply()
                 }
