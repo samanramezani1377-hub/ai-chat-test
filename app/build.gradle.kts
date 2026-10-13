@@ -94,7 +94,7 @@ val extractOnnxRuntimeApi by tasks.registering {
 }
 
 // The Java ONNX API also requires its JNI bridge. Keep sherpa's matching
-// libonnxruntime.so, but package the bridge from the same 1.28.2 AAR so
+// libonnxruntime.so, but package the bridge from the same 1.28.0 AAR so
 // OrtEnvironment can initialize in-process with Laya.
 val extractOnnxRuntimeJni by tasks.registering {
     inputs.files(onnxRuntimeApiAar)
@@ -117,7 +117,7 @@ android.sourceSets.getByName("main").jniLibs.srcDir(onnxRuntimeJniDir)
 tasks.named("preBuild").configure { dependsOn(extractOnnxRuntimeJni) }
 
 dependencies {
-    add(onnxRuntimeApiAar.name, "com.microsoft.onnxruntime:onnxruntime-android:1.28.2@aar")
+    add(onnxRuntimeApiAar.name, "com.microsoft.onnxruntime:onnxruntime-android:1.28.0@aar")
     implementation(files(onnxRuntimeApiJar).builtBy(extractOnnxRuntimeApi))
     implementation(project(":core:domain"))
     implementation(project(":core:actions"))
