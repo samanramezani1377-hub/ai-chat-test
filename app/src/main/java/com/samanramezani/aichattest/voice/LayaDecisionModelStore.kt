@@ -248,7 +248,7 @@ internal class LayaDecisionModelStore(
                     require(entries <= MAX_ENTRIES) {
                         "LAYA-CACHE-002: تعداد فایل‌های بستهٔ ذخیره‌شده بیش از حد مجاز است."
                     }
-                    val relative = entry.name.replace('\\\\', '/').removePrefix("./").trimEnd('/')
+                    val relative = entry.name.replace('\\', '/').removePrefix("./").trimEnd('/')
                     require(relative.isNotBlank() && !relative.startsWith("/") &&
                         relative.split('/').none { it == ".." || it == "." || it.isBlank() }
                     ) { "LAYA-CACHE-003: مسیر ناامن در بستهٔ ذخیره‌شده وجود دارد." }
