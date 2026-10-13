@@ -43,6 +43,13 @@ class DinaCommandClassifierTest {
         assertEquals(DinaIntent.CHAT, DinaCommandClassifier.classify("درباره صدای پرنده‌ها توضیح بده").intent)
     }
 
+    @Test fun parsesSpokenPersianNumberForVolumePercent() {
+        val command = DinaCommandClassifier.classify("دینا صدا رو بذار روی پنجاه درصد")
+        assertEquals(DinaIntent.SET_VOLUME, command.intent)
+        assertEquals(50, command.value)
+        assertEquals(true, command.valueIsPercent)
+    }
+
     @Test fun recognizesMuteCommandLocally() {
         assertEquals(DinaIntent.MUTE, DinaCommandClassifier.classify("دینا صدا رو قطع کن").intent)
     }
