@@ -42,7 +42,29 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install the project's Android NDK
-        run: sdkmanager "ndk;27.2.12479018" "platforms;android-36"
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=("ndk;27.2.12479018" "platforms;android-36")
+          # sdkmanager occasionally receives a truncated/corrupt package archive.
+          # Retry from a clean temporary download area instead of failing the job
+          # on the first SeekableByteChannel/ZIP extraction error.
+          for attempt in 1 2 3; do
+            echo "Android SDK package install attempt ${attempt}/3"
+            if yes | sdkmanager --install "${packages[@]}"; then
+              test -d "$ANDROID_HOME/ndk/27.2.12479018"
+              test -d "$ANDROID_HOME/platforms/android-36"
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::SDK/NDK package installation failed; clearing incomplete downloads before retry."
+              rm -rf "$ANDROID_HOME/temp" "$ANDROID_HOME/.temp"
+              rm -rf "$ANDROID_HOME/ndk/27.2.12479018"
+              sleep $((attempt * 5))
+            fi
+          done
+          echo "::error::Could not install Android NDK 27.2.12479018 and Android platform 36 after 3 attempts."
+          exit 1
 
       - name: Set up Rust for the official Laya tokenizer
         uses: dtolnay/rust-toolchain@stable
@@ -88,7 +110,29 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install the project's Android NDK
-        run: sdkmanager "ndk;27.2.12479018" "platforms;android-36"
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=("ndk;27.2.12479018" "platforms;android-36")
+          # sdkmanager occasionally receives a truncated/corrupt package archive.
+          # Retry from a clean temporary download area instead of failing the job
+          # on the first SeekableByteChannel/ZIP extraction error.
+          for attempt in 1 2 3; do
+            echo "Android SDK package install attempt ${attempt}/3"
+            if yes | sdkmanager --install "${packages[@]}"; then
+              test -d "$ANDROID_HOME/ndk/27.2.12479018"
+              test -d "$ANDROID_HOME/platforms/android-36"
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::SDK/NDK package installation failed; clearing incomplete downloads before retry."
+              rm -rf "$ANDROID_HOME/temp" "$ANDROID_HOME/.temp"
+              rm -rf "$ANDROID_HOME/ndk/27.2.12479018"
+              sleep $((attempt * 5))
+            fi
+          done
+          echo "::error::Could not install Android NDK 27.2.12479018 and Android platform 36 after 3 attempts."
+          exit 1
 
       - name: Set up Rust for the official Laya tokenizer
         uses: dtolnay/rust-toolchain@stable
@@ -283,7 +327,29 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install the project's Android NDK
-        run: sdkmanager "ndk;27.2.12479018" "platforms;android-36"
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=("ndk;27.2.12479018" "platforms;android-36")
+          # sdkmanager occasionally receives a truncated/corrupt package archive.
+          # Retry from a clean temporary download area instead of failing the job
+          # on the first SeekableByteChannel/ZIP extraction error.
+          for attempt in 1 2 3; do
+            echo "Android SDK package install attempt ${attempt}/3"
+            if yes | sdkmanager --install "${packages[@]}"; then
+              test -d "$ANDROID_HOME/ndk/27.2.12479018"
+              test -d "$ANDROID_HOME/platforms/android-36"
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::SDK/NDK package installation failed; clearing incomplete downloads before retry."
+              rm -rf "$ANDROID_HOME/temp" "$ANDROID_HOME/.temp"
+              rm -rf "$ANDROID_HOME/ndk/27.2.12479018"
+              sleep $((attempt * 5))
+            fi
+          done
+          echo "::error::Could not install Android NDK 27.2.12479018 and Android platform 36 after 3 attempts."
+          exit 1
 
       - name: Set up Rust for the official Laya tokenizer
         uses: dtolnay/rust-toolchain@stable
