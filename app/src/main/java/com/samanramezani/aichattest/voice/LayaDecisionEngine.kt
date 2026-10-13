@@ -16,37 +16,6 @@ import kotlin.math.exp
  * The normal voice path passes one utterance; this boundary defensively strips old turns
  * if a transcript was accidentally supplied upstream. It does not infer user intent.
  */
-internal fun extractCurrentLayaTurn(rawText: String): String {
-    var text = rawText.filter { it != 0.toChar() }.trim()
-    if (text.isBlank()) return ""
-
-    val roleMarker = Regex("""(?im)^\s*(user|کاربر|شما|assistant|دستیار)\s*[:：]\s*""")
-    val roles = roleMarker.findAll(text).toList()
-    if (roles.isNotEmpty()) {
-        val lastUser = roles.lastOrNull {
-            it.groupValues[1].equals("user", true) ||
-                it.groupValues[1] == "کاربر" || it.groupValues[1] == "شما"
-        } ?: return ""
-        val nextRole = roles.firstOrNull { it.range.first > lastUser.range.first }
-        text = text.substring(lastUser.range.last + 1, nextRole?.range?.first ?: text.length).trim()
-    }
-
-    // Numbering at the start of a user's actual message is user-authored content
-    // (for example, "۳. ساعت چنده؟") and must be preserved. Only when multiple
-    // numbered turns are present do we isolate the final segment; retain its number.
-    val turnMarker = Regex("""(?<!\\S)[0-9۰-۹٠-٩]{1,3}[.)]\\s*""")
-    val markers = turnMarker.findAll(text).toList()
-    if (markers.size >= 2) {
-        text = text.substring(markers.last().range.first).trim()
-    }
-    return text
-}
-
-/**
- * Laya's typed-choice ONNX runner. It performs all decisions on-device and never generates
- * assistant text. A decision is accepted only when its softmax confidence and margin clear
- * conservative thresholds; otherwise no device action is inferred and the original text is routed to chat.
- */
 internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
     data class Decision(val command: DinaCommand, val route: String, val confidence: Double, val trace: List<String>)
 
@@ -103,9 +72,10 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
     fun classify(rawText: String, currentVolume: Int? = null, maxVolume: Int? = null): Decision? = synchronized(lock) {
         lastTrace = emptyList()
         lastError = null
-        val decisionText = extractCurrentLayaTurn(rawText)
+        // Preserve the complete user-authored text exactly for Laya inference.
+        val decisionText = rawText
         if (decisionText.isBlank()) {
-            lastTrace = listOf("inputChars=${rawText.length} decisionChars=0 reason=no-current-user-turn")
+            lastTrace = listOf("inputChars=${rawText.length} modelInputChars=0 reason=blank-user-input")
             return@synchronized null
         }
         if (!isReady()) {
@@ -126,10 +96,10 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
             // split. The previous taxonomy confidently misrouted short Persian requests
             // such as "ساعت چنده؟" to SYSTEM, preventing the local clock/date path from running.
             // Laya still makes the decision; this is not a keyword/regex fallback.
-            trace += "input originalChars=${rawText.length} decisionChars=${decisionText.length} staleTurnsRemoved=${decisionText != rawText.trim()}"
+            trace += "input originalChars=${rawText.length} modelInputChars=${decisionText.length} userTextPreserved=true"
             val domain = choose(
                 decisionText,
-                "فقط آخرین پیام کاربر را طبقه‌بندی کن؛ هیچ درخواست قدیمی یا پاسخ دستیار را در نظر نگیر. فقط متن پیام فعلی مهم است. اگر درخواست درباره ساعت همین لحظه یا تاریخ امروز است، گزینه مربوط را انتخاب کن. مسیر‌یابی، سفر، آدرس، پرسش دانشی و گفت‌وگوی معمولی CHAT هستند. Choose based only on the current user utterance, not previous turns.",
+                "تمام متن ورودی کاربر را دقیقاً همان‌طور که دریافت شده طبقه‌بندی کن؛ شماره‌گذاری، نشانه‌گذاری و ترتیب کلمات بخشی از متن کاربر هستند. اگر درخواست درباره ساعت همین لحظه یا تاریخ امروز است، گزینه مربوط را انتخاب کن. مسیر‌یابی، سفر، آدرس، پرسش دانشی و گفت‌وگوی معمولی CHAT هستند. Classify the complete supplied user text exactly as received; do not rewrite or remove user-authored content.",
                 listOf(
                     Option("GET_TIME", "درخواست صریح ساعت فعلی همین لحظه یا پرسش «ساعت چنده؟». فقط وقتی کاربر زمان فعلی را می‌خواهد. Current time now, what time is it."),
                     Option("GET_DATE", "درخواست صریح تاریخ امروز یا روز و ماه فعلی. فقط وقتی کاربر تاریخ فعلی را می‌خواهد. Today's current date."),
