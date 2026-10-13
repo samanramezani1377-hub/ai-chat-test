@@ -13,7 +13,7 @@ internal enum class DinaIntent {
     CHAT, GET_TIME, GET_DATE, INCREASE_VOLUME, DECREASE_VOLUME, SET_VOLUME,
     INCREASE_BRIGHTNESS, DECREASE_BRIGHTNESS, SET_BRIGHTNESS
 }
-internal data class DinaCommand(val intent: DinaIntent, val value: Int? = null)
+internal data class DinaCommand(val intent: DinaIntent, val value: Int? = null, val valueIsPercent: Boolean = false)
 
 internal object DinaCommandClassifier {
     private fun normalize(input: String): String = input
@@ -29,26 +29,36 @@ internal object DinaCommandClassifier {
     fun classify(raw: String): DinaCommand {
         val text = normalize(raw)
         if (text.isBlank()) return DinaCommand(DinaIntent.CHAT)
-        val number = Regex("(?:روی|رو|به|در|درجه|عدد)?\\s*(\\d{1,3})\\s*(?:درصد|درجه)?").findAll(text)
-            .mapNotNull { it.groupValues[1].toIntOrNull() }.firstOrNull()
-        if (Regex("(ساعت چنده|ساعت چند است|ساعت الان|الان ساعت|چه ساعتی|زمان فعلی|time\\b)").containsMatchIn(text)) {
+
+        if (Regex("(ساعت چنده|ساعت چند است|ساعت الان|الان ساعت|ساعت رو بگو|چه ساعتیه?|زمان فعلی|time\\b)").containsMatchIn(text)) {
             return DinaCommand(DinaIntent.GET_TIME)
         }
-        if (Regex("(امروز چندمه|تاریخ امروز|امروز چه تاریخ|تاریخ چنده)").containsMatchIn(text)) {
+        if (Regex("(امروز چندمه|تاریخ امروز|امروز چه تاریخ|تاریخ چنده|تاریخ امروز رو بگو)").containsMatchIn(text)) {
             return DinaCommand(DinaIntent.GET_DATE)
         }
-        val volume = Regex("(صدا|ولوم|volume|بلندی)").containsMatchIn(text)
+
+        val volume = Regex("(صدا|ولوم|volume|بلندی صدا)").containsMatchIn(text)
         val brightness = Regex("(نور صفحه|روشنایی صفحه|نور نمایشگر|روشنایی|brightness)").containsMatchIn(text)
-        val set = Regex("(بذار|بگذار|تنظیم کن|تنظیمش کن|قرار بده|روی|رو |به |set )").containsMatchIn(text)
-        val decrease = Regex("(کم کن|کمتر کن|پایین بیار|کاهش بده|بیار پایین|کم شه|کمتر شه|decrease|turn down)").containsMatchIn(text)
-        val increase = Regex("(زیاد کن|بیشتر کن|بالا ببر|افزایش بده|ببر بالا|زیاد شه|بیشتر شه|increase|turn up)").containsMatchIn(text)
+        val decrease = Regex("(کم کن|کمتر کن|پایین بیار|کاهش بده|بیار پایین|کم شه|کمتر شه|کمش کن|decrease|turn down)").containsMatchIn(text)
+        val increase = Regex("(زیاد کن|بیشتر کن|بالا ببر|افزایش بده|ببر بالا|زیاد شه|بیشتر شه|زیادش کن|increase|turn up)").containsMatchIn(text)
+        val targetMatch = Regex("(?:روی|رو|به)\\s*(\\d{1,3})\\s*(درصد|درجه)?").find(text)
+            ?: Regex("(?:بذار|بزار|بگذار|تنظیم(?:ش)? کن|قرار بده|set)\\s+(?:[^0-9]{0,24})?(\\d{1,3})\\s*(درصد|درجه)?").find(text)
+        val target = targetMatch?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val explicitPercent = targetMatch?.groupValues?.getOrNull(2) == "درصد" ||
+            Regex("\\d{1,3}\\s*درصد").containsMatchIn(text)
+        val hasSetCue = Regex("(بذار|بزار|بگذار|تنظیم|قرار بده|روی\\s*\\d|رو\\s*\\d|به\\s*\\d|set\\s)").containsMatchIn(text)
+
         if (volume) {
-            if (set && number != null) return DinaCommand(DinaIntent.SET_VOLUME, number)
+            if (hasSetCue && target != null && target in 0..100) {
+                return DinaCommand(DinaIntent.SET_VOLUME, target, explicitPercent)
+            }
             if (decrease) return DinaCommand(DinaIntent.DECREASE_VOLUME)
             if (increase) return DinaCommand(DinaIntent.INCREASE_VOLUME)
         }
         if (brightness) {
-            if (set && number != null) return DinaCommand(DinaIntent.SET_BRIGHTNESS, number)
+            if (hasSetCue && target != null && target in 0..100) {
+                return DinaCommand(DinaIntent.SET_BRIGHTNESS, target, true)
+            }
             if (decrease) return DinaCommand(DinaIntent.DECREASE_BRIGHTNESS)
             if (increase) return DinaCommand(DinaIntent.INCREASE_BRIGHTNESS)
         }
@@ -67,7 +77,7 @@ internal class DinaDeviceCommandExecutor(private val context: Context) {
         DinaIntent.GET_DATE -> "تاریخ امروز ${SimpleDateFormat("d MMMM yyyy", Locale("fa", "IR")).format(Date())} است."
         DinaIntent.INCREASE_VOLUME -> changeVolume(2)
         DinaIntent.DECREASE_VOLUME -> changeVolume(-2)
-        DinaIntent.SET_VOLUME -> setVolume(requireNotNull(command.value))
+        DinaIntent.SET_VOLUME -> setVolume(requireNotNull(command.value), command.valueIsPercent)
         DinaIntent.INCREASE_BRIGHTNESS -> changeBrightness(0.10f)
         DinaIntent.DECREASE_BRIGHTNESS -> changeBrightness(-0.10f)
         DinaIntent.SET_BRIGHTNESS -> setBrightness(requireNotNull(command.value))
@@ -82,11 +92,11 @@ internal class DinaDeviceCommandExecutor(private val context: Context) {
         return "صدای رسانه از ${persianNumber(current)} به ${persianNumber(target)} از ${persianNumber(max)} تغییر کرد."
     }
 
-    private fun setVolume(requested: Int): String {
+    private fun setVolume(requested: Int, isPercent: Boolean): String {
         require(requested in 0..100) { "VOICE-CMD-VOLUME-001: مقدار صدا باید بین صفر تا صد باشد." }
         val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        val target = if (requested <= max) requested else (requested * max / 100.0).toInt().coerceIn(0, max)
+        val target = if (isPercent || requested > max) (requested * max / 100.0).toInt().coerceIn(0, max) else requested
         audio.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
         return "صدای رسانه روی ${persianNumber(target)} از ${persianNumber(max)} تنظیم شد."
     }
