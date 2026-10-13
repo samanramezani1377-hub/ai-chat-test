@@ -104,16 +104,18 @@ internal class MiniLmDecisionTreeRouter(private val root: File) : AutoCloseable 
         for (i in 0 until choices.length()) {
             val choice = choices.getJSONObject(i)
             val id = choice.getString("id")
-            val texts = ArrayList<String>()
-            texts += choice.optString("description", id.replace('_', ' ').lowercase(Locale.ROOT))
-            val examples = choice.optJSONArray("examples") ?: JSONArray()
-            for (j in 0 until examples.length()) texts += examples.getString(j)
-            var best = Float.NEGATIVE_INFINITY
-            for (candidateText in texts) {
-                val vector = candidateCache.getOrPut(candidateText) { embed(candidateText) }
-                best = maxOf(best, cosine(query, vector))
+            // Embed one compact prototype per option instead of running ONNX once per example.
+            // This keeps the first decision fast while retaining examples as semantic anchors.
+            val prototype = buildString {
+                append(choice.optString("description", id.replace('_', ' ').lowercase(Locale.ROOT)))
+                val examples = choice.optJSONArray("examples") ?: JSONArray()
+                for (j in 0 until minOf(examples.length(), 3)) {
+                    append(". ")
+                    append(examples.getString(j))
+                }
             }
-            ranked += id to best
+            val vector = candidateCache.getOrPut("$nodeId:$id:$prototype") { embed(prototype) }
+            ranked += id to cosine(query, vector)
         }
         val ordered = ranked.sortedByDescending { it.second }
         val best = ordered.firstOrNull() ?: return null
