@@ -61,11 +61,8 @@ internal class MiniLmDecisionTreeRouter(private val root: File) : AutoCloseable 
             val query = embed(rawText)
             val domain = choose("domain", query) ?: return@synchronized null
             val command = when (domain) {
-                "TIME_DATE" -> when (choose("time_date", query)) {
-                    "GET_TIME" -> DinaCommand(DinaIntent.GET_TIME)
-                    "GET_DATE" -> DinaCommand(DinaIntent.GET_DATE)
-                    else -> null
-                }
+                "GET_TIME" -> DinaCommand(DinaIntent.GET_TIME)
+                "GET_DATE" -> DinaCommand(DinaIntent.GET_DATE)
                 "AUDIO" -> routeDeviceCommand("audio", query, rawText)
                 "DISPLAY" -> routeDeviceCommand("display", query, rawText)
                 "CHAT" -> DinaCommand(DinaIntent.CHAT)
@@ -155,7 +152,7 @@ internal class MiniLmDecisionTreeRouter(private val root: File) : AutoCloseable 
         minSimilarity = config.optDouble("min_similarity", DEFAULT_MIN_SIMILARITY).toFloat()
         minMargin = config.optDouble("min_margin", DEFAULT_MIN_MARGIN).toFloat()
         require(minSimilarity in -1f..1f && minMargin >= 0f) { "آستانه‌های شباهت نامعتبرند." }
-        for (nodeId in listOf("domain", "time_date", "audio", "display")) {
+        for (nodeId in listOf("domain", "audio", "display")) {
             require(nodes?.optJSONObject(nodeId)?.optJSONArray("choices")?.length()?.let { it > 0 } == true) {
                 "درخت تصمیم گره معتبر '$nodeId' را ندارد."
             }
