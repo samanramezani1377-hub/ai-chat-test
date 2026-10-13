@@ -300,7 +300,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 val top = ranked.take(3).joinToString(";") { index ->
                     "${options[index].id}:logit=${"%.4f".format(Locale.US, logits[index])},p=${"%.4f".format(Locale.US, probs[index])}"
                 }
-                val detail = "stage=${instructions.take(48).replace(Regex("\\s+"), " ")} qtype=choice(0) options=${options.size} inputTokens=${ids.size} stateTokens=${stateIds.size} headTokens=${ids.size - stateIds.size - 1} outputs=${active.outputNames.joinToString(",")} temperature=${"%.3f".format(Locale.US, activeTemperature)} calibration=$activeCalibration confidence=${"%.3f".format(Locale.US, confidence)} margin=${"%.3f".format(Locale.US, margin)}$actSummary top=[$top]"
+                val detail = "stage=${instructions.take(48).replace(Regex("\\s+"), " ")} tokenizer=hf-tokenizers-rust clsId=${tok.clsId} sepId=${tok.sepId} maskId=${tok.maskId} qtype=choice(0) options=${options.size} inputTokens=${ids.size} stateTokens=${stateIds.size} headTokens=${ids.size - stateIds.size - 1} outputs=${active.outputNames.joinToString(",")} temperature=${"%.3f".format(Locale.US, activeTemperature)} calibration=$activeCalibration confidence=${"%.3f".format(Locale.US, confidence)} margin=${"%.3f".format(Locale.US, margin)}$actSummary top=[$top]"
                 lastTrace = lastTrace + detail
                 // Keep the app's conservative action gate on the top probability and margin.
                 // Entropy confidence is the official Laya confidence metric, but it is not
