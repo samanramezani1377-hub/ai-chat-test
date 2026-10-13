@@ -6,6 +6,8 @@ import ai.onnxruntime.OrtSession
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.LongBuffer
 import java.util.Locale
 import kotlin.math.exp
@@ -59,11 +61,11 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
                 activeSession.inputNames.forEach { inputName ->
                     val tensor = when {
                         inputName.contains("input_ids", ignoreCase = true) ->
-                            OnnxTensor.createTensor(env, LongBuffer.wrap(encoded.ids), longArrayOf(1, MAX_LENGTH.toLong()))
+                            createLongTensor(env, encoded.ids)
                         inputName.contains("attention_mask", ignoreCase = true) ->
-                            OnnxTensor.createTensor(env, LongBuffer.wrap(encoded.mask), longArrayOf(1, MAX_LENGTH.toLong()))
+                            createLongTensor(env, encoded.mask)
                         inputName.contains("token_type_ids", ignoreCase = true) ->
-                            OnnxTensor.createTensor(env, LongBuffer.wrap(encoded.typeIds), longArrayOf(1, MAX_LENGTH.toLong()))
+                            createLongTensor(env, encoded.typeIds)
                         else -> return@synchronized null
                     }
                     inputs[inputName] = tensor
@@ -97,6 +99,16 @@ internal class MiniLmOnnxIntentClassifier(private val root: File) : AutoCloseabl
             lastError = "MINILM-INFER-005: ${t.message ?: t.javaClass.simpleName}"
             null
         }
+    }
+
+    private fun createLongTensor(env: OrtEnvironment, values: LongArray): OnnxTensor {
+        // ONNX Runtime requires direct, native-order buffers for zero-copy tensor inputs.
+        val buffer = ByteBuffer.allocateDirect(values.size * java.lang.Long.BYTES)
+            .order(ByteOrder.nativeOrder())
+            .asLongBuffer()
+        buffer.put(values)
+        buffer.rewind()
+        return OnnxTensor.createTensor(env, buffer, longArrayOf(1, values.size.toLong()))
     }
 
     private fun commandFor(label: String, text: String): DinaCommand? {
