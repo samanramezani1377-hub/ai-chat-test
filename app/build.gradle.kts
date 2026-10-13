@@ -6,6 +6,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.mozilla.rust-android-gradle.rust-android") version "0.9.6"
 }
 
 android {
@@ -13,6 +14,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
+        ndkVersion = "29.0.13113456"
         applicationId = "com.samanramezani.aichattest"
         minSdk = 29
         targetSdk = 35
@@ -63,6 +65,20 @@ android {
             useLegacyPackaging = false
         }
     }
+}
+
+
+/*
+ * Build Hugging Face's official Rust Tokenizers on-device for Laya.
+ * Only arm64-v8a is packaged because this app's native inference runtime is arm64-only.
+ */
+cargo {
+    module = "../rs-laya-tokenizers"
+    libname = "laya_tokenizers"
+    targets = listOf("arm64")
+    profile = "release"
+    targetDirectory = "src/main/jniLibs/"
+    prebuiltToolchains = true
 }
 
 // sherpa-onnx's regular AAR exports ONNX Runtime as libonnxruntime.so, which
