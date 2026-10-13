@@ -53,18 +53,43 @@ android {
             excludes += setOf("sherpa-onnx/native/**")
         }
         jniLibs {
-            // Both AARs contain libonnxruntime.so. sherpa-onnx 1.13.8's JNI
-            // library is linked against its bundled ONNX Runtime 1.28.2, so
-            // keep sherpa's native runtime first and use the Microsoft AAR for
-            // the Java API classes. Do not let the 1.28.0 native binary shadow it.
-            pickFirsts += "**/libonnxruntime.so"
+            // Do not use pickFirst for libonnxruntime.so: the Microsoft AAR is
+            // unpacked as Java classes only, so sherpa's ABI-matched native
+            // runtime is the only ONNX Runtime .so packaged in the APK.
             // Keep native libraries uncompressed and avoid a second extracted copy on disk.
             useLegacyPackaging = false
         }
     }
 }
 
+// Resolve ONNX Runtime's Java API without packaging its competing native .so.
+ // sherpa-onnx bundles the native ONNX Runtime version required by libsherpa-onnx-jni.so.
+val onnxRuntimeApiAar by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+
+val onnxRuntimeApiJar = layout.buildDirectory.file("generated/onnxruntime-api/classes.jar")
+val extractOnnxRuntimeApi by tasks.registering {
+    inputs.files(onnxRuntimeApiAar)
+    outputs.file(onnxRuntimeApiJar)
+    doLast {
+        val aar = onnxRuntimeApiAar.singleFile
+        val output = onnxRuntimeApiJar.get().asFile
+        output.parentFile.mkdirs()
+        java.util.zip.ZipFile(aar).use { zip ->
+            val entry = zip.getEntry("classes.jar")
+                ?: error("ONNX Runtime AAR does not contain classes.jar: ${aar.name}")
+            zip.getInputStream(entry).use { input ->
+                output.outputStream().use { destination -> input.copyTo(destination) }
+            }
+        }
+    }
+}
+
 dependencies {
+    add(onnxRuntimeApiAar.name, "com.microsoft.onnxruntime:onnxruntime-android:1.28.0@aar")
+    implementation(files(onnxRuntimeApiJar).builtBy(extractOnnxRuntimeApi))
     implementation(project(":core:domain"))
     implementation(project(":core:actions"))
     implementation(project(":core:observability"))
@@ -76,14 +101,10 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     // Local-only ASR/TTS engines; no network inference or cloud API.
-    // sherpa AAR first so pickFirst keeps the native ORT binary it was linked against.
+    // The AAR supplies sherpa's Kotlin/JVM API and its matching native runtime.
     implementation("com.github.k2-fsa:sherpa-onnx:v1.13.8") {
-        // The Android AAR already bundles the sherpa Kotlin/JVM API classes.
-        // Exclude the duplicate JVM jar published as a transitive dependency.
         exclude(group = "com.github.k2-fsa.sherpa-onnx", module = "sherpa-onnx-jvm")
     }
-    // Supplies the ONNX Runtime Java API for Laya; native .so is selected from sherpa above.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0")
     implementation("org.apache.commons:commons-compress:1.28.0")
 
     // Keep all Compose artifacts on Google's stable BOM so Gradle cannot resolve
