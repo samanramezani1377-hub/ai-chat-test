@@ -1,3 +1,5 @@
+import java.net.URL
+import java.security.MessageDigest
 import java.util.zip.ZipFile
 
 plugins {
@@ -64,7 +66,29 @@ android {
     }
 }
 
-// Resolve ONNX Runtime's Java API without packaging its competing native .so.
+// sherpa-onnx's regular AAR exports ONNX Runtime as libonnxruntime.so, which
+// collides with the separate Microsoft JNI bridge used by Laya. Use sherpa's
+// official static-link AAR so ASR/TTS carries its own statically linked ORT,
+// and reserve libonnxruntime.so for the matching Microsoft Java API/JNI pair.
+val sherpaStaticAar = layout.buildDirectory.file("generated/sherpa/sherpa-onnx-static-link-onnxruntime-1.13.8.aar")
+val downloadSherpaStaticAar by tasks.registering {
+    outputs.file(sherpaStaticAar)
+    doLast {
+        val output = outputs.files.singleFile
+        output.parentFile.mkdirs()
+        URL("https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-static-link-onnxruntime-1.13.8.aar")
+            .openStream().use { input ->
+                output.outputStream().use { destination -> input.copyTo(destination) }
+            }
+        val actual = MessageDigest.getInstance("SHA-256").digest(output.readBytes())
+            .joinToString("") { "%02x".format(it) }
+        check(actual == "b22c3fc1b6a45666d28892bb2f7694beeb77a8362d7ebd77c1a5431ec9435471") {
+            "sherpa static-link AAR checksum mismatch: $actual"
+        }
+    }
+}
+
+// Resolve ONNX Runtime's Java API and both matching native libraries from one AAR.
  // sherpa-onnx bundles the native ONNX Runtime version required by libsherpa-onnx-jni.so.
 val onnxRuntimeApiAar by configurations.creating {
     isCanBeConsumed = false
@@ -93,28 +117,30 @@ val extractOnnxRuntimeApi by tasks.registering {
     }
 }
 
-// The Java ONNX API also requires its JNI bridge. Keep sherpa's matching
-// libonnxruntime.so, but package the bridge from the same 1.28.0 AAR so
-// OrtEnvironment can initialize in-process with Laya.
+// Package the native runtime and JNI bridge from the same Microsoft 1.28.0
+// AAR. Do not mix its JNI bridge with sherpa's separately-built ORT runtime.
 val extractOnnxRuntimeJni by tasks.registering {
     inputs.files(onnxRuntimeApiAar)
-    outputs.file(onnxRuntimeJniDir.map { it.file("arm64-v8a/libonnxruntime4j_jni.so") })
+    outputs.dir(onnxRuntimeJniDir)
     doLast {
         val aar = inputs.files.singleFile
-        val output = outputs.files.singleFile
-        output.parentFile.mkdirs()
+        val outputDir = outputs.files.singleFile
+        val abiDir = outputDir.resolve("arm64-v8a")
+        abiDir.mkdirs()
         ZipFile(aar).use { zip ->
-            val entry = zip.getEntry("jni/arm64-v8a/libonnxruntime4j_jni.so")
-                ?: error("ONNX Runtime AAR does not contain jni/arm64-v8a/libonnxruntime4j_jni.so: ${aar.name}")
-            zip.getInputStream(entry).use { input ->
-                output.outputStream().use { destination -> input.copyTo(destination) }
+            listOf("libonnxruntime.so", "libonnxruntime4j_jni.so").forEach { library ->
+                val path = "jni/arm64-v8a/$library"
+                val entry = zip.getEntry(path) ?: error("ONNX Runtime AAR does not contain $path: ${aar.name}")
+                zip.getInputStream(entry).use { input ->
+                    abiDir.resolve(library).outputStream().use { destination -> input.copyTo(destination) }
+                }
             }
         }
     }
 }
 
 android.sourceSets.getByName("main").jniLibs.srcDir(onnxRuntimeJniDir)
-tasks.named("preBuild").configure { dependsOn(extractOnnxRuntimeJni) }
+tasks.named("preBuild").configure { dependsOn(extractOnnxRuntimeJni, downloadSherpaStaticAar) }
 
 dependencies {
     add(onnxRuntimeApiAar.name, "com.microsoft.onnxruntime:onnxruntime-android:1.28.0@aar")
@@ -130,10 +156,9 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     // Local-only ASR/TTS engines; no network inference or cloud API.
-    // The AAR supplies sherpa's Kotlin/JVM API and its matching native runtime.
-    implementation("com.github.k2-fsa:sherpa-onnx:v1.13.8") {
-        exclude(group = "com.github.k2-fsa.sherpa-onnx", module = "sherpa-onnx-jvm")
-    }
+    // Static-link variant avoids the libonnxruntime.so SONAME collision with
+    // the independently initialized ONNX Runtime Java API used by Laya.
+    implementation(files(sherpaStaticAar).builtBy(downloadSherpaStaticAar))
     implementation("org.apache.commons:commons-compress:1.28.0")
 
     // Keep all Compose artifacts on Google's stable BOM so Gradle cannot resolve
