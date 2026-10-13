@@ -501,8 +501,14 @@ private class LayaTokenizer(file: File) {
         return value.filterNot { it == '\u0000' || it == '\uFFFD' }
     }
 
-    private fun rootNormalizerContains(needle: String): Boolean =
-        normalizerConfig.contains(needle)
+    private fun rootNormalizerContains(needle: String): Boolean {
+        if (normalizerConfig.contains(needle, ignoreCase = true)) return true
+        // BertNormalizer stores strip_accents as a boolean, while tokenizer pipelines store
+        // the same operation as a "StripAccents" stage. Support both JSON representations.
+        return needle.equals("StripAccents", ignoreCase = true) &&
+            Regex("\\"strip_accents\\"\\s*:\\s*true", RegexOption.IGNORE_CASE)
+                .containsMatchIn(normalizerConfig)
+    }
 
     private fun splitBertPreTokens(text: String): List<String> {
         val result = ArrayList<String>()
