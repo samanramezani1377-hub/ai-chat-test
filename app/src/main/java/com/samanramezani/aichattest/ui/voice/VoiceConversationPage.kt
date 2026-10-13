@@ -339,7 +339,7 @@ internal fun VoiceConversationPage(
                     Text("برای گفت‌وگو آماده‌ای؟", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "ابتدا در تنظیمات، مدل تشخیص گفتار و مدل تولید گفتار را انتخاب کن. بعد شروع را بزن و صحبت کن؛ پاسخ دستیار به‌صورت صوتی پخش می‌شود.",
+                        "ابتدا در تنظیمات، مدل تشخیص گفتار و یکی از موتورهای تولید گفتار Piper یا Pocket TTS را انتخاب کن. بعد شروع را بزن و صحبت کن؛ پاسخ دستیار به‌صورت صوتی پخش می‌شود.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
