@@ -116,32 +116,56 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
             }
             trace += "domain=${domain.id} confidence=${"%.3f".format(Locale.US, domain.confidence)}"
 
-            // GET_TIME and GET_DATE are read-only answers, not device mutations.
-            // Requiring a second differently worded classifier question was causing clear
-            // requests such as «ساعت چنده؟» to be rejected after the domain classifier had
-            // already selected GET_TIME. Keep the independent confirmation only for actions
-            // that change device state (volume/brightness).
-            if (domain.id == "GET_TIME" || domain.id == "GET_DATE") {
-                trace += "local_action_validation=SKIPPED_READ_ONLY route=${domain.id}"
-            } else if (domain.id == "AUDIO" || domain.id == "DISPLAY") {
+            // Independent second-stage confirmation is required for every local route,
+            // including read-only time/date answers. The confirmation prompt is conditioned
+            // on the exact first-stage route and contrasts it with realistic near-misses;
+            // this avoids the old generic yes/no question that rejected valid time requests
+            // while still guarding against false positives.
+            if (domain.id != "CHAT") {
+                val confirmation = when (domain.id) {
+                    "GET_TIME" -> Triple(
+                        "مرحلهٔ تأیید مستقل: آیا منظور صریح همین پیامِ کامل کاربر پرسیدن ساعت فعلیِ همین لحظه است؟ فقط اگر کاربر واقعاً ساعت الان را می‌خواهد CONFIRM_ROUTE را انتخاب کن. وجود واژهٔ «ساعت» به‌تنهایی کافی نیست؛ سؤال دربارهٔ ساعت کاری، مدت‌زمان، تنظیم ساعت، زمان یک رویداد، یا مثال/نقل‌قول، درخواست ساعت فعلی نیست. اگر درخواست مبهم است یا منظور دیگری دارد، گزینهٔ رد را انتخاب کن. Do not infer intent from keywords alone; verify the user's actual request.",
+                        Option("CONFIRM_ROUTE", "پیام صریحاً می‌پرسد ساعت همین الان چند است؛ مثلاً «ساعت چنده؟»، «الان ساعت چند است؟»، «می‌تونی ساعت فعلی رو بگی؟». The user wants the current local clock time now."),
+                        Option("REJECT_ROUTE", "پیام ساعت فعلی را نمی‌پرسد، فقط واژهٔ ساعت را دارد، دربارهٔ زمان/ساعت دیگری است، یا مبهم است. Not a clear request for the current clock time.")
+                    )
+                    "GET_DATE" -> Triple(
+                        "مرحلهٔ تأیید مستقل: آیا منظور صریح همین پیامِ کامل کاربر دانستن تاریخ امروز است؟ فقط اگر کاربر تاریخ امروز/تاریخ فعلی را می‌خواهد CONFIRM_ROUTE را انتخاب کن. پرسش دربارهٔ ساعت، روز یک رویداد، تاریخ تاریخی یا برنامه‌ریزی آینده درخواست تاریخ امروز نیست. اگر مبهم است، رد کن. Verify intent, not keywords.",
+                        Option("CONFIRM_ROUTE", "پیام صریحاً تاریخ امروز یا تاریخ فعلی را می‌خواهد؛ مثلاً «امروز چندمه؟» یا «تاریخ امروز رو بگو». The user wants today's date."),
+                        Option("REJECT_ROUTE", "پیام تاریخ امروز را نمی‌خواهد، دربارهٔ تاریخ دیگری است، یا مبهم است. Not a clear request for today's date.")
+                    )
+                    "AUDIO" -> Triple(
+                        "مرحلهٔ تأیید مستقل: آیا کاربر در همین پیام واقعاً می‌خواهد بلندی صدای رسانهٔ دستگاه تغییر کند؟ باید درخواست عملیِ افزایش، کاهش، تنظیم، قطع یا وصل صدا باشد. پرسش اطلاعاتی دربارهٔ صدا، اشاره به صدای یک فایل/ویدئو، یا جملهٔ نقل‌شده فرمان دستگاه نیست. اگر تغییر صدا صریح نیست، رد کن. Verify the requested action, not topic words.",
+                        Option("CONFIRM_ROUTE", "کاربر صریحاً می‌خواهد صدای رسانهٔ همین دستگاه را تغییر دهد، تنظیم کند، قطع یا وصل کند. Explicit media-volume control request."),
+                        Option("REJECT_ROUTE", "کاربر فقط دربارهٔ صدا حرف می‌زند/سؤال می‌پرسد یا درخواست تغییر صدای رسانه روشن نیست. No clear media-volume action.")
+                    )
+                    "DISPLAY" -> Triple(
+                        "مرحلهٔ تأیید مستقل: آیا کاربر در همین پیام واقعاً می‌خواهد روشنایی نمایشگر دستگاه تغییر کند؟ باید درخواست عملیِ بیشتر/کمتر کردن یا تنظیم روشنایی باشد. پرسش اطلاعاتی دربارهٔ صفحه، اشاره به روشنایی در متن دیگر یا جملهٔ نقل‌شده فرمان دستگاه نیست. اگر تغییر روشنایی صریح نیست، رد کن. Verify the requested action, not topic words.",
+                        Option("CONFIRM_ROUTE", "کاربر صریحاً می‌خواهد روشنایی نمایشگر همین دستگاه را کم، زیاد یا روی مقداری تنظیم کند. Explicit screen-brightness control request."),
+                        Option("REJECT_ROUTE", "کاربر فقط دربارهٔ روشنایی/صفحه حرف می‌زند یا درخواست تغییر روشنایی روشن نیست. No clear brightness action.")
+                    )
+                    else -> null
+                }
+                if (confirmation == null) {
+                    lastTrace = trace.toList() + lastTrace
+                    lastError = "LAYA-INFER-009: مسیر محلی ناشناخته در مرحلهٔ تأیید؛ درخواست به مدل گفت‌وگو سپرده شد."
+                    return@synchronized null
+                }
+                val (instructions, confirmOption, rejectOption) = confirmation
                 val validation = choose(
                     decisionText,
-                    "آیا آخرین پیام کاربر به‌طور صریح تغییر در تنظیمات دستگاه می‌خواهد (کنترل صدای رسانه یا روشنایی صفحه)؟ درخواست مسیر، سفر، آدرس، اطلاعات عمومی، ساعت، تاریخ یا گفت‌وگوی عادی اقدام تغییردهنده نیست. بر اساس همین پیام فعلی پاسخ بده، نه متن قبلی. Does this current utterance explicitly request a device-state change?",
-                    listOf(
-                        Option("LOCAL_ACTION", "درخواست صریح برای تغییر صدای رسانه یا روشنایی صفحه. Explicit device-state change."),
-                        Option("CHAT", "هر درخواست دیگر یا هر مورد مبهم؛ ساعت، تاریخ، مسیر، سفر، آدرس، اطلاعات عمومی یا گفت‌وگو. Normal chat or uncertain request."),
-                    ),
+                    "$instructions\nمسیر پیشنهادی مرحلهٔ اول: ${domain.id}. در این مرحله از نو دسته‌بندی کلی نکن؛ فقط بررسی کن آیا متن کامل کاربر واقعاً همین مسیر پیشنهادی را تأیید می‌کند. متن کاربر را تغییر نده و به سابقهٔ مکالمه تکیه نکن. If uncertain, reject the proposed route.",
+                    listOf(confirmOption, rejectOption),
                     minConfidence = 0.50,
                     minMaxProbability = 0.58,
                     minMargin = 0.16,
                 )
-                if (validation?.id != "LOCAL_ACTION") {
-                    trace += "local_action_validation=${validation?.id ?: "ABSTAIN"} result=CHAT"
+                if (validation?.id != "CONFIRM_ROUTE") {
+                    trace += "route_confirmation=${validation?.id ?: "ABSTAIN"} proposed=${domain.id} result=CHAT"
                     lastTrace = trace.toList() + lastTrace
-                    lastError = "LAYA-INFER-008: تأیید مستقل تغییر تنظیمات دستگاه رد شد؛ متن اصلی به مدل گفت‌وگو فرستاده می‌شود."
+                    lastError = "LAYA-INFER-008: مسیر ${domain.id} در تأیید مستقل تأیید نشد؛ متن اصلی به مدل گفت‌وگو فرستاده می‌شود."
                     return@synchronized null
                 }
-                trace += "local_action_validation=LOCAL_ACTION confidence=${"%.3f".format(Locale.US, validation.confidence)}"
+                trace += "route_confirmation=CONFIRM_ROUTE proposed=${domain.id} confidence=${"%.3f".format(Locale.US, validation.confidence)}"
             }
 
             val command = when (domain.id) {
