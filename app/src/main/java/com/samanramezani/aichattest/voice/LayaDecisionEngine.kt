@@ -409,13 +409,14 @@ private class LayaTokenizer(file: File) {
         val previous = IntArray(n + 1) { -1 }
         val previousToken = arrayOfNulls<String>(n + 1)
         best[0] = 0.0
-        val pieces = vocab.keys.filter { it.isNotEmpty() }.sortedByDescending { it.length }
         for (start in 0 until n) {
             if (best[start].isInfinite() && best[start] < 0) continue
             var matched = false
-            for (piece in pieces) {
-                val end = start + piece.length
-                if (end > n || !normalized.startsWith(piece, start)) continue
+            // Tokenizer vocabularies can contain hundreds of thousands of entries. Scan a
+            // bounded character window instead of iterating the entire vocabulary per position.
+            for (end in minOf(n, start + 32) downTo start + 1) {
+                val piece = normalized.substring(start, end)
+                if (piece !in vocab) continue
                 val score = tokenScores[piece] ?: -10.0
                 val candidate = best[start] + score
                 if (candidate > best[end]) {
