@@ -27,14 +27,14 @@ class Qwen3PromptFormatterTest {
     }
 
     @Test
-    fun noThinkingModeLeavesAssistantPrefixOpenWithoutThinkBlock() {
+    fun noThinkingModeSelectsFinalChannelWithoutThinkBlock() {
         val prompt = Qwen3PromptFormatter.format(
             listOf(ChatMessage(ChatMessage.Role.USER, "سلام")),
             enableThinking = false,
         )
 
         assertEquals(
-            "<|im_start|>user\nسلام<|im_end|>\n<|im_start|>assistant\n",
+            "<|im_start|>user\nسلام<|im_end|>\n<|im_start|>assistant\n<|channel|>final\n",
             prompt,
         )
     }
