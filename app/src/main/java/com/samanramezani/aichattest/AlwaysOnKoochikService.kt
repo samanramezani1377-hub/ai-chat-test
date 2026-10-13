@@ -391,6 +391,9 @@ class AlwaysOnKoochikService : Service() {
                                 .putString(PREF_LAST_DIAGNOSTIC, "ALWAYS_ON_TTS_ACK: synthesisMs=$duration")
                                 .apply()
                         },
+                        // Speak the complete acknowledgement more slowly and leave a short audible tail.
+                        speed = 0.80f,
+                        playbackTailMs = 800L,
                     )
                 }
                 acknowledgementPlayed.set(true)
