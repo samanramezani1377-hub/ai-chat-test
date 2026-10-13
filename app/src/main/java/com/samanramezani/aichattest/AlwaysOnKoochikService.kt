@@ -202,9 +202,24 @@ class AlwaysOnKoochikService : Service() {
             val ttsModels = store.list(VoiceModelKind.TTS)
             val selectedTtsId = prefs.getString(PREF_TTS_MODEL_ID, null)
             val tts = ttsModels.firstOrNull { it.id == selectedTtsId } ?: ttsModels.firstOrNull()
-                ?: error("VOICE-ALWAYS-005: مدل TTS محلی آماده نیست.")
             acknowledgementPlayed.set(false)
-            acknowledgementTts = LocalPiperTts(tts)
+
+            // TTS is optional for wake detection: a broken/incompatible voice model must not
+            // prevent the recognizer from starting and opening the microphone.
+            acknowledgementTts = tts?.let { selectedTts ->
+                runCatching { LocalPiperTts(selectedTts) }
+                    .onFailure { error ->
+                        Log.e(TAG, "Local TTS unavailable; continuing wake detection without spoken acknowledgement", error)
+                        prefs.edit()
+                            .putString(
+                                PREF_LAST_DIAGNOSTIC,
+                                "VOICE-TTS-OPTIONAL: wake detection continues without TTS: ${error.stackTraceToString()}",
+                            )
+                            .apply()
+                    }
+                    .getOrNull()
+            }
+
             val activeRecognizer = LocalNemoCtcAsr(stt)
             recognizer = activeRecognizer
             val frames = ArrayBlockingQueue<LocalMicrophone.Frame>(256)
