@@ -53,6 +53,9 @@ android {
             excludes += setOf("sherpa-onnx/native/**")
         }
         jniLibs {
+            // sherpa-onnx 1.13.8 and the MiniLM Java API both ship ONNX Runtime 1.28.2.
+            // Keep one ABI-compatible runtime library rather than packaging duplicate .so files.
+            pickFirsts += "**/libonnxruntime.so"
             // Keep native libraries uncompressed and avoid a second extracted copy on disk.
             useLegacyPackaging = false
         }
@@ -71,7 +74,7 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     // Local-only ASR/TTS engines; no network inference or cloud API.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.2")
     implementation("com.github.k2-fsa:sherpa-onnx:v1.13.8") {
         // The Android AAR already bundles the sherpa Kotlin/JVM API classes.
         // Exclude the duplicate JVM jar published as a transitive dependency.
