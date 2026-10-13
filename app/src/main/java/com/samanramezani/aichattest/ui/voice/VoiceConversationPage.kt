@@ -43,9 +43,9 @@ internal fun VoiceConversationPage(
     missingTtsComponents: List<String>,
     activeSttId: String?,
     activeTtsId: String?,
-    miniLmModelReady: Boolean,
-    miniLmStatus: String,
-    onImportMiniLm: () -> Unit,
+    layaModelReady: Boolean,
+    layaStatus: String,
+    onImportLaya: () -> Unit,
     onBack: () -> Unit,
     onImportStt: () -> Unit,
     onImportKoochikModel: () -> Unit,
@@ -105,16 +105,20 @@ internal fun VoiceConversationPage(
                 }
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("۱. فرمان‌های محلی فارسی · MiniLM", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("۱. تصمیم‌گیری محلی فارسی · Laya INT4", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "فرمان‌های ساعت، تاریخ، صدا و نور صفحه پیش از مدل گفت‌وگو بررسی می‌شوند. ZIP می‌تواند طبقه‌بند آموزش‌دیده یا مدل embedding همراه درخت تصمیم چندمرحله‌ای باشد. تصمیم نامطمئن به قواعد امن محلی برمی‌گردد. all-MiniLM-L6-v2 انگلیسی است؛ برای متن فارسی از قواعد فارسی استفاده می‌شود و کیفیت تصمیم‌گیری معنایی فارسی این مدل تأیید نشده است.",
+                            "مدل تصمیم‌گیری Laya چندمرحله‌ای و کاملاً محلی است: ابتدا نوع درخواست، سپس عملیات دستگاه و در صورت نیاز سطح هدف را انتخاب می‌کند. فرمان‌های ساعت، تاریخ، صدا و روشنایی پیش از مدل گفت‌وگو اجرا می‌شوند. اگر تصمیم مدل مطمئن نباشد، مسیر قواعد امن فارسی استفاده می‌شود. متن درخواست عادی بدون افزودن برچسب تصمیم‌گیری به مدل گفت‌وگو فرستاده می‌شود.",
                             style = MaterialTheme.typography.bodySmall,
                         )
-                        OutlinedButton(onClick = onImportMiniLm, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                            Text(if (miniLmModelReady) "جایگزینی بسته مدل MiniLM" else "وارد کردن بسته مدل MiniLM · ZIP")
+                        OutlinedButton(onClick = onImportLaya, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (layaModelReady) "جایگزینی مدل Laya INT4" else "وارد کردن مدل Laya INT4 · ZIP")
                         }
-                        Text("بستهٔ طبقه‌بند: model.onnx + tokenizer.json + labels.json. بستهٔ تصمیم مرحله‌ای: model.onnx + tokenizer.json + decision_trees.json. مدل embedding باید خروجی [1, sequence, 384] یا [1,384] داشته باشد و فایل آن حداکثر ۱۰۰ مگابایت باشد. نمونهٔ درخت‌ها در docs/minilm-decision-trees.json است. همهٔ استنتاج‌ها محلی‌اند؛ مقدار عددی از متن واقعی استخراج می‌شود، نه از حدس embedding.", style = MaterialTheme.typography.bodySmall)
-                        Text(miniLmStatus, style = MaterialTheme.typography.bodySmall, color = if (miniLmModelReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("بسته ZIP باید شامل laya-multilingual-int4-layer32-vocab128.onnx و فایل هم‌نام .data، پوشه tokenizer/، و rl_agent_config.json باشد. مدل را داخل APK قرار نمی‌دهیم؛ واردسازی در حافظه خصوصی برنامه انجام می‌شود. عملیات عددی روی دستگاه اعتبارسنجی می‌شود و پاسخ نهایی فقط از TTS یا مدل گفت‌وگوی جداگانه می‌آید.", style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(
+                            onClick = { uriHandler.openUri("https://huggingface.co/androidli/laya-multilingual-onnx-int4/tree/main") },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("صفحه رسمی فایل‌های مدل Laya INT4") }
+                        Text(layaStatus, style = MaterialTheme.typography.bodySmall, color = if (layaModelReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 Card(Modifier.fillMaxWidth()) {
