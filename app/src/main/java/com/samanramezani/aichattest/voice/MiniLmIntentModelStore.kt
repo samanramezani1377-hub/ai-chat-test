@@ -124,7 +124,7 @@ internal class MiniLmIntentModelStore(
                 }
                 val parsedLabels = parseLabels(labels.readText(Charsets.UTF_8))
                 val allowedLabels = setOf("CHAT", "GET_TIME", "GET_DATE", "INCREASE_VOLUME", "DECREASE_VOLUME",
-                    "SET_VOLUME", "INCREASE_BRIGHTNESS", "DECREASE_BRIGHTNESS", "SET_BRIGHTNESS")
+                    "SET_VOLUME", "MUTE", "UNMUTE", "INCREASE_BRIGHTNESS", "DECREASE_BRIGHTNESS", "SET_BRIGHTNESS")
                 require(parsedLabels.isNotEmpty() && parsedLabels.contains("CHAT") && parsedLabels.all { it in allowedLabels }) {
                     "MINILM-IMPORT-008: labels.json باید CHAT و برچسب‌های معتبر فرمان‌های پشتیبانی‌شده را تعریف کند."
                 }
