@@ -26,6 +26,23 @@ env:
   JAVA_VERSION: '17'
 
 jobs:
+  pocket-tts-contract:
+    name: Pocket TTS ONNX contract
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install ONNX Runtime test dependencies
+        run: python -m pip install --disable-pip-version-check onnxruntime numpy
+      - name: Validate the real Pocket TTS model input/output contract
+        run: python .github/scripts/test_pocket_tts_contract.py
+
   unit-tests:
     name: Unit tests
     runs-on: ubuntu-22.04
