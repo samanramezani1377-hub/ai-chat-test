@@ -162,29 +162,41 @@ class AgentSession(
         recentMessages: Int,
         contextMessages: List<ConversationMessage>,
     ): GenerationResult {
-        // Stream ordinary prose as it is decoded, but keep likely internal formats buffered.
-        // Agent/tool requests are JSON and reasoning channels commonly begin with '<'; these
-        // must never be exposed before the full response has been classified.
+        // Stream ordinary prose incrementally, but never expose structured actions or
+        // reasoning markers. With action planning enabled, wait for a short clean prefix:
+        // malformed legacy output can start with prose and then contain </think> + shell.
         val prefix = StringBuilder()
         var streamDecision: Boolean? = null
         var streamPublished = false
         val result = orchestrator.generate(settings, recentMessages, { chunk ->
             if (chunk.isNotEmpty()) {
+                val hasReasoningMarker = chunk.contains("<think>") || chunk.contains("</think>")
                 if (streamDecision == null) {
                     prefix.append(chunk)
                     val first = prefix.firstOrNull { !it.isWhitespace() }
                     if (first != null) {
-                        streamDecision = first != '{' && first != '<' && first != '`'
+                        val accumulatedHasReasoning = prefix.contains("<think>") || prefix.contains("</think>")
+                        val structured = first == '{' || first == '<' || first == '`'
+                        val actionPrefixReady = actionPlanCoordinator == null || prefix.length >= 48
+                        if (accumulatedHasReasoning || structured) {
+                            streamDecision = false
+                        } else if (actionPrefixReady) {
+                            streamDecision = true
+                        }
                         if (streamDecision == true) {
-                            val safePrefix = prefix.toString()
-                            eventSink(AgentEvent.Token(safePrefix))
+                            eventSink(AgentEvent.Token(prefix.toString()))
                             streamPublished = true
                             prefix.setLength(0)
                         }
                     }
                 } else if (streamDecision == true) {
-                    eventSink(AgentEvent.Token(chunk))
-                    streamPublished = true
+                    if (hasReasoningMarker) {
+                        // Stop publishing if a malformed internal marker appears mid-stream.
+                        streamDecision = false
+                    } else {
+                        eventSink(AgentEvent.Token(chunk))
+                        streamPublished = true
+                    }
                 }
             }
         }, contextMessages)
