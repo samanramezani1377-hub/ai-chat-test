@@ -54,15 +54,14 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
         if (bytes.isEmpty()) return ""
         val inputIds = LongArray(bytes.size) { (bytes[it].toInt() and 0xff).toLong() + 3L }
         val encoded = tensor(inputIds)
-        // Use the named ONNX output and copy it before closing Result; the encoder hidden state
-        // must remain owned after the Result is closed.
-        // remains valid after the encoder Result is closed.
+        // Copy the named ONNX output before closing Result so the hidden state remains valid.
         val hidden = try {
             encoder.run(mapOf("input_ids" to encoded)).use { result ->
                 require(result.size() > 0) { "گراف encoder هیچ خروجی‌ای برنگرداند" }
                 val outputName = encoder.outputNames.firstOrNull()
                     ?: error("گراف encoder هیچ خروجی نام‌گذاری‌شده‌ای ندارد")
-                val outputValue = result.get(outputName)
+                // OrtSession.Result.get(String) returns Optional<OnnxValue>, not OnnxValue.
+                val outputValue = result.get(outputName).orElse(null)
                     ?: error("خروجی encoder پیدا نشد: $outputName")
                 val output = outputValue as? OnnxTensor
                     ?: throw IllegalStateException(
@@ -90,7 +89,8 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
                         // the Result is open instead of round-tripping through value/createTensor.
                         val outputName = decoder.outputNames.firstOrNull()
                             ?: error("گراف decoder هیچ خروجی نام‌گذاری‌شده‌ای ندارد")
-                        val outputValue = result.get(outputName)
+                        // The named lookup also returns Optional<OnnxValue> in the Java API.
+                        val outputValue = result.get(outputName).orElse(null)
                             ?: error("خروجی decoder پیدا نشد: $outputName")
                         val outputTensor = outputValue as? OnnxTensor
                             ?: throw IllegalStateException(
