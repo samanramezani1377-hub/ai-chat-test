@@ -70,9 +70,21 @@ set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_UI OFF CACHE BOOL "" FORCE)
 set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
-# Keep the generic ARM64 baseline portable. KleidiAI compiles its specialized
-# microkernels separately and selects only CPU-compatible kernels at runtime.
-set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+# Keep the generic ARM64 backend portable. Never compile the whole ggml CPU
+# backend for the build host or force newer ISA features: phones in the same
+# arm64-v8a ABI can differ in DotProd/i8mm support. KleidiAI builds its optimized
+# microkernels separately and uses its compatible dispatch paths at runtime.
+set(GGML_NATIVE OFF CACHE BOOL "Keep the generic CPU backend ISA-portable" FORCE)
+if (ANDROID)
+    if (NOT CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
+        message(FATAL_ERROR "AI Chat Test native runtime supports arm64-v8a only; got '${CMAKE_ANDROID_ARCH_ABI}'")
+    endif()
+    # Pin the generic backend to the ARMv8-A baseline. Do not raise this to
+    # armv8.2-a/i8mm or a device-specific -mcpu: that would risk SIGILL on
+    # otherwise supported arm64 phones. KleidiAI's own kernels remain enabled.
+    set(GGML_CPU_ARM_ARCH "armv8-a" CACHE STRING "Portable generic ARM64 CPU baseline" FORCE)
+    message(STATUS "AI_CHAT_CPU_ARCH_POLICY baseline=armv8-a native=OFF kleidiai=ON runtime_compatible_dispatch=ON")
+endif()
 set(GGML_CPU_KLEIDIAI ON CACHE BOOL "Enable portable ARM KleidiAI CPU microkernels" FORCE)
 
 # OpenMP is enabled for the CPU backend. Android's NDK Clang requires static
