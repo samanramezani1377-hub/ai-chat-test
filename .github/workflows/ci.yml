@@ -221,6 +221,15 @@ jobs:
           grep -q 'GGML_OPENCL_USE_ADRENO_KERNELS OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'GGML_CPU_KLEIDIAI ON' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'GGML_OPENMP ON' core/runtime-android/src/main/cpp/CMakeLists.txt
+          # The generic CPU backend must stay on a portable ARMv8-A baseline.
+          # ISA-specialized kernels may dispatch at runtime, but global native/i8mm
+          # flags must never be forced on all arm64-v8a devices.
+          grep -q 'GGML_NATIVE OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'GGML_CPU_ARM_ARCH "armv8-a"' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'GGML_CPU_ARM_ARCH=armv8-a' core/runtime-android/build.gradle.kts
+          grep -q 'AI_CHAT_CPU_ARCH_POLICY baseline=armv8-a' core/runtime-android/src/main/cpp/CMakeLists.txt
+          ! grep -Eq -- '-mcpu=native|-march=armv8\.[2-9].*i8mm|-march=armv8\.[2-9].*dotprod' core/runtime-android/src/main/cpp/CMakeLists.txt
+          ! grep -Eq 'GGML_NATIVE=ON|GGML_NATIVE ON' core/runtime-android/build.gradle.kts core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'GGML_CPU_KLEIDIAI=ON' core/runtime-android/build.gradle.kts
           grep -q 'GGML_OPENMP=ON' core/runtime-android/build.gradle.kts
           grep -q 'LLAMA_LOAD_MODE_AUTO' core/runtime-android/src/main/cpp/native_runtime.cpp
