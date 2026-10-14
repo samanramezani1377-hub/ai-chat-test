@@ -235,6 +235,7 @@ jobs:
           grep -q 'LLAMA_LOAD_MODE_AUTO' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'NATIVE_OPENMP_POLICY enabled=1 linkage=static' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'NATIVE_KLEIDIAI_POLICY enabled=1 cpuRuntimeDispatch=1' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'NATIVE_CPU_ARCH_POLICY baseline=' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'NATIVE_EXECUTION_POLICY mode=OPENCL_GPU_PREFERRED' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'wholeModelCpuFallback=enabled' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'OPENCL_ATTEMPT_FAILED reason=' core/runtime-android/src/main/cpp/native_runtime.cpp
