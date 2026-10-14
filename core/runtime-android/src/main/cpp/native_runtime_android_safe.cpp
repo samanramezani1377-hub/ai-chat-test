@@ -15,6 +15,26 @@ static std::vector<llama_token> g_cached_system_prefix_tokens;
 static std::vector<uint8_t> g_cached_system_prefix_state;
 static llama_model * g_cached_system_prefix_model = nullptr;
 static llama_context * g_cached_system_prefix_context = nullptr;
+// One validated system-prefix snapshot per local model identity, retained across model switches.
+static void clear_android_system_prefix_cache();
+static void clear_android_turn_prefix_cache();
+static void append_native_trace(const char *text);
+struct AndroidSystemPrefixSnapshot { std::vector<llama_token> tokens; std::vector<uint8_t> state; };
+static std::unordered_map<std::string, AndroidSystemPrefixSnapshot> g_system_prefix_snapshots;
+static std::string g_active_model_cache_key;
+static std::string make_android_model_cache_key(const std::string & path, uint32_t context_length) {
+    struct stat st{}; const bool ok = ::stat(path.c_str(), &st) == 0;
+    return path + "|size=" + std::to_string(ok ? (long long)st.st_size : -1LL) +
+        "|mtime=" + std::to_string(ok ? (long long)st.st_mtime : -1LL) + "|ctx=" + std::to_string(context_length);
+}
+static void preserve_android_system_prefix_cache_for_active_model() {
+    if (g_active_model_cache_key.empty() || g_cached_system_prefix_tokens.empty() || g_cached_system_prefix_state.empty()) return;
+    g_system_prefix_snapshots[g_active_model_cache_key] = {g_cached_system_prefix_tokens, g_cached_system_prefix_state};
+}
+static void set_android_cache_model_key(const std::string & path, uint32_t context_length) {
+    g_active_model_cache_key = make_android_model_cache_key(path, context_length);
+    clear_android_system_prefix_cache(); clear_android_turn_prefix_cache(); g_cached_prompt_tokens.clear();
+}
 // A second snapshot captures the conversation prefix before the final assistant marker.
 // It allows hybrid models to reuse the previous turn's full shared prefix without rollback.
 static std::vector<llama_token> g_cached_turn_prefix_tokens;
@@ -55,6 +75,8 @@ static void clear_android_generation_cache() {
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <unordered_map>
+#include <sys/stat.h>
 
 static std::mutex g_native_runtime_mutex;
 static bool g_spec_requested=false;
@@ -927,13 +949,21 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         clear_android_turn_prefix_cache();
     }
 
-    // If this is a new session (or the previous conversation prefix differs), reuse the
-    // invariant global system prompt snapshot instead. Session-specific SYSTEM messages
-    // remain in the variable suffix and are never replayed from stale cache state.
+    // Restore this model's saved system prefix after switching away and back. Model file
+    // identity and context are keyed separately, and exact prefix tokens are checked below.
+    if (g_cached_system_prefix_state.empty() && !g_active_model_cache_key.empty() && stable_prefix_count > 0) {
+        const auto saved = g_system_prefix_snapshots.find(g_active_model_cache_key);
+        if (saved != g_system_prefix_snapshots.end() && saved->second.tokens.size() == stable_prefix_count &&
+            std::equal(saved->second.tokens.begin(), saved->second.tokens.end(), prompt_tokens.begin())) {
+            g_cached_system_prefix_tokens = saved->second.tokens;
+            g_cached_system_prefix_state = saved->second.state;
+            append_native_trace((std::string("NATIVE_KV_CACHE_MODEL_SNAPSHOT_FOUND tokens=") + std::to_string(stable_prefix_count)).c_str());
+        }
+    }
+    // Session-specific SYSTEM messages remain in the variable suffix and are never replayed.
     if (!turn_prefix_reused && hybrid_memory && cache_supported && stable_prefix_count > 0 &&
         !g_cached_system_prefix_state.empty() &&
-        g_cached_system_prefix_model == g_model &&
-        g_cached_system_prefix_context == g_context &&
+        !g_active_model_cache_key.empty() &&
         g_cached_system_prefix_tokens.size() == stable_prefix_count &&
         std::equal(g_cached_system_prefix_tokens.begin(),
                    g_cached_system_prefix_tokens.end(),
@@ -957,9 +987,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             llama_memory_clear(memory, true);
         }
     } else if (!turn_prefix_reused && hybrid_memory && !g_cached_system_prefix_state.empty() &&
-               (g_cached_system_prefix_model != g_model ||
-                g_cached_system_prefix_context != g_context ||
-                stable_prefix_count == 0 ||
+               (stable_prefix_count == 0 ||
                 g_cached_system_prefix_tokens.size() != stable_prefix_count ||
                 !std::equal(g_cached_system_prefix_tokens.begin(),
                             g_cached_system_prefix_tokens.end(),
@@ -1173,6 +1201,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                             prompt_tokens.begin() + static_cast<std::ptrdiff_t>(stable_prefix_count));
                     g_cached_system_prefix_model = g_model;
                     g_cached_system_prefix_context = g_context;
+                    if (!g_active_model_cache_key.empty()) g_system_prefix_snapshots[g_active_model_cache_key] = {g_cached_system_prefix_tokens, g_cached_system_prefix_state};
                     append_native_trace((std::string("NATIVE_KV_CACHE_SYSTEM_PREFIX_SAVED tokens=") +
                             std::to_string(stable_prefix_count) + " stateBytes=" +
                             std::to_string(copied)).c_str());
