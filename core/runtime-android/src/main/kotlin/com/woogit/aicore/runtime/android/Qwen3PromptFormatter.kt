@@ -21,7 +21,7 @@ internal object Qwen3PromptFormatter {
         // Cache the invariant global system instruction only. Later SYSTEM messages can
         // contain per-session summaries, task state, or workspace context and must remain
         // part of the variable suffix when a new session is started.
-        messages.firstOrNull { it.role == ChatMessage.Role.SYSTEM }
+        messages.firstOrNull()?.takeIf { it.role == ChatMessage.Role.SYSTEM }
             ?.takeIf { it.content.isNotBlank() }
             ?.let { message ->
                 append(IM_START).append("system\n")
