@@ -115,6 +115,11 @@ static bool init_generation_context() {
 #else
     append_native_trace("NATIVE_KLEIDIAI_POLICY enabled=0");
 #endif
+#if defined(AI_CHAT_CPU_ARM_BASELINE)
+    append_native_trace((std::string("NATIVE_CPU_ARCH_POLICY baseline=") +
+        AI_CHAT_CPU_ARM_BASELINE +
+        " genericBackendPortable=1 specializedKernelDispatch=runtime").c_str());
+#endif
     // Hybrid/recurrent architectures (including Qwen3.5-family models) carry
     // recurrent state across prompt batches. On Android, graph reuse in the pinned
     // llama.cpp build can fail on the second otherwise-identical prefill batch
