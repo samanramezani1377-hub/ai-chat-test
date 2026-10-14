@@ -45,12 +45,6 @@ internal fun VoiceConversationPage(
     activeTtsId: String?,
     layaModelReady: Boolean,
     layaStatus: String,
-    pocketTtsReady: Boolean,
-    pocketTtsStatus: String,
-    pocketTtsSelected: Boolean,
-    onPocketTtsSelectedChange: (Boolean) -> Unit,
-    onDownloadPocketTts: () -> Unit,
-    onImportPocketTts: () -> Unit,
     onImportLaya: () -> Unit,
     onDownloadLaya: () -> Unit,
     onBack: () -> Unit,
@@ -196,40 +190,6 @@ internal fun VoiceConversationPage(
                 }
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("بستهٔ Pocket TTS Farsi v2 · ONNX", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "دریافت همهٔ گراف‌ها و وزن‌های موردنیاز در یک ZIP حدود ۴۹۱ مگابایتی؛ فایل در Downloads ذخیره می‌شود. پس از وارد کردن و اعتبارسنجی ZIP، موتور Pocket TTS به‌صورت خودکار انتخاب می‌شود؛ برای اعمال آن، مکالمه را دوباره شروع کن.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Button(onClick = onDownloadPocketTts, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                            Text("دانلود یکجای بستهٔ کامل Pocket TTS")
-                        }
-                        OutlinedButton(onClick = onImportPocketTts, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                            Text("وارد کردن بستهٔ ZIP از حافظه")
-                        }
-                        Text(
-                            if (pocketTtsReady) "✓ بسته معتبر است؛ موتور Pocket TTS در مسیر مکالمه قابل انتخاب و اجراست."
-                            else "بسته هنوز نصب نشده است.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (pocketTtsReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(pocketTtsStatus, style = MaterialTheme.typography.bodySmall)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("استفاده از Pocket TTS در مکالمه")
-                                Text(
-                                    if (pocketTtsSelected) "فعال است؛ پس از شروع یا شروع مجدد مکالمه، پاسخ‌ها با Pocket TTS تولید می‌شوند."
-                                    else "پس از نصب، این گزینه را روشن کن؛ با انتخاب موفق بسته به‌صورت خودکار فعال می‌شود.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                            Switch(checked = pocketTtsSelected, onCheckedChange = onPocketTtsSelectedChange, enabled = pocketTtsReady && !busy)
-                        }
-                        Text("مجوز مدل: CC-BY-NC-4.0 (غیرتجاری).", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("۴. تولید گفتار · TTS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text("مدل TTS پاسخ دستیار را به صدا تبدیل می‌کند. مدل Piper آماده‌شده باید فایل مدل، تنظیمات و داده‌های آواشناسی را داشته باشد.", style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(onClick = onImportTtsModel, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن مدل صوتی · ONNX") }
@@ -269,7 +229,7 @@ internal fun VoiceConversationPage(
                                     appendLine("Status: $status")
                                     appendLine("Listening: $listening")
                                     appendLine("STT: ${sttModels.firstOrNull { it.id == activeSttId }?.title ?: "not selected"}")
-                                    appendLine("TTS: ${if (pocketTtsSelected && pocketTtsReady) "Pocket TTS Farsi v2" else ttsModels.firstOrNull { it.id == activeTtsId }?.title ?: "not selected"}")
+                                    appendLine("TTS: ${ttsModels.firstOrNull { it.id == activeTtsId }?.title ?: "not selected"}")
                                     appendLine()
                                     diagnosticLogs.forEach { appendLine(it) }
                                 }))
@@ -295,7 +255,7 @@ internal fun VoiceConversationPage(
                                     appendLine("Status: $status")
                                     appendLine("Listening: $listening")
                                     appendLine("STT: ${sttModels.firstOrNull { it.id == activeSttId }?.title ?: "not selected"}")
-                                    appendLine("TTS: ${if (pocketTtsSelected && pocketTtsReady) "Pocket TTS Farsi v2" else ttsModels.firstOrNull { it.id == activeTtsId }?.title ?: "not selected"}")
+                                    appendLine("TTS: ${ttsModels.firstOrNull { it.id == activeTtsId }?.title ?: "not selected"}")
                                     appendLine()
                                     diagnosticLogs.forEach { appendLine(it) }
                                 }))
@@ -339,7 +299,7 @@ internal fun VoiceConversationPage(
                     Text("برای گفت‌وگو آماده‌ای؟", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "ابتدا در تنظیمات، مدل تشخیص گفتار و یکی از موتورهای تولید گفتار Piper یا Pocket TTS را انتخاب کن. بعد شروع را بزن و صحبت کن؛ پاسخ دستیار به‌صورت صوتی پخش می‌شود.",
+                        "ابتدا در تنظیمات، مدل تشخیص گفتار فارسی و موتور تولید گفتار Piper را انتخاب کن. بعد شروع را بزن و صحبت کن؛ پاسخ دستیار به‌صورت صوتی پخش می‌شود.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -378,7 +338,7 @@ internal fun VoiceConversationPage(
                 Button(
                     onClick = { if (permissionGranted) onStart() else permission.launch(Manifest.permission.RECORD_AUDIO) },
                     enabled = !busy && !listening && activeSttId != null &&
-                        (activeTtsId != null || (pocketTtsReady && pocketTtsSelected)),
+                        (activeTtsId != null),
                     modifier = Modifier.weight(1f).heightIn(min = 54.dp),
                 ) {
                     Icon(Icons.Default.Mic, null)
