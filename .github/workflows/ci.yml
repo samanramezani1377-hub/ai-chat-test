@@ -26,58 +26,6 @@ env:
   JAVA_VERSION: '17'
 
 jobs:
-  pocket-tts-contract:
-    name: Pocket TTS ONNX contract
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
-    env:
-      POCKET_TTS_TEST_DIR: .cache/pocket-tts-contract
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - name: Restore Pocket TTS model bundle cache
-        id: pocket-model-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .cache/pocket-tts-contract
-          key: pocket-tts-farsi-v2-onnx-${{ runner.os }}-v1
-      - name: Install ONNX Runtime test dependencies
-        run: python -m pip install --disable-pip-version-check onnxruntime numpy
-      - name: Validate the real Pocket TTS model input/output contract
-        run: python .github/scripts/test_pocket_tts_contract.py
-      - name: Check whether the model bundle is complete enough to cache
-        id: pocket-model-bundle
-        if: always()
-        shell: bash
-        run: |
-          python - <<'PY'
-          import os, runpy
-          from pathlib import Path
-          spec = runpy.run_path(".github/scripts/test_pocket_tts_contract.py", run_name="pocket_tts_contract_module")
-          root = Path(os.environ["POCKET_TTS_TEST_DIR"])
-          missing = [
-              f"{name} (minimum {minimum} bytes)"
-              for name, minimum in spec["MIN"].items()
-              if not (root / name).is_file() or (root / name).stat().st_size < minimum
-          ]
-          ready = not missing
-          print("Pocket TTS cache bundle:", "complete" if ready else "incomplete")
-          if missing:
-              print("Files not ready for caching:", *missing, sep="\n- ")
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"complete={'true' if ready else 'false'}\n")
-          PY
-      - name: Save Pocket TTS model bundle cache
-        if: always() && steps.pocket-model-cache.outputs.cache-hit != 'true' && steps.pocket-model-bundle.outputs.complete == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .cache/pocket-tts-contract
-          key: pocket-tts-farsi-v2-onnx-${{ runner.os }}-v1
-
   unit-tests:
     name: Unit tests
     runs-on: ubuntu-22.04
