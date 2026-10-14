@@ -77,12 +77,39 @@ def main():
  latent=next(iter(meo.values())); typ(latent,"tensor(float)","Mimi encoder"); rank(latent,3,"Mimi encoder")
  need(latent.shape[-1]==c["ldim"],f"Mimi latent dimension mismatch {latent.shape}")
  md=gs["mimi_decoder_step_kv.onnx"]; mdi={x.name:x for x in md.get_inputs()}; mdo={x.name:x for x in md.get_outputs()}
- expected=states|{"latent"}
- need(set(mdi)==expected,f"Mimi inputs/state mismatch; missing={sorted(expected-set(mdi))}; unexpected={sorted(set(mdi)-expected)}")
+ # The exported graph deliberately names decoder inputs s0..sN; the NPZ
+ # stores the corresponding tensors under their original module/state names.
+ # Their archive order is the export's state order (as used by the reference
+ # runtime), so compare by position and shape rather than comparing names.
+ state_names=list(states)
+ expected_inputs={"latent"}|{f"s{i}" for i in range(len(state_names))}
+ need(set(mdi)==expected_inputs,
+      f"Mimi inputs/state mismatch; expected {sorted(expected_inputs)}, "
+      f"missing={sorted(expected_inputs-set(mdi))}; unexpected={sorted(set(mdi)-expected_inputs)}")
+ need(len(state_names)==len(mdi)-1,
+      f"Mimi state count mismatch: NPZ={len(state_names)}, graph={len(mdi)-1}")
  need("audio" in mdo,f"Mimi audio output missing: {sorted(mdo)}")
- caches=sum(n.endswith(".cache") for n in states)
- need(sum(n.startswith("kv") for n in mdo)==caches,"Mimi KV output count differs from cache states")
- need(sum(n.endswith("o") and n!="audio" for n in mdo)==len(states)-caches,"Mimi small-state output count differs from state inputs")
+ caches=[i for i,n in enumerate(state_names) if n.endswith(".cache")]
+ small=[i for i in range(len(state_names)) if i not in caches]
+ kv_outputs=sorted((n for n in mdo if n.startswith("kv")),key=lambda n:int(n[2:]))
+ small_outputs=sorted((n for n in mdo if n.endswith("o") and n!="audio"),
+                      key=lambda n:int(n[1:-1]) if n[1:-1].isdigit() else 10**9)
+ need(len(kv_outputs)==len(caches),
+      f"Mimi KV output count differs from cache states: {len(kv_outputs)} vs {len(caches)}")
+ need(len(small_outputs)==len(small),
+      f"Mimi small-state output count differs from state inputs: {len(small_outputs)} vs {len(small)}")
+ # Reopen NPZ to compare actual array metadata with s0..sN input metadata.
+ with np.load(ROOT/"decode_state_init.npz",allow_pickle=False) as init:
+  for i,name in enumerate(init.files):
+   node=mdi[f"s{i}"]; arr=init[name]
+   need(node.type=="tensor(float)" and arr.dtype==np.float32,
+        f"Mimi state s{i} ({name}) dtype mismatch: graph={node.type}, NPZ={arr.dtype}")
+   need(len(node.shape)==arr.ndim,
+        f"Mimi state s{i} ({name}) rank mismatch: graph={node.shape}, NPZ={arr.shape}")
+   for axis,(graph_dim,array_dim) in enumerate(zip(node.shape,arr.shape)):
+    if isinstance(graph_dim,int):
+     need(graph_dim==array_dim,
+          f"Mimi state s{i} ({name}) dimension {axis} mismatch: graph={graph_dim}, NPZ={array_dim}")
  typ(mdi["latent"],"tensor(float)","Mimi decoder"); rank(mdi["latent"],3,"Mimi decoder")
  need(mdi["latent"].shape[:2]==[1,1] and mdi["latent"].shape[-1]==c["ldim"],f"Mimi latent shape mismatch {mdi['latent'].shape}")
  typ(mdo["audio"],"tensor(float)","Mimi decoder"); rank(mdo["audio"],3,"Mimi decoder")
