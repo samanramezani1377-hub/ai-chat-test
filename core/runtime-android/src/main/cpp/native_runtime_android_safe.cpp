@@ -6,6 +6,9 @@
 #include <cstdint>
 #include <algorithm>
 #include <cstddef>
+#include <string>
+#include <unordered_map>
+#include <sys/stat.h>
 
 // Tokens represented by the resident prompt prefix in the native KV cache.
 static std::vector<llama_token> g_cached_prompt_tokens;
@@ -75,8 +78,6 @@ static void clear_android_generation_cache() {
 #include <cstring>
 #include <limits>
 #include <mutex>
-#include <unordered_map>
-#include <sys/stat.h>
 
 static std::mutex g_native_runtime_mutex;
 static bool g_spec_requested=false;
