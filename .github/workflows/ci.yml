@@ -247,9 +247,15 @@ jobs:
           grep -q 'AI_CHAT_BACKEND_SPLIT_TIMING' core/runtime-android/src/main/cpp/cmake/patch_backend_assignment_trace.cmake
           grep -q 'AI_CHAT_OPENCL_PROFILING=ON' core/runtime-android/build.gradle.kts
           grep -q 'resident_max + 1' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          # Hybrid/recurrent KV state is reused only as an exact resident prefix;
-          # never trim recurrent state or force a full rebuild on every turn.
+          # Hybrid/recurrent memory is never rolled back by arbitrary token position.
+          # A sequence-state snapshot preserves the invariant global system prefix across sessions.
           grep -q 'NATIVE_KV_CACHE_HYBRID_EXACT_REUSE' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'NATIVE_KV_CACHE_SYSTEM_PREFIX_SAVED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'NATIVE_KV_CACHE_SYSTEM_PREFIX_RESTORED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'llama_state_seq_get_data' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'llama_state_seq_set_data' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'formatSystemPrefix' core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/Qwen3PromptFormatter.kt
+          grep -q 'cachePrefixTokens = cachePrefixTokens' core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/LlamaCppAndroidRuntimeAdapter.kt
           grep -q 'resident_hybrid_exact_prefix' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
           grep -q 'prompt_tokens.size() > g_cached_prompt_tokens.size()' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
           ! grep -q 'NATIVE_KV_CACHE_HYBRID_DISABLED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
