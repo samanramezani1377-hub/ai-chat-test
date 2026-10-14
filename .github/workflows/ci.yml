@@ -67,9 +67,9 @@ jobs:
           ready = not missing
           print("Pocket TTS cache bundle:", "complete" if ready else "incomplete")
           if missing:
-              print("Files not ready for caching:", *missing, sep="\\n- ")
+              print("Files not ready for caching:", *missing, sep="\n- ")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"complete={'true' if ready else 'false'}\\n")
+              output.write(f"complete={'true' if ready else 'false'}\n")
           PY
       - name: Save Pocket TTS model bundle cache
         if: always() && steps.pocket-model-cache.outputs.cache-hit != 'true' && steps.pocket-model-bundle.outputs.complete == 'true'
