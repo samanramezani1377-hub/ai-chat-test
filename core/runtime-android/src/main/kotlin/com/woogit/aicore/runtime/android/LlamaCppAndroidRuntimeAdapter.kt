@@ -200,7 +200,7 @@ class LlamaCppAndroidRuntimeAdapter(
         val continuationPrefixText = if (loadedArchitecture == "lfm2" || loadedArchitecture == "llama") {
             ""
         } else {
-            prompt.substringBeforeLast("<|im_start|>assistant\\n")
+            prompt.substringBeforeLast("<|im_start|>assistant\n")
         }
         val continuationPrefixTokens = if (continuationPrefixText.isNotBlank()) {
             NativeLlamaCpp.countTokens(continuationPrefixText).takeIf { it > 0 } ?: 0
