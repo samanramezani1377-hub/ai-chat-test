@@ -102,7 +102,12 @@ def main():
  with np.load(ROOT/"decode_state_init.npz",allow_pickle=False) as init:
   for i,name in enumerate(init.files):
    node=mdi[f"s{i}"]; arr=init[name]
-   need(node.type=="tensor(float)" and arr.dtype==np.float32,
+   dtype_map={"tensor(float)":np.dtype(np.float32),
+              "tensor(bool)":np.dtype(np.bool_),
+              "tensor(int64)":np.dtype(np.int64),
+              "tensor(int32)":np.dtype(np.int32)}
+   expected_dtype=dtype_map.get(node.type)
+   need(expected_dtype is not None and arr.dtype==expected_dtype,
         f"Mimi state s{i} ({name}) dtype mismatch: graph={node.type}, NPZ={arr.dtype}")
    need(len(node.shape)==arr.ndim,
         f"Mimi state s{i} ({name}) rank mismatch: graph={node.shape}, NPZ={arr.shape}")
