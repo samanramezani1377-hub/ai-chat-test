@@ -311,12 +311,6 @@ internal class PocketTtsFarsiG2p(private val modelDir: java.io.File) : Closeable
             "windows" to "ویندوز", "notebook" to "نوت‌بوک", "photoshop" to "فتوشاپ",
             "python" to "پایتون", "recurrency" to "ریکارانسی"
         )
-        private val LATIN_DIGRAPHS = mapOf(
-            "sh" to "ش", "ch" to "چ", "th" to "ث", "ph" to "ف", "gh" to "غ",
-            "kh" to "خ", "wh" to "و", "ck" to "ک", "qu" to "کو", "oo" to "و",
-            "ee" to "ی", "ea" to "ی", "ou" to "او", "au" to "او", "ai" to "ای",
-            "ay" to "ای", "ey" to "ای", "oi" to "اوی", "oy" to "اوی"
-        )
         private val LATIN_CHARS = mapOf(
             'a' to "ا", 'b' to "ب", 'c' to "ک", 'd' to "د", 'e' to "", 'f' to "ف",
             'g' to "گ", 'h' to "ه", 'i' to "ی", 'j' to "ج", 'k' to "ک", 'l' to "ل",
