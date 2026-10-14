@@ -194,8 +194,21 @@ class LlamaCppAndroidRuntimeAdapter(
         } else {
             0
         }
+        // The prompt's stable conversation prefix ends immediately before the final
+        // assistant generation marker. On the next turn, that exact prefix is followed
+        // by the prior assistant answer and the next user message.
+        val continuationPrefixText = if (loadedArchitecture == "lfm2" || loadedArchitecture == "llama") {
+            ""
+        } else {
+            prompt.substringBeforeLast("<|im_start|>assistant\\n")
+        }
+        val continuationPrefixTokens = if (continuationPrefixText.isNotBlank()) {
+            NativeLlamaCpp.countTokens(continuationPrefixText).takeIf { it > 0 } ?: 0
+        } else {
+            0
+        }
         RuntimeDiagnosticsStore.recordNativeEvent(
-            "NATIVE_SYSTEM_PREFIX_CACHE_REQUEST prefixTokens=$cachePrefixTokens architecture=$loadedArchitecture"
+            "NATIVE_SYSTEM_PREFIX_CACHE_REQUEST prefixTokens=$cachePrefixTokens continuationPrefixTokens=$continuationPrefixTokens architecture=$loadedArchitecture"
         )
         stopRequested.set(false)
         RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_STARTED context=$loadedContextLength backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads enableThinking=${settings.enableThinking} maxNewTokens=${settings.maxNewTokens} recentMessages=${settings.recentMessages}")
@@ -237,7 +250,8 @@ class LlamaCppAndroidRuntimeAdapter(
                     "llama" -> 0.0f
                     else -> (settings.minP ?: 0.05).toFloat().coerceIn(0f, 1f)
                 },
-                cachePrefixTokens = cachePrefixTokens
+                cachePrefixTokens = cachePrefixTokens,
+                continuationPrefixTokens = continuationPrefixTokens
             ).collect { chunk ->
                 currentCoroutineContext().ensureActive()
                 if (chunk.isEmpty() || stopRequested.get()) return@collect
