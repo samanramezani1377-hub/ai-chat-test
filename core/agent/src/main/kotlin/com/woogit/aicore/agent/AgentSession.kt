@@ -170,24 +170,25 @@ class AgentSession(
         var streamDecision: Boolean? = null
         var streamPublished = false
         val result = orchestrator.generate(settings, recentMessages, { chunk ->
-            if (chunk.isEmpty()) return@generate
-            if (streamDecision == null) {
-                prefix.append(chunk)
-                val first = prefix.firstOrNull { !it.isWhitespace() }
-                if (first != null) {
-                    streamDecision = first != '{' && first != '<' && first != '`'
-                    if (streamDecision == true) {
-                        val safePrefix = prefix.toString()
-                        eventSink(AgentEvent.Token(safePrefix))
-                        streamedText.append(safePrefix)
-                        streamPublished = true
-                        prefix.setLength(0)
+            if (chunk.isNotEmpty()) {
+                if (streamDecision == null) {
+                    prefix.append(chunk)
+                    val first = prefix.firstOrNull { !it.isWhitespace() }
+                    if (first != null) {
+                        streamDecision = first != '{' && first != '<' && first != '`'
+                        if (streamDecision == true) {
+                            val safePrefix = prefix.toString()
+                            eventSink(AgentEvent.Token(safePrefix))
+                            streamedText.append(safePrefix)
+                            streamPublished = true
+                            prefix.setLength(0)
+                        }
                     }
+                } else if (streamDecision == true) {
+                    eventSink(AgentEvent.Token(chunk))
+                    streamedText.append(chunk)
+                    streamPublished = true
                 }
-            } else if (streamDecision == true) {
-                eventSink(AgentEvent.Token(chunk))
-                streamedText.append(chunk)
-                streamPublished = true
             }
         }, contextMessages)
         val cleaned = stripReasoning(result.text)
