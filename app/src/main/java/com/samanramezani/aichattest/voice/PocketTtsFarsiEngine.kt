@@ -62,8 +62,6 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
     private val rng = Random()
 
     init {
-        val report = PocketTtsFarsiRuntimeProbe(dir).inspect()
-        check(report.ok) { report.detail }
         opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
         opts.setIntraOpNumThreads(2); opts.setInterOpNumThreads(1)
         flow = env.createSession(File(dir, "flow_lm_step.onnx").absolutePath, opts)
