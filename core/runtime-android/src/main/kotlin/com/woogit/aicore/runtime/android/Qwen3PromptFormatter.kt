@@ -18,13 +18,16 @@ internal object Qwen3PromptFormatter {
      * the assistant generation marker so native code can snapshot only the stable prefix.
      */
     fun formatSystemPrefix(messages: List<ChatMessage>): String = buildString {
-        messages.takeWhile { it.role == ChatMessage.Role.SYSTEM }.forEach { message ->
-            if (message.content.isNotBlank()) {
+        // Cache the invariant global system instruction only. Later SYSTEM messages can
+        // contain per-session summaries, task state, or workspace context and must remain
+        // part of the variable suffix when a new session is started.
+        messages.firstOrNull { it.role == ChatMessage.Role.SYSTEM }
+            ?.takeIf { it.content.isNotBlank() }
+            ?.let { message ->
                 append(IM_START).append("system\n")
                 append(message.content.trim())
                 append(IM_END).append('\n')
             }
-        }
     }
 
     fun format(messages: List<ChatMessage>, enableThinking: Boolean = true): String {
