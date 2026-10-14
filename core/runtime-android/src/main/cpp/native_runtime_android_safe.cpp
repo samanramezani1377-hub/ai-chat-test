@@ -6,13 +6,28 @@
 
 // Tokens represented by the resident prompt prefix in the native KV cache.
 static std::vector<llama_token> g_cached_prompt_tokens;
-// Identity of the model/context that owns the resident KV cache.
+// A stable system-only sequence snapshot lets hybrid/recurrent models reuse system
+// instructions across sessions without attempting an unsafe rollback of conversation state.
+static std::vector<llama_token> g_cached_system_prefix_tokens;
+static std::vector<uint8_t> g_cached_system_prefix_state;
+static llama_model * g_cached_system_prefix_model = nullptr;
+static llama_context * g_cached_system_prefix_context = nullptr;
+// Identity of the model/context that owns the current resident prompt state.
 static llama_model * g_cached_model = nullptr;
 static llama_context * g_cached_context = nullptr;
+
+static void clear_android_system_prefix_cache() {
+    g_cached_system_prefix_tokens.clear();
+    g_cached_system_prefix_state.clear();
+    g_cached_system_prefix_model = nullptr;
+    g_cached_system_prefix_context = nullptr;
+}
+
 static void clear_android_generation_cache() {
     g_cached_prompt_tokens.clear();
     g_cached_model = nullptr;
     g_cached_context = nullptr;
+    clear_android_system_prefix_cache();
 }
 
 #include <signal.h>
@@ -730,6 +745,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         jint top_k,
         jfloat top_p,
         jfloat min_p,
+        jint cache_prefix_tokens,
         jobject listener) {
     std::lock_guard<std::mutex> runtime_lock(g_native_runtime_mutex);
     checkpoint("NATIVE_GENERATE_ENTERED");
@@ -844,11 +860,57 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     }
 
     const bool hybrid_memory = model_uses_recurrent_memory();
-    // Sequence-state rollback is not equivalent to ordinary KV trimming for
-    // recurrent/hybrid models. The safe fast path is exact append-only reuse:
-    // keep the live resident state and append only when the complete cached
-    // token sequence is an exact prefix of the new prompt. Otherwise rebuild.
     const bool cache_supported = !llama_model_has_encoder(g_model);
+    const size_t stable_prefix_count = cache_prefix_tokens > 0 &&
+            static_cast<size_t>(cache_prefix_tokens) < prompt_tokens.size()
+            ? static_cast<size_t>(cache_prefix_tokens) : 0;
+    bool system_prefix_reused = false;
+    bool cache_reused = false;
+    size_t reuse_prefix = 0;
+
+    // Prefer restoring the independently captured system-only state on hybrid models.
+    // This is safe for recurrent memory, unlike trying to trim a previous conversation
+    // back to a common token prefix.
+    if (hybrid_memory && cache_supported && stable_prefix_count > 0 &&
+        !g_cached_system_prefix_state.empty() &&
+        g_cached_system_prefix_model == g_model &&
+        g_cached_system_prefix_context == g_context &&
+        g_cached_system_prefix_tokens.size() == stable_prefix_count &&
+        std::equal(g_cached_system_prefix_tokens.begin(),
+                   g_cached_system_prefix_tokens.end(),
+                   prompt_tokens.begin())) {
+        llama_memory_clear(memory, true);
+        const size_t restored = llama_state_seq_set_data(
+                g_context, g_cached_system_prefix_state.data(),
+                g_cached_system_prefix_state.size(), 0);
+        if (restored > 0) {
+            system_prefix_reused = true;
+            cache_reused = true;
+            reuse_prefix = stable_prefix_count;
+            g_cached_prompt_tokens.clear();
+            append_native_trace((std::string("NATIVE_KV_CACHE_SYSTEM_PREFIX_RESTORED tokens=") +
+                    std::to_string(reuse_prefix) + " stateBytes=" +
+                    std::to_string(restored)).c_str());
+        } else {
+            append_native_trace("NATIVE_KV_CACHE_SYSTEM_PREFIX_RESTORE_FAILED");
+            clear_android_system_prefix_cache();
+            llama_memory_clear(memory, true);
+        }
+    } else if (hybrid_memory && !g_cached_system_prefix_state.empty() &&
+               (g_cached_system_prefix_model != g_model ||
+                g_cached_system_prefix_context != g_context ||
+                stable_prefix_count == 0 ||
+                g_cached_system_prefix_tokens.size() != stable_prefix_count ||
+                !std::equal(g_cached_system_prefix_tokens.begin(),
+                            g_cached_system_prefix_tokens.end(),
+                            prompt_tokens.begin()))) {
+        append_native_trace("NATIVE_KV_CACHE_SYSTEM_PREFIX_INVALIDATED reason=prefix_changed");
+        clear_android_system_prefix_cache();
+    }
+
+    // Sequence-state rollback is not equivalent to ordinary KV trimming for
+    // recurrent/hybrid models. Without a system snapshot, their safe fast path
+    // remains exact append-only reuse.
     const llama_pos resident_min = llama_memory_seq_pos_min(memory, 0);
     const llama_pos resident_max = llama_memory_seq_pos_max(memory, 0);
     const bool resident_sequence_matches_cache = hybrid_memory
@@ -861,21 +923,25 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                resident_min == 0 &&
                resident_max >= 0 &&
                static_cast<size_t>(resident_max + 1) == g_cached_prompt_tokens.size());
-    bool cache_reused = cache_supported && resident_sequence_matches_cache && common_prefix > 0;
-    size_t reuse_prefix = 0;
-    const bool exact_cached_prefix = cache_reused &&
+    cache_reused = cache_reused ||
+            (cache_supported && resident_sequence_matches_cache && common_prefix > 0);
+    const bool exact_cached_prefix = !system_prefix_reused && cache_reused &&
             common_prefix == g_cached_prompt_tokens.size();
     append_native_trace((std::string("NATIVE_KV_CACHE_PREFIX_CHECK supported=") +
         (cache_supported ? "1" : "0") +
         " hybrid=" + (hybrid_memory ? "1" : "0") +
-        " cachedTokens=" + std::to_string(g_cached_prompt_tokens.size()) +
+        " cachedTokens=" + std::to_string(system_prefix_reused ? reuse_prefix : g_cached_prompt_tokens.size()) +
+        " systemPrefixTokens=" + std::to_string(stable_prefix_count) +
         " commonPrefix=" + std::to_string(common_prefix) +
         " residentMin=" + std::to_string(resident_min) +
         " residentMax=" + std::to_string(resident_max) +
         " residentMatches=" + (resident_sequence_matches_cache ? "1" : "0")).c_str());
 
     if (hybrid_memory) {
-        if (exact_cached_prefix) {
+        if (system_prefix_reused) {
+            // Sequence state was restored from the stable system-only checkpoint.
+            // Decode only the variable conversation suffix.
+        } else if (exact_cached_prefix) {
             // Do not clear or trim recurrent memory. It is still resident from
             // the last successful generation and corresponds to the cached
             // token sequence; process only the new suffix at its true position.
@@ -914,7 +980,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     // completed. A failed decode must never advertise a partially-built state
     // as a valid prefix for the next turn.
 
-    const size_t diagnostic_cached_tokens = g_cached_prompt_tokens.size();
+    const size_t diagnostic_cached_tokens = system_prefix_reused ? reuse_prefix : g_cached_prompt_tokens.size();
     const size_t diagnostic_reused_tokens = reuse_prefix;
     const size_t diagnostic_new_tokens = prompt_tokens.size() > reuse_prefix
             ? prompt_tokens.size() - reuse_prefix
@@ -999,7 +1065,15 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     int prompt_offset = (int) reuse_prefix;
     while (prompt_offset < n_prompt) {
         if (g_stop.load(std::memory_order_relaxed)) { result = 9; stop_reason = "USER_STOP"; checkpoint("NATIVE_GENERATE_STOPPED"); break; }
-        const int count = std::min(decode_batch_size, n_prompt - prompt_offset);
+        int count = std::min(decode_batch_size, n_prompt - prompt_offset);
+        const bool capture_system_prefix = hybrid_memory && stable_prefix_count > 0 &&
+                g_cached_system_prefix_state.empty() && reuse_prefix == 0;
+        // End a batch exactly at the system-prefix boundary so its recurrent/KV
+        // state can be snapshotted before any user/session-specific token is decoded.
+        if (capture_system_prefix && prompt_offset < static_cast<int>(stable_prefix_count) &&
+            prompt_offset + count > static_cast<int>(stable_prefix_count)) {
+            count = static_cast<int>(stable_prefix_count) - prompt_offset;
+        }
         const bool final_prompt_batch = prompt_offset + count == n_prompt;
         fill_batch(prompt_tokens.data() + prompt_offset, count, prompt_offset, final_prompt_batch);
         const int decode_result = llama_decode(g_context, batch);
@@ -1014,7 +1088,34 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         }
         position = prompt_offset + count;
         prompt_offset += count;
-        append_native_trace((std::string("NATIVE_PREFILL_PROGRESS processed=") +
+        if (capture_system_prefix && prompt_offset == static_cast<int>(stable_prefix_count)) {
+            const size_t state_size = llama_state_seq_get_size(g_context, 0);
+            if (state_size > 0) {
+                std::vector<uint8_t> state(state_size);
+                const size_t copied = llama_state_seq_get_data(
+                        g_context, state.data(), state.size(), 0);
+                if (copied > 0 && copied <= state.size()) {
+                    state.resize(copied);
+                    g_cached_system_prefix_state = std::move(state);
+                    g_cached_system_prefix_tokens.assign(
+                            prompt_tokens.begin(),
+                            prompt_tokens.begin() + static_cast<std::ptrdiff_t>(stable_prefix_count));
+                    g_cached_system_prefix_model = g_model;
+                    g_cached_system_prefix_context = g_context;
+                    append_native_trace((std::string("NATIVE_KV_CACHE_SYSTEM_PREFIX_SAVED tokens=") +
+                            std::to_string(stable_prefix_count) + " stateBytes=" +
+                            std::to_string(copied)).c_str());
+                } else {
+                    append_native_trace("NATIVE_KV_CACHE_SYSTEM_PREFIX_SAVE_FAILED");
+                    clear_android_system_prefix_cache();
+                }
+            } else {
+                append_native_trace("NATIVE_KV_CACHE_SYSTEM_PREFIX_SAVE_SKIPPED reason=empty_state");
+            }
+        }
+        append_native_trace((std::string("NATIVE_PREFILL_PROGRESS processed=" + std::to_string(prompt_offset) + " total=" + std::to_string(n_prompt) +
+                " reused=" + std::to_string(reuse_prefix)).c_str());
+        /* preserve existing progress trace below */
             std::to_string(prompt_offset) + " total=" + std::to_string(n_prompt) +
             " reused=" + std::to_string(reuse_prefix)).c_str());
         if (final_prompt_batch) {
@@ -1228,7 +1329,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                 " generatedDecodedTokens=" + std::to_string(generated_decoded_tokens.size()) +
                 " residentMin=" + std::to_string(published_min) +
                 " residentMax=" + std::to_string(published_max) +
-                " mode=" + (hybrid_memory ? "resident_hybrid_exact_prefix" : "resident_kv")).c_str());
+                " mode=" + (hybrid_memory ? (g_cached_system_prefix_state.empty() ? "resident_hybrid_exact_prefix" : "resident_hybrid_system_prefix_snapshot") : "resident_kv") +
+                " systemPrefixTokens=" + std::to_string(g_cached_system_prefix_tokens.size())).c_str());
         }
     } else if (result != 0) {
         // Any interrupted/failed request may have trimmed or partially changed
