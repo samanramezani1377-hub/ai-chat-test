@@ -78,8 +78,15 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
         decoderInitial = states.values.map { A(it.name, it.shape, it.v, it.name.endsWith(".cache"), it.dtype, it.lv) }
         cacheSlots = decoderInitial.indices.filter { decoderInitial[it].cache }
         smallSlots = decoderInitial.indices.filterNot { it in cacheSlots }
-        smallOutputs = decOutputs.indices.filter { decOutputs[it].endsWith("o") && decOutputs[it] != "audio" }
-        kvOutputs = decOutputs.indices.filter { decOutputs[it].startsWith("kv") }
+        // ONNX Runtime exposes input/output names as sets; never rely on their iteration order.
+        // State outputs are numbered by their original decoder-state slot, while KV
+        // outputs are numbered by cache slot.
+        smallOutputs = decOutputs.indices
+            .filter { decOutputs[it].endsWith("o") && decOutputs[it] != "audio" }
+            .sortedBy { decOutputs[it].removePrefix("s").removeSuffix("o").toIntOrNull() ?: Int.MAX_VALUE }
+        kvOutputs = decOutputs.indices
+            .filter { decOutputs[it].startsWith("kv") }
+            .sortedBy { decOutputs[it].removePrefix("kv").toIntOrNull() ?: Int.MAX_VALUE }
         require(smallOutputs.size == smallSlots.size && kvOutputs.size == cacheSlots.size) {
             "Mimi state output layout does not match decode_state_init.npz"
         }
