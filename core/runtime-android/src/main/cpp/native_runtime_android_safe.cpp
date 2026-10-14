@@ -890,6 +890,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             system_prefix_reused = true;
             cache_reused = true;
             reuse_prefix = stable_prefix_count;
+            common_prefix = stable_prefix_count;
             g_cached_prompt_tokens.clear();
             append_native_trace((std::string("NATIVE_KV_CACHE_SYSTEM_PREFIX_RESTORED tokens=") +
                     std::to_string(reuse_prefix) + " stateBytes=" +
@@ -1005,6 +1006,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     append_native_trace((std::string("NATIVE_KV_CACHE_REQUEST status=") +
         (cache_reused ? "HIT" : "MISS") +
         " cachedTokens=" + std::to_string(diagnostic_cached_tokens) +
+        " systemPrefixTokens=" + std::to_string(stable_prefix_count) +
+        " cacheMode=" + (system_prefix_reused ? "system_prefix_snapshot" : (hybrid_memory ? "resident_hybrid" : "resident_kv")) +
         " reusedTokens=" + std::to_string(diagnostic_reused_tokens) +
         " newTokens=" + std::to_string(diagnostic_new_tokens) +
         " hitRatio=" + std::to_string(diagnostic_hit_ratio)).c_str());
