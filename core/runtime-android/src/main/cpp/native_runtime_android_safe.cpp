@@ -850,6 +850,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             append_native_trace("NATIVE_KV_CACHE_INVALIDATED reason=model_or_context_replaced");
         }
         g_cached_prompt_tokens.clear();
+        clear_android_system_prefix_cache();
         g_cached_model = g_model;
         g_cached_context = g_context;
         llama_memory_clear(memory, true);
