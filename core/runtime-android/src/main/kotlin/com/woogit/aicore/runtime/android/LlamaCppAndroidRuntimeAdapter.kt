@@ -181,6 +181,22 @@ class LlamaCppAndroidRuntimeAdapter(
         } catch (t: Throwable) {
             return ModelResult.Failure(ModelError.Inference(t.message ?: "Invalid conversation"))
         }
+        // Cache the exact leading system-message token prefix independently of session
+        // history. Hybrid/recurrent models cannot safely roll back arbitrary KV positions,
+        // so native code snapshots this stable prefix and restores it for a new session.
+        val systemPrefixText = if (loadedArchitecture == "lfm2" || loadedArchitecture == "llama") {
+            ""
+        } else {
+            Qwen3PromptFormatter.formatSystemPrefix(safeMessages)
+        }
+        val cachePrefixTokens = if (systemPrefixText.isNotBlank()) {
+            NativeLlamaCpp.countTokens(systemPrefixText).takeIf { it > 0 } ?: 0
+        } else {
+            0
+        }
+        RuntimeDiagnosticsStore.recordNativeEvent(
+            "NATIVE_SYSTEM_PREFIX_CACHE_REQUEST prefixTokens=$cachePrefixTokens architecture=$loadedArchitecture"
+        )
         stopRequested.set(false)
         RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_GENERATE_STARTED context=$loadedContextLength backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads enableThinking=${settings.enableThinking} maxNewTokens=${settings.maxNewTokens} recentMessages=${settings.recentMessages}")
         RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "context=${loadedContextLength} backend=$selectedBackend gpuLayers=$selectedGpuLayers threads=$selectedCpuThreads")
@@ -220,7 +236,8 @@ class LlamaCppAndroidRuntimeAdapter(
                     "lfm2" -> 0.15f
                     "llama" -> 0.0f
                     else -> (settings.minP ?: 0.05).toFloat().coerceIn(0f, 1f)
-                }
+                },
+                cachePrefixTokens = cachePrefixTokens
             ).collect { chunk ->
                 currentCoroutineContext().ensureActive()
                 if (chunk.isEmpty() || stopRequested.get()) return@collect
