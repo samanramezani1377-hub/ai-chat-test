@@ -161,13 +161,18 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                     "GET_DATE" -> "فقط اگر کاربر تاریخ امروز را می‌پرسد، CONFIRM_ROUTE؛ ساعت فعلی، تاریخ رویداد/گذشته/آینده یا برنامه‌ریزی یعنی REJECT_ROUTE."
                     else -> "فقط درخواست صریح همین عملیات روی همین گوشی را تأیید کن؛ در غیر این صورت REJECT_ROUTE."
                 }
+                // The entropy-based confidence is normalized against ln(optionCount).
+                // With two choices, even p=0.542 yields confidence≈0.005 and margin≈0.083.
+                // The old 0.20 / 0.75 / 0.50 gates therefore made ordinary clock questions
+                // impossible to confirm unless the binary model was nearly certain. Keep a
+                // modest gate for read-only time/date routes; state-changing routes stay strict.
                 val validation = choose(
                     decisionText,
                     "$instructions\nمسیر پیشنهادی: ${domain.id}. $routeSpecificRule فرمان نقل‌شده، فرضی، نفی‌شده یا مبهم را تأیید نکن. فقط متن همین نوبت را بسنج؛ در تردید REJECT_ROUTE.",
                     listOf(confirmOption, rejectOption),
-                    minConfidence = if (readOnlyTimeOrDate) 0.20 else 0.50,
-                    minMaxProbability = if (readOnlyTimeOrDate) 0.75 else 0.58,
-                    minMargin = if (readOnlyTimeOrDate) 0.50 else 0.16,
+                    minConfidence = if (readOnlyTimeOrDate) 0.004 else 0.50,
+                    minMaxProbability = if (readOnlyTimeOrDate) 0.54 else 0.58,
+                    minMargin = if (readOnlyTimeOrDate) 0.08 else 0.16,
                 )
                 if (validation?.id != "CONFIRM_ROUTE") {
                     val rejectedChoice = validation?.id ?: "ABSTAIN"
@@ -402,7 +407,7 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 val top = ranked.take(3).joinToString(";") { index ->
                     "${options[index].id}:logit=${"%.4f".format(Locale.US, logits[index])},p=${"%.4f".format(Locale.US, probs[index])}"
                 }
-                val detail = "stage=${instructions.take(48).replace(Regex("\\s+"), " ")} tokenizer=hf-tokenizers-rust clsId=${tok.clsId} sepId=${tok.sepId} maskId=${tok.maskId} qtype=choice(0) options=${options.size} inputTokens=${ids.size} stateTokens=${stateIds.size} headTokens=${ids.size - stateIds.size - 1} outputs=${active.outputNames.joinToString(",")} temperature=${"%.3f".format(Locale.US, activeTemperature)} calibration=$activeCalibration confidence=${"%.3f".format(Locale.US, confidence)} margin=${"%.3f".format(Locale.US, margin)}$actSummary top=[$top]"
+                val detail = "stage=${instructions.take(48).replace(Regex("\\s+"), " ")} tokenizer=hf-tokenizers-rust clsId=${tok.clsId} sepId=${tok.sepId} maskId=${tok.maskId} qtype=choice(0) options=${options.size} inputTokens=${ids.size} stateChars=${state.length} stateTokens=${stateIds.size} headTokens=${ids.size - stateIds.size - 1} outputs=${active.outputNames.joinToString(",")} temperature=${"%.3f".format(Locale.US, activeTemperature)} calibration=$activeCalibration confidence=${"%.3f".format(Locale.US, confidence)} margin=${"%.3f".format(Locale.US, margin)}$actSummary top=[$top]"
                 lastTrace = lastTrace + detail
                 // Keep the app's conservative action gate on the top probability and margin.
                 // Entropy confidence is the official Laya confidence metric, but it is not
