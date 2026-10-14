@@ -879,12 +879,32 @@ internal class VoiceConversationController(
             onStatus("در حال پردازش گفتار و تولید پاسخ محلی…")
             val id = conversationId ?: error("VOICE-CHAT-001: شناسه مکالمه ایجاد نشده است.")
             val modelFailure = AtomicReference<String?>(null)
+            val voiceStreamRaw = StringBuilder()
+            val voiceStreamSafeFed = StringBuilder()
             val session = container.createAgentSession(id, eventSink = { event ->
-                // Avoid speaking streamed fragments: <think> and Markdown may be split across callbacks.
-                if (event is AgentEvent.Failed) {
-                    modelFailure.compareAndSet(null, event.message)
-                    onDiagnostic("VOICE-LLM-001: ${event.message}")
-                    onStatus("VOICE-LLM-001: ${event.message}")
+                when (event) {
+                    is AgentEvent.Token -> {
+                        // Voice has its own streaming consumer: sanitize the accumulated output,
+                        // then send only newly available complete sentences to TTS. This avoids
+                        // speaking split Markdown/reasoning markers and does not wait for the
+                        // entire model response before starting audio playback.
+                        voiceStreamRaw.append(event.value)
+                        val safe = sanitizeAssistantVoiceText(voiceStreamRaw.toString())
+                        val alreadyFed = voiceStreamSafeFed.toString()
+                        if (safe.startsWith(alreadyFed)) {
+                            val delta = safe.substring(alreadyFed.length)
+                            if (delta.isNotEmpty()) {
+                                enqueueCompleteSentences(delta)
+                                voiceStreamSafeFed.append(delta)
+                            }
+                        }
+                    }
+                    is AgentEvent.Failed -> {
+                        modelFailure.compareAndSet(null, event.message)
+                        onDiagnostic("VOICE-LLM-001: ${event.message}")
+                        onStatus("VOICE-LLM-001: ${event.message}")
+                    }
+                    else -> Unit
                 }
             }, includeAgentTools = false) ?: error("VOICE-CHAT-002: نشست مدل محلی در دسترس نیست.")
             // Voice is latency-sensitive: skip Qwen reasoning, cap response length, and keep
@@ -898,7 +918,15 @@ internal class VoiceConversationController(
                 val generation = result.generation
                 persistAssistantReplyIfMissing(generation.text)
                 val answer = sanitizeAssistantVoiceText(generation.text)
-                if (answer.isNotBlank()) enqueueCompleteSentences(answer, flush = true)
+                // Flush only text not already handed to the sentence queue while streaming.
+                val streamedSafe = voiceStreamSafeFed.toString()
+                if (answer.startsWith(streamedSafe)) {
+                    enqueueCompleteSentences(answer.substring(streamedSafe.length), flush = true)
+                } else if (streamedSafe.isEmpty() && answer.isNotBlank()) {
+                    enqueueCompleteSentences(answer, flush = true)
+                } else {
+                    enqueueCompleteSentences("", flush = true)
+                }
                 queue.close()
                 activeSpeechJob.join()
                 val outputTokens = generation.outputTokens
