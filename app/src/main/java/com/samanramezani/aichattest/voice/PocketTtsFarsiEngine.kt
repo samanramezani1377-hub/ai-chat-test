@@ -71,7 +71,7 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
         sp = Model.parseFrom(Paths.get(File(dir, "tokenizer_ph.model").absolutePath))
         val states = npz(File(dir, "decode_state_init.npz"))
         decInputs = dec.inputNames.toList(); decOutputs = dec.outputNames.toList()
-        val expectedDecoderInputs = setOf("latent") + states.keys.indices.map { "s$it" }
+        val expectedDecoderInputs = setOf("latent") + (0 until states.size).map { "s$it" }
         require(decInputs.toSet() == expectedDecoderInputs) {
             "Mimi decoder input names mismatch: expected=$expectedDecoderInputs actual=${decInputs.toSet()}"
         }
