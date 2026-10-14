@@ -30,6 +30,28 @@ class AgentSessionTest {
     }
 
     @Test
+    fun sendPublishesSafeProseChunksInOrderWithoutAppendingTheFinalTextTwice() = kotlinx.coroutines.test.runTest {
+        val store = TestStore()
+        val runtime = TestRuntime(listOf("Hello", ", ", "world."))
+        val provider = DefaultContextProvider(store, { "system" }, { "task" }, { "workspace" })
+        val events = mutableListOf<AgentEvent>()
+        val session = AgentSession(
+            orchestrator = AgentOrchestrator(provider, runtime),
+            conversationStore = store,
+            eventSink = { event -> events += event },
+        )
+
+        val reply = session.send("say hello", InferenceSettings())
+
+        assertEquals("Hello, world.", reply.generation.text)
+        assertEquals(
+            listOf("Hello", ", ", "world."),
+            events.filterIsInstance<AgentEvent.Token>().map { it.value },
+        )
+        assertEquals("Hello, world.", store.messages.last().content)
+    }
+
+    @Test
     fun sendUsesSuppliedInferenceSettingsInsteadOfGlobalSnapshot() = kotlinx.coroutines.test.runTest {
         val store = TestStore()
         val runtime = TestRuntime()
@@ -52,14 +74,14 @@ class AgentSessionTest {
         override suspend fun replaceSummary(summary: String) { summaryValue = summary }
     }
 
-    private class TestRuntime : ModelRuntime {
+    private class TestRuntime(private val chunks: List<String> = listOf("answer")) : ModelRuntime {
         var lastRequest: GenerationRequest? = null
         override suspend fun load(model: com.woogit.aicore.domain.ModelDescriptor) = Unit
         override suspend fun unload() = Unit
         override suspend fun generate(request: GenerationRequest, onToken: suspend (String) -> Unit): GenerationResult {
             lastRequest = request
-            onToken("answer")
-            return GenerationResult("answer")
+            chunks.forEach { onToken(it) }
+            return GenerationResult(chunks.joinToString(""))
         }
         override suspend fun stopGeneration() = Unit
         override fun runtimeInfo() = RuntimeInfo("test", "1", "test")
