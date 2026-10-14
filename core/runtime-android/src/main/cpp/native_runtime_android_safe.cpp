@@ -899,7 +899,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             stable_turn_prefix_count > 0 && !g_cached_turn_prefix_state.empty() &&
             g_cached_turn_prefix_model == g_model &&
             g_cached_turn_prefix_context == g_context &&
-            g_cached_turn_prefix_tokens.size() == stable_turn_prefix_count &&
+            !g_cached_turn_prefix_tokens.empty() &&
+            g_cached_turn_prefix_tokens.size() <= stable_turn_prefix_count &&
             std::equal(g_cached_turn_prefix_tokens.begin(),
                        g_cached_turn_prefix_tokens.end(), prompt_tokens.begin());
     if (turn_prefix_matches) {
@@ -910,8 +911,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         if (restored > 0) {
             turn_prefix_reused = true;
             cache_reused = true;
-            reuse_prefix = stable_turn_prefix_count;
-            common_prefix = stable_turn_prefix_count;
+            reuse_prefix = g_cached_turn_prefix_tokens.size();
+            common_prefix = reuse_prefix;
             g_cached_prompt_tokens.clear();
             append_native_trace((std::string("NATIVE_KV_CACHE_TURN_PREFIX_RESTORED tokens=") +
                     std::to_string(reuse_prefix) + " stateBytes=" +
