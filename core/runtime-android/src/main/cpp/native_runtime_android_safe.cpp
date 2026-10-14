@@ -1024,7 +1024,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         llama_batch_free(batch);
         env->DeleteLocalRef(listener_class);
         llama_sampler_free(sampler);
-        clear_android_generation_cache();
+        ai_chat_clear_android_generation_cache();
         llama_memory_clear(memory, true);
         checkpoint("NATIVE_GENERATE_BATCH_INIT_FAILED");
         return 9;
@@ -1307,7 +1307,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                     " residentMax=" + std::to_string(published_max) +
                     " cachedTokens=" + std::to_string(g_cached_prompt_tokens.size())).c_str());
             if (!replay_ok) {
-                clear_android_generation_cache();
+                ai_chat_clear_android_generation_cache();
                 llama_memory_clear(memory, true);
             }
         }
@@ -1324,7 +1324,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                 std::to_string(published_max) + " cachedTokens=" +
                 std::to_string(g_cached_prompt_tokens.size()) +
                 " hybrid=" + (hybrid_memory ? "1" : "0")).c_str());
-            clear_android_generation_cache();
+            ai_chat_clear_android_generation_cache();
             llama_memory_clear(memory, true);
         } else {
             append_native_trace((std::string("NATIVE_KV_CACHE_PUBLISHED tokens=") +
@@ -1340,7 +1340,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         // Any interrupted/failed request may have trimmed or partially changed
         // the resident memory, even when prefill never reached its completion
         // marker. Invalidate both sides together to prevent a stale token/state pair.
-        clear_android_generation_cache();
+        ai_chat_clear_android_generation_cache();
         llama_memory_clear(memory, true);
         checkpoint("NATIVE_KV_CACHE_NOT_PUBLISHED_AFTER_FAILED_GENERATION");
     }
