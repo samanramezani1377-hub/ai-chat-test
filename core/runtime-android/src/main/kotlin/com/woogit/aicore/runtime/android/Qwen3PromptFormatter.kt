@@ -13,6 +13,20 @@ internal object Qwen3PromptFormatter {
     private const val IM_START = "<|im_start|>"
     private const val IM_END = "<|im_end|>"
 
+    /**
+     * Exact serialized system-message prefix used by format(). It deliberately excludes
+     * the assistant generation marker so native code can snapshot only the stable prefix.
+     */
+    fun formatSystemPrefix(messages: List<ChatMessage>): String = buildString {
+        messages.takeWhile { it.role == ChatMessage.Role.SYSTEM }.forEach { message ->
+            if (message.content.isNotBlank()) {
+                append(IM_START).append("system\\n")
+                append(message.content.trim())
+                append(IM_END).append('\\n')
+            }
+        }
+    }
+
     fun format(messages: List<ChatMessage>, enableThinking: Boolean = true): String {
         require(messages.isNotEmpty()) { "Conversation must contain at least one message" }
 
