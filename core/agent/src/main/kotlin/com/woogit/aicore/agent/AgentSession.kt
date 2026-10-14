@@ -162,7 +162,34 @@ class AgentSession(
         recentMessages: Int,
         contextMessages: List<ConversationMessage>,
     ): GenerationResult {
-        val result = orchestrator.generate(settings, recentMessages, { /* published after classification */ }, contextMessages)
+        // Stream ordinary prose as it is decoded, but keep likely internal formats buffered.
+        // Agent/tool requests are JSON and reasoning channels commonly begin with '<'; these
+        // must never be exposed before the full response has been classified.
+        val streamedText = StringBuilder()
+        val prefix = StringBuilder()
+        var streamDecision: Boolean? = null
+        var streamPublished = false
+        val result = orchestrator.generate(settings, recentMessages, { chunk ->
+            if (chunk.isEmpty()) return@generate
+            if (streamDecision == null) {
+                prefix.append(chunk)
+                val first = prefix.firstOrNull { !it.isWhitespace() }
+                if (first != null) {
+                    streamDecision = first != '{' && first != '<' && first != '`'
+                    if (streamDecision == true) {
+                        val safePrefix = prefix.toString()
+                        eventSink(AgentEvent.Token(safePrefix))
+                        streamedText.append(safePrefix)
+                        streamPublished = true
+                        prefix.setLength(0)
+                    }
+                }
+            } else if (streamDecision == true) {
+                eventSink(AgentEvent.Token(chunk))
+                streamedText.append(chunk)
+                streamPublished = true
+            }
+        }, contextMessages)
         val cleaned = stripReasoning(result.text)
         val context = contextProvider.build(Int.MAX_VALUE)
         val candidateContext = context.copy(
@@ -175,7 +202,11 @@ class AgentSession(
         )
         val actionRequired = actionPlanCoordinator?.requiresAction(candidateContext) == true
         val toolCall = actionPlanCoordinator != null && ActionProtocolParser().parse(cleaned) != null
-        if (!toolCall && !actionRequired && cleaned.isNotBlank()) eventSink(AgentEvent.Token(cleaned))
+        if (!toolCall && !actionRequired && cleaned.isNotBlank() && !streamPublished) {
+            // Structured/tool-shaped output is emitted only after classification. For ordinary
+            // prose already streamed above, do not append the final response a second time.
+            eventSink(AgentEvent.Token(cleaned))
+        }
         return result.copy(text = cleaned)
     }
 
