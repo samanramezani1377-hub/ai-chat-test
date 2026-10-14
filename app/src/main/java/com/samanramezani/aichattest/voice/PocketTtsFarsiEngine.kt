@@ -71,7 +71,10 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
         sp = Model.parseFrom(Paths.get(File(dir, "tokenizer_ph.model").absolutePath))
         val states = npz(File(dir, "decode_state_init.npz"))
         decInputs = dec.inputNames.toList(); decOutputs = dec.outputNames.toList()
-        require(decInputs.size == states.size + 1) { "Mimi state/input count mismatch" }
+        val expectedDecoderInputs = setOf("latent") + states.keys.indices.map { "s$it" }
+        require(decInputs.toSet() == expectedDecoderInputs) {
+            "Mimi decoder input names mismatch: expected=$expectedDecoderInputs actual=${decInputs.toSet()}"
+        }
         decoderInitial = states.values.map { A(it.name, it.shape, it.v, it.name.endsWith(".cache"), it.dtype, it.lv) }
         cacheSlots = decoderInitial.indices.filter { decoderInitial[it].cache }
         smallSlots = decoderInitial.indices.filterNot { it in cacheSlots }
@@ -217,8 +220,14 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
             val lt=tensor(un,longArrayOf(1,1,ld.toLong()))
             val stateTensors=mutableListOf<OnnxTensor>()
             try {
-                val feeds=LinkedHashMap<String,OnnxTensor>(); feeds[decInputs[0]]=lt
-                states.forEachIndexed { i,s -> tensor(s).also { stateTensors+=it; feeds[decInputs[i+1]]=it } }
+                // ONNX Runtime does not guarantee inputNames iteration order. Bind by
+                // the exported graph names so a float latent can never be fed into a
+                // BOOL/INT decoder-state input merely because it appeared first.
+                val feeds=LinkedHashMap<String,OnnxTensor>(); feeds["latent"]=lt
+                states.forEachIndexed { i,s ->
+                    val inputName = "s$i"
+                    tensor(s).also { stateTensors+=it; feeds[inputName]=it }
+                }
                 dec.run(feeds).use { r ->
                     val ai=decOutputs.indexOf("audio").let { if(it<0) 0 else it }
                     audio += floats(r[ai] as? OnnxTensor ?: error("Mimi audio output is not an ONNX tensor: ${decOutputs.getOrNull(ai)}"))
