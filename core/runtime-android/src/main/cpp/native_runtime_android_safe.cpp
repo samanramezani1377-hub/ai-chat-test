@@ -917,7 +917,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     // remains exact append-only reuse.
     const llama_pos resident_min = llama_memory_seq_pos_min(memory, 0);
     const llama_pos resident_max = llama_memory_seq_pos_max(memory, 0);
-    const bool resident_sequence_matches_cache = hybrid_memory
+    const bool resident_sequence_matches_cache = system_prefix_reused || (hybrid_memory
             ? (!g_cached_prompt_tokens.empty() &&
                resident_max >= 0 &&
                static_cast<size_t>(resident_max + 1) == g_cached_prompt_tokens.size() &&
@@ -926,7 +926,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             : (!g_cached_prompt_tokens.empty() &&
                resident_min == 0 &&
                resident_max >= 0 &&
-               static_cast<size_t>(resident_max + 1) == g_cached_prompt_tokens.size());
+               static_cast<size_t>(resident_max + 1) == g_cached_prompt_tokens.size()));
     cache_reused = cache_reused ||
             (cache_supported && resident_sequence_matches_cache && common_prefix > 0);
     const bool exact_cached_prefix = !system_prefix_reused && cache_reused &&
