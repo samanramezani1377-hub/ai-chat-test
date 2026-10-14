@@ -4,9 +4,11 @@ import android.app.ActivityManager
 import android.content.Context
 import android.os.Debug
 import android.util.Log
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -54,7 +56,7 @@ internal object NativeLlamaCpp {
             Log.e(TAG, "ACTIVATION_LOAD_EXCEPTION type=${t::class.java.name} message=${t.message}", t)
             throw t
         }
-    }
+    }.buffer(Channel.UNLIMITED)
 
     @Synchronized
     fun unload() {
@@ -105,7 +107,16 @@ internal object NativeLlamaCpp {
 
     fun generate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float): Flow<String> = callbackFlow {
         val listener = object : TokenListener {
-            override fun onToken(token: String) { trySend(token) }
+            override fun onToken(token: String) {
+                // JNI callbacks are synchronous and cannot suspend. The default callbackFlow
+                // buffer is bounded; ignoring trySend's failure silently drops generated text
+                // when native decode outruns the collector. Output is already bounded by
+                // maxTokens, so an unlimited fused channel preserves every token in order.
+                val result = trySend(token)
+                if (result.isFailure && !result.isClosed) {
+                    Log.e(TAG, "STREAM_TOKEN_ENQUEUE_FAILED: generated token was not queued")
+                }
+            }
         }
         val worker = launch {
             val result = nativeGenerate(prompt, maxTokens, temperature, topK, topP, minP, listener)
