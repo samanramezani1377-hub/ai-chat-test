@@ -26,7 +26,7 @@ static void clear_android_system_prefix_cache() {
     g_cached_system_prefix_context = nullptr;
 }
 
-void ai_chat_clear_android_generation_cache() {
+static void clear_android_generation_cache() {
     g_cached_prompt_tokens.clear();
     g_cached_model = nullptr;
     g_cached_context = nullptr;
