@@ -1128,13 +1128,21 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     while (prompt_offset < n_prompt) {
         if (g_stop.load(std::memory_order_relaxed)) { result = 9; stop_reason = "USER_STOP"; checkpoint("NATIVE_GENERATE_STOPPED"); break; }
         int count = std::min(decode_batch_size, n_prompt - prompt_offset);
-        const bool capture_system_prefix = hybrid_memory && stable_prefix_count > 0 &&
-                g_cached_system_prefix_state.empty() && reuse_prefix == 0;
-        // End a batch exactly at the system-prefix boundary so its recurrent/KV
-        // state can be snapshotted before any user/session-specific token is decoded.
-        if (capture_system_prefix && prompt_offset < static_cast<int>(stable_prefix_count) &&
-            prompt_offset + count > static_cast<int>(stable_prefix_count)) {
-            count = static_cast<int>(stable_prefix_count) - prompt_offset;
+        const bool capture_system_prefix = hybrid_memory && stable_prefix_count > reuse_prefix &&
+                g_cached_system_prefix_state.empty();
+        const bool capture_turn_prefix = hybrid_memory &&
+                stable_turn_prefix_count > reuse_prefix;
+        // Split at the next reusable checkpoint boundary. Save system state first for
+        // new-session reuse, then save the longer per-turn prefix before assistant decode.
+        size_t next_snapshot_boundary = static_cast<size_t>(n_prompt);
+        if (capture_system_prefix && stable_prefix_count > static_cast<size_t>(prompt_offset)) {
+            next_snapshot_boundary = std::min(next_snapshot_boundary, stable_prefix_count);
+        }
+        if (capture_turn_prefix && stable_turn_prefix_count > static_cast<size_t>(prompt_offset)) {
+            next_snapshot_boundary = std::min(next_snapshot_boundary, stable_turn_prefix_count);
+        }
+        if (next_snapshot_boundary < static_cast<size_t>(prompt_offset + count)) {
+            count = static_cast<int>(next_snapshot_boundary - static_cast<size_t>(prompt_offset));
         }
         const bool final_prompt_batch = prompt_offset + count == n_prompt;
         fill_batch(prompt_tokens.data() + prompt_offset, count, prompt_offset, final_prompt_batch);
@@ -1173,6 +1181,31 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                 }
             } else {
                 append_native_trace("NATIVE_KV_CACHE_SYSTEM_PREFIX_SAVE_SKIPPED reason=empty_state");
+            }
+        }
+        if (capture_turn_prefix && prompt_offset == static_cast<int>(stable_turn_prefix_count)) {
+            const size_t state_size = llama_state_seq_get_size(g_context, 0);
+            if (state_size > 0) {
+                std::vector<uint8_t> state(state_size);
+                const size_t copied = llama_state_seq_get_data(
+                        g_context, state.data(), state.size(), 0);
+                if (copied > 0 && copied <= state.size()) {
+                    state.resize(copied);
+                    g_cached_turn_prefix_state = std::move(state);
+                    g_cached_turn_prefix_tokens.assign(
+                            prompt_tokens.begin(),
+                            prompt_tokens.begin() + static_cast<std::ptrdiff_t>(stable_turn_prefix_count));
+                    g_cached_turn_prefix_model = g_model;
+                    g_cached_turn_prefix_context = g_context;
+                    append_native_trace((std::string("NATIVE_KV_CACHE_TURN_PREFIX_SAVED tokens=") +
+                            std::to_string(stable_turn_prefix_count) + " stateBytes=" +
+                            std::to_string(copied)).c_str());
+                } else {
+                    append_native_trace("NATIVE_KV_CACHE_TURN_PREFIX_SAVE_FAILED");
+                    clear_android_turn_prefix_cache();
+                }
+            } else {
+                append_native_trace("NATIVE_KV_CACHE_TURN_PREFIX_SAVE_SKIPPED reason=empty_state");
             }
         }
         append_native_trace((std::string("NATIVE_PREFILL_PROGRESS processed=") +
@@ -1389,8 +1422,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                 " generatedDecodedTokens=" + std::to_string(generated_decoded_tokens.size()) +
                 " residentMin=" + std::to_string(published_min) +
                 " residentMax=" + std::to_string(published_max) +
-                " mode=" + (hybrid_memory ? (g_cached_system_prefix_state.empty() ? "resident_hybrid_exact_prefix" : "resident_hybrid_system_prefix_snapshot") : "resident_kv") +
-                " systemPrefixTokens=" + std::to_string(g_cached_system_prefix_tokens.size())).c_str());
+                " mode=" + (hybrid_memory ? (!g_cached_turn_prefix_state.empty() ? "resident_hybrid_turn_prefix_snapshot" : (!g_cached_system_prefix_state.empty() ? "resident_hybrid_system_prefix_snapshot" : "resident_hybrid_exact_prefix")) : "resident_kv") +
+                " systemPrefixTokens=" + std::to_string(g_cached_system_prefix_tokens.size()) +
+                " continuationPrefixTokens=" + std::to_string(g_cached_turn_prefix_tokens.size())).c_str());
         }
     } else if (result != 0) {
         // Any interrupted/failed request may have trimmed or partially changed
