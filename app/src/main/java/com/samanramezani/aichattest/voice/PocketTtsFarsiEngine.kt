@@ -299,21 +299,41 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
 
     private fun noise()=FloatArray(ld){val u=max(1e-7,rng.nextDouble());(sqrt(-2*ln(u))*cos(2*PI*rng.nextDouble())*temp).toFloat()}
     private fun tensor(v:FloatArray,s:LongArray)=OnnxTensor.createTensor(env,FloatBuffer.wrap(v),s)
-    private fun tensor(state:A):OnnxTensor = if (state.dtype.endsWith("i8") || state.lv != null) {
-        val values = state.lv ?: error("Integer state ${state.name} has no integer payload")
-        val buffer = ByteBuffer.allocate(values.size * 8).order(ByteOrder.nativeOrder()).asLongBuffer()
-        buffer.put(values); buffer.flip()
-        OnnxTensor.createTensor(env, buffer, state.shape)
-    } else tensor(state.v, state.shape)
-    private fun floats(t:OnnxTensor):FloatArray { val b=t.floatBuffer.duplicate();return FloatArray(b.remaining()).also{b.get(it)} }
+    private fun tensor(state:A):OnnxTensor = when {
+        state.dtype.endsWith("i8") || state.lv != null -> {
+            val values = state.lv ?: error("Integer state ${state.name} has no integer payload")
+            val buffer = ByteBuffer.allocate(values.size * 8).order(ByteOrder.nativeOrder()).asLongBuffer()
+            buffer.put(values); buffer.flip()
+            OnnxTensor.createTensor(env, buffer, state.shape)
+        }
+        state.dtype == "|b1" || state.dtype == "?b1" -> {
+            // ONNX BOOL tensors are byte-backed in the Java API; feeding the
+            // NPZ values as FloatBuffer makes ORT reject them at decoder input.
+            val buffer = ByteBuffer.allocateDirect(state.v.size).order(ByteOrder.nativeOrder())
+            state.v.forEach { buffer.put(if (it != 0f) 1.toByte() else 0.toByte()) }
+            buffer.flip()
+            OnnxTensor.createTensor(env, buffer, state.shape, OnnxJavaType.BOOL)
+        }
+        else -> tensor(state.v, state.shape)
+    }
+    private fun floats(t:OnnxTensor):FloatArray {
+        val b=t.floatBuffer.duplicate()
+        return FloatArray(b.remaining()).also{b.get(it)}
+    }
     private fun stateFromTensor(name:String,t:OnnxTensor,cache:Boolean):A {
         val shape=t.info.shape
-        return if (t.info.type == OnnxJavaType.INT64) {
-            val b=t.longBuffer.duplicate()
-            val values=LongArray(b.remaining()).also { b.get(it) }
-            A(name,shape,FloatArray(0),cache,"<i8",values)
-        } else {
-            A(name,shape,floats(t),cache,"<f4",null)
+        return when (t.info.type) {
+            OnnxJavaType.INT64 -> {
+                val b=t.longBuffer.duplicate()
+                val values=LongArray(b.remaining()).also { b.get(it) }
+                A(name,shape,FloatArray(0),cache,"<i8",values)
+            }
+            OnnxJavaType.BOOL -> {
+                val b=t.byteBuffer
+                val values=FloatArray(b.remaining()) { if (b.get().toInt() != 0) 1f else 0f }
+                A(name,shape,values,cache,"|b1",null)
+            }
+            else -> A(name,shape,floats(t),cache,"<f4",null)
         }
     }
     private fun concat(a:List<FloatArray>):FloatArray { val out=FloatArray(a.sumOf{it.size});var p=0;for(x in a){x.copyInto(out,p);p+=x.size};return out }
