@@ -15,6 +15,12 @@ static std::vector<llama_token> g_cached_system_prefix_tokens;
 static std::vector<uint8_t> g_cached_system_prefix_state;
 static llama_model * g_cached_system_prefix_model = nullptr;
 static llama_context * g_cached_system_prefix_context = nullptr;
+// A second snapshot captures the conversation prefix before the final assistant marker.
+// It allows hybrid models to reuse the previous turn's full shared prefix without rollback.
+static std::vector<llama_token> g_cached_turn_prefix_tokens;
+static std::vector<uint8_t> g_cached_turn_prefix_state;
+static llama_model * g_cached_turn_prefix_model = nullptr;
+static llama_context * g_cached_turn_prefix_context = nullptr;
 // Identity of the model/context that owns the current resident prompt state.
 static llama_model * g_cached_model = nullptr;
 static llama_context * g_cached_context = nullptr;
@@ -26,11 +32,19 @@ static void clear_android_system_prefix_cache() {
     g_cached_system_prefix_context = nullptr;
 }
 
+static void clear_android_turn_prefix_cache() {
+    g_cached_turn_prefix_tokens.clear();
+    g_cached_turn_prefix_state.clear();
+    g_cached_turn_prefix_model = nullptr;
+    g_cached_turn_prefix_context = nullptr;
+}
+
 static void clear_android_generation_cache() {
     g_cached_prompt_tokens.clear();
     g_cached_model = nullptr;
     g_cached_context = nullptr;
     clear_android_system_prefix_cache();
+    clear_android_turn_prefix_cache();
 }
 
 #include <signal.h>
@@ -749,6 +763,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         jfloat top_p,
         jfloat min_p,
         jint cache_prefix_tokens,
+        jint continuation_prefix_tokens,
         jobject listener) {
     std::lock_guard<std::mutex> runtime_lock(g_native_runtime_mutex);
     checkpoint("NATIVE_GENERATE_ENTERED");
@@ -851,6 +866,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         }
         g_cached_prompt_tokens.clear();
         clear_android_system_prefix_cache();
+        clear_android_turn_prefix_cache();
         g_cached_model = g_model;
         g_cached_context = g_context;
         llama_memory_clear(memory, true);
@@ -868,14 +884,52 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     const size_t stable_prefix_count = cache_prefix_tokens > 0 &&
             static_cast<size_t>(cache_prefix_tokens) < prompt_tokens.size()
             ? static_cast<size_t>(cache_prefix_tokens) : 0;
+    const size_t stable_turn_prefix_count = continuation_prefix_tokens > 0 &&
+            static_cast<size_t>(continuation_prefix_tokens) < prompt_tokens.size()
+            ? static_cast<size_t>(continuation_prefix_tokens) : 0;
     bool system_prefix_reused = false;
+    bool turn_prefix_reused = false;
     bool cache_reused = false;
     size_t reuse_prefix = 0;
 
-    // Prefer restoring the independently captured system-only state on hybrid models.
-    // This is safe for recurrent memory, unlike trying to trim a previous conversation
-    // back to a common token prefix.
-    if (hybrid_memory && cache_supported && stable_prefix_count > 0 &&
+    // First try the longest reusable prefix from the previous turn. The saved sequence
+    // state ends before the assistant generation marker, so the next turn can append the
+    // previous answer and new user turn without unsafe recurrent-memory rollback.
+    const bool turn_prefix_matches = hybrid_memory && cache_supported &&
+            stable_turn_prefix_count > 0 && !g_cached_turn_prefix_state.empty() &&
+            g_cached_turn_prefix_model == g_model &&
+            g_cached_turn_prefix_context == g_context &&
+            g_cached_turn_prefix_tokens.size() == stable_turn_prefix_count &&
+            std::equal(g_cached_turn_prefix_tokens.begin(),
+                       g_cached_turn_prefix_tokens.end(), prompt_tokens.begin());
+    if (turn_prefix_matches) {
+        llama_memory_clear(memory, true);
+        const size_t restored = llama_state_seq_set_data(
+                g_context, g_cached_turn_prefix_state.data(),
+                g_cached_turn_prefix_state.size(), 0);
+        if (restored > 0) {
+            turn_prefix_reused = true;
+            cache_reused = true;
+            reuse_prefix = stable_turn_prefix_count;
+            common_prefix = stable_turn_prefix_count;
+            g_cached_prompt_tokens.clear();
+            append_native_trace((std::string("NATIVE_KV_CACHE_TURN_PREFIX_RESTORED tokens=") +
+                    std::to_string(reuse_prefix) + " stateBytes=" +
+                    std::to_string(restored)).c_str());
+        } else {
+            append_native_trace("NATIVE_KV_CACHE_TURN_PREFIX_RESTORE_FAILED");
+            clear_android_turn_prefix_cache();
+            llama_memory_clear(memory, true);
+        }
+    } else if (hybrid_memory && !g_cached_turn_prefix_state.empty()) {
+        append_native_trace("NATIVE_KV_CACHE_TURN_PREFIX_INVALIDATED reason=prefix_changed");
+        clear_android_turn_prefix_cache();
+    }
+
+    // If this is a new session (or the previous conversation prefix differs), reuse the
+    // invariant global system prompt snapshot instead. Session-specific SYSTEM messages
+    // remain in the variable suffix and are never replayed from stale cache state.
+    if (!turn_prefix_reused && hybrid_memory && cache_supported && stable_prefix_count > 0 &&
         !g_cached_system_prefix_state.empty() &&
         g_cached_system_prefix_model == g_model &&
         g_cached_system_prefix_context == g_context &&
@@ -901,7 +955,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             clear_android_system_prefix_cache();
             llama_memory_clear(memory, true);
         }
-    } else if (hybrid_memory && !g_cached_system_prefix_state.empty() &&
+    } else if (!turn_prefix_reused && hybrid_memory && !g_cached_system_prefix_state.empty() &&
                (g_cached_system_prefix_model != g_model ||
                 g_cached_system_prefix_context != g_context ||
                 stable_prefix_count == 0 ||
@@ -918,7 +972,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     // remains exact append-only reuse.
     const llama_pos resident_min = llama_memory_seq_pos_min(memory, 0);
     const llama_pos resident_max = llama_memory_seq_pos_max(memory, 0);
-    const bool resident_sequence_matches_cache = system_prefix_reused || (hybrid_memory
+    const bool resident_sequence_matches_cache = turn_prefix_reused || system_prefix_reused || (hybrid_memory
             ? (!g_cached_prompt_tokens.empty() &&
                resident_max >= 0 &&
                static_cast<size_t>(resident_max + 1) == g_cached_prompt_tokens.size() &&
@@ -930,22 +984,22 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                static_cast<size_t>(resident_max + 1) == g_cached_prompt_tokens.size()));
     cache_reused = cache_reused ||
             (cache_supported && resident_sequence_matches_cache && common_prefix > 0);
-    const bool exact_cached_prefix = !system_prefix_reused && cache_reused &&
+    const bool exact_cached_prefix = !turn_prefix_reused && !system_prefix_reused && cache_reused &&
             common_prefix == g_cached_prompt_tokens.size();
     append_native_trace((std::string("NATIVE_KV_CACHE_PREFIX_CHECK supported=") +
         (cache_supported ? "1" : "0") +
         " hybrid=" + (hybrid_memory ? "1" : "0") +
-        " cachedTokens=" + std::to_string(system_prefix_reused ? reuse_prefix : g_cached_prompt_tokens.size()) +
+        " cachedTokens=" + std::to_string((turn_prefix_reused || system_prefix_reused) ? reuse_prefix : g_cached_prompt_tokens.size()) +
         " systemPrefixTokens=" + std::to_string(stable_prefix_count) +
+        " continuationPrefixTokens=" + std::to_string(stable_turn_prefix_count) +
         " commonPrefix=" + std::to_string(common_prefix) +
         " residentMin=" + std::to_string(resident_min) +
         " residentMax=" + std::to_string(resident_max) +
         " residentMatches=" + (resident_sequence_matches_cache ? "1" : "0")).c_str());
 
     if (hybrid_memory) {
-        if (system_prefix_reused) {
-            // Sequence state was restored from the stable system-only checkpoint.
-            // Decode only the variable conversation suffix.
+        if (turn_prefix_reused || system_prefix_reused) {
+            // A validated sequence snapshot was restored; decode only its variable suffix.
         } else if (exact_cached_prefix) {
             // Do not clear or trim recurrent memory. It is still resident from
             // the last successful generation and corresponds to the cached
@@ -985,7 +1039,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     // completed. A failed decode must never advertise a partially-built state
     // as a valid prefix for the next turn.
 
-    const size_t diagnostic_cached_tokens = system_prefix_reused ? reuse_prefix : g_cached_prompt_tokens.size();
+    const size_t diagnostic_cached_tokens = (turn_prefix_reused || system_prefix_reused) ? reuse_prefix : g_cached_prompt_tokens.size();
     const size_t diagnostic_reused_tokens = reuse_prefix;
     const size_t diagnostic_new_tokens = prompt_tokens.size() > reuse_prefix
             ? prompt_tokens.size() - reuse_prefix
@@ -1008,7 +1062,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         (cache_reused ? "HIT" : "MISS") +
         " cachedTokens=" + std::to_string(diagnostic_cached_tokens) +
         " systemPrefixTokens=" + std::to_string(stable_prefix_count) +
-        " cacheMode=" + (system_prefix_reused ? "system_prefix_snapshot" : (hybrid_memory ? "resident_hybrid" : "resident_kv")) +
+        " continuationPrefixTokens=" + std::to_string(stable_turn_prefix_count) +
+        " cacheMode=" + (turn_prefix_reused ? "turn_prefix_snapshot" : (system_prefix_reused ? "system_prefix_snapshot" : (hybrid_memory ? "resident_hybrid" : "resident_kv"))) +
         " reusedTokens=" + std::to_string(diagnostic_reused_tokens) +
         " newTokens=" + std::to_string(diagnostic_new_tokens) +
         " hitRatio=" + std::to_string(diagnostic_hit_ratio)).c_str());
