@@ -20,9 +20,9 @@ internal object Qwen3PromptFormatter {
     fun formatSystemPrefix(messages: List<ChatMessage>): String = buildString {
         messages.takeWhile { it.role == ChatMessage.Role.SYSTEM }.forEach { message ->
             if (message.content.isNotBlank()) {
-                append(IM_START).append("system\\n")
+                append(IM_START).append("system\n")
                 append(message.content.trim())
-                append(IM_END).append('\\n')
+                append(IM_END).append('\n')
             }
         }
     }
