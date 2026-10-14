@@ -165,7 +165,6 @@ class AgentSession(
         // Stream ordinary prose as it is decoded, but keep likely internal formats buffered.
         // Agent/tool requests are JSON and reasoning channels commonly begin with '<'; these
         // must never be exposed before the full response has been classified.
-        val streamedText = StringBuilder()
         val prefix = StringBuilder()
         var streamDecision: Boolean? = null
         var streamPublished = false
@@ -179,14 +178,12 @@ class AgentSession(
                         if (streamDecision == true) {
                             val safePrefix = prefix.toString()
                             eventSink(AgentEvent.Token(safePrefix))
-                            streamedText.append(safePrefix)
                             streamPublished = true
                             prefix.setLength(0)
                         }
                     }
                 } else if (streamDecision == true) {
                     eventSink(AgentEvent.Token(chunk))
-                    streamedText.append(chunk)
                     streamPublished = true
                 }
             }
