@@ -215,7 +215,7 @@ class AlwaysOnKoochikService : Service() {
             } ?: error("VOICE-ALWAYS-003: مدل فارسی Shenava Koochik آماده نیست؛ model.onnx و tokens.txt را وارد کنید.")
             // Do not construct a separate ONNX/Piper engine for the wake acknowledgement.
             // The conversation controller speaks the acknowledgement through the exact TTS
-            // engine selected in settings (Piper or Pocket TTS), avoiding a hidden fallback.
+            // engine selected in settings, avoiding a hidden fallback.
             val activeRecognizer = pendingConversationRecognizer ?: LocalNemoCtcAsr(stt)
             pendingConversationRecognizer = null
             recognizer = activeRecognizer
@@ -386,14 +386,7 @@ class AlwaysOnKoochikService : Service() {
             val ttsModels = store.list(VoiceModelKind.TTS)
             val selectedTtsId = prefs.getString(PREF_TTS_MODEL_ID, null)
             val tts = ttsModels.firstOrNull { it.id == selectedTtsId } ?: ttsModels.firstOrNull()
-            val usePocketTts = prefs.getBoolean("pocket_tts_selected", false)
-            if (usePocketTts) {
-                check(com.samanramezani.aichattest.voice.PocketTtsFarsiBundleStore(
-                    contentResolver, File(filesDir, "voice-models/pocket-tts-farsi-v2"),
-                ).isReady()) { "POCKET-TTS-SELECT-002: بستهٔ Pocket TTS نصب نیست یا ناقص است." }
-            } else {
-                check(tts != null) { "VOICE-ALWAYS-005: مدل TTS محلی انتخاب نشده است." }
-            }
+            check(tts != null) { "VOICE-ALWAYS-005: مدل TTS محلی انتخاب نشده است." }
             val container = (application as? AIChatApplication)?.container
                 ?: error("VOICE-ALWAYS-006: مخزن برنامه در دسترس نیست.")
             prefs.edit()
