@@ -26,7 +26,7 @@ static void clear_android_system_prefix_cache() {
     g_cached_system_prefix_context = nullptr;
 }
 
-static void clear_android_generation_cache() {
+void ai_chat_clear_android_generation_cache() {
     g_cached_prompt_tokens.clear();
     g_cached_model = nullptr;
     g_cached_context = nullptr;
@@ -782,7 +782,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             // contexts internally. Invalidate the ordinary resident-prefix cache
             // before entering that path so a later non-speculative request cannot
             // mistake speculative memory for the cached token sequence.
-            clear_android_generation_cache();
+            ai_chat_clear_android_generation_cache();
             append_native_trace("NATIVE_KV_CACHE_INVALIDATED reason=speculative_generation");
             const int sr=generate_spec(env,listener,spec_on_token,spec_tokens,std::min((int)max_tokens,spec_capacity),(float)temperature,(int)top_k,(float)top_p,(float)min_p);
             append_native_trace((std::string("SPECULATIVE_GENERATE_RETURNED code=")+std::to_string(sr)).c_str());
