@@ -56,7 +56,7 @@ internal object NativeLlamaCpp {
             Log.e(TAG, "ACTIVATION_LOAD_EXCEPTION type=${t::class.java.name} message=${t.message}", t)
             throw t
         }
-    }.buffer(Channel.UNLIMITED)
+    }
 
     @Synchronized
     fun unload() {
@@ -133,6 +133,7 @@ internal object NativeLlamaCpp {
             }
         }
     }
+        .buffer(Channel.UNLIMITED)
 
     @Synchronized
     fun stop() = nativeStop()
