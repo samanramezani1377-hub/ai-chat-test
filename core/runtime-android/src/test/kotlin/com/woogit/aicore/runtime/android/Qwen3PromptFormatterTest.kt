@@ -8,6 +8,23 @@ import kotlin.test.assertTrue
 
 class Qwen3PromptFormatterTest {
     @Test
+    fun systemPrefixIsExactAndExcludesSessionSpecificMessages() {
+        val messages = listOf(
+            ChatMessage(ChatMessage.Role.SYSTEM, "  Global instructions  "),
+            ChatMessage(ChatMessage.Role.SYSTEM, "Session summary that may change"),
+            ChatMessage(ChatMessage.Role.USER, "Hello"),
+        )
+
+        val prefix = Qwen3PromptFormatter.formatSystemPrefix(messages)
+        val fullPrompt = Qwen3PromptFormatter.format(messages)
+
+        assertEquals("<|im_start|>system\nGlobal instructions<|im_end|>\n", prefix)
+        assertTrue(fullPrompt.startsWith(prefix))
+        assertFalse(prefix.contains("Session summary"))
+        assertFalse(prefix.contains("<|im_start|>assistant"))
+    }
+
+    @Test
     fun formatsSystemUserHistoryAndAssistantGenerationPrompt() {
         val prompt = Qwen3PromptFormatter.format(
             listOf(
