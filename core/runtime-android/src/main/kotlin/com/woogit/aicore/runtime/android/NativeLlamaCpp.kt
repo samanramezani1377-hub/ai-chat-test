@@ -105,7 +105,7 @@ internal object NativeLlamaCpp {
 
     fun countTokens(prompt: String): Int = nativeCountTokens(prompt)
 
-    fun generate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float): Flow<String> = callbackFlow {
+    fun generate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float, cachePrefixTokens: Int = 0): Flow<String> = callbackFlow {
         val listener = object : TokenListener {
             override fun onToken(token: String) {
                 // JNI callbacks are synchronous and cannot suspend. The default callbackFlow
@@ -119,7 +119,7 @@ internal object NativeLlamaCpp {
             }
         }
         val worker = launch {
-            val result = nativeGenerate(prompt, maxTokens, temperature, topK, topP, minP, listener)
+            val result = nativeGenerate(prompt, maxTokens, temperature, topK, topP, minP, cachePrefixTokens, listener)
             if (result == 0 || result == 9) close()
             else close(IllegalStateException("llama.cpp generation failed: code=$result"))
         }
@@ -144,7 +144,7 @@ internal object NativeLlamaCpp {
     @JvmStatic private external fun nativeInstallFatalHandlers()
     @JvmStatic private external fun nativeLoad(path: String, contextLength: Int, gpuLayers: Int, draftPath: String?): Int
     @JvmStatic private external fun nativeCountTokens(prompt: String): Int
-    @JvmStatic private external fun nativeGenerate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float, listener: TokenListener): Int
+    @JvmStatic private external fun nativeGenerate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float, cachePrefixTokens: Int, listener: TokenListener): Int
     @JvmStatic private external fun nativeStop()
     @JvmStatic private external fun nativeUnload()
     @JvmStatic private external fun nativeRuntimeInfo(): String
