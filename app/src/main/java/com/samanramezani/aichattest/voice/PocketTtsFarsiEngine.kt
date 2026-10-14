@@ -163,12 +163,21 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
         try {
             flow.run(mapOf("sequence" to a,"text_emb" to b,"offset" to o,"noise" to n,"cache" to k)).use { r ->
                 val names=flow.outputNames.toList()
-                val li=names.indexOfFirst { it.contains("latent",true) }.let { if(it<0) 0 else it }
-                val ei=names.indexOfFirst { it.contains("eos",true) }.let { if(it<0) 1 else it }
-                val ki=names.indexOfFirst { it.contains("kv",true)||it.contains("cache",true) }.let { if(it<0) 2 else it }
-                val lat=floats(r[li] as? OnnxTensor ?: error("Pocket flow latent output is not an ONNX tensor: ${names[li]}"))
-                val eos=floats(r[ei] as? OnnxTensor ?: error("Pocket flow EOS output is not an ONNX tensor: ${names[ei]}")).firstOrNull()?.let { it>.5f } ?: false
-                val kt=r[ki] as? OnnxTensor ?: error("Pocket flow KV output is not an ONNX tensor: ${names[ki]}"); val kv=floats(kt)
+                val latentName=names.firstOrNull { it.contains("latent",true) }
+                    ?: error("Pocket flow latent output missing: $names")
+                val eosName=names.firstOrNull { it.contains("eos",true) }
+                    ?: error("Pocket flow EOS output missing: $names")
+                val cacheName=names.firstOrNull { it.contains("kv",true)||it.contains("cache",true) }
+                    ?: error("Pocket flow KV output missing: $names")
+                // Resolve each output by its ONNX name. Numeric Result indexes are not
+                // coupled safely to Set iteration order and can silently feed cache/EOS
+                // tensors into the latent path, producing short repeated syllables.
+                fun output(name: String): OnnxTensor =
+                    r.get(name).orElse(null) as? OnnxTensor
+                        ?: error("Pocket flow output is not an ONNX tensor: $name")
+                val lat=floats(output(latentName))
+                val eos=floats(output(eosName)).firstOrNull()?.let { it>.5f } ?: false
+                val kt=output(cacheName); val kv=floats(kt)
                 val count=kv.size/(layers*2*heads*hd)
                 require(count>0 && offset+count<=cap) { "Flow KV cache overflow: offset=$offset count=$count cap=$cap" }
                 val updated=cache.copyOf()
@@ -204,8 +213,11 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
         try {
             flow.run(mapOf("sequence" to a,"text_emb" to b,"offset" to o,"noise" to n,"cache" to k)).use { r ->
                 val names=flow.outputNames.toList()
-                val ix=names.indexOfFirst { it.contains("kv",true)||it.contains("cache",true) }.let { if(it<0) 2 else it }
-                val kv=floats(r[ix] as? OnnxTensor ?: error("Pocket voice-cache KV output is not an ONNX tensor: ${flow.outputNames.elementAtOrNull(ix)}"))
+                val cacheName=names.firstOrNull { it.contains("kv",true)||it.contains("cache",true) }
+                    ?: error("Pocket voice-cache KV output missing: $names")
+                val kvTensor=r.get(cacheName).orElse(null) as? OnnxTensor
+                    ?: error("Pocket voice-cache KV output is not an ONNX tensor: $cacheName")
+                val kv=floats(kvTensor)
                 val countSteps=kv.size/(layers*2*heads*hd)
                 require(countSteps<=cap) { "Voice prompt exceeds cache capacity" }
                 for(l in 0 until layers) for(kind in 0..1) for(s in 0 until countSteps)
@@ -236,14 +248,18 @@ internal class PocketTtsFarsiEngine(private val dir: File) : java.io.Closeable {
                     tensor(s).also { stateTensors+=it; feeds[inputName]=it }
                 }
                 dec.run(feeds).use { r ->
-                    val ai=decOutputs.indexOf("audio").let { if(it<0) 0 else it }
-                    audio += floats(r[ai] as? OnnxTensor ?: error("Mimi audio output is not an ONNX tensor: ${decOutputs.getOrNull(ai)}"))
+                    fun output(name: String): OnnxTensor =
+                        r.get(name).orElse(null) as? OnnxTensor
+                            ?: error("Mimi decoder output is not an ONNX tensor: $name")
+                    audio += floats(output("audio"))
                     smallOutputs.forEachIndexed { j,oi ->
-                        val slot=smallSlots[j]; val ot=r[oi] as? OnnxTensor ?: error("Mimi state output is not an ONNX tensor: ${decOutputs.getOrNull(oi)}")
-                        states[slot]=stateFromTensor(states[slot].name, ot, false)
+                        val name=decOutputs[oi]
+                        val slot=smallSlots[j]
+                        states[slot]=stateFromTensor(states[slot].name, output(name), false)
                     }
                     kvOutputs.forEachIndexed { j,oi ->
-                        val slot=cacheSlots[j]; val ot=r[oi] as? OnnxTensor ?: error("Mimi state output is not an ONNX tensor: ${decOutputs.getOrNull(oi)}"); val out=floats(ot)
+                        val name=decOutputs[oi]
+                        val slot=cacheSlots[j]; val ot=output(name); val out=floats(ot)
                         val state=states[slot]; val per=state.v.size/state.shape[2].toInt()
                         val n=min(steps,out.size/per)
                         require(offset+n<=state.shape[2]) { "Mimi KV cache overflow" }
