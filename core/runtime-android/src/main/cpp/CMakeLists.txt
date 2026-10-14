@@ -204,6 +204,7 @@ target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_GPU_BACKEND_VULKAN=0
     AI_CHAT_GGML_OPENMP_ENABLED=1
     AI_CHAT_GGML_CPU_KLEIDIAI_ENABLED=1
+    AI_CHAT_CPU_ARM_BASELINE="armv8-a"
 )
 
 if (ANDROID)
