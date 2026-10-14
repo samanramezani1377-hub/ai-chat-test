@@ -132,8 +132,7 @@ internal object NativeLlamaCpp {
                 runBlocking { worker.join() }
             }
         }
-    }
-        .buffer(Channel.UNLIMITED)
+    }.buffer(Channel.UNLIMITED)
 
     @Synchronized
     fun stop() = nativeStop()
