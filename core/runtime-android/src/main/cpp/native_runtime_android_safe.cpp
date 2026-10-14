@@ -3,6 +3,9 @@
 #include "sampling.h"
 #include "speculative.h"
 #include <vector>
+#include <cstdint>
+#include <algorithm>
+#include <cstddef>
 
 // Tokens represented by the resident prompt prefix in the native KV cache.
 static std::vector<llama_token> g_cached_prompt_tokens;
@@ -1113,11 +1116,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                 append_native_trace("NATIVE_KV_CACHE_SYSTEM_PREFIX_SAVE_SKIPPED reason=empty_state");
             }
         }
-        append_native_trace((std::string("NATIVE_PREFILL_PROGRESS processed=" + std::to_string(prompt_offset) + " total=" + std::to_string(n_prompt) +
+        append_native_trace((std::string("NATIVE_PREFILL_PROGRESS processed=") +
+                std::to_string(prompt_offset) + " total=" + std::to_string(n_prompt) +
                 " reused=" + std::to_string(reuse_prefix)).c_str());
-        /* preserve existing progress trace below */
-            std::to_string(prompt_offset) + " total=" + std::to_string(n_prompt) +
-            " reused=" + std::to_string(reuse_prefix)).c_str());
         if (final_prompt_batch) {
             const auto now = std::chrono::steady_clock::now();
             prefill_finished_at = now;
