@@ -41,7 +41,7 @@ def main():
  need(required<=arrays,f"weights.npz missing {sorted(required-arrays)}")
  with np.load(ROOT/"decode_state_init.npz",allow_pickle=False) as z:
   states=set(z.files); need(bool(states),"decode_state_init.npz contains no decoder states")
-  for n in z.files: need(z[n].size>0,f"empty decoder state {n}")
+  for n in z.files: need(z[n].dtype != object, f"decoder state {n} has unsupported object dtype")
  opt=ort.SessionOptions(); opt.graph_optimization_level=ort.GraphOptimizationLevel.ORT_ENABLE_ALL
  opt.intra_op_num_threads=2; opt.inter_op_num_threads=1
  gs={}
