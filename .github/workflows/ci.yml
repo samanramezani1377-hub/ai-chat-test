@@ -16,7 +16,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Push and pull_request events for the same branch share one concurrency group.
+  # This prevents two full Android/native builds for a single commit.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -24,6 +26,58 @@ env:
   JAVA_VERSION: '17'
 
 jobs:
+  pocket-tts-contract:
+    name: Pocket TTS ONNX contract
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      POCKET_TTS_TEST_DIR: .cache/pocket-tts-contract
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Restore Pocket TTS model bundle cache
+        id: pocket-model-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/pocket-tts-contract
+          key: pocket-tts-farsi-v2-onnx-${{ runner.os }}-v1
+      - name: Install ONNX Runtime test dependencies
+        run: python -m pip install --disable-pip-version-check onnxruntime numpy
+      - name: Validate the real Pocket TTS model input/output contract
+        run: python .github/scripts/test_pocket_tts_contract.py
+      - name: Check whether the model bundle is complete enough to cache
+        id: pocket-model-bundle
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, runpy
+          from pathlib import Path
+          spec = runpy.run_path(".github/scripts/test_pocket_tts_contract.py", run_name="pocket_tts_contract_module")
+          root = Path(os.environ["POCKET_TTS_TEST_DIR"])
+          missing = [
+              f"{name} (minimum {minimum} bytes)"
+              for name, minimum in spec["MIN"].items()
+              if not (root / name).is_file() or (root / name).stat().st_size < minimum
+          ]
+          ready = not missing
+          print("Pocket TTS cache bundle:", "complete" if ready else "incomplete")
+          if missing:
+              print("Files not ready for caching:", *missing, sep="\n- ")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"complete={'true' if ready else 'false'}\n")
+          PY
+      - name: Save Pocket TTS model bundle cache
+        if: always() && steps.pocket-model-cache.outputs.cache-hit != 'true' && steps.pocket-model-bundle.outputs.complete == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/pocket-tts-contract
+          key: pocket-tts-farsi-v2-onnx-${{ runner.os }}-v1
+
   unit-tests:
     name: Unit tests
     runs-on: ubuntu-22.04
@@ -42,7 +96,29 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install the project's Android NDK
-        run: sdkmanager "ndk;27.2.12479018" "platforms;android-36"
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=("ndk;27.2.12479018" "platforms;android-36")
+          # sdkmanager occasionally receives a truncated/corrupt package archive.
+          # Retry from a clean temporary download area instead of failing the job
+          # on the first SeekableByteChannel/ZIP extraction error.
+          for attempt in 1 2 3; do
+            echo "Android SDK package install attempt ${attempt}/3"
+            if sdkmanager --install "${packages[@]}"; then
+              test -d "$ANDROID_HOME/ndk/27.2.12479018"
+              test -d "$ANDROID_HOME/platforms/android-36"
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::SDK/NDK package installation failed; clearing incomplete downloads before retry."
+              rm -rf "$ANDROID_HOME/temp" "$ANDROID_HOME/.temp"
+              rm -rf "$ANDROID_HOME/ndk/27.2.12479018"
+              sleep $((attempt * 5))
+            fi
+          done
+          echo "::error::Could not install Android NDK 27.2.12479018 and Android platform 36 after 3 attempts."
+          exit 1
 
       - name: Set up Rust for the official Laya tokenizer
         uses: dtolnay/rust-toolchain@stable
@@ -74,6 +150,10 @@ jobs:
     name: Android debug build
     runs-on: ubuntu-22.04
     timeout-minutes: 25
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPILERCHECK: content
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -88,7 +168,29 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install the project's Android NDK
-        run: sdkmanager "ndk;27.2.12479018" "platforms;android-36"
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=("ndk;27.2.12479018" "platforms;android-36")
+          # sdkmanager occasionally receives a truncated/corrupt package archive.
+          # Retry from a clean temporary download area instead of failing the job
+          # on the first SeekableByteChannel/ZIP extraction error.
+          for attempt in 1 2 3; do
+            echo "Android SDK package install attempt ${attempt}/3"
+            if sdkmanager --install "${packages[@]}"; then
+              test -d "$ANDROID_HOME/ndk/27.2.12479018"
+              test -d "$ANDROID_HOME/platforms/android-36"
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::SDK/NDK package installation failed; clearing incomplete downloads before retry."
+              rm -rf "$ANDROID_HOME/temp" "$ANDROID_HOME/.temp"
+              rm -rf "$ANDROID_HOME/ndk/27.2.12479018"
+              sleep $((attempt * 5))
+            fi
+          done
+          echo "::error::Could not install Android NDK 27.2.12479018 and Android platform 36 after 3 attempts."
+          exit 1
 
       - name: Set up Rust for the official Laya tokenizer
         uses: dtolnay/rust-toolchain@stable
@@ -105,7 +207,7 @@ jobs:
           test -n "${ANDROID_HOME:-}"
           test -d "$ANDROID_HOME/platforms/android-36"
 
-      - name: Cache exact native build state
+      - name: Cache native CMake state
         uses: actions/cache@v4
         with:
           path: |
@@ -124,9 +226,38 @@ jobs:
               'rs-laya-tokenizers/src/**',
               'core/runtime-android/build.gradle.kts',
               'core/runtime-android/src/main/cpp/**',
-              'core/runtime-android/src/main/cpp/cmake/**',
-              '.github/workflows/ci.yml'
+              'core/runtime-android/src/main/cpp/cmake/**'
             ) }}
+          restore-keys: |
+            native-${{ runner.os }}-
+      - name: Install and cache native compiler cache
+        shell: bash
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: 2G
+          CCACHE_COMPILERCHECK: content
+        run: |
+          set -euo pipefail
+          if ! command -v ccache >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ccache
+          fi
+          mkdir -p "$CCACHE_DIR"
+          ccache --version
+          ccache -M "$CCACHE_MAXSIZE"
+      - name: Restore native compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: >-
+            ccache-${{ runner.os }}-ndk27-arm64-
+            ${{ hashFiles(
+              'core/runtime-android/build.gradle.kts',
+              'core/runtime-android/src/main/cpp/**',
+              'core/runtime-android/src/main/cpp/cmake/**'
+            ) }}
+          restore-keys: |
+            ccache-${{ runner.os }}-ndk27-arm64-
 
       - name: Verify OpenCL-first runtime invariants
         run: |
@@ -283,7 +414,29 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install the project's Android NDK
-        run: sdkmanager "ndk;27.2.12479018" "platforms;android-36"
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=("ndk;27.2.12479018" "platforms;android-36")
+          # sdkmanager occasionally receives a truncated/corrupt package archive.
+          # Retry from a clean temporary download area instead of failing the job
+          # on the first SeekableByteChannel/ZIP extraction error.
+          for attempt in 1 2 3; do
+            echo "Android SDK package install attempt ${attempt}/3"
+            if sdkmanager --install "${packages[@]}"; then
+              test -d "$ANDROID_HOME/ndk/27.2.12479018"
+              test -d "$ANDROID_HOME/platforms/android-36"
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::SDK/NDK package installation failed; clearing incomplete downloads before retry."
+              rm -rf "$ANDROID_HOME/temp" "$ANDROID_HOME/.temp"
+              rm -rf "$ANDROID_HOME/ndk/27.2.12479018"
+              sleep $((attempt * 5))
+            fi
+          done
+          echo "::error::Could not install Android NDK 27.2.12479018 and Android platform 36 after 3 attempts."
+          exit 1
 
       - name: Set up Rust for the official Laya tokenizer
         uses: dtolnay/rust-toolchain@stable
@@ -310,9 +463,10 @@ jobs:
               'gradle/libs.versions.toml',
               'core/runtime-android/build.gradle.kts',
               'core/runtime-android/src/main/cpp/**',
-              'core/runtime-android/src/main/cpp/cmake/**',
-              '.github/workflows/ci.yml'
+              'core/runtime-android/src/main/cpp/cmake/**'
             ) }}
+          restore-keys: |
+            native-lint-${{ runner.os }}-
 
       - name: Run Android lint
         run: >-

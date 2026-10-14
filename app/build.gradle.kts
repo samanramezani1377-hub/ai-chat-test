@@ -177,6 +177,8 @@ dependencies {
     // the independently initialized ONNX Runtime Java API used by Laya.
     implementation(files(sherpaStaticAar).builtBy(downloadSherpaStaticAar))
     implementation("org.apache.commons:commons-compress:1.28.0")
+    // Pure-Java SentencePiece tokenizer for the official Pocket TTS phoneme model.
+    implementation("io.github.eix128:sentencepiece4j:1.0.2")
 
     // Keep all Compose artifacts on Google's stable BOM so Gradle cannot resolve
     // unversioned Compose modules to an incompatible alpha release.

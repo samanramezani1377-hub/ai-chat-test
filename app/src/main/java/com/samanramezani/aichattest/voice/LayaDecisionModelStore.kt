@@ -1,11 +1,18 @@
 package com.samanramezani.aichattest.voice
 
 import android.content.ContentResolver
+import android.content.ContentValues
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 import org.json.JSONObject
 
 /**
@@ -18,6 +25,8 @@ internal class LayaDecisionModelStore(
 ) {
     companion object {
         const val MODEL_FILE = "laya-multilingual-int4-layer32-vocab128.onnx"
+        private const val CACHE_FILE = "AI-Chat-Test-Laya-INT4-Bundle.zip"
+        private const val DOWNLOAD_RELATIVE_PATH = "Download/AI Chat Test/Laya/"
         private const val MAX_ENTRIES = 300
         private const val MAX_EXPANDED_BYTES = 650L * 1024L * 1024L
         private val REQUIRED = setOf(
@@ -117,9 +126,39 @@ internal class LayaDecisionModelStore(
      */
     fun downloadOfficialBundle(onProgress: (String) -> Unit = {}): String {
         root.parentFile?.mkdirs()
-        val staging = File(root.parentFile, ".laya-stage-${System.currentTimeMillis()}")
-        staging.deleteRecursively()
-        check(staging.mkdirs()) { "LAYA-DOWNLOAD-001: پوشهٔ موقت دانلود ساخته نشد." }
+
+        // If an older app version installed Laya without retaining the original bundle,
+        // create the Downloads backup from the already-installed files instead of re-fetching.
+        val existingCache = findCachedBundleUri()
+        if (isReady()) {
+            val retained = existingCache != null || runCatching { saveCachedBundle(root) }.isSuccess
+            onProgress(if (retained) "مدل Laya از قبل نصب است؛ نسخهٔ دانلودی نگه‌داری شد و دانلود مجدد انجام نشد."
+                else "مدل Laya از قبل نصب است؛ دانلود مجدد انجام نشد، اما ذخیره در Downloads ناموفق بود.")
+            return if (retained) {
+                "مدل Laya Multilingual INT4 از قبل نصب است و دانلود مجدد انجام نشد. نسخهٔ اصلی در Downloads/AI Chat Test/Laya/$CACHE_FILE نگه‌داری می‌شود."
+            } else {
+                "مدل Laya Multilingual INT4 از قبل نصب و آماده است؛ دانلود مجدد لازم نیست، اما ساخت نسخهٔ پشتیبان در Downloads ناموفق بود."
+            }
+        }
+
+        // The bundle ZIP is kept in the public Downloads folder (Android 10+) so it
+        // survives app updates and reinstalls. Restore it before contacting Hugging Face.
+        val cachedUri = existingCache
+        if (cachedUri != null) {
+            val staging = newStagingDirectory()
+            try {
+                extractCachedBundle(cachedUri, staging)
+                val result = validateAndInstall(staging, staging)
+                onProgress("بستهٔ ذخیره‌شدهٔ Laya از Downloads بازیابی شد؛ دانلود اینترنتی لازم نشد.")
+                return "$result\nبستهٔ اصلی در Downloads/AI Chat Test/Laya/$CACHE_FILE نگه داشته شد."
+            } catch (t: Throwable) {
+                staging.deleteRecursively()
+                deleteCachedBundle(cachedUri)
+                onProgress("نسخهٔ ذخیره‌شدهٔ Laya قابل استفاده نبود؛ دریافت دوباره آغاز می‌شود.")
+            }
+        }
+
+        val staging = newStagingDirectory()
         val files = listOf(
             "laya-multilingual-int4-layer32-vocab128.onnx" to "laya-multilingual-int4-layer32-vocab128.onnx",
             "laya-multilingual-int4-layer32-vocab128.onnx.data" to "laya-multilingual-int4-layer32-vocab128.onnx.data",
@@ -138,10 +177,168 @@ internal class LayaDecisionModelStore(
                 }
                 onProgress("دریافت بسته Laya — $label کامل شد.")
             }
-            return validateAndInstall(staging, staging)
+
+            // Cache a single portable bundle before moving the extracted files into the
+            // app-private runtime directory. A cache-write failure must not block install.
+            val retained = runCatching { saveCachedBundle(staging) }.fold(
+                onSuccess = { true },
+                onFailure = {
+                    onProgress("هشدار: ذخیرهٔ نسخهٔ پشتیبان در Downloads ناموفق بود: ${it.message ?: "خطای ناشناخته"}")
+                    false
+                }
+            )
+
+            return validateAndInstall(staging, staging) + if (retained) {
+                "\nنسخهٔ قابل‌بازیابی بسته در Downloads/AI Chat Test/Laya/$CACHE_FILE ذخیره شد."
+            } else {
+                "\nهشدار: نصب انجام شد، اما نگه‌داری بسته در Downloads موفق نبود."
+            }
         } catch (t: Throwable) {
             staging.deleteRecursively()
             throw t
+        }
+    }
+
+    private fun newStagingDirectory(): File {
+        val staging = File(root.parentFile, ".laya-stage-${System.currentTimeMillis()}")
+        staging.deleteRecursively()
+        check(staging.mkdirs()) { "LAYA-DOWNLOAD-001: پوشهٔ موقت دانلود ساخته نشد." }
+        return staging
+    }
+
+    private fun findCachedBundleUri(): Uri? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val projection = arrayOf(MediaStore.Downloads._ID)
+            val selection = "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?"
+            resolver.query(
+                collection, projection, selection,
+                arrayOf(CACHE_FILE, DOWNLOAD_RELATIVE_PATH), null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    return Uri.withAppendedPath(collection, cursor.getLong(0).toString())
+                }
+            }
+        }
+        val fallback = File(root.parentFile, CACHE_FILE)
+        return if (fallback.isFile && fallback.length() > 0L) Uri.fromFile(fallback) else null
+    }
+
+    private fun deleteCachedBundle(uri: Uri) {
+        runCatching {
+            if (uri.scheme == "file") {
+                File(uri.path.orEmpty()).delete()
+            } else {
+                resolver.delete(uri, null, null)
+            }
+        }
+    }
+
+    private fun extractCachedBundle(uri: Uri, staging: File) {
+        val input = if (uri.scheme == "file") FileInputStream(File(uri.path.orEmpty()))
+            else resolver.openInputStream(uri)
+                ?: error("LAYA-CACHE-001: بستهٔ ذخیره‌شده قابل خواندن نیست.")
+        input.use { raw ->
+            ZipInputStream(java.io.BufferedInputStream(raw)).use { zip ->
+                var entries = 0
+                var expanded = 0L
+                while (true) {
+                    val entry = zip.nextEntry ?: break
+                    entries++
+                    require(entries <= MAX_ENTRIES) {
+                        "LAYA-CACHE-002: تعداد فایل‌های بستهٔ ذخیره‌شده بیش از حد مجاز است."
+                    }
+                    val relative = entry.name.replace('\\', '/').removePrefix("./").trimEnd('/')
+                    require(relative.isNotBlank() && !relative.startsWith("/") &&
+                        relative.split('/').none { it == ".." || it == "." || it.isBlank() }
+                    ) { "LAYA-CACHE-003: مسیر ناامن در بستهٔ ذخیره‌شده وجود دارد." }
+                    if (!entry.isDirectory) {
+                        val target = File(staging, relative).canonicalFile
+                        require(target.toPath().startsWith(staging.canonicalFile.toPath())) {
+                            "LAYA-CACHE-003: مسیر ناامن در بستهٔ ذخیره‌شده وجود دارد."
+                        }
+                        target.parentFile?.mkdirs()
+                        FileOutputStream(target).use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                val count = zip.read(buffer)
+                                if (count < 0) break
+                                expanded += count
+                                require(expanded <= MAX_EXPANDED_BYTES) {
+                                    "LAYA-CACHE-004: حجم بستهٔ ذخیره‌شده از ۶۵۰ مگابایت بیشتر است."
+                                }
+                                output.write(buffer, 0, count)
+                            }
+                        }
+                    }
+                    zip.closeEntry()
+                }
+            }
+        }
+    }
+
+    private fun saveCachedBundle(sourceRoot: File) {
+        val temporaryZip = File(root.parentFile, ".laya-cache-build.zip")
+        temporaryZip.delete()
+        try {
+            ZipOutputStream(java.io.BufferedOutputStream(FileOutputStream(temporaryZip))).use { zip ->
+                zip.setLevel(java.util.zip.Deflater.BEST_SPEED)
+                sourceRoot.walkTopDown().filter { it.isFile }.forEach { file ->
+                    val relative = file.relativeTo(sourceRoot).invariantSeparatorsPath
+                    zip.putNextEntry(ZipEntry(relative))
+                    FileInputStream(file).use { input ->
+                        val buffer = ByteArray(128 * 1024)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            zip.write(buffer, 0, count)
+                        }
+                    }
+                    zip.closeEntry()
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                val selection = "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?"
+                resolver.query(
+                    collection, arrayOf(MediaStore.Downloads._ID), selection,
+                    arrayOf(CACHE_FILE, DOWNLOAD_RELATIVE_PATH), null
+                )?.use { cursor ->
+                    while (cursor.moveToNext()) {
+                        resolver.delete(Uri.withAppendedPath(collection, cursor.getLong(0).toString()), null, null)
+                    }
+                }
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, CACHE_FILE)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "application/zip")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, DOWNLOAD_RELATIVE_PATH)
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(collection, values)
+                    ?: error("ساخت فایل در Downloads ناموفق بود.")
+                try {
+                    val output = resolver.openOutputStream(uri, "w")
+                        ?: error("نوشتن فایل در Downloads ناموفق بود.")
+                    output.use { stream ->
+                        FileInputStream(temporaryZip).use { input -> input.copyTo(stream, 128 * 1024) }
+                    }
+                    val ready = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+                    resolver.update(uri, ready, null, null)
+                    return
+                } catch (t: Throwable) {
+                    resolver.delete(uri, null, null)
+                    throw t
+                }
+            }
+
+            // Pre-Android 10 fallback: keep a reusable app-private archive where scoped
+            // Downloads writes are unavailable without extra permissions.
+            val fallback = File(root.parentFile, CACHE_FILE)
+            if (fallback.exists()) check(fallback.delete()) { "حذف بستهٔ ذخیره‌شدهٔ قبلی ناموفق بود." }
+            check(temporaryZip.renameTo(fallback)) { "ذخیرهٔ بستهٔ Laya ناموفق بود." }
+        } finally {
+            temporaryZip.delete()
         }
     }
 

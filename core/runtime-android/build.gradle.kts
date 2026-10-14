@@ -41,6 +41,13 @@ android {
                     "-DGGML_VULKAN=OFF",
                     "-DCMAKE_BUILD_TYPE=Release",
                 )
+                // GitHub Actions provides CCACHE_DIR; keep local builds independent of ccache.
+                if (System.getenv("CCACHE_DIR") != null) {
+                    arguments += listOf(
+                        "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+                        "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+                    )
+                }
             }
         }
     }

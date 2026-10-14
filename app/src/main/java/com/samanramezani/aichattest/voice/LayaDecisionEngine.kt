@@ -10,10 +10,11 @@ import java.nio.ByteOrder
 import java.util.Locale
 import kotlin.math.exp
 
+
 /**
- * Laya's typed-choice ONNX runner. It performs all decisions on-device and never generates
- * assistant text. A decision is accepted only when its softmax confidence and margin clear
- * conservative thresholds; otherwise no device action is inferred and the original text is routed to chat.
+ * Laya must classify the latest user turn, never a serialized conversation transcript.
+ * The normal voice path passes one utterance; this boundary defensively strips old turns
+ * if a transcript was accidentally supplied upstream. It does not infer user intent.
  */
 internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
     data class Decision(val command: DinaCommand, val route: String, val confidence: Double, val trace: List<String>)
@@ -22,7 +23,11 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
         private const val MODEL_FILE = LayaDecisionModelStore.MODEL_FILE
         private const val DEFAULT_MAX_SEQUENCE = 1024
         private const val DEFAULT_HEAD_MAX_SEQUENCE = 256
+        // Entropy confidence and top-class probability are distinct. Both must pass,
+        // so diffuse predictions such as "سلام" -> GET_TIME (p=0.62, confidence=0.297)
+        // abstain instead of triggering a local device action.
         private const val MIN_CONFIDENCE = 0.43
+        private const val MIN_MAX_PROBABILITY = 0.43
         private const val MIN_MARGIN = 0.09
     }
 
@@ -67,7 +72,12 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
     fun classify(rawText: String, currentVolume: Int? = null, maxVolume: Int? = null): Decision? = synchronized(lock) {
         lastTrace = emptyList()
         lastError = null
-        if (rawText.isBlank()) return@synchronized null
+        // Preserve the complete user-authored text exactly for Laya inference.
+        val decisionText = rawText
+        if (decisionText.isBlank()) {
+            lastTrace = listOf("inputChars=${rawText.length} modelInputChars=0 reason=blank-user-input")
+            return@synchronized null
+        }
         if (!isReady()) {
             closeLoaded()
             val missing = missingModelFiles()
@@ -86,27 +96,114 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
             // split. The previous taxonomy confidently misrouted short Persian requests
             // such as "ساعت چنده؟" to SYSTEM, preventing the local clock/date path from running.
             // Laya still makes the decision; this is not a keyword/regex fallback.
-            val domain = choose(rawText, "درخواست کاربر را به دقیق‌ترین دسته انتخاب کن. اگر ساعت فعلی یا تاریخ امروز را می‌خواهد، همان گزینه را انتخاب کن؛ گفت‌وگوی معمولی باید CHAT باشد. Choose the user's request category.",
+            trace += "input originalChars=${rawText.length} modelInputChars=${decisionText.length} userTextPreserved=true"
+            val domain = choose(
+                decisionText,
+                "نیت اصلی پیام کامل فعلی را بر اساس درخواست واقعی انتخاب کن، نه واژه‌های تنها. متن کاربر را تغییر یا کوتاه نکن. فرمان نقل‌شده، نفی‌شده، فرضی یا مبهم، درخواست اجرایی نیست. اگر هیچ مسیر محلی صریحی درخواست نشده، CHAT را انتخاب کن.",
                 listOf(
-                    Option("GET_TIME", "کاربر ساعت همین الان را می‌پرسد یا می‌خواهد بداند ساعت چند است. زمان فعلی دستگاه را اعلام کن. Current time now, what time is it."),
-                    Option("GET_DATE", "کاربر تاریخ امروز یا روز و ماه فعلی را می‌پرسد. تاریخ محلی دستگاه. Today's current date."),
-                    Option("AUDIO", "کنترل صدای رسانه: کم یا زیاد کردن، تنظیم مقدار، قطع یا وصل کردن صدا. Media volume control."),
-                    Option("DISPLAY", "کنترل روشنایی نمایشگر: کم یا زیاد کردن یا تنظیم درصد روشنایی. Screen brightness control."),
-                    Option("CHAT", "هر درخواست دیگر، پرسش دانشی، یا گفت‌وگوی معمولی که فرمان محلی ساعت، تاریخ، صدا یا روشنایی نیست. Normal chat or information request."),
-                )) ?: return@synchronized null
+                    Option("GET_TIME", "درخواست دانستن ساعت همین لحظه؛ مثل «ساعت چنده؟». نه ساعت کاری، مدت‌زمان، زمان رویداد یا تنظیم ساعت گوشی."),
+                    Option("GET_DATE", "درخواست تاریخ امروز؛ مثل «امروز چندمه؟». نه تاریخ رویداد/تاریخی یا برنامه‌ریزی آینده."),
+                    Option("AUDIO", "فرمان تغییر صدای رسانهٔ همین گوشی: زیاد، کم، تنظیم، قطع یا وصل. نه پرسش یا گفت‌وگو دربارهٔ صدا."),
+                    Option("DISPLAY", "فرمان تغییر روشنایی نمایشگر همین گوشی: زیاد، کم یا تنظیم. نه پرسش یا گفت‌وگو دربارهٔ صفحه."),
+                    Option("CHAT", "سلام، گفت‌وگو، دانش عمومی، مسیر/آدرس/سفر، ساعت کاری، مدت‌زمان، تاریخ غیرامروز، نقل‌قول، نفی، ابهام یا هر درخواست دیگر."),
+                ),
+                minConfidence = 0.48,
+                minMaxProbability = 0.52,
+                minMargin = 0.12,
+            ) ?: run {
+                lastTrace = trace.toList() + lastTrace
+                return@synchronized null
+            }
             trace += "domain=${domain.id} confidence=${"%.3f".format(Locale.US, domain.confidence)}"
+
+            // Independent second-stage confirmation is required for every local route,
+            // including read-only time/date answers. The confirmation prompt is conditioned
+            // on the exact first-stage route and contrasts it with realistic near-misses;
+            // this avoids the old generic yes/no question that rejected valid time requests
+            // while still guarding against false positives.
+            if (domain.id != "CHAT") {
+                val confirmation = when (domain.id) {
+                    "GET_TIME" -> Triple(
+                        "فقط بررسی کن آیا کل پیام واقعاً ساعت همین لحظه را می‌خواهد. «ساعت چنده؟» بله؛ ساعت کاری، مدت‌زمان، تنظیم ساعت، زمان رویداد، نقل‌قول، نفی یا ابهام خیر. این تأیید مسیر پیشنهادی است، نه دسته‌بندی دوباره.",
+                        Option("CONFIRM_ROUTE", "درخواست مستقیم ساعت همین لحظه؛ مثلاً «ساعت چنده؟» یا «الان ساعت رو می‌گی؟»."),
+                        Option("REJECT_ROUTE", "ساعت فعلی درخواست نشده یا پیام دربارهٔ ساعت کاری، مدت، تنظیم، رویداد، نقل‌قول، نفی یا مورد مبهم است.")
+                    )
+                    "GET_DATE" -> Triple(
+                        "فقط بررسی کن آیا کل پیام واقعاً تاریخ امروز را می‌خواهد. «امروز چندمه؟» بله؛ تاریخ رویداد، تاریخ تاریخی، روز آینده، برنامه‌ریزی، نقل‌قول، نفی یا ابهام خیر. این تأیید مسیر پیشنهادی است، نه دسته‌بندی دوباره.",
+                        Option("CONFIRM_ROUTE", "درخواست مستقیم تاریخ امروز؛ مثل «امروز چندمه؟» یا «تاریخ امروز رو بگو»."),
+                        Option("REJECT_ROUTE", "تاریخ امروز درخواست نشده یا پیام دربارهٔ تاریخ دیگری، رویداد، آینده، نقل‌قول، نفی یا ابهام است.")
+                    )
+                    "AUDIO" -> Triple(
+                        "فقط بررسی کن آیا کاربر واقعاً می‌خواهد صدای رسانهٔ همین گوشی تغییر کند. فرمان زیاد/کم، قطع/وصل بله؛ پرسش، گفت‌وگو، نقل‌قول، نفی یا ابهام خیر.",
+                        Option("CONFIRM_ROUTE", "درخواست صریح تغییر صدای رسانهٔ همین گوشی؛ زیاد، کم، قطع یا وصل."),
+                        Option("REJECT_ROUTE", "تغییر صدای رسانهٔ گوشی درخواست نشده یا پیام صرفاً پرسشی، نقل‌قولی، نفی‌شده یا مبهم است.")
+                    )
+                    "DISPLAY" -> Triple(
+                        "فقط بررسی کن آیا کاربر واقعاً می‌خواهد روشنایی نمایشگر همین گوشی تغییر کند. فرمان زیاد/کم/تنظیم بله؛ بحث دربارهٔ صفحه، دستگاه دیگر، نقل‌قول، نفی یا ابهام خیر.",
+                        Option("CONFIRM_ROUTE", "درخواست صریح کم/زیاد یا تنظیم روشنایی نمایشگر همین گوشی."),
+                        Option("REJECT_ROUTE", "تغییر روشنایی این نمایشگر درخواست نشده یا پیام دربارهٔ موضوعی دیگر، نقل‌قول، نفی یا ابهام است.")
+                    )
+                    else -> null
+                }
+                if (confirmation == null) {
+                    lastTrace = trace.toList() + lastTrace
+                    lastError = "LAYA-INFER-009: مسیر محلی ناشناخته در مرحلهٔ تأیید؛ درخواست به مدل گفت‌وگو سپرده شد."
+                    return@synchronized null
+                }
+                val (instructions, confirmOption, rejectOption) = confirmation
+                // Read-only clock/date questions were being rejected by the generic
+                // binary-confirmation entropy gate even when Laya's top choice was correct.
+                // Calibrate only these harmless routes more appropriately; device-changing
+                // actions keep the existing stricter confirmation thresholds.
+                val readOnlyTimeOrDate = domain.id == "GET_TIME" || domain.id == "GET_DATE"
+                val routeSpecificRule = when (domain.id) {
+                    "GET_TIME" -> "فقط اگر کاربر همین لحظه را می‌پرسد، CONFIRM_ROUTE؛ تاریخ امروز، ساعت کاری، مدت‌زمان، زمان رویداد یا تنظیم ساعت یعنی REJECT_ROUTE."
+                    "GET_DATE" -> "فقط اگر کاربر تاریخ امروز را می‌پرسد، CONFIRM_ROUTE؛ ساعت فعلی، تاریخ رویداد/گذشته/آینده یا برنامه‌ریزی یعنی REJECT_ROUTE."
+                    else -> "فقط درخواست صریح همین عملیات روی همین گوشی را تأیید کن؛ در غیر این صورت REJECT_ROUTE."
+                }
+                // The entropy-based confidence is normalized against ln(optionCount).
+                // With two choices, even p=0.542 yields confidence≈0.005 and margin≈0.083.
+                // The old 0.20 / 0.75 / 0.50 gates therefore made ordinary clock questions
+                // impossible to confirm unless the binary model was nearly certain. Keep a
+                // modest gate for read-only time/date routes; state-changing routes stay strict.
+                val validation = choose(
+                    decisionText,
+                    "$instructions\nمسیر پیشنهادی: ${domain.id}. $routeSpecificRule فرمان نقل‌شده، فرضی، نفی‌شده یا مبهم را تأیید نکن. فقط متن همین نوبت را بسنج؛ در تردید REJECT_ROUTE.",
+                    listOf(confirmOption, rejectOption),
+                    minConfidence = if (readOnlyTimeOrDate) 0.004 else 0.50,
+                    minMaxProbability = if (readOnlyTimeOrDate) 0.54 else 0.58,
+                    minMargin = if (readOnlyTimeOrDate) 0.08 else 0.16,
+                )
+                if (validation?.id != "CONFIRM_ROUTE") {
+                    val rejectedChoice = validation?.id ?: "ABSTAIN"
+                    val gateDiagnostic = lastError
+                        ?.takeIf { it.startsWith("LAYA-INFER-005") }
+                        ?.take(900)
+                    val scoreDiagnostic = lastTrace.lastOrNull { it.startsWith("stage=") }?.take(900)
+                    trace += "route_confirmation=$rejectedChoice proposed=${domain.id} result=CHAT"
+                    lastTrace = trace.toList() + lastTrace
+                    // Preserve the actual reason/score from the second-stage decision.
+                    // Previously this was overwritten by a generic error, hiding whether
+                    // Laya chose REJECT_ROUTE or abstained at a confidence threshold.
+                    val detail = gateDiagnostic ?: scoreDiagnostic ?: "no-score-details"
+                    lastError = "LAYA-INFER-008: تأیید مسیر ${domain.id} ناموفق بود؛ choice=$rejectedChoice; $detail"
+                    return@synchronized null
+                }
+                trace += "route_confirmation=CONFIRM_ROUTE proposed=${domain.id} confidence=${"%.3f".format(Locale.US, validation.confidence)}"
+            }
+
             val command = when (domain.id) {
                 "GET_TIME" -> DinaCommand(DinaIntent.GET_TIME)
                 "GET_DATE" -> DinaCommand(DinaIntent.GET_DATE)
                 "CHAT" -> DinaCommand(DinaIntent.CHAT)
                 "AUDIO" -> {
-                    val operation = choose(rawText, "کاربر برای صدای رسانه چه عملی می‌خواهد؟ Choose the media-volume operation.",
+                    val operation = choose(decisionText, "عمل درخواستی روی صدای رسانهٔ همین گوشی را انتخاب کن؛ موضوع گفتگو کافی نیست. اگر درخواست تغییر روشن نیست، حدس نزن.",
                         listOf(
-                            Option("INCREASE", "صدای رسانه را بیشتر کن یا بلندتر کن. Increase or turn up the volume."),
-                            Option("DECREASE", "صدای رسانه را کمتر کن یا آرام‌تر کن. Decrease or turn down the volume."),
-                            Option("SET", "صدای رسانه را روی سطح مشخص یا درصد معین تنظیم کن. Set a specific level or percentage."),
-                            Option("MUTE", "صدای رسانه را قطع یا بی‌صدا کن. Mute the sound."),
-                            Option("UNMUTE", "صدا را دوباره وصل کن و از حالت بی‌صدا خارج کن. Unmute or restore sound."),
+                            Option("INCREASE", "صدای رسانه را بلندتر کن."),
+                            Option("DECREASE", "صدای رسانه را کم‌تر کن."),
+                            Option("SET", "صدای رسانه را روی مقدار عددی مشخص تنظیم کن."),
+                            Option("MUTE", "صدای رسانه را قطع یا بی‌صدا کن."),
+                            Option("UNMUTE", "صدای رسانه را دوباره فعال کن."),
                         )) ?: return@synchronized null
                     trace += "audio_operation=${operation.id} confidence=${"%.3f".format(Locale.US, operation.confidence)}"
                     when (operation.id) {
@@ -123,15 +220,15 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                                 (actual * 10.0 / maximum).toInt().coerceIn(0, 10)
                             } else null
                             val state = buildString {
-                                append(rawText)
+                                append(decisionText)
                                 if (currentLevel != null) append("\nCurrent media volume level: ").append(currentLevel).append(" of 10.")
                             }
                             val level = choose(
                                 state,
-                                "مقدار دقیق صدای درخواستی را تعیین کن. اگر درصد گفته شده، خودت آن را به مقیاس ۰ تا ۱۰ تبدیل کن؛ اگر عدد مستقیم ۰ تا ۱۰ گفته شده همان را انتخاب کن. عدد را حدس نزن و اگر نامشخص است UNKNOWN را برگردان. Interpret the original request and choose its exact target level from 0 to 10.",
+                                "فقط هدف عددی درخواست‌شده را تعیین کن؛ سطح فعلی هدف نیست. درصد را به نزدیک‌ترین گام ۱۰٪ تبدیل کن (۴۷٪→۵۰٪؛ ۸۰٪→۸۰٪). عدد ۰ تا ۱۰ را مستقیم بگیر. اگر مقدار دقیق گفته نشده، UNKNOWN؛ از «بیشتر/کمتر» هدف نساز.",
                                 (0..10).map { n ->
-                                    Option("LEVEL_$n", "سطح صدای درخواستی برابر $n از ۱۰ است. Exact target volume level is $n out of 10.")
-                                } + Option("UNKNOWN", "مقدار قابل تشخیص نیست؛ حدس نزن. Target level is unknown; do not guess.")
+                                    Option("LEVEL_$n", "هدف صدا: $n از ۱۰ (${n * 10}٪).")
+                                } + Option("UNKNOWN", "مقدار هدف عددی مشخص نیست؛ حدس نزن.")
                             ) ?: return@synchronized null
                             trace += "volume_target=${level.id} confidence=${"%.3f".format(Locale.US, level.confidence)} current=${currentLevel ?: "unknown"}"
                             if (level.id == "UNKNOWN") return@synchronized null
@@ -143,11 +240,11 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                     }
                 }
                 "DISPLAY" -> {
-                    val operation = choose(rawText, "کاربر برای روشنایی صفحه چه عملی می‌خواهد؟ Choose the screen-brightness operation.",
+                    val operation = choose(decisionText, "عمل درخواستی برای روشنایی نمایشگر همین گوشی را انتخاب کن. اگر فقط دربارهٔ روشنایی حرف می‌زند، تغییر را حدس نزن.",
                         listOf(
-                            Option("INCREASE", "روشنایی صفحه را بیشتر کن. Increase screen brightness."),
-                            Option("DECREASE", "روشنایی صفحه را کمتر کن. Decrease screen brightness."),
-                            Option("SET", "روشنایی صفحه را روی درصد مشخص تنظیم کن. Set brightness to a percentage."),
+                            Option("INCREASE", "روشنایی نمایشگر را بیشتر کن."),
+                            Option("DECREASE", "روشنایی نمایشگر را کم‌تر کن."),
+                            Option("SET", "روشنایی را روی درصد مشخص تنظیم کن."),
                         )) ?: return@synchronized null
                     trace += "display_operation=${operation.id} confidence=${"%.3f".format(Locale.US, operation.confidence)}"
                     when (operation.id) {
@@ -155,11 +252,11 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                         "DECREASE" -> DinaCommand(DinaIntent.DECREASE_BRIGHTNESS)
                         "SET" -> {
                             val target = choose(
-                                rawText,
-                                "مقدار دقیق روشنایی درخواستی را از ۰ تا ۱۰۰ درصد تعیین کن. اگر مقدار مشخص نیست UNKNOWN برگردان و حدس نزن. Choose the exact requested brightness percentage from 0 to 100.",
+                                decisionText,
+                                "فقط درصد هدف را تعیین کن؛ سطح فعلی یا درصد داخل نقل‌قول هدف نیست. مقدار به نزدیک‌ترین گام ۱۰٪ گرد می‌شود (۴۷٪→۵۰٪). اگر فقط «بیشتر/کمتر» آمده، SET نیست؛ اگر درصد هدف روشن نیست، UNKNOWN.",
                                 (0..10).map { n ->
-                                    Option("LEVEL_$n", "روشنایی صفحه روی ${n * 10} درصد تنظیم شود. Set screen brightness to ${n * 10} percent.")
-                                } + Option("UNKNOWN", "مقدار روشنایی مشخص نیست؛ حدس نزن. Unknown target brightness.")
+                                    Option("LEVEL_$n", "هدف روشنایی: ${n * 10}٪.")
+                                } + Option("UNKNOWN", "درصد هدف مشخص نیست؛ حدس نزن.")
                             ) ?: return@synchronized null
                             trace += "brightness_target=${target.id} confidence=${"%.3f".format(Locale.US, target.confidence)}"
                             if (target.id == "UNKNOWN") return@synchronized null
@@ -197,7 +294,14 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
     private data class Option(val id: String, val description: String)
     private data class Ranked(val id: String, val confidence: Double)
 
-    private fun choose(state: String, instructions: String, options: List<Option>): Ranked? {
+    private fun choose(
+        state: String,
+        instructions: String,
+        options: List<Option>,
+        minConfidence: Double = MIN_CONFIDENCE,
+        minMaxProbability: Double = MIN_MAX_PROBABILITY,
+        minMargin: Double = MIN_MARGIN,
+    ): Ranked? {
         require(options.size in 2..16) { "LAYA-QUESTION-001: تعداد گزینه‌های تصمیم باید بین ۲ و ۱۶ باشد." }
         val env = environment ?: error("محیط ONNX آماده نیست.")
         val active = session ?: error("نشست ONNX آماده نیست.")
@@ -303,13 +407,16 @@ internal class LayaDecisionEngine(private val root: File) : AutoCloseable {
                 val top = ranked.take(3).joinToString(";") { index ->
                     "${options[index].id}:logit=${"%.4f".format(Locale.US, logits[index])},p=${"%.4f".format(Locale.US, probs[index])}"
                 }
-                val detail = "stage=${instructions.take(48).replace(Regex("\\s+"), " ")} tokenizer=hf-tokenizers-rust clsId=${tok.clsId} sepId=${tok.sepId} maskId=${tok.maskId} qtype=choice(0) options=${options.size} inputTokens=${ids.size} stateTokens=${stateIds.size} headTokens=${ids.size - stateIds.size - 1} outputs=${active.outputNames.joinToString(",")} temperature=${"%.3f".format(Locale.US, activeTemperature)} calibration=$activeCalibration confidence=${"%.3f".format(Locale.US, confidence)} margin=${"%.3f".format(Locale.US, margin)}$actSummary top=[$top]"
+                val detail = "stage=${instructions.take(48).replace(Regex("\\s+"), " ")} tokenizer=hf-tokenizers-rust clsId=${tok.clsId} sepId=${tok.sepId} maskId=${tok.maskId} qtype=choice(0) options=${options.size} inputTokens=${ids.size} stateChars=${state.length} stateTokens=${stateIds.size} headTokens=${ids.size - stateIds.size - 1} outputs=${active.outputNames.joinToString(",")} temperature=${"%.3f".format(Locale.US, activeTemperature)} calibration=$activeCalibration confidence=${"%.3f".format(Locale.US, confidence)} margin=${"%.3f".format(Locale.US, margin)}$actSummary top=[$top]"
                 lastTrace = lastTrace + detail
                 // Keep the app's conservative action gate on the top probability and margin.
                 // Entropy confidence is the official Laya confidence metric, but it is not
                 // interchangeable with the old max-probability threshold.
-                if (probs[best] < MIN_CONFIDENCE || margin < MIN_MARGIN) {
-                    lastError = "LAYA-INFER-005: تصمیم کم‌اطمینان؛ confidence=${"%.3f".format(Locale.US, confidence)}, maxProbability=${"%.3f".format(Locale.US, probs[best])}, margin=${"%.3f".format(Locale.US, margin)}, maxProbabilityThreshold=$MIN_CONFIDENCE, marginThreshold=$MIN_MARGIN; $detail"
+                if (confidence < minConfidence ||
+                    probs[best] < minMaxProbability ||
+                    margin < minMargin
+                ) {
+                    lastError = "LAYA-INFER-005: تصمیم کم‌اطمینان؛ confidence=${"%.3f".format(Locale.US, confidence)}, maxProbability=${"%.3f".format(Locale.US, probs[best])}, margin=${"%.3f".format(Locale.US, margin)}, confidenceThreshold=$minConfidence, maxProbabilityThreshold=$minMaxProbability, marginThreshold=$minMargin; $detail"
                     return null
                 }
                 return Ranked(options[best].id, confidence)
