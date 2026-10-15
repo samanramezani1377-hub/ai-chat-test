@@ -9,6 +9,11 @@
 #include <string>
 #include <unordered_map>
 #include <sys/stat.h>
+#include <fstream>
+#include <cstdio>
+#include <iomanip>
+#include <sstream>
+#include <cstring>
 
 // Tokens represented by the resident prompt prefix in the native KV cache.
 static std::vector<llama_token> g_cached_prompt_tokens;
@@ -24,19 +29,119 @@ static void clear_android_turn_prefix_cache();
 static void append_native_trace(const char *text);
 struct AndroidSystemPrefixSnapshot { std::vector<llama_token> tokens; std::vector<uint8_t> state; };
 static std::unordered_map<std::string, AndroidSystemPrefixSnapshot> g_system_prefix_snapshots;
+static std::string g_android_cache_directory;
+static constexpr uint32_t kAndroidPrefixCacheSchema = 1;
+static constexpr uint32_t kAndroidPrefixCacheMaxTokens = 65536;
+static constexpr uint64_t kAndroidPrefixCacheMaxStateBytes = 64ULL * 1024ULL * 1024ULL;
+
+static std::string android_cache_file_path(const std::string & key) {
+    uint64_t hash = 14695981039346656037ULL;
+    for (unsigned char c : key) { hash ^= c; hash *= 1099511628211ULL; }
+    std::ostringstream name;
+    name << std::hex << std::setfill('0') << std::setw(16) << hash << ".kvp";
+    return g_android_cache_directory.empty() ? std::string() : g_android_cache_directory + "/" + name.str();
+}
+
+static bool read_android_prefix_snapshot_file(const std::string & key, AndroidSystemPrefixSnapshot & out) {
+    const std::string path = android_cache_file_path(key);
+    if (path.empty()) return false;
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return false;
+    char magic[8] = {};
+    uint32_t schema = 0, key_size = 0, token_count = 0;
+    uint64_t state_size = 0;
+    in.read(magic, sizeof(magic));
+    in.read(reinterpret_cast<char *>(&schema), sizeof(schema));
+    in.read(reinterpret_cast<char *>(&key_size), sizeof(key_size));
+    if (!in || std::memcmp(magic, "AICKVP01", 8) != 0 ||
+        schema != kAndroidPrefixCacheSchema || key_size == 0 || key_size > 4096) return false;
+    std::string stored_key(key_size, '\0');
+    in.read(stored_key.data(), static_cast<std::streamsize>(stored_key.size()));
+    in.read(reinterpret_cast<char *>(&token_count), sizeof(token_count));
+    if (!in || stored_key != key || token_count == 0 || token_count > kAndroidPrefixCacheMaxTokens) return false;
+    std::vector<llama_token> tokens(token_count);
+    for (uint32_t i = 0; i < token_count; ++i) {
+        int32_t token = 0;
+        in.read(reinterpret_cast<char *>(&token), sizeof(token));
+        if (!in) return false;
+        tokens[i] = static_cast<llama_token>(token);
+    }
+    in.read(reinterpret_cast<char *>(&state_size), sizeof(state_size));
+    if (!in || state_size == 0 || state_size > kAndroidPrefixCacheMaxStateBytes) return false;
+    std::vector<uint8_t> state(static_cast<size_t>(state_size));
+    in.read(reinterpret_cast<char *>(state.data()), static_cast<std::streamsize>(state.size()));
+    if (!in || in.peek() != std::char_traits<char>::eof()) return false;
+    out = {std::move(tokens), std::move(state)};
+    return true;
+}
+
+static bool write_android_prefix_snapshot_file(const std::string & key, const AndroidSystemPrefixSnapshot & snapshot) {
+    const std::string path = android_cache_file_path(key);
+    if (path.empty() || key.empty() || key.size() > 4096 || snapshot.tokens.empty() ||
+        snapshot.tokens.size() > kAndroidPrefixCacheMaxTokens || snapshot.state.empty() ||
+        snapshot.state.size() > kAndroidPrefixCacheMaxStateBytes) return false;
+    const std::string temp = path + ".tmp";
+    std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+    if (!out) return false;
+    const char magic[8] = {'A','I','C','K','V','P','0','1'};
+    const uint32_t schema = kAndroidPrefixCacheSchema;
+    const uint32_t key_size = static_cast<uint32_t>(key.size());
+    const uint32_t token_count = static_cast<uint32_t>(snapshot.tokens.size());
+    const uint64_t state_size = static_cast<uint64_t>(snapshot.state.size());
+    out.write(magic, sizeof(magic));
+    out.write(reinterpret_cast<const char *>(&schema), sizeof(schema));
+    out.write(reinterpret_cast<const char *>(&key_size), sizeof(key_size));
+    out.write(key.data(), static_cast<std::streamsize>(key.size()));
+    out.write(reinterpret_cast<const char *>(&token_count), sizeof(token_count));
+    for (llama_token token : snapshot.tokens) {
+        const int32_t stored_token = static_cast<int32_t>(token);
+        out.write(reinterpret_cast<const char *>(&stored_token), sizeof(stored_token));
+    }
+    out.write(reinterpret_cast<const char *>(&state_size), sizeof(state_size));
+    out.write(reinterpret_cast<const char *>(snapshot.state.data()), static_cast<std::streamsize>(snapshot.state.size()));
+    out.flush();
+    const bool written = out.good();
+    out.close();
+    if (!written || out.fail()) { std::remove(temp.c_str()); return false; }
+    if (std::rename(temp.c_str(), path.c_str()) != 0) { std::remove(temp.c_str()); return false; }
+    return true;
+}
+
+static void publish_android_system_prefix_snapshot(const std::string & key,
+        const std::vector<llama_token> & tokens, const std::vector<uint8_t> & state) {
+    if (key.empty() || tokens.empty() || state.empty()) return;
+    AndroidSystemPrefixSnapshot snapshot{tokens, state};
+    g_system_prefix_snapshots[key] = snapshot;
+    const bool saved = write_android_prefix_snapshot_file(key, snapshot);
+    append_native_trace((std::string("NATIVE_KV_CACHE_DISK_SAVE ") +
+        (saved ? "status=OK" : "status=FAILED") +
+        " tokens=" + std::to_string(tokens.size()) +
+        " stateBytes=" + std::to_string(state.size())).c_str());
+}
+
 static std::string g_active_model_cache_key;
 static std::string make_android_model_cache_key(const std::string & path, uint32_t context_length) {
     struct stat st{}; const bool ok = ::stat(path.c_str(), &st) == 0;
     return path + "|size=" + std::to_string(ok ? (long long)st.st_size : -1LL) +
-        "|mtime=" + std::to_string(ok ? (long long)st.st_mtime : -1LL) + "|ctx=" + std::to_string(context_length);
+        "|mtime=" + std::to_string(ok ? (long long)st.st_mtime : -1LL) +
+        "|ctx=" + std::to_string(context_length) + "|llama=" + AI_CHAT_LLAMA_CPP_SHA;
 }
 static void preserve_android_system_prefix_cache_for_active_model() {
     if (g_active_model_cache_key.empty() || g_cached_system_prefix_tokens.empty() || g_cached_system_prefix_state.empty()) return;
-    g_system_prefix_snapshots[g_active_model_cache_key] = {g_cached_system_prefix_tokens, g_cached_system_prefix_state};
+    publish_android_system_prefix_snapshot(g_active_model_cache_key, g_cached_system_prefix_tokens, g_cached_system_prefix_state);
 }
 static void set_android_cache_model_key(const std::string & path, uint32_t context_length) {
     g_active_model_cache_key = make_android_model_cache_key(path, context_length);
     clear_android_system_prefix_cache(); clear_android_turn_prefix_cache(); g_cached_prompt_tokens.clear();
+    if (g_system_prefix_snapshots.find(g_active_model_cache_key) == g_system_prefix_snapshots.end()) {
+        AndroidSystemPrefixSnapshot loaded;
+        if (read_android_prefix_snapshot_file(g_active_model_cache_key, loaded)) {
+            g_system_prefix_snapshots[g_active_model_cache_key] = std::move(loaded);
+            append_native_trace("NATIVE_KV_CACHE_DISK_LOAD status=OK");
+        } else {
+            append_native_trace("NATIVE_KV_CACHE_DISK_LOAD status=MISS_OR_INVALID");
+        }
+    }
 }
 // A second snapshot captures the conversation prefix before the final assistant marker.
 // It allows hybrid models to reuse the previous turn's full shared prefix without rollback.
@@ -140,6 +245,19 @@ static void append_speculative_stats_trace(int draft_tokens, int accepted_tokens
 #define install_native_fatal_handlers install_native_fatal_handlers_legacy
 #include "native_runtime.cpp"
 #undef install_native_fatal_handlers
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeSetCacheDirectory(
+        JNIEnv *env, jclass, jstring jpath) {
+    if (!env || !jpath) return JNI_FALSE;
+    const char *path = env->GetStringUTFChars(jpath, nullptr);
+    if (!path) return JNI_FALSE;
+    g_android_cache_directory = path;
+    env->ReleaseStringUTFChars(jpath, path);
+    append_native_trace((std::string("NATIVE_KV_CACHE_DIRECTORY configured=") +
+        (g_android_cache_directory.empty() ? "0" : "1")).c_str());
+    return g_android_cache_directory.empty() ? JNI_FALSE : JNI_TRUE;
+}
 
 static void disable_speculative_runtime(const char * reason) {
     set_spec_phase("DISABLE_BEGIN");
@@ -931,7 +1049,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         const size_t restored = llama_state_seq_set_data(
                 g_context, g_cached_turn_prefix_state.data(),
                 g_cached_turn_prefix_state.size(), 0);
-        if (restored > 0) {
+        if (restored == g_cached_turn_prefix_state.size()) {
             turn_prefix_reused = true;
             cache_reused = true;
             reuse_prefix = g_cached_turn_prefix_tokens.size();
@@ -962,7 +1080,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         }
     }
     // Session-specific SYSTEM messages remain in the variable suffix and are never replayed.
-    if (!turn_prefix_reused && hybrid_memory && cache_supported && stable_prefix_count > 0 &&
+    if (!turn_prefix_reused && cache_supported && stable_prefix_count > 0 &&
         !g_cached_system_prefix_state.empty() &&
         !g_active_model_cache_key.empty() &&
         g_cached_system_prefix_tokens.size() == stable_prefix_count &&
@@ -973,7 +1091,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         const size_t restored = llama_state_seq_set_data(
                 g_context, g_cached_system_prefix_state.data(),
                 g_cached_system_prefix_state.size(), 0);
-        if (restored > 0) {
+        if (restored == g_cached_system_prefix_state.size()) {
             system_prefix_reused = true;
             cache_reused = true;
             reuse_prefix = stable_prefix_count;
@@ -987,7 +1105,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
             clear_android_system_prefix_cache();
             llama_memory_clear(memory, true);
         }
-    } else if (!turn_prefix_reused && hybrid_memory && !g_cached_system_prefix_state.empty() &&
+    } else if (!turn_prefix_reused && !g_cached_system_prefix_state.empty() &&
                (stable_prefix_count == 0 ||
                 g_cached_system_prefix_tokens.size() != stable_prefix_count ||
                 !std::equal(g_cached_system_prefix_tokens.begin(),
@@ -1158,7 +1276,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     while (prompt_offset < n_prompt) {
         if (g_stop.load(std::memory_order_relaxed)) { result = 9; stop_reason = "USER_STOP"; checkpoint("NATIVE_GENERATE_STOPPED"); break; }
         int count = std::min(decode_batch_size, n_prompt - prompt_offset);
-        const bool capture_system_prefix = hybrid_memory && stable_prefix_count > reuse_prefix &&
+        const bool capture_system_prefix = cache_supported && stable_prefix_count > reuse_prefix &&
                 g_cached_system_prefix_state.empty();
         const bool capture_turn_prefix = hybrid_memory &&
                 stable_turn_prefix_count > reuse_prefix;
@@ -1202,7 +1320,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
                             prompt_tokens.begin() + static_cast<std::ptrdiff_t>(stable_prefix_count));
                     g_cached_system_prefix_model = g_model;
                     g_cached_system_prefix_context = g_context;
-                    if (!g_active_model_cache_key.empty()) g_system_prefix_snapshots[g_active_model_cache_key] = {g_cached_system_prefix_tokens, g_cached_system_prefix_state};
+                    if (!g_active_model_cache_key.empty()) publish_android_system_prefix_snapshot(g_active_model_cache_key, g_cached_system_prefix_tokens, g_cached_system_prefix_state);
                     append_native_trace((std::string("NATIVE_KV_CACHE_SYSTEM_PREFIX_SAVED tokens=") +
                             std::to_string(stable_prefix_count) + " stateBytes=" +
                             std::to_string(copied)).c_str());

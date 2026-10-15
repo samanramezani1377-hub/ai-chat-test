@@ -46,6 +46,7 @@ internal object NativeLlamaCpp {
         require(file.isFile && file.canRead()) { "Model file is not readable: $path" }
 
         persistModelLoadPreflight(path, contextLength, gpuLayers)
+        configurePersistentPrefixCache()
         ensureNativeInitialized()
         Log.i(TAG, "ACTIVATION_LOAD_BEGIN ctx_len=$contextLength gpu_layers=$gpuLayers file=${file.name}")
         return try {
@@ -63,6 +64,26 @@ internal object NativeLlamaCpp {
         Log.i(TAG, "ACTIVATION_UNLOAD_BEGIN")
         nativeUnload()
         Log.i(TAG, "ACTIVATION_UNLOAD_END")
+    }
+
+    /**
+     * Keep native sequence snapshots in the app-private, non-backed-up directory.
+     * Native code validates model identity, llama.cpp revision, context, and exact
+     * token prefix before restoring any state.
+     */
+    private fun configurePersistentPrefixCache() {
+        val appContext = try {
+            Class.forName("android.app.ActivityThread")
+                .getMethod("currentApplication")
+                .invoke(null) as? Context
+        } catch (_: Throwable) { null }
+        val directory = appContext?.noBackupFilesDir?.let { File(it, "kv-prefix-cache") }
+        if (directory == null || (!directory.isDirectory && !directory.mkdirs())) {
+            Log.w(TAG, "NATIVE_KV_CACHE_DIRECTORY unavailable; disk persistence disabled")
+            return
+        }
+        val configured = runCatching { nativeSetCacheDirectory(directory.absolutePath) }.getOrDefault(false)
+        Log.i(TAG, "NATIVE_KV_CACHE_DIRECTORY configured=$configured")
     }
 
     private fun persistModelLoadPreflight(path: String, contextLength: Int, gpuLayers: Int) {
@@ -140,6 +161,7 @@ internal object NativeLlamaCpp {
     fun contextLength(): Int = nativeContextLength()
 
     private interface TokenListener { fun onToken(token: String) }
+    @JvmStatic private external fun nativeSetCacheDirectory(path: String): Boolean
     @JvmStatic private external fun nativeInit(enableGpu: Boolean)
     @JvmStatic private external fun nativeInstallFatalHandlers()
     @JvmStatic private external fun nativeLoad(path: String, contextLength: Int, gpuLayers: Int, draftPath: String?): Int
