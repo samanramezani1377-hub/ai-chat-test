@@ -3,7 +3,7 @@ package com.woogit.aicore.domain
 import java.nio.file.Path
 
 /** Supported on-disk model container formats. */
-enum class ModelFormat { GGUF, UNKNOWN }
+enum class ModelFormat { GGUF, ONNX_GENAI, UNKNOWN }
 
 enum class ModelState {
     NOT_IMPORTED, IMPORTING, VALIDATING, IMPORTED, READY, LOADING, ACTIVE, UNLOADING, INVALID, FAILED
