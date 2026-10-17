@@ -103,7 +103,17 @@ class FileModelRepository(private val registryFile: Path) : ModelRepository {
         val prefix = "model.$id."
         val path = runCatching { Path.of(properties.getProperty(prefix + "path")) }.getOrNull() ?: return null
         val recordedSize = properties.getProperty(prefix + "sizeBytes")?.toLongOrNull()
-        val fileValid = Files.isRegularFile(path) && recordedSize != null && recordedSize >= 0 && runCatching { Files.size(path) == recordedSize }.getOrDefault(false)
+        val pathValid = when (enumValue(properties.getProperty(prefix + "format"), com.woogit.aicore.domain.ModelFormat.UNKNOWN)) {
+            com.woogit.aicore.domain.ModelFormat.ONNX_GENAI -> Files.isDirectory(path) && Files.isRegularFile(path.resolve("genai_config.json"))
+            com.woogit.aicore.domain.ModelFormat.GGUF -> Files.isRegularFile(path)
+            else -> false
+        }
+        val actualSize = runCatching {
+            if (Files.isDirectory(path)) Files.walk(path).use { paths ->
+                paths.filter { Files.isRegularFile(it) }.mapToLong { Files.size(it) }.sum()
+            } else Files.size(path)
+        }.getOrNull()
+        val fileValid = pathValid && recordedSize != null && recordedSize >= 0 && actualSize == recordedSize
         val validation = if (fileValid) com.woogit.aicore.domain.ValidationStatus.VALID else com.woogit.aicore.domain.ValidationStatus.INVALID
         return ModelDescriptor(
             id = id,
