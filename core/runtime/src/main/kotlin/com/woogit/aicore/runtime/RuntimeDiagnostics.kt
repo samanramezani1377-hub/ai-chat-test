@@ -101,25 +101,18 @@ object RuntimeDiagnosticsStore {
     private val markerFile = File(System.getProperty("java.io.tmpdir") ?: ".", "ai-chat-last-native-event.txt")
     private val preflightFile = File(System.getProperty("java.io.tmpdir") ?: ".", "ai-chat-model-preflight.txt")
     private val nativeTraceFile = File(System.getProperty("java.io.tmpdir") ?: ".", "ai-chat-native-trace.txt")
-    private val state = MutableStateFlow(RuntimeDiagnosticsSnapshot(lastNativeEvent = readNativeDiagnostics(), openClProfile = readOpenClProfile(), gpuDevice = readGpuDevice(), weightResidency = readWeightResidency()))
+    private val state = MutableStateFlow(RuntimeDiagnosticsSnapshot(lastNativeEvent = readNativeDiagnostics()))
     val snapshot: StateFlow<RuntimeDiagnosticsSnapshot> = state.asStateFlow()
 
     private fun lastNativeDiagnosticLines(text: String): String =
         text.lineSequence().toList().takeLast(MAX_NATIVE_DIAGNOSTIC_LINES).joinToString("\n")
 
     private fun readNativeDiagnostics(): String? = runCatching {
-        val preflight = preflightFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotBlank() }
-        val marker = markerFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotBlank() }
-        val trace = nativeTraceFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotBlank() }
-        listOfNotNull(
-            preflight,
-            marker?.let { "LAST_NATIVE_EVENT=$it" },
-            trace?.let { "===== NATIVE TRACE =====\n${lastNativeDiagnosticLines(it)}" },
-        ).joinToString("\n===== NATIVE DIAGNOSTICS =====\n").let(::lastNativeDiagnosticLines).takeIf { it.isNotBlank() }
+        markerFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotBlank() }?.let(::lastNativeDiagnosticLines)
     }.getOrNull()
 
     fun refreshNativeEvent() {
-        state.value = state.value.copy(lastNativeEvent = readNativeDiagnostics(), openClProfile = readOpenClProfile(), gpuDevice = readGpuDevice(), weightResidency = readWeightResidency())
+        state.value = state.value.copy(lastNativeEvent = readNativeDiagnostics(), openClProfile = null, gpuDevice = null, weightResidency = null)
     }
 
     fun recordTrace(type: RuntimeTraceEvent.Type, message: String? = null) {
@@ -136,12 +129,12 @@ object RuntimeDiagnosticsStore {
     }
 
     fun recordLoaded(model: ModelDescriptor, loadTimeMs: Long?, runtime: RuntimeInfo) {
-        state.value = state.value.copy(model = model, runtime = runtime, loadTimeMs = loadTimeMs, generation = null, settings = null, openClProfile = readOpenClProfile(), gpuDevice = readGpuDevice(), weightResidency = readWeightResidency())
+        state.value = state.value.copy(model = model, runtime = runtime, loadTimeMs = loadTimeMs, generation = null, settings = null, openClProfile = null, gpuDevice = null, weightResidency = null)
         recordTrace(RuntimeTraceEvent.Type.MODEL_LOAD_COMPLETED, loadTimeMs?.let { "loadMs=$it" })
     }
 
     fun recordGeneration(settings: InferenceSettings, result: GenerationResult, runtime: RuntimeInfo) {
-        state.value = state.value.copy(runtime = runtime, generation = result, settings = settings, generationStartedAtMs = System.currentTimeMillis() - (result.generationTimeMs ?: 0L), openClProfile = readOpenClProfile(), gpuDevice = readGpuDevice(), weightResidency = readWeightResidency())
+        state.value = state.value.copy(runtime = runtime, generation = result, settings = settings, generationStartedAtMs = System.currentTimeMillis() - (result.generationTimeMs ?: 0L), openClProfile = null, gpuDevice = null, weightResidency = null)
         recordTrace(if (result.stopped) RuntimeTraceEvent.Type.GENERATION_STOPPED else RuntimeTraceEvent.Type.GENERATION_COMPLETED, "generationMs=${result.generationTimeMs ?: "n/a"}")
     }
 
