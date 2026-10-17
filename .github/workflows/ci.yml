@@ -117,6 +117,7 @@ jobs:
           --stacktrace
           --console=plain
           --parallel
+          --no-configuration-cache
 
   android-build:
     name: Android debug build
