@@ -7,7 +7,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val genAiVersion = "0.11.4"
+// Qwen3.5 support was added to the model builder in newer ORT GenAI releases.
+// Keep this aligned with the native Android AAR and adapter diagnostics.
+val genAiVersion = "0.15.2"
 val genAiAar = layout.buildDirectory.file("generated/onnxruntime-genai/onnxruntime-genai-android-$genAiVersion.aar")
 val genAiJar = layout.buildDirectory.file("generated/onnxruntime-genai/classes.jar")
 val genAiJniDir = layout.buildDirectory.dir("generated/onnxruntime-genai/jniLibs")
@@ -21,7 +23,7 @@ val downloadGenAiAar by tasks.registering {
             .openStream().use { input -> output.outputStream().use { destination -> input.copyTo(destination) } }
         val actual = MessageDigest.getInstance("SHA-256").digest(output.readBytes())
             .joinToString("") { "%02x".format(it) }
-        check(actual == "c149c24af368825701314b0200b737890f6fd72c610b0c97e421c43943df0826") {
+        check(actual == "f507ddbf0f635554ab12fcbf7dcfb115981eb664b925d90f28ed598dd8eb2ee7") {
             "ONNX Runtime GenAI AAR checksum mismatch: $actual"
         }
     }
@@ -54,10 +56,14 @@ val extractGenAiAar by tasks.registering {
             nativeEntries.forEach { entry ->
                 val output = jniRoot.resolve("arm64-v8a").resolve(entry.name.substringAfterLast('/'))
                 output.parentFile.mkdirs()
-                zip.getInputStream(entry).use { input -> output.outputStream().use { destination -> input.copyTo(destination) } }
+                zip.getInputStream(entry).use { input -> input.outputStreamTo(output) }
             }
         }
     }
+}
+
+private fun java.io.InputStream.outputStreamTo(output: java.io.File) {
+    output.outputStream().use { destination -> copyTo(destination) }
 }
 
 android {
