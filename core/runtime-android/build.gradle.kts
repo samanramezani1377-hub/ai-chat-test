@@ -1,101 +1,94 @@
+import java.net.URL
+import java.security.MessageDigest
+import java.util.zip.ZipFile
+
 plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
 }
 
+val genAiVersion = "0.11.4"
+val genAiAar = layout.buildDirectory.file("generated/onnxruntime-genai/onnxruntime-genai-android-$genAiVersion.aar")
+val genAiJar = layout.buildDirectory.file("generated/onnxruntime-genai/classes.jar")
+val genAiJniDir = layout.buildDirectory.dir("generated/onnxruntime-genai/jniLibs")
+
+val downloadGenAiAar by tasks.registering {
+    outputs.file(genAiAar)
+    doLast {
+        val output = outputs.files.singleFile
+        output.parentFile.mkdirs()
+        URL("https://github.com/microsoft/onnxruntime-genai/releases/download/v$genAiVersion/onnxruntime-genai-android-$genAiVersion.aar")
+            .openStream().use { input -> output.outputStream().use { destination -> input.copyTo(destination) } }
+        val actual = MessageDigest.getInstance("SHA-256").digest(output.readBytes())
+            .joinToString("") { "%02x".format(it) }
+        check(actual == "c149c24af368825701314b0200b737890f6fd72c610b0c97e421c43943df0826") {
+            "ONNX Runtime GenAI AAR checksum mismatch: $actual"
+        }
+    }
+}
+
+val extractGenAiAar by tasks.registering {
+    dependsOn(downloadGenAiAar)
+    inputs.file(genAiAar)
+    outputs.file(genAiJar)
+    outputs.dir(genAiJniDir)
+    doLast {
+        val aar = inputs.files.singleFile
+        val jar = genAiJar.get().asFile
+        val jniRoot = genAiJniDir.get().asFile
+        jar.parentFile.mkdirs()
+        jniRoot.mkdirs()
+        ZipFile(aar).use { zip ->
+            val classes = zip.getEntry("classes.jar")
+                ?: error("ONNX Runtime GenAI AAR does not contain classes.jar")
+            zip.getInputStream(classes).use { input -> jar.outputStream().use { output -> input.copyTo(output) } }
+            val nativeEntries = zip.entries().asSequence().filter {
+                !it.isDirectory && it.name.startsWith("jni/arm64-v8a/") && it.name.endsWith(".so")
+            }.toList()
+            check(nativeEntries.any { it.name.endsWith("libonnxruntime-genai.so") }) {
+                "ONNX Runtime GenAI AAR is missing libonnxruntime-genai.so for arm64-v8a"
+            }
+            check(nativeEntries.any { it.name.endsWith("libonnxruntime-genai-jni.so") }) {
+                "ONNX Runtime GenAI AAR is missing libonnxruntime-genai-jni.so for arm64-v8a"
+            }
+            nativeEntries.forEach { entry ->
+                val output = jniRoot.resolve("arm64-v8a").resolve(entry.name.substringAfterLast('/'))
+                output.parentFile.mkdirs()
+                zip.getInputStream(entry).use { input -> output.outputStream().use { destination -> input.copyTo(destination) } }
+            }
+        }
+    }
+}
+
 android {
     namespace = "com.woogit.aicore.runtime.android"
     compileSdk = 36
-    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         minSdk = 29
         consumerProguardFiles("consumer-rules.pro")
-        ndk {
-            debugSymbolLevel = "none"
-        }
-        externalNativeBuild {
-            cmake {
-                // Validation is intentionally debug-only while native loading is under investigation.
-                // Keep the native build strictly single-ABI; the app also packages arm64-v8a only.
-                abiFilters += "arm64-v8a"
-                arguments += listOf(
-                    "-DLLAMA_BUILD_COMMON=OFF",
-                    "-DLLAMA_BUILD_TESTS=OFF",
-                    "-DLLAMA_BUILD_EXAMPLES=OFF",
-                    "-DLLAMA_BUILD_TOOLS=OFF",
-                    "-DLLAMA_BUILD_SERVER=OFF",
-                    "-DLLAMA_BUILD_APP=OFF",
-                    "-DLLAMA_BUILD_UI=OFF",
-                    "-DLLAMA_OPENSSL=OFF",
-                    "-DGGML_NATIVE=OFF",
-                    "-DGGML_CPU_ARM_ARCH=armv8-a",
-                    "-DGGML_CPU_KLEIDIAI=ON",
-                    "-DGGML_OPENMP=ON",
-                    // NDK Clang's OpenMP runtime must be statically linked into the
-                    // native library; no separate libomp.so is required in the APK.
-                    "-DOpenMP_C_FLAGS=-fopenmp -static-openmp",
-                    "-DOpenMP_CXX_FLAGS=-fopenmp -static-openmp",
-                    "-DGGML_LLAMAFILE=OFF",
-                    "-DGGML_OPENCL=ON",
-                    "-DGGML_VULKAN=OFF",
-                    "-DCMAKE_BUILD_TYPE=Release",
-                )
-                // GitHub Actions provides CCACHE_DIR; keep local builds independent of ccache.
-                if (System.getenv("CCACHE_DIR") != null) {
-                    arguments += listOf(
-                        "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
-                        "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
-                    )
-                }
-            }
-        }
+        ndk { abiFilters += "arm64-v8a" }
     }
 
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-        }
-    }
-
-    buildTypes {
-        debug {
-            externalNativeBuild {
-                cmake {
-                    arguments += "-DAI_CHAT_OPENCL_PROFILING=ON"
-                }
-            }
-        }
-        release {
-            externalNativeBuild {
-                cmake {
-                    // Keep the real OpenCL kernel profile available in the shipped
-                    // diagnostic build; the profiler writes asynchronously to app cache.
-                    arguments += "-DAI_CHAT_OPENCL_PROFILING=ON"
-                }
-            }
-        }
-    }
-
+    sourceSets.getByName("main").jniLibs.srcDir(genAiJniDir)
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
 }
+
+tasks.named("preBuild").configure { dependsOn(extractGenAiAar) }
 
 dependencies {
     implementation(project(":core:domain"))
     implementation(project(":core:runtime"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation(files(genAiJar).builtBy(extractGenAiAar))
     testImplementation(kotlin("test"))
     testImplementation(kotlin("test-junit5"))
 }
 
-tasks.withType<Test>().configureEach {
-    useJUnitPlatform()
-}
+tasks.withType<Test>().configureEach { useJUnitPlatform() }
