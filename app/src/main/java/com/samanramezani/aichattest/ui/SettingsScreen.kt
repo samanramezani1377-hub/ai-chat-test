@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.InferenceSettingsStore
 import com.woogit.aicore.domain.ModelDescriptor
+import com.woogit.aicore.domain.ModelFormat
 import com.samanramezani.aichattest.ui.errors.ErrorCenter
 
 private const val PREFS = "inference_settings"
@@ -248,8 +249,11 @@ private fun CloudflareProviderSettings(onProviderChanged: () -> Unit, sharedStor
                 }
                 Text(if (active) "فعال" else "آماده", color = if (active) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
             }
+            if (model.format != ModelFormat.ONNX_GENAI) {
+                Text("این مدل متعلق به موتور قبلی است و قابل فعال‌سازی نیست؛ بستهٔ ZIP سازگار با ONNX Runtime GenAI را وارد کن.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (!active) Button(onClick = { onActivate(model.id) }) { Text("فعال‌سازی") }
+                if (!active) Button(onClick = { onActivate(model.id) }, enabled = model.format == ModelFormat.ONNX_GENAI) { Text("فعال‌سازی") }
                 TextButton(onClick = { details = !details }) { Text(if (details) "بستن" else "جزئیات") }
                 TextButton(onClick = { onDelete(model.id) }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("حذف") }
             }
