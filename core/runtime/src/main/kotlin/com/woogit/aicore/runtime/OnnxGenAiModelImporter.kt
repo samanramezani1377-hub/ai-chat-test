@@ -101,12 +101,12 @@ class OnnxGenAiModelImporter(
             }
             if (!tokenizerExists) throw IllegalArgumentException("فایل‌های tokenizer پیدا نشدند؛ بستهٔ مدل ناقص است.")
 
-            val modelType = Regex("""["']type["']\\s*:\\s*["']([^"']+)["']""")
+            val modelType = Regex("""["']type["']\s*:\s*["']([^"']+)["']""")
                 .find(configText)?.groupValues?.get(1)
-            if (!configText.trimStart().startsWith("{") || !configText.contains("\\\"model\\\"") || modelType.isNullOrBlank()) {
+            if (!configText.trimStart().startsWith("{") || !configText.contains("\"model\"") || modelType.isNullOrBlank()) {
                 throw IllegalArgumentException("genai_config.json ناقص است یا نوع مدل در آن مشخص نشده است.")
             }
-            val context = Regex("""["']context_length["']\\s*:\\s*(\\d+)""")
+            val context = Regex("""["']context_length["']\s*:\s*(\d+)""")
                 .find(configText)?.groupValues?.get(1)?.toLongOrNull()
             val displayName = modelType?.replaceFirstChar { it.uppercase() }
                 ?: "ONNX Runtime GenAI model"
