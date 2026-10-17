@@ -69,6 +69,7 @@ internal fun AppHeader(
 ) {
     val title = when (destination) {
         AppDestination.CHAT -> "گفت‌وگو"
+        AppDestination.WEBGPU -> "گفت‌وگوی WebGPU آزمایشی"
         AppDestination.VOICE -> "مکالمه صوتی"
         AppDestination.WORK, AppDestination.WORKSPACE -> "فضای کار"
         AppDestination.DIAGNOSTICS -> "عیب‌یابی"
