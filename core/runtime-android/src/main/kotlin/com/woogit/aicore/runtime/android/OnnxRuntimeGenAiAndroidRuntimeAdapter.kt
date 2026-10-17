@@ -146,27 +146,30 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
             promptTokenCount = sequences.getSequence(0).size
             val contextBudget = (loadedContextLength - promptTokenCount - 8).coerceAtLeast(1)
             val maxNewTokens = request.settings.maxNewTokens.coerceIn(1, contextBudget)
-            params = GeneratorParams(activeModel)
-            params.setInput(sequences)
-            params.setSearchOption("max_length", (promptTokenCount + maxNewTokens).toDouble())
-            params.setSearchOption("do_sample", request.settings.temperature > 0.0001)
+            val createdParams = GeneratorParams(activeModel)
+            params = createdParams
+            createdParams.setInput(sequences)
+            createdParams.setSearchOption("max_length", (promptTokenCount + maxNewTokens).toDouble())
+            createdParams.setSearchOption("do_sample", request.settings.temperature > 0.0001)
             if (request.settings.temperature > 0.0001) {
-                params.setSearchOption("temperature", request.settings.temperature.coerceIn(0.01, 2.0))
+                createdParams.setSearchOption("temperature", request.settings.temperature.coerceIn(0.01, 2.0))
             }
-            request.settings.topK?.takeIf { it > 0 }?.let { params.setSearchOption("top_k", it.toDouble()) }
-            request.settings.topP?.let { params.setSearchOption("top_p", it.coerceIn(0.01, 1.0)) }
-            request.settings.repeatPenalty?.let { params.setSearchOption("repetition_penalty", it.coerceIn(0.5, 2.0)) }
-            generator = Generator(activeModel, params)
-            stream = activeTokenizer.createStream()
+            request.settings.topK?.takeIf { it > 0 }?.let { createdParams.setSearchOption("top_k", it.toDouble()) }
+            request.settings.topP?.let { createdParams.setSearchOption("top_p", it.coerceIn(0.01, 1.0)) }
+            request.settings.repeatPenalty?.let { createdParams.setSearchOption("repetition_penalty", it.coerceIn(0.5, 2.0)) }
+            val createdGenerator = Generator(activeModel, createdParams)
+            generator = createdGenerator
+            val createdStream = activeTokenizer.createStream()
+            stream = createdStream
             RuntimeDiagnosticsStore.recordTrace(com.woogit.aicore.runtime.RuntimeTraceEvent.Type.GENERATION_STARTED, "engine=onnxruntime-genai promptTokens=$promptTokenCount maxNewTokens=$maxNewTokens")
             RuntimeDiagnosticsStore.recordNativeEvent("$TAG GENERATE_BEGIN promptTokens=$promptTokenCount maxNewTokens=$maxNewTokens type=$loadedModelType")
 
             val maxStopLength = request.settings.stopSequences.maxOfOrNull { it.length } ?: 0
-            while (!generator.isDone() && outputTokens < maxNewTokens && !stopRequested.get()) {
+            while (!createdGenerator.isDone() && outputTokens < maxNewTokens && !stopRequested.get()) {
                 currentCoroutineContext().ensureActive()
-                generator.generateNextToken()
+                createdGenerator.generateNextToken()
                 outputTokens++
-                val chunk = stream.decode(generator.getLastTokenInSequence(0))
+                val chunk = createdStream.decode(createdGenerator.getLastTokenInSequence(0))
                 if (chunk.isNotEmpty()) {
                     if (firstTokenAt == null) firstTokenAt = System.nanoTime()
                     pending.append(chunk)
