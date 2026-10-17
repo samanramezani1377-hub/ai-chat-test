@@ -97,9 +97,9 @@ private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescript
         Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.primaryContainer) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (active != null) "مدل آماده است" else "اول یک مدل اضافه کن", style = MaterialTheme.typography.headlineSmall)
-                Text(active?.displayName ?: "یک فایل GGUF از حافظه گوشی انتخاب کن.", color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(active?.displayName ?: "یک بستهٔ ZIP از مدل ONNX Runtime GenAI را از حافظهٔ گوشی انتخاب کن.", color = MaterialTheme.colorScheme.onPrimaryContainer)
                 if (active != null) {
-                    Text("GGUF · " + active.quantization, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Text("ONNX Runtime GenAI · " + active.metadata.architecture.orEmpty().ifBlank { "architecture نامشخص" }, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                     if (onDeactivate != null) OutlinedButton(onClick = onDeactivate) { Text("خارج‌کردن از حافظه") }
                 }
             }
@@ -112,7 +112,7 @@ private fun ModelManagement(active: ModelDescriptor?, models: List<ModelDescript
         Text("مدل‌های روی دستگاه", style = MaterialTheme.typography.titleMedium)
         if (models.isEmpty()) {
             Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                Text("هنوز فایل GGUF وارد نشده است.", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("هنوز بستهٔ ONNX Runtime GenAI وارد نشده است.", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             models.forEach { model -> ModelCard(model, model.id == active?.id, onActivate, onDelete) }
@@ -246,7 +246,7 @@ private fun CloudflareProviderSettings(onProviderChanged: () -> Unit, sharedStor
             Row(Modifier.fillMaxWidth()) {
                 Column(Modifier.weight(1f)) {
                     Text(model.displayName, style = MaterialTheme.typography.titleMedium)
-                    Text("GGUF · " + model.quantization, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(model.format.name + " · " + model.metadata.architecture.orEmpty().ifBlank { model.quantization.name }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text(if (active) "فعال" else "آماده", color = if (active) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
             }
