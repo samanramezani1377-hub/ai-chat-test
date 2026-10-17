@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Primary local inference engine. It loads ONNX Runtime GenAI model packages, never GGUF files. */
 class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
     companion object {
-        private const val GENAI_VERSION = "0.11.4"
+        private const val GENAI_VERSION = "0.15.2"
         private const val TAG = "ONNX_RUNTIME_GENAI"
     }
 
