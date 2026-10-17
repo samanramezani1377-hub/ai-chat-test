@@ -51,8 +51,6 @@ private enum class InferencePreset(val title: String, val description: String, v
 @Composable
 fun SettingsScreen(
     models: List<ModelDescriptor>, active: ModelDescriptor?, error: String?, onImport: () -> Unit,
-    draftModels: List<ModelDescriptor>, activeDraft: ModelDescriptor?, onImportDraft: () -> Unit,
-    onAssignDraft: (String?) -> Unit, onDeleteDraft: (String) -> Unit,
     onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)? = null, onDelete: (String) -> Unit,
     onProviderChanged: () -> Unit = {},
     providerStore: CloudflareProviderStore? = null,
