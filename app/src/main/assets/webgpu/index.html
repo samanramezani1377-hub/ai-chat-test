@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: blob:; worker-src 'self' blob:; img-src 'self' data: blob: https:; font-src 'self' data: https:">
+  <title>دینا · WebGPU</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div><span class="badge">آزمایشی</span><h1>دینا · اجرای WebGPU</h1><p>Qwen3.5-2B · پردازش روی دستگاه</p></div>
+      <button id="reset" class="secondary" disabled>گفت‌وگوی تازه</button>
+    </header>
+    <section class="notice">
+      <strong id="status">آمادهٔ بررسی WebGPU</strong>
+      <p id="detail">برای بار اول باید فایل‌های مدل (حدود ۱٫۷ تا ۲ گیگابایت) دانلود شوند. بعد از کش‌شدن ممکن است در بازدیدهای بعدی دوباره دانلود نشوند.</p>
+      <button id="load">بررسی GPU و بارگذاری مدل</button>
+    </section>
+    <section id="messages" class="messages" aria-live="polite">
+      <div class="welcome">این موتور آزمایشی از مدل ONNX-OPT جدا از بستهٔ بومی ONNX GenAI استفاده می‌کند. برای گفت‌وگوی فعلی دینا، از منوی کناری «گفت‌وگو» را انتخاب کن.</div>
+    </section>
+    <form id="composer" class="composer">
+      <textarea id="input" rows="2" placeholder="پیامت را به فارسی بنویس…" disabled></textarea>
+      <button id="send" type="submit" disabled>ارسال</button>
+      <button id="stop" type="button" class="secondary" disabled>توقف</button>
+    </form>
+    <footer>مدل: onnx-community/Qwen3.5-2B-ONNX-OPT · محتوای گفتگو برای استنتاج به سرور ارسال نمی‌شود؛ دانلود مدل از Hugging Face و بارگذاری runtime از jsDelivr نیازمند اینترنت است.</footer>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
