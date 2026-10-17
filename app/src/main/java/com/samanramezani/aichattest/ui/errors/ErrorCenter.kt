@@ -17,7 +17,7 @@ internal object ErrorCenter {
             "model_not_active" in text ->
                 PersianError("MODEL-000", "مدل فعالی وجود ندارد",
                     "برای ارسال پیام هنوز هیچ مدل محلی فعال نشده است.",
-                    "از بخش تنظیمات یک مدل GGUF را فعال کن و سپس دوباره پیام بفرست.", technical)
+                    "از بخش تنظیمات یک بستهٔ ZIP سازگار با ONNX Runtime GenAI را وارد و فعال کن، سپس دوباره پیام بفرست.", technical)
 
             text == "input_empty" || "پیام خالی" in text ->
                 PersianError("INPUT-001", "پیام خالی است",
@@ -29,36 +29,19 @@ internal object ErrorCenter {
                     "حجم متن ورودی برای این اجرا بیش از حد مجاز است.",
                     "متن را کوتاه‌تر کن یا آن را در چند پیام بفرست.", technical)
 
-            // The driver probe can successfully enumerate a real GPU while the
-            // pinned ggml-opencl backend rejects its GPU family. Report that distinctly:
-            // asking the user to reinstall/check a working driver is misleading here.
-            "unsupported gpu" in text || "drop unsupported device" in text ->
-                PersianError("OPENCL-003", "GPU شناسایی شد اما پشتیبانی نمی‌شود",
-                    "درایور OpenCL سالم است و دستگاه Mali-G57 شناسایی شده؛ اما نسخه فعلی backend در llama.cpp این خانواده GPU را رد می‌کند. به همین دلیل مدل فعال نشده است.",
-                    "این مشکل با نصب دوباره درایور یا تغییر فایل مدل حل نمی‌شود. باید مسیر کرنل‌ها و dispatch برای Mali به‌صورت واقعی پیاده‌سازی و روی دستگاه آزمایش شود. حالت CPU fallback همچنان غیرفعال است.",
+            "unsupported gpu" in text || "execution provider" in text || "provider is not available" in text ->
+                PersianError("MODEL-004", "مسیر اجرای مدل در دسترس نیست",
+                    "بستهٔ مدل به یک Execution Provider نیاز دارد که در این دستگاه یا نسخهٔ Runtime در دسترس نیست.",
+                    "بستهٔ ONNX Runtime GenAI و تنظیمات Provider داخل genai_config.json را بررسی کن و در صورت نیاز از بسته‌ای با Provider سازگار استفاده کن.",
                     technical)
 
-            "OPENCL_GPU_ONLY_REJECTED_NO_OPENCL_GPU_DEVICE".lowercase() in text ||
-                "platform ids not available" in text ||
-                "no opencl gpu device" in text ->
-                PersianError("OPENCL-001", "GPU ‏OpenCL پیدا نشد",
-                    "برنامه نتوانست یک دستگاه GPU قابل استفاده از درایور OpenCL پیدا کند.",
-                    "درایور OpenCL دستگاه را بررسی کن و برنامه را دوباره اجرا کن. اگر مشکل باقی ماند، گزارش کامل را ارسال کن.",
-                    technical)
-
-            "OPENCL_GPU_ONLY_MODEL_RESIDENCY_REJECTED".lowercase() in text ->
-                PersianError("OPENCL-002", "وزن‌های مدل روی GPU قرار نگرفتند",
-                    "مدل بارگذاری شد، اما بخشی از وزن‌ها روی دستگاه GPU مورد انتظار قرار نگرفت.",
-                    "این خطا به مسیر GPU مربوط است و نباید با فعال‌کردن حالت CPU دور زده شود. گزارش کامل را بررسی کن.",
-                    technical)
-
-            "unable to load" in text || "MODEL_LOAD_FAILED" in text || "model_load_returned_failed" in text ->
+            "unable to load" in text || "MODEL_LOAD_FAILED" in text || "model_load_returned_failed" in text || "genai_config.json" in text ->
                 PersianError("MODEL-001", "بارگذاری مدل ناموفق بود",
                     "فایل مدل قابل شناسایی است، اما Runtime نتوانست آن را برای اجرا آماده کند.",
-                    "فایل GGUF و سازگاری معماری مدل با Runtime را بررسی کن؛ سپس دوباره فعال‌سازی را امتحان کن.",
+                    "وجود genai_config.json، فایل‌های ONNX و tokenizer را بررسی کن و مطمئن شو بسته برای ONNX Runtime GenAI صادر شده است.",
                     technical)
 
-            "gguf_preflight_failed" in text || "file access" in text || "cannot read" in text ||
+            "file access" in text || "cannot read" in text ||
                 "no such file" in text || "permission denied" in text ->
                 PersianError("MODEL-002", "دسترسی به فایل مدل مشکل دارد",
                     "فایل مدل وجود ندارد، خواندن آن ممکن نیست یا دسترسی لازم به فایل برقرار نیست.",
