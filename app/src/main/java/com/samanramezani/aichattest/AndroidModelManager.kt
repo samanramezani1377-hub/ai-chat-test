@@ -10,10 +10,11 @@ import com.woogit.aicore.domain.ModelError
 import com.woogit.aicore.domain.ModelResult
 import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.runtime.FileModelImporter
+import com.woogit.aicore.runtime.OnnxGenAiModelImporter
 import com.woogit.aicore.runtime.FileModelRepository
 import com.woogit.aicore.runtime.LocalModelService
 import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
-import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
+import com.woogit.aicore.runtime.android.OnnxRuntimeGenAiAndroidRuntimeAdapter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.nio.file.Files
@@ -24,11 +25,11 @@ class AndroidModelManager(
     private val contentResolver: ContentResolver,
     private val appContext: android.content.Context,
     modelDirectory: Path,
-    private val runtime: LlamaCppAndroidRuntimeAdapter,
+    private val runtime: OnnxRuntimeGenAiAndroidRuntimeAdapter,
 ) {
     private val root = modelDirectory
     private val repository = FileModelRepository(root.resolve("models.properties"))
-    private val importer = FileModelImporter(root)
+    private val importer = OnnxGenAiModelImporter(root)
     private val draftRoot = root.resolve("drafts")
     private val draftRepository = FileModelRepository(root.resolve("drafts.properties"))
     private val draftImporter = FileModelImporter(draftRoot)
@@ -37,10 +38,10 @@ class AndroidModelManager(
     suspend fun import(uri: Uri): ModelResult<ModelDescriptor> = withContext(Dispatchers.IO) {
         try {
             Files.createDirectories(root)
-            val staged = Files.createTempFile(root, "import-", ".gguf")
+            val staged = Files.createTempFile(root, "import-", ".zip")
             try {
                 val input = contentResolver.openInputStream(uri)
-                    ?: return@withContext ModelResult.Failure(ModelError.FileAccess("Unable to open the selected model file"))
+                    ?: return@withContext ModelResult.Failure(ModelError.FileAccess("Unable to open the selected ONNX GenAI ZIP package"))
                 input.use { source -> Files.newOutputStream(staged).use { target -> source.copyTo(target) } }
                 service.importModel(staged)
             } catch (t: Throwable) {
