@@ -3,15 +3,14 @@ package com.samanramezani.aichattest
 import android.content.ContentResolver
 import android.net.Uri
 import com.woogit.aicore.domain.ChatMessage
-import com.woogit.aicore.domain.GenerationRequest
 import com.woogit.aicore.domain.GenerationResult
+import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.domain.ModelError
 import com.woogit.aicore.domain.ModelResult
-import com.woogit.aicore.domain.InferenceSettings
-import com.woogit.aicore.runtime.OnnxGenAiModelImporter
 import com.woogit.aicore.runtime.FileModelRepository
 import com.woogit.aicore.runtime.LocalModelService
+import com.woogit.aicore.runtime.OnnxGenAiModelImporter
 import com.woogit.aicore.runtime.android.OnnxRuntimeGenAiAndroidRuntimeAdapter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -62,9 +61,6 @@ class AndroidModelManager(
     }
 
     suspend fun activate(id: String): ModelResult<ModelDescriptor> = withContext(Dispatchers.IO) {
-        // The target must always load with speculative decoding disabled. Draft state
-        // is connected only after the target runtime has reported a successful load.
-        val res    suspend fun activate(id: String): ModelResult<ModelDescriptor> = withContext(Dispatchers.IO) {
         val result = service.activate(id)
         if (result is ModelResult.Success) ModelRuntimeForegroundService.start(appContext)
         result
@@ -72,9 +68,7 @@ class AndroidModelManager(
 
     suspend fun deactivate(): ModelResult<Unit> = withContext(Dispatchers.IO) {
         val result = service.deactivate()
-        if (result is ModelResult.Success) {
-            ModelRuntimeForegroundService.stop(appContext)
-        }
+        if (result is ModelResult.Success) ModelRuntimeForegroundService.stop(appContext)
         result
     }
 
@@ -83,7 +77,7 @@ class AndroidModelManager(
     suspend fun generate(
         messages: List<ChatMessage>,
         settings: InferenceSettings,
-        onToken: suspend (String) -> Unit = {}
+        onToken: suspend (String) -> Unit = {},
     ): ModelResult<GenerationResult> = service.generate(messages, settings, onToken)
 
     suspend fun stopGeneration() = service.stopGeneration()
