@@ -26,6 +26,30 @@ env:
   JAVA_VERSION: '17'
 
 jobs:
+  webgpu-static-check:
+    name: WebGPU asset checks
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate WebGPU JavaScript and Android wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module --check < app/src/main/assets/webgpu/app.js
+          grep -q 'onnx-community/Qwen3.5-2B-ONNX-OPT' app/src/main/assets/webgpu/app.js
+          grep -q 'navigator.gpu.requestAdapter' app/src/main/assets/webgpu/app.js
+          grep -q 'WebViewAssetLoader' app/src/main/java/com/samanramezani/aichattest/ui/webgpu/WebGpuChatPage.kt
+          grep -q 'AppDestination.WEBGPU -> WebGpuChatPage()' app/src/main/java/com/samanramezani/aichattest/MainScreen.kt
+          test -s app/src/main/assets/webgpu/index.html
+          test -s app/src/main/assets/webgpu/style.css
+          echo "WebGPU assets parse and Android navigation is wired."
+
   unit-tests:
     name: Unit tests
     runs-on: ubuntu-22.04
