@@ -45,8 +45,9 @@ class AndroidModelManager(
                 input.use { source -> Files.newOutputStream(staged).use { target -> source.copyTo(target) } }
                 service.importModel(staged)
             } catch (t: Throwable) {
-                Files.deleteIfExists(staged)
-                ModelResult.Failure(ModelError.Storage("Unable to stage the selected model", t))
+                ModelResult.Failure(ModelError.Storage("Unable to stage the selected ONNX GenAI package", t))
+            } finally {
+                runCatching { Files.deleteIfExists(staged) }
             }
         } catch (t: Throwable) {
             ModelResult.Failure(ModelError.Storage("Unable to prepare model storage", t))
