@@ -1,5 +1,5 @@
 import {
-  AutoProcessor,
+  AutoTokenizer,
   Qwen3_5ForConditionalGeneration,
   TextStreamer,
   InterruptableStoppingCriteria,
@@ -17,7 +17,7 @@ const composer = $("composer");
 const input = $("input");
 const sendButton = $("send");
 const stopButton = $("stop");
-let processor = null;
+let tokenizer = null;
 let model = null;
 let generating = false;
 let history = [];
@@ -51,7 +51,7 @@ function showError(error) {
 
 async function loadLocalModel() {
   setStatus("در حال بارگذاری مدل محلی…", "فایل‌ها از پوشهٔ پایدار دینا خوانده می‌شوند؛ دانلود مجدد انجام نمی‌شود.");
-  processor = await AutoProcessor.from_pretrained(MODEL_ID, { local_files_only: true });
+  tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID, { local_files_only: true });
   model = await Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_ID, {
     dtype: { embed_tokens: "q4", decoder_model_merged: "q4" },
     device: "webgpu",
@@ -142,8 +142,8 @@ composer.addEventListener("submit", async (event) => {
   let generated = "";
   stoppingCriteria.reset();
   try {
-    const inputs = await processor(prompt);
-    const streamer = new TextStreamer(processor.tokenizer, {
+    const inputs = await tokenizer(prompt);
+    const streamer = new TextStreamer(tokenizer, {
       skip_prompt: true,
       skip_special_tokens: true,
       callback_function: (piece) => {
