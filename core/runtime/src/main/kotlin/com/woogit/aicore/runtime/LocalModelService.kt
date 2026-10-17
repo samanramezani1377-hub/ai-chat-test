@@ -50,13 +50,28 @@ class LocalModelService(
 
     suspend fun listModels(): ModelResult<List<ModelDescriptor>> = repository.list()
     suspend fun getModel(id: String): ModelResult<ModelDescriptor?> = repository.get(id)
-    suspend fun activeModel(): ModelResult<ModelDescriptor?> = repository.getActive()
+    suspend fun activeModel(): ModelResult<ModelDescriptor?> = when (val result = repository.getActive()) {
+        is ModelResult.Failure -> result
+        is ModelResult.Success -> {
+            val model = result.value
+            if (model != null && model.format != ModelFormat.ONNX_GENAI) {
+                repository.setActive(null)
+                activeId = null
+                ModelResult.Success(null)
+            } else result
+        }
+    }
 
     suspend fun restoreActive(): ModelResult<ModelDescriptor?> {
         val active = when (val result = repository.getActive()) {
             is ModelResult.Success -> result.value
             is ModelResult.Failure -> return result
         } ?: return ModelResult.Success(null)
+        if (active.format != ModelFormat.ONNX_GENAI) {
+            val cleared = repository.setActive(null)
+            activeId = null
+            return if (cleared is ModelResult.Failure) cleared else ModelResult.Success(null)
+        }
         return when (val activated = activate(active.id)) {
             is ModelResult.Success -> ModelResult.Success(activated.value)
             is ModelResult.Failure -> activated
@@ -72,8 +87,11 @@ class LocalModelService(
                     is ModelResult.Failure -> return@withLock result
                 } ?: return@withLock ModelResult.Failure(ModelError.InvalidModel("Model is not registered"))
 
-                if (model.format != ModelFormat.ONNX_GENAI || model.validation != ValidationStatus.VALID) {
-                    return@withLock ModelResult.Failure(ModelError.InvalidModel("Model is not valid for activation"))
+                if (model.format != ModelFormat.ONNX_GENAI) {
+                    return@withLock ModelResult.Failure(ModelError.UnsupportedFormat("این شاخه فقط بسته‌های ONNX Runtime GenAI را فعال می‌کند؛ فایل GGUF را دوباره با بستهٔ ZIP سازگار وارد کن."))
+                }
+                if (model.validation != ValidationStatus.VALID) {
+                    return@withLock ModelResult.Failure(ModelError.InvalidModel("بستهٔ مدل معتبر نیست؛ آن را دوباره وارد کن."))
                 }
 
                 try {
