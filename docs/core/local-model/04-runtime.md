@@ -1,64 +1,32 @@
 # 04 — Runtime
 
-```text
-Runtime
-├── ModelRuntime Contract
-│   ├── load(model)
-│   ├── unload()
-│   ├── generate(...)
-│   ├── stopGeneration()
-│   └── runtimeInfo()
-├── RuntimeAdapter
-│   └── Domain ↔ Runtime boundary
-├── Android Runtime
-│   └── LlamaCppAndroidRuntimeAdapter
-│       └── dev.ffmpegkit-maintained:llama-android:0.1.1
-├── GGUF Backend
-│   ├── initialization
-│   ├── GGUF loading
-│   ├── tokenizer / chat template
-│   ├── context
-│   ├── inference
-│   ├── cancellation boundary
-│   ├── unload
-│   ├── memory
-│   └── cleanup
-└── Runtime State
-    ├── Unavailable
-    ├── Idle
-    ├── Loading
-    ├── Ready
-    ├── Generating
-    ├── Unloading
-    └── Failed
-```
+## Runtime contract
 
-## Android implementation
+`:core:runtime` remains the platform-neutral model lifecycle layer. The Android implementation in `:core:runtime-android` is `OnnxRuntimeGenAiAndroidRuntimeAdapter`, and the application composition root injects it as the primary local runtime.
 
-The Android runtime is isolated in `:core:runtime-android`. The existing JVM `:core:runtime` remains the platform-neutral contract and model-management layer. The application wires the Android implementation at the composition root.
+The old llama.cpp adapter, JNI bridge, CMake build, GGML/OpenCL patches and native inference sources have been removed from this branch. Local inference uses the pinned ONNX Runtime GenAI Android Java/JNI SDK (v0.11.4) for `arm64-v8a`. The SDK AAR is downloaded during the Gradle build and verified against a fixed SHA-256 before its Java and native artifacts are used.
 
-The selected AAR is a prebuilt llama.cpp Android library distributed through Maven Central. It supports GGUF, `arm64-v8a`, Android API 24+, CPU/NEON execution and 16 KB Android page support. citeturn4search1
+## Activation
 
-The AAR currently exposes full completion rather than incremental token Flow streaming in its free artifact. Therefore the adapter emits one completed response chunk through the existing `onToken` callback and does **not** claim incremental streaming. A future streaming/interrupt-capable binding can replace only the Android adapter.
+A model can activate only when its format is `ONNX_GENAI`, its persisted validation state is valid, and its directory contains `genai_config.json`. Activation creates the GenAI `Model` and tokenizer objects before the model is persisted as active. If loading fails, partially created native objects are closed and the active-model pointer is cleared.
 
-The upstream llama.cpp Android example demonstrates the same architectural boundary: GGUF metadata inspection from a `Uri`/private file, loading through an inference engine, and collecting generated tokens in Kotlin `Flow`. citeturn1search6
+Legacy GGUF registry entries are not loaded by this runtime. A stale persisted GGUF active pointer is cleared during restoration, and the settings UI disables activation for those entries while allowing deletion.
 
-## Model compatibility
+## Generation
 
-The runtime accepts GGUF models. Qwen3 is a supported architecture in llama.cpp, and upstream model schemas include `Q6_K` tensors. citeturn0search5turn4search3
+The adapter formats the conversation, tokenizes it with the model's tokenizer, configures bounded generation options, then emits decoded token chunks to the existing chat flow. Generation is bounded by the model context and requested output budget; stop strings and cancellation are handled by the adapter. Runtime metrics are exposed through the existing `RuntimeMetrics` contract.
 
-## ارجاعات
+The chat UI, history, provider routing and conversation orchestration continue to use the shared `ModelRuntime` contract. The model package must be exported for ONNX Runtime GenAI; GGUF is not a compatible artifact and cannot be converted by merely renaming the file.
 
-- [Architecture](01-architecture.md)
-- [Model Management](02-model-management.md)
-- [Model Domain](03-model-domain.md)
-- [Activation](05-activation.md)
-- [Storage](06-storage.md)
-- [Operations](07-operations.md)
-- [Concurrency & Cancellation](08-concurrency.md)
-- [Errors](09-errors.md)
-- [Observability](10-observability.md)
-- [Capabilities](11-capabilities.md)
-- [Resources](12-resources.md)
-- [Testing](14-testing.md)
-- [UI Integration](15-ui-integration.md)
+## Model package requirements
+
+A ZIP package must include:
+- `genai_config.json`
+- one or more `.onnx` graph files (including any external tensor data referenced by the graph)
+- tokenizer assets supported by the model package, such as `tokenizer.json`, `tokenizer.model`, `tokenizer_config.json` or `vocab.json`
+
+The importer rejects path traversal, limits the number of ZIP entries and caps expanded data at 32 GiB. Runtime/provider availability still depends on the execution providers encoded in the package and supported by the packaged GenAI runtime.
+
+## Validation status
+
+CI covers JVM lifecycle/importer tests, Gradle compilation, APK assembly and native library packaging checks. A successful CI build does not prove that every external ONNX model will load or generate correctly on a physical device; a smoke test with the exact model package on the target phone remains necessary.
