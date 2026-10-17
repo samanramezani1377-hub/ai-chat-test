@@ -205,8 +205,8 @@ private class WebGpuModelStoreBridge(context: Context, private val webView: WebV
                             }
                             val published = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
                             check(resolver.update(uri, published, null, null) == 1) { "ثبت فایل دانلودشده در Downloads ناموفق بود: $relative" }
-                            val size = findFile(relative)?.second ?: 0L
-                            check(size > 0L) { "فایل دانلودشده خالی است: $relative" }
+                            // Validate the bytes actually written, not MediaStore's possibly stale SIZE index.
+                            check(received > 0L) { "سرور فایل خالی برگرداند: $relative" }
                         } finally {
                             connection.disconnect()
                         }
@@ -234,8 +234,15 @@ private class WebGpuModelStoreBridge(context: Context, private val webView: WebV
         val projection = arrayOf(MediaStore.Downloads._ID, MediaStore.MediaColumns.SIZE)
         val selection = "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?"
         return resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, projection, selection, arrayOf(name, folder), null)?.use { cursor ->
-            if (cursor.moveToFirst()) Uri.withAppendedPath(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cursor.getLong(0).toString()) to cursor.getLong(1)
-            else null
+            if (!cursor.moveToFirst()) return@use null
+            val uri = Uri.withAppendedPath(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cursor.getLong(0).toString())
+            val indexedSize = cursor.getLong(1)
+            // Some Android MediaStore providers lag behind writes and report SIZE=0.
+            // Ask the content provider for the descriptor's real length before treating a file as missing.
+            val actualSize = if (indexedSize > 0L) indexedSize else runCatching {
+                resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: 0L
+            }.getOrDefault(0L)
+            uri to actualSize
         }
     }
 
