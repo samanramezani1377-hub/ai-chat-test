@@ -106,8 +106,8 @@ class OnnxGenAiModelImporter(
                 .find(configText)?.groupValues?.get(1)
             val context = Regex("""["']context_length["']\\s*:\\s*(\\d+)""")
                 .find(configText)?.groupValues?.get(1)?.toLongOrNull()
-            val displayName = source.fileName.toString().removeSuffix(".zip").removeSuffix(".ZIP")
-                .ifBlank { modelType ?: "ONNX Runtime GenAI model" }
+            val displayName = modelType?.replaceFirstChar { it.uppercase() }
+                ?: "ONNX Runtime GenAI model"
 
             // Store the model package itself at a stable path; the archive's optional
             // single top-level directory is flattened without moving files individually.
