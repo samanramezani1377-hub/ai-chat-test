@@ -1,41 +1,48 @@
-# Qwen3.5-2B WebGPU on Android
+# Qwen3.5-2B WebGPU on Android (experimental)
 
-## Verified model artifact
+Dina now has a **separate experimental WebGPU chat screen**. Open the app's side menu and choose **گفت‌وگوی WebGPU آزمایشی**. This path uses an Android WebView, Transformers.js, and the browser's WebGPU API. It does not replace the native ONNX Runtime GenAI path.
 
-The WebAI Community publishes a Qwen3.5-2B ONNX Runtime GenAI export under:
+## Model artifact used by the WebGPU screen
 
-- Model folder: [Qwen3.5-2B/onnx-webgpu](https://huggingface.co/webai-community/ai-models/tree/main/Qwen3.5-2B/onnx-webgpu)
-- Model notes and export provenance: [Qwen3.5-2B README](https://huggingface.co/webai-community/ai-models/blob/main/Qwen3.5-2B/README.md)
-- Current listed folder size: about 1.78 GB.
+- Transformers.js model: [onnx-community/Qwen3.5-2B-ONNX-OPT](https://huggingface.co/onnx-community/Qwen3.5-2B-ONNX-OPT)
+- Reference implementation: [webml-community/Qwen3.5-WebGPU](https://huggingface.co/spaces/webml-community/Qwen3.5-WebGPU)
+- Transformers.js runtime: `@huggingface/transformers@4.2.0`, loaded from jsDelivr.
+- Device selection: `device: "webgpu"`; model dtype is configured as Q4 for embeddings and the merged decoder, matching the published reference implementation.
 
-The package contains `genai_config.json`, `model.onnx`, `model.onnx.data`, `tokenizer.json`, `tokenizer_config.json`, `config.json`, and `chat_template.jinja`. Its GenAI config requests the `webgpu` provider and sets `enableGraphCapture=0` and `validationMode=basic`.
+The browser path uses the Transformers.js ONNX-OPT export. **Do not import the separate `Qwen3.5-2B/onnx-webgpu` GenAI package ZIP into this browser route.** The GenAI package and Transformers.js ONNX-OPT package have different model layouts and runtime APIs. The native chat screen still uses the ONNX Runtime GenAI ZIP importer.
 
-The publisher lists these SHA-256 values for the ONNX graph and external weights:
+## How it works
 
-- `model.onnx`: `565610B25156AA0DBC2E9F8E80766ED1658CFCC47F09DCF226BC692FF20F939A`
-- `model.onnx.data`: `4DF448BC35E944F053EFD0130972E8224CA17BAE330F37951BA799066CDFC74A`
+1. The Compose app opens a local HTML page from Android assets using `WebViewAssetLoader` and the secure `https://appassets.androidplatform.net` origin.
+2. The page checks `window.isSecureContext`, `navigator.gpu`, and `navigator.gpu.requestAdapter()` before loading any model.
+3. Transformers.js and model files are downloaded from jsDelivr and Hugging Face on first use. Browser caching is enabled to reduce repeat downloads.
+4. Text generation runs in the WebView using WebGPU. Prompt content is passed to the local inference runtime; it is not sent to a chat inference API.
+5. If WebGPU is not exposed by the device's Android System WebView, the screen shows an error and the user can return to the existing native chat. This screen does not silently claim CPU fallback.
 
-## Importing into Dina
+## Network and privacy
 
-1. Download **only** the `Qwen3.5-2B/onnx-webgpu/` directory, not the whole `ai-models` repository.
-2. ZIP the *contents* of that directory so `genai_config.json` is at the ZIP root. Do not leave an extra `Qwen3.5-2B/onnx-webgpu/` parent directory inside the ZIP.
-3. In Dina's model-import UI, import that ZIP and activate it.
-4. Check runtime diagnostics. The backend field now reports the provider requested by `genai_config.json`; it explicitly warns that unsupported operators may fall back to another provider.
+- First launch requires internet to fetch the Transformers.js runtime and model files. The total model download is large (around gigabyte scale).
+- Inference is intended to happen on-device. Model weights and JavaScript runtime code are fetched from their publishers; chat messages are not sent to a remote inference endpoint by this implementation.
+- Cache retention depends on Android WebView storage policies and available device storage. Do not assume the model is permanently available offline until that behavior is verified on the target device.
+- The app does not expose a JavaScript bridge to native Android APIs from this WebView. Local assets are served through WebViewAssetLoader; direct file access is disabled.
 
-## Important runtime boundary
+## Real-device acceptance checklist
 
-The model artifact is a **GenAI WebGPU export**, not a generic ONNX graph that can be run by simply selecting `executionProviders: ['webgpu']` in ONNX Runtime Web. It uses GenAI-specific generation/KV-cache configuration and a WebGPU provider configuration. The current Dina branch uses the native Android ONNX Runtime GenAI Java API; it does not embed a browser-based ONNX Runtime Web engine.
+The code and CI can validate packaging and syntax, but they cannot prove that a particular phone's WebView supports the required GPU operations. Test on physical devices from different GPU vendors.
 
-Therefore, provider configuration in the model file is not by itself proof that the Android AAR contains a working WebGPU execution provider on every device. A successful APK build only proves packaging/compilation. Actual GPU inference must be confirmed on a physical Android device by activating this exact model and checking logs/per-token latency. If the native AAR does not expose WebGPU on that device, a separate WebView + ORT Web/GenAI Web runtime must be built and integrated; it cannot be achieved by switching a Kotlin flag.
+1. Install the debug APK and open the WebGPU screen.
+2. Verify it reports a secure context and detects a non-null WebGPU adapter.
+3. Load the 2B model and wait for a clear `مدل آماده است` status.
+4. Send several Persian prompts and verify streamed output, stopping, and a fresh conversation.
+5. Inspect Android logcat for `DinaWebGPU` errors and the WebView console.
+6. Force-stop and reopen the app; verify whether cached assets are reused and whether the model needs to be downloaded again.
+7. Record phone model, Android/WebView version, GPU adapter information (if exposed), first-load time, first-token latency, decode tokens/sec, memory pressure, heat, and any WebGPU validation errors.
+8. Repeat with WebGPU unavailable (or on a device where it is disabled) and verify the app shows an actionable error without claiming GPU acceleration.
 
-## Acceptance checks for a real-device WebGPU run
+## Current limits
 
-- Model import validates all required assets and preserves the ONNX external-data file.
-- Model activation succeeds without provider/session initialization errors.
-- Runtime diagnostics identify the requested WebGPU provider.
-- A short Persian prompt generates coherent output and reaches EOS/stop handling.
-- Logs confirm whether unsupported operations fell back to CPU; do not infer GPU use from the model name alone.
-- Record first-token latency, decode tokens/sec, peak memory, device/GPU/Android version, and whether WebGPU was actually used.
-- Repeat after force-stop/relaunch to verify persistence and activation restore.
-
-No performance claim should be made until these checks pass on a real device.
+- This is an **experimental, independent chat route**, not yet merged into the native model manager, native conversation-history database, voice pipeline, or agent/action system.
+- The WebGPU model is currently loaded by model ID from Hugging Face; the native import/activate controls do not manage its weights.
+- It has its own in-page conversation history; reset clears that in-memory history.
+- It is text-only. Image input and integration with Dina's voice/wake-word features are not wired up here.
+- No real-device execution or speed claim is made until the acceptance checklist passes on hardware.
