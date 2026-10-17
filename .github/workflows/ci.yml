@@ -207,62 +207,18 @@ jobs:
           restore-keys: |
             ccache-${{ runner.os }}-ndk27-arm64-
 
-      - name: Verify OpenCL-first runtime invariants
+      - name: Verify ONNX Runtime GenAI integration invariants
         run: |
           set -euo pipefail
-          ! grep -R "GGML_OPENCL_ADRENO_XMEM_GEMM.*1" -n core/runtime-android/src/main/cpp
-          grep -q 'OPENCL_KERNEL_POLICY=UPSTREAM_DEVICE_CAPABILITY_SELECTION' core/runtime-android/src/main/cpp/native_runtime.cpp
-          # Never spoof device families: upstream kernels have family-specific
-          # subgroup assumptions, so unsupported devices must fail closed.
-          grep -q 'Do not spoof an unsupported GPU family' core/runtime-android/src/main/cpp/CMakeLists.txt
-          ! grep -q 'AI_CHAT_ADRENO_A7X_FAMILY_EXPANSION_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
-          # Match a real setenv call, not unsetenv (which contains setenv as a substring).
-          ! grep -Eq '(^|[^[:alnum:]_])setenv\("GGML_OPENCL_Q6K_GEMV_TILED"' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'GGML_OPENCL_USE_ADRENO_KERNELS OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
-          grep -q 'GGML_CPU_KLEIDIAI ON' core/runtime-android/src/main/cpp/CMakeLists.txt
-          grep -q 'GGML_OPENMP ON' core/runtime-android/src/main/cpp/CMakeLists.txt
-          # The generic CPU backend must stay on a portable ARMv8-A baseline.
-          # ISA-specialized kernels may dispatch at runtime, but global native/i8mm
-          # flags must never be forced on all arm64-v8a devices.
-          grep -q 'GGML_NATIVE OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
-          grep -q 'GGML_CPU_ARM_ARCH "armv8-a"' core/runtime-android/src/main/cpp/CMakeLists.txt
-          grep -q 'GGML_CPU_ARM_ARCH=armv8-a' core/runtime-android/build.gradle.kts
-          grep -q 'AI_CHAT_CPU_ARCH_POLICY baseline=armv8-a' core/runtime-android/src/main/cpp/CMakeLists.txt
-          ! grep -Eq -- '-mcpu=native|-march=armv8\.[2-9].*i8mm|-march=armv8\.[2-9].*dotprod' core/runtime-android/src/main/cpp/CMakeLists.txt
-          ! grep -Eq 'GGML_NATIVE=ON|GGML_NATIVE ON' core/runtime-android/build.gradle.kts core/runtime-android/src/main/cpp/CMakeLists.txt
-          grep -q 'GGML_CPU_KLEIDIAI=ON' core/runtime-android/build.gradle.kts
-          grep -q 'GGML_OPENMP=ON' core/runtime-android/build.gradle.kts
-          grep -q 'LLAMA_LOAD_MODE_AUTO' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'NATIVE_OPENMP_POLICY enabled=1 linkage=static' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'NATIVE_KLEIDIAI_POLICY enabled=1 cpuRuntimeDispatch=1' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'NATIVE_CPU_ARCH_POLICY baseline=' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'NATIVE_EXECUTION_POLICY mode=OPENCL_GPU_PREFERRED' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'wholeModelCpuFallback=enabled' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'OPENCL_ATTEMPT_FAILED reason=' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'CPU_FALLBACK_STARTED gpuAttempted=' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'CPU_FALLBACK_FAILED reason=' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'OPENCL_MODEL_RESIDENCY_POLICY mode=' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'NATIVE_EXECUTION_PROFILE mode=' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          grep -q 'AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V3' core/runtime-android/src/main/cpp/cmake/patch_backend_assignment_trace.cmake
-          grep -q 'AI_CHAT_BACKEND_SPLIT_TIMING' core/runtime-android/src/main/cpp/cmake/patch_backend_assignment_trace.cmake
-          grep -q 'AI_CHAT_OPENCL_PROFILING=ON' core/runtime-android/build.gradle.kts
-          grep -q 'resident_max + 1' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          # Hybrid/recurrent memory is never rolled back by arbitrary token position.
-          # A sequence-state snapshot preserves the invariant global system prefix across sessions.
-          grep -q 'NATIVE_KV_CACHE_HYBRID_EXACT_REUSE' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          grep -q 'NATIVE_KV_CACHE_SYSTEM_PREFIX_SAVED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          grep -q 'NATIVE_KV_CACHE_SYSTEM_PREFIX_RESTORED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          grep -q 'NATIVE_KV_CACHE_TURN_PREFIX_SAVED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          grep -q 'NATIVE_KV_CACHE_TURN_PREFIX_RESTORED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          grep -q 'llama_state_seq_get_data' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          grep -q 'llama_state_seq_set_data' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          grep -q 'formatSystemPrefix' core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/Qwen3PromptFormatter.kt
-          grep -q 'cachePrefixTokens = cachePrefixTokens' core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/LlamaCppAndroidRuntimeAdapter.kt
-          grep -q 'continuationPrefixTokens = continuationPrefixTokens' core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/LlamaCppAndroidRuntimeAdapter.kt
-          grep -q 'resident_hybrid_exact_prefix' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          grep -q 'prompt_tokens.size() > g_cached_prompt_tokens.size()' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          ! grep -q 'NATIVE_KV_CACHE_HYBRID_DISABLED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          echo "OpenCL-first fallback policy, backend assignment, profiling, and KV-cache invariants verified"
+          grep -q 'ModelFormat.ONNX_GENAI' core/runtime/src/main/kotlin/com/woogit/aicore/runtime/LocalModelService.kt
+          grep -q 'class OnnxGenAiModelImporter' core/runtime/src/main/kotlin/com/woogit/aicore/runtime/OnnxGenAiModelImporter.kt
+          grep -q 'genai_config.json' core/runtime/src/main/kotlin/com/woogit/aicore/runtime/OnnxGenAiModelImporter.kt
+          grep -q 'rawName.split.*any.*\.\.' core/runtime/src/main/kotlin/com/woogit/aicore/runtime/OnnxGenAiModelImporter.kt
+          grep -q 'class OnnxRuntimeGenAiAndroidRuntimeAdapter' core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/OnnxRuntimeGenAiAndroidRuntimeAdapter.kt
+          grep -q 'onnxruntime-genai-android-\$genAiVersion.aar' core/runtime-android/build.gradle.kts
+          grep -q 'c149c24af368825701314b0200b737890f6fd72c610b0c97e421c43943df0826' core/runtime-android/build.gradle.kts
+          ! grep -R 'LlamaCppAndroidRuntimeAdapter\|NativeLlamaCpp\|LLAMA_CPP_TAG\|GGML_OPENCL' -n app/src/main core/runtime-android core/runtime/src/main/kotlin
+          echo "ONNX Runtime GenAI package import, activation, generation and pinned SDK wiring verified"
 
       - name: Assemble debug APK
         run: >-
@@ -306,35 +262,18 @@ jobs:
           fi
           echo "Verified: Laya JNI and its defined OrtGetApiBase are from the same ORT AAR; sherpa ORT is statically linked."
 
-      - name: Verify OpenCL profiling and static backend linkage
+      - name: Verify ONNX Runtime GenAI native linkage
         run: |
           set -euo pipefail
-          source_file="$(find core/runtime-android -path '*/.cxx/*' -path '*/llama_cpp-src/ggml/src/ggml-opencl/ggml-opencl.cpp' -print -quit)"
-          test -n "$source_file"
-          grep -q 'AI_CHAT_OPENCL_PROFILE_PATCH_V4' "$source_file"
-          grep -q 'fperf_live' "$source_file"
-          grep -q 'cmd_queued_duration_ns' "$source_file"
-          grep -q 'cmd_submit_duration_ns' "$source_file"
-          grep -q 'cmd_complete_duration_ns' "$source_file"
-          grep -q 'cl_profiling.csv' "$source_file"
-
-          # The production runtime is intentionally static. Fail CI if the
-          # OpenCL backend target disappeared or the ggml registry was built
-          # without GGML_USE_OPENCL.
-          opencl_target="$(find core/runtime-android -path '*/.cxx/*' -type f \( -name 'build.ninja' -o -name 'rules.ninja' \) -print0 | xargs -0 grep -l 'ggml-opencl' | head -n 1 || true)"
-          test -n "$opencl_target"
-          native_dirs=()
-          for dir in core/runtime-android/.cxx core/runtime-android/src/.cxx; do
-            if [ -d "$dir" ]; then native_dirs+=( "$dir" ); fi
-          done
-          test "${#native_dirs[@]}" -gt 0
-          grep -R 'GGML_USE_OPENCL' "${native_dirs[@]}" >/dev/null
-          grep -R 'ggml-opencl' "${native_dirs[@]}" >/dev/null
-          grep -R 'GGML_USE_OPENMP' "${native_dirs[@]}" >/dev/null
-          grep -R 'GGML_USE_CPU_KLEIDIAI' "${native_dirs[@]}" >/dev/null
-          grep -R 'GGML_OPENMP_ENABLED' "${native_dirs[@]}" >/dev/null
-          echo "Static OpenCL backend, OpenMP and KleidiAI build integration verified: $opencl_target"
-          echo "OpenCL profiling instrumentation is present in the compiled llama.cpp source: $source_file"
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$apk"
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime-genai.so'
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime-genai-jni.so'
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime.so'
+          unzip -p "$apk" lib/arm64-v8a/libonnxruntime-genai.so > "$RUNNER_TEMP/libonnxruntime-genai.so"
+          readelf -d --wide "$RUNNER_TEMP/libonnxruntime-genai.so" > "$RUNNER_TEMP/genai-deps.txt"
+          grep -q 'libonnxruntime.so' "$RUNNER_TEMP/genai-deps.txt"
+          echo "Verified ONNX Runtime GenAI arm64 libraries are packaged with the matching ONNX Runtime."
 
       - name: Verify APK ABI and size budget
         run: |
