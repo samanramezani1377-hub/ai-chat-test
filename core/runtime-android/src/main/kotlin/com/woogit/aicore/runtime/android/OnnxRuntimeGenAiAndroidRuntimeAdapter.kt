@@ -20,6 +20,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.nio.file.Files
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Primary local inference engine. It loads ONNX Runtime GenAI model packages, never GGUF files. */
@@ -35,6 +37,7 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
     @Volatile private var loadedDescriptor: ModelDescriptor? = null
     @Volatile private var loadedModelType: String = "qwen3"
     @Volatile private var loadedContextLength: Int = 4096
+    @Volatile private var chatTemplate: String? = null
     private val stopRequested = AtomicBoolean(false)
     @Volatile private var latestGeneration: GenerationResult? = null
     @Volatile private var latestLoadTimeMs: Long? = null
@@ -64,7 +67,7 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
             }
             RuntimeDiagnosticsStore.recordNativeEvent("$TAG LOAD_BEGIN model=${model.displayName} path=${model.path}")
             candidate = Model(model.path.toAbsolutePath().toString())
-            candidateTokenizer = candidate.createTokenizer()
+            candidateTokenizer = Tokenizer(candidate)
             val config = Files.readString(model.path.resolve("genai_config.json"))
             val type = Regex("""["']type["']\s*:\s*["']([^"']+)["']""")
                 .find(config)?.groupValues?.get(1)?.lowercase() ?: model.metadata.architecture.orEmpty().lowercase()
@@ -74,6 +77,7 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
                 loadedDescriptor = model
                 loadedModelType = type.ifBlank { "qwen3" }
                 loadedContextLength = (model.metadata.contextLength ?: 4096L).coerceIn(256L, 131072L).toInt()
+                chatTemplate = readChatTemplate(model.path)
                 latestLoadTimeMs = (System.nanoTime() - started) / 1_000_000L
             }
             RuntimeDiagnosticsStore.recordNativeEvent("$TAG LOAD_READY model=${model.displayName} type=$loadedModelType context=$loadedContextLength loadMs=$latestLoadTimeMs")
@@ -85,6 +89,7 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
                 tokenizer = null
                 loadedModel = null
                 loadedDescriptor = null
+                chatTemplate = null
             }
             RuntimeDiagnosticsStore.recordNativeEvent("$TAG LOAD_FAILED type=${t::class.java.name} message=${t.message}")
             throw t
@@ -99,6 +104,7 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
             tokenizer = null
             loadedModel = null
             loadedDescriptor = null
+            chatTemplate = null
             generating = false
             latestGeneration = null
         }
@@ -124,18 +130,30 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
         var outputTokens = 0L
         val startedAt = System.nanoTime()
         var firstTokenAt: Long? = null
-        val prompt = formatPrompt(request.messages, loadedModelType, request.settings.enableThinking)
+        var prompt = formatPrompt(activeTokenizer, request.messages, loadedModelType, chatTemplate, request.settings.enableThinking)
         var promptTokenCount = 0
         try {
             currentCoroutineContext().ensureActive()
-            val sequences = activeTokenizer.encode(prompt)
+            var effectiveMessages = request.messages
+            var sequences = activeTokenizer.encode(prompt)
             encoded = sequences
             promptTokenCount = sequences.getSequence(0).size
+            while (promptTokenCount > loadedContextLength - 16 && effectiveMessages.count { it.role != ChatMessage.Role.SYSTEM } > 1) {
+                closeQuietly(sequences)
+                val removable = effectiveMessages.indexOfFirst { it.role != ChatMessage.Role.SYSTEM }
+                effectiveMessages = effectiveMessages.toMutableList().also { it.removeAt(removable) }
+                prompt = formatPrompt(activeTokenizer, effectiveMessages, loadedModelType, chatTemplate, request.settings.enableThinking)
+                sequences = activeTokenizer.encode(prompt)
+                encoded = sequences
+                promptTokenCount = sequences.getSequence(0).size
+            }
+            require(promptTokenCount < loadedContextLength - 1) {
+                "متن ورودی حتی پس از کوتاه‌کردن سابقهٔ گفتگو از ظرفیت زمینهٔ مدل بیشتر است."
+            }
             val contextBudget = (loadedContextLength - promptTokenCount - 8).coerceAtLeast(1)
             val maxNewTokens = request.settings.maxNewTokens.coerceIn(1, contextBudget)
             val createdParams = GeneratorParams(activeModel)
             params = createdParams
-            createdParams.setInput(sequences)
             createdParams.setSearchOption("max_length", (promptTokenCount + maxNewTokens).toDouble())
             createdParams.setSearchOption("do_sample", request.settings.temperature > 0.0001)
             if (request.settings.temperature > 0.0001) {
@@ -146,6 +164,7 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
             request.settings.repeatPenalty?.let { createdParams.setSearchOption("repetition_penalty", it.coerceIn(0.5, 2.0)) }
             val createdGenerator = Generator(activeModel, createdParams)
             generator = createdGenerator
+            createdGenerator.appendTokenSequences(sequences)
             val createdStream = activeTokenizer.createStream()
             stream = createdStream
             RuntimeDiagnosticsStore.recordTrace(com.woogit.aicore.runtime.RuntimeTraceEvent.Type.GENERATION_STARTED, "engine=onnxruntime-genai promptTokens=$promptTokenCount maxNewTokens=$maxNewTokens")
@@ -229,10 +248,26 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
     override fun lastLoadTimeMs(): Long? = latestLoadTimeMs
 
     private fun formatPrompt(
+        tokenizer: Tokenizer,
         messages: List<ChatMessage>,
         modelType: String,
+        template: String?,
         enableThinking: Boolean,
     ): String {
+        if (!template.isNullOrBlank()) {
+            val jsonMessages = JSONArray()
+            messages.forEach { message ->
+                val role = when (message.role) {
+                    ChatMessage.Role.SYSTEM -> "system"
+                    ChatMessage.Role.USER -> "user"
+                    ChatMessage.Role.ASSISTANT -> "assistant"
+                    ChatMessage.Role.TOOL -> "user"
+                }
+                jsonMessages.put(JSONObject().put("role", role).put("content", message.content))
+            }
+            return tokenizer.applyChatTemplate(template, jsonMessages.toString(), null, true)
+        }
+
         val type = modelType.lowercase()
         return when {
             type.startsWith("phi3") || type == "phi" -> buildString {
@@ -243,11 +278,11 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
                         ChatMessage.Role.ASSISTANT -> "assistant"
                         ChatMessage.Role.TOOL -> "user"
                     }
-                    append("<|$role|>\n")
+                    append("<|$role|>\\n")
                     append(message.content)
-                    append("\n")
+                    append("\\n")
                 }
-                append("<|assistant|>\n")
+                append("<|assistant|>\\n")
             }
             type.startsWith("llama") || type.startsWith("mistral") -> buildString {
                 messages.forEach { message ->
@@ -257,11 +292,11 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
                         ChatMessage.Role.ASSISTANT -> "assistant"
                         ChatMessage.Role.TOOL -> "user"
                     }
-                    append("<|start_header_id|>$role<|end_header_id|>\n\n")
+                    append("<|start_header_id|>$role<|end_header_id|>\\n\\n")
                     append(message.content)
-                    append("<|eot_id|>\n")
+                    append("<|eot_id|>\\n")
                 }
-                append("<|start_header_id|>assistant<|end_header_id|>\n\n")
+                append("<|start_header_id|>assistant<|end_header_id|>\\n\\n")
             }
             else -> buildString {
                 messages.forEach { message ->
@@ -271,17 +306,30 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
                         ChatMessage.Role.ASSISTANT -> "assistant"
                         ChatMessage.Role.TOOL -> "user"
                     }
-                    append("<|im_start|>$role\n")
+                    append("<|im_start|>$role\\n")
                     append(message.content)
-                    append("<|im_end|>\n")
+                    append("<|im_end|>\\n")
                 }
-                append("<|im_start|>assistant\n")
+                append("<|im_start|>assistant\\n")
                 if (!enableThinking && (type.startsWith("qwen2") || type.startsWith("qwen3"))) {
-                    append("<think>\n</think>\n")
+                    append("/no_think\\n")
                 }
             }
         }
     }
+
+    private fun readChatTemplate(modelPath: java.nio.file.Path): String? = runCatching {
+        val configPath = modelPath.resolve("tokenizer_config.json")
+        if (!Files.isRegularFile(configPath)) return@runCatching null
+        val config = JSONObject(Files.readString(configPath))
+        when (val template = config.opt("chat_template")) {
+            is String -> template.takeIf { it.isNotBlank() }
+            is JSONArray -> (0 until template.length()).asSequence()
+                .mapNotNull { index -> template.optJSONObject(index)?.optString("template") }
+                .firstOrNull { it.isNotBlank() }
+            else -> null
+        }
+    }.getOrNull()
 
     private fun closeQuietly(value: Any?) {
         if (value == null) return
