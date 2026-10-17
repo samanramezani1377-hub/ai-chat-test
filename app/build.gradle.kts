@@ -157,7 +157,13 @@ val extractOnnxRuntimeJni by tasks.registering {
 }
 
 android.sourceSets.getByName("main").jniLibs.srcDir(onnxRuntimeJniDir)
-tasks.named("preBuild").configure { dependsOn(extractOnnxRuntimeJni, downloadSherpaStaticAar) }
+// The GenAI AAR is unpacked by the runtime module, but generated JNI directories
+// inside an Android library are not reliably propagated into the consuming APK.
+// Package those exact native files from the app module to guarantee they reach the APK.
+android.sourceSets.getByName("main").jniLibs.srcDir("../core/runtime-android/build/generated/onnxruntime-genai/jniLibs")
+tasks.named("preBuild").configure {
+    dependsOn(extractOnnxRuntimeJni, downloadSherpaStaticAar, ":core:runtime-android:extractGenAiAar")
+}
 
 dependencies {
     implementation("androidx.webkit:webkit:1.14.0")

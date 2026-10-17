@@ -76,7 +76,6 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
 
-    sourceSets.getByName("main").jniLibs.srcDir(genAiJniDir)
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
