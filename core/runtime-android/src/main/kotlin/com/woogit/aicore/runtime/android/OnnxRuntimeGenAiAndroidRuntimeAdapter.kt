@@ -69,7 +69,7 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
             val createdModel = Model(model.path.toAbsolutePath().toString())
             candidate = createdModel
             candidateTokenizer = Tokenizer(createdModel)
-            val config = Files.readString(model.path.resolve("genai_config.json"))
+            val config = String(Files.readAllBytes(model.path.resolve("genai_config.json")), Charsets.UTF_8)
             val type = Regex("""["']type["']\s*:\s*["']([^"']+)["']""")
                 .find(config)?.groupValues?.get(1)?.lowercase() ?: model.metadata.architecture.orEmpty().lowercase()
             synchronized(lock) {
@@ -322,7 +322,7 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
     private fun readChatTemplate(modelPath: java.nio.file.Path): String? = runCatching {
         val configPath = modelPath.resolve("tokenizer_config.json")
         if (!Files.isRegularFile(configPath)) return@runCatching null
-        val config = JSONObject(Files.readString(configPath))
+        val config = JSONObject(String(Files.readAllBytes(configPath), Charsets.UTF_8))
         when (val template = config.opt("chat_template")) {
             is String -> template.takeIf { it.isNotBlank() }
             is JSONArray -> (0 until template.length()).asSequence()
