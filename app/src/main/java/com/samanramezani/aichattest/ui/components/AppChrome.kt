@@ -94,8 +94,15 @@ internal fun AppHeader(
                 Box(Modifier.size(7.dp).background(if (model != null) Accent2 else Warning, RoundedCornerShape(50)))
                 Spacer(Modifier.width(7.dp))
                 Column {
-                    Text(if (model != null) "آماده" else "بدون مدل", style = MaterialTheme.typography.labelLarge)
-                    Text("OpenCL", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        if (destination == AppDestination.WEBGPU) "آزمایشی" else if (model != null) "آماده" else "بدون مدل",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Text(
+                        if (destination == AppDestination.WEBGPU) "WebGPU" else "ONNX GenAI",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
