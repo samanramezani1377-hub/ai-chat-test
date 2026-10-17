@@ -85,44 +85,17 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             InfoLine("Quantization", runtime.model?.quantization?.toString() ?: "—")
             InfoLine("Runtime", runtime.runtime.name)
             InfoLine("نسخه", runtime.runtime.version)
-            InfoLine("Backend", runtime.runtime.backend ?: "OpenCL")
+            InfoLine("Backend", runtime.runtime.backend ?: "طبق genai_config.json")
             InfoLine("GPU Layers", runtime.runtime.gpuLayers?.toString() ?: "—")
             InfoLine("Threads", runtime.runtime.threads?.toString() ?: "—")
             InfoLine("Context", runtime.runtime.contextLength?.toString() ?: "—")
         }
 
-        SectionCard("دستگاه و حافظه واقعی GPU") {
-            val device = runtime.gpuDevice
-            val residency = runtime.weightResidency
-            InfoLine("GPU", device?.name ?: "—")
-            InfoLine("شرح دستگاه", device?.description ?: "—")
-            InfoLine("حافظه کل GPU", device?.memoryTotalMiB?.let { "%.1f MiB".format(it) } ?: "گزارش نشده توسط درایور")
-            InfoLine("حافظه آزاد GPU", device?.memoryFreeMiB?.let { "%.1f MiB".format(it) } ?: "گزارش نشده توسط درایور")
-            InfoLine("حافظه مصرف‌شده GPU", device?.memoryUsedMiB?.let { "%.1f MiB".format(it) } ?: "قابل محاسبه نیست")
-            InfoLine("وزن‌های واقعاً روی GPU", residency?.gpuTensorMiB?.let { "%.1f MiB".format(it) } ?: "—")
-            InfoLine("تعداد Tensor روی GPU", residency?.gpuTensors?.toString() ?: "—")
-            InfoLine("تعداد Buffer روی GPU", residency?.gpuBuffers?.toString() ?: "—")
-            InfoLine("وزن‌های Host", residency?.hostTensorMiB?.let { "%.1f MiB".format(it) } ?: "—")
-            InfoLine("وزن‌های CPU", residency?.cpuTensorMiB?.let { "%.1f MiB".format(it) } ?: "—")
-        }
-
-        SectionCard("پروفایل واقعی GPU / OpenCL") {
-            val gpu = runtime.openClProfile
-            InfoLine("تعداد Kernel", gpu?.kernelCount?.toString() ?: "—")
-            InfoLine("MUL_MAT Q6_K", gpu?.q6KMulMatMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("Attention", gpu?.attentionMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("RoPE", gpu?.ropeMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("RMSNorm", gpu?.rmsNormMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("FFN", gpu?.ffnMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("Softmax", gpu?.softmaxMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("Kernel launch", gpu?.kernelLaunchMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("Kernel submit", gpu?.kernelSubmitMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("Kernel execution", gpu?.totalKernelMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("Sync / completion", gpu?.syncMs?.let { "%.3f ms".format(it) } ?: "—")
-            InfoLine("Memory transfer", gpu?.memoryTransferMs?.let { "%.3f ms".format(it) } ?: "اندازه‌گیری نشده")
-            gpu?.topKernels?.forEachIndexed { index, kernel ->
-                InfoLine("Kernel ${index + 1}", "${kernel.kernelName} — %.3f ms".format(kernel.executionMs))
-            }
+        SectionCard("دستگاه و Execution Provider") {
+            InfoLine("Runtime", runtime.runtime.name)
+            InfoLine("پیکربندی Provider", runtime.runtime.backend ?: "طبق genai_config.json")
+            InfoLine("اندازه‌گیری حافظهٔ GPU", "این آداپتر فعلاً آمار جزئی GPU را ارائه نمی‌کند.")
+            InfoLine("پروفایل Kernel", "اندازه‌گیری per-kernel در ONNX Runtime GenAI فعال نشده است.")
         }
 
         SectionCard("ورودی و خروجی") {
@@ -169,7 +142,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             }
         }
 
-        Text("گزارش کامل شامل مشخصات مدل، عملکرد، حافظه، OpenCL، تنظیمات، همه رویدادهای Runtime و Agent و لاگ خام Native است.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("گزارش شامل مشخصات مدل، زمان تولید، تنظیمات، رویدادهای Runtime و Agent و آخرین رویداد ONNX Runtime GenAI است.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
