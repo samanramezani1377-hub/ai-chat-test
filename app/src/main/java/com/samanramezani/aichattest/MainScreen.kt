@@ -54,8 +54,6 @@ internal fun MainScreen(container: AppContainer, openVoiceInitially: Boolean = f
     var diagnostic by remember { mutableStateOf<String?>(null) }
     var activeModel by remember { mutableStateOf<ModelDescriptor?>(null) }
     var models by remember { mutableStateOf(emptyList<ModelDescriptor>()) }
-    var draftModels by remember { mutableStateOf(emptyList<ModelDescriptor>()) }
-    var activeDraft by remember { mutableStateOf<ModelDescriptor?>(null) }
     var execution by remember { mutableStateOf<ExecutionState?>(null) }
     var sidebarOpen by remember { mutableStateOf(false) }
     var quickMenuOpen by remember { mutableStateOf(false) }
@@ -73,7 +71,7 @@ internal fun MainScreen(container: AppContainer, openVoiceInitially: Boolean = f
     )
 
     fun loadConversation(record: ConversationRecord) { current = record; messages = history.messages(record.id).map { UiMessage(it.role, it.content, it.id) } }
-    fun refreshModels() { scope.launch(Dispatchers.Default) { val listed = manager?.models(); val drafts = manager?.draftModels(); val active = manager?.activeModel(); val draft = (active as? ModelResult.Success)?.value?.let { manager?.draftForModel(it.id) }; withContext(Dispatchers.Main) { models = (listed as? ModelResult.Success)?.value ?: emptyList(); draftModels = (drafts as? ModelResult.Success)?.value ?: emptyList(); activeModel = (active as? ModelResult.Success)?.value; activeDraft = (draft as? ModelResult.Success)?.value; if (!generating && !approvalBusy && !importBusy && !activationBusy) runtimeStatus = if (activeModel != null || container.isCloudflareConfigured()) "آماده" else "خارج از دسترس" } } }
+    fun refreshModels() { scope.launch(Dispatchers.Default) { val listed = manager?.models(); val active = manager?.activeModel(); withContext(Dispatchers.Main) { models = (listed as? ModelResult.Success)?.value ?: emptyList(); activeModel = (active as? ModelResult.Success)?.value; if (!generating && !approvalBusy && !importBusy && !activationBusy) runtimeStatus = if (activeModel != null || container.isCloudflareConfigured()) "آماده" else "خارج از دسترس" } } }
     fun refreshHistory() { scope.launch(Dispatchers.Default) { val records = history.recent(recentLimit); withContext(Dispatchers.Main) { conversations = records } } }
     LaunchedEffect(Unit) {
         val startup = withContext(Dispatchers.Default) {
@@ -92,58 +90,6 @@ internal fun MainScreen(container: AppContainer, openVoiceInitially: Boolean = f
     }
     BackHandler(enabled = sidebarOpen || quickMenuOpen) { if (sidebarOpen) sidebarOpen = false else quickMenuOpen = false }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri == null || manager == null) return@rememberLauncherForActivityResult; importBusy = true; runtimeStatus = "در حال وارد کردن بستهٔ ONNX GenAI…"; diagnostic = null; scope.launch { try { val result = withContext(Dispatchers.IO) { manager.import(uri) }; when (result) { is ModelResult.Success -> { runtimeStatus = "بستهٔ ONNX GenAI وارد شد؛ برای فعال‌سازی آماده است."; diagnostic = null }; is ModelResult.Failure -> diagnostic = formatDiagnostic(result.error.message) } } catch (t: Throwable) { diagnostic = formatDiagnostic(t.message ?: "وارد کردن مدل ناموفق بود.", "وارد کردن مدل") } finally { withContext(Dispatchers.Main) { importBusy = false; if (diagnostic == null && activeModel == null) runtimeStatus = "مدل وارد شد؛ برای فعال‌سازی آماده است." else if (diagnostic != null) runtimeStatus = "خطا" }; refreshModels() } } }
-    val draftPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null || manager == null) return@rememberLauncherForActivityResult
-        importBusy = true
-        runtimeStatus = "در حال وارد کردن مدل درفت…"
-        diagnostic = null
-        scope.launch {
-            try {
-                when (val result = withContext(Dispatchers.IO) { manager.importDraft(uri) }) {
-                    is ModelResult.Success -> runtimeStatus = "مدل درفت وارد شد؛ آن را به مدل اصلی متصل کن."
-                    is ModelResult.Failure -> { runtimeStatus = "خطا"; diagnostic = formatDiagnostic(result.error.message) }
-                }
-            } catch (t: Throwable) {
-                runtimeStatus = "خطا"
-                diagnostic = formatDiagnostic(t.message ?: "وارد کردن مدل درفت ناموفق بود.", "وارد کردن مدل درفت")
-            } finally {
-                withContext(Dispatchers.Main) { importBusy = false; refreshModels() }
-            }
-        }
-    }
-    fun assignDraft(draftId: String?) {
-        val m = manager ?: return
-        val target = activeModel ?: return
-        scope.launch(Dispatchers.Default) {
-            val result = m.assignDraft(target.id, draftId)
-            withContext(Dispatchers.Main) {
-                when (result) {
-                    is ModelResult.Success -> {
-                        val activated = m.activate(target.id)
-                        if (activated is ModelResult.Success) {
-                            activeDraft = draftModels.firstOrNull { it.id == draftId }
-                            runtimeStatus = "آماده"
-                            diagnostic = null
-                        } else {
-                            runtimeStatus = "خطا"
-                            diagnostic = (activated as ModelResult.Failure).error.message
-                        }
-                    }
-                    is ModelResult.Failure -> { runtimeStatus = "خطا"; diagnostic = result.error.message }
-                }
-                refreshModels()
-            }
-        }
-    }
-    fun deleteDraft(id: String) {
-        scope.launch(Dispatchers.Default) {
-            val result = manager?.deleteDraft(id)
-            withContext(Dispatchers.Main) {
-                if (result is ModelResult.Failure) { runtimeStatus = "خطا"; diagnostic = result.error.message }
-                refreshModels()
-            }
-        }
-    }
     fun activateModel(id: String) { val m = manager ?: return; if (generating || approvalBusy || importBusy || activationBusy) return; activationBusy = true; runtimeStatus = "در حال فعال‌سازی…"; diagnostic = null; scope.launch(Dispatchers.Default) { container.providerStore?.selectMode(InferenceProviderMode.LOCAL); val result = m.activate(id); withContext(Dispatchers.Main) { activationBusy = false; when (result) { is ModelResult.Success -> { activeModel = result.value; runtimeStatus = "آماده"; diagnostic = null }; is ModelResult.Failure -> { runtimeStatus = "خطا"; diagnostic = result.error.message } }; refreshModels() } } }
     fun updateStreamMessage(streamId: String, append: String? = null, replace: String? = null) { if (activeStreamId != streamId) return; messages = messages.map { message -> if (message.id != streamId) message else message.copy(text = replace ?: (message.text + append.orEmpty())) } }
     fun send() { val record = current ?: return; if (manager == null || generating || approvalBusy || importBusy || activationBusy) return; val cloudflareSelected = container.providerStore?.load()?.mode == InferenceProviderMode.CLOUDFLARE; if (activeModel == null && !cloudflareSelected) { runtimeStatus = "خارج از دسترس"; diagnostic = formatDiagnostic("MODEL_NOT_ACTIVE", "ارسال پیام"); return }; val text = composer.trim(); if (text.isEmpty()) { runtimeStatus = "خطا"; diagnostic = formatDiagnostic("INPUT_EMPTY", "ارسال پیام"); return }; composer = ""; messages = messages + UiMessage(ChatMessage.Role.USER, text, UUID.randomUUID().toString()); val streamId = UUID.randomUUID().toString(); activeStreamId = streamId; messages = messages + UiMessage(ChatMessage.Role.ASSISTANT, "", streamId); generating = true; runtimeStatus = "در حال اجرای Agent"; diagnostic = null; execution = ExecutionState(UUID.randomUUID().toString(), "در حال تولید پاسخ", "در حال تحلیل درخواست", System.currentTimeMillis(), requestPreview = text, steps = listOf(ExecutionStep("understand", "در حال تحلیل درخواست", "بررسی پیام و زمینه گفت‌وگو", StepState.ACTIVE))); scope.launch(Dispatchers.Default) { val session = container.createAgentSession(record.id) { event -> withContext(Dispatchers.Main.immediate) { when (event) { AgentEvent.Started -> { runtimeStatus = "در حال اجرای Agent"; execution = execution?.copy(status = "در حال تحلیل", steps = execution?.steps.orEmpty().map { it.copy(state = StepState.DONE) } + ExecutionStep("plan", "در حال برنامه‌ریزی پاسخ", "تعیین مسیر پاسخ یا اقدام", StepState.ACTIVE)) }; is AgentEvent.Token -> { updateStreamMessage(streamId, append = event.value); execution = execution?.copy(status = "در حال تولید پاسخ", steps = execution?.steps.orEmpty().map { if (it.state == StepState.ACTIVE) it.copy(state = StepState.DONE) else it } + if (execution?.steps.orEmpty().any { it.id == "generate" }) emptyList() else listOf(ExecutionStep("generate", "در حال تولید پاسخ", "پاسخ کاربر در حال تولید است", StepState.ACTIVE))) }; is AgentEvent.ActionPrepared -> { updateStreamMessage(streamId, replace = ""); execution = execution?.copy(id = event.executionId, action = event.actionId, status = "در حال اجرای عملیات", steps = execution?.steps.orEmpty().map { if (it.state == StepState.ACTIVE) it.copy(state = StepState.DONE) else it } + ExecutionStep("action-" + event.executionId, "در حال اجرای اقدام", event.actionId, StepState.ACTIVE)) }; is AgentEvent.ApprovalRequired -> { execution = execution?.copy(id = event.executionId, status = "نیازمند تأیید", approvalRequired = true, steps = execution?.steps.orEmpty().map { if (it.state == StepState.ACTIVE) it.copy(state = StepState.DONE) else it } + ExecutionStep("approval-" + event.executionId, "نیازمند تأیید شما", "برای ادامه اجرای این اقدام تأیید لازم است", StepState.ACTIVE)); runtimeStatus = "نیازمند تأیید"; generating = false; activeStreamId = null }; is AgentEvent.ActionExecuted -> { execution = execution?.copy(status = "عملیات انجام شد", steps = execution?.steps.orEmpty().map { if (it.state == StepState.ACTIVE) it.copy(state = StepState.DONE) else it } + ExecutionStep("final-" + event.executionId, "در حال آماده‌سازی پاسخ نهایی", state = StepState.ACTIVE)) }; is AgentEvent.Failed -> { diagnostic = formatDiagnostic(event.message); execution = execution?.copy(status = "ناموفق", error = event.message, finishedAt = System.currentTimeMillis(), steps = execution?.steps.orEmpty().map { if (it.state == StepState.ACTIVE) it.copy(state = StepState.FAILED, detail = event.message) else it }) }; AgentEvent.Completed -> if (!(execution?.approvalRequired ?: false)) { runtimeStatus = "آماده"; execution = execution?.copy(status = "پاسخ آماده است", steps = execution?.steps.orEmpty().map { if (it.state == StepState.ACTIVE) it.copy(state = StepState.DONE) else it }) } } } } ?: run { withContext(Dispatchers.Main) { generating = false; activeStreamId = null; runtimeStatus = "خطا"; diagnostic = formatDiagnostic("Agent Session در دسترس نیست.", "اجرای عامل"); execution = execution?.copy(status = "ناموفق", finishedAt = System.currentTimeMillis(), error = diagnostic) }; return@launch }; try { val result = session.send(text, InferenceSettings(maxNewTokens = 2048, enableThinking = false), requestedRecentMessages = Int.MAX_VALUE); withContext(Dispatchers.Main) { updateStreamMessage(streamId, replace = result.generation.text); generating = false; activeStreamId = null; val finalStatus = when { execution?.approvalRequired == true -> "نیازمند تأیید"; result.actionPlan != null -> "عملیات تکمیل شد"; else -> "پاسخ آماده است" }; execution = execution?.copy(status = finalStatus, finishedAt = System.currentTimeMillis(), resultPreview = result.generation.text.take(240)); if (!(execution?.approvalRequired ?: false)) runtimeStatus = "آماده" } } catch (t: Throwable) { withContext(Dispatchers.Main) { generating = false; activeStreamId = null; runtimeStatus = "خطا"; diagnostic = formatDiagnostic(t.message ?: "Local agent execution failed", "اجرای عامل"); execution = execution?.copy(status = "ناموفق", finishedAt = System.currentTimeMillis(), error = diagnostic) } }; val updated = history.recent(recentLimit).firstOrNull { it.id == record.id }; withContext(Dispatchers.Main) { if (updated != null) current = updated; conversations = history.recent(recentLimit) } } }
