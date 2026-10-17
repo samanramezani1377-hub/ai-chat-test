@@ -108,7 +108,9 @@ object RuntimeDiagnosticsStore {
         text.lineSequence().toList().takeLast(MAX_NATIVE_DIAGNOSTIC_LINES).joinToString("\n")
 
     private fun readNativeDiagnostics(): String? = runCatching {
-        markerFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotBlank() }?.let(::lastNativeDiagnosticLines)
+        markerFile.takeIf { it.isFile }?.readText()?.trim()
+            ?.takeIf { it.isNotBlank() && it.contains("ONNX_RUNTIME_GENAI") }
+            ?.let(::lastNativeDiagnosticLines)
     }.getOrNull()
 
     fun refreshNativeEvent() {
