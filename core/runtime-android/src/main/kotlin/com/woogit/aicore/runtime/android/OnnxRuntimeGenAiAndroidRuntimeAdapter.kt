@@ -37,6 +37,7 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
     @Volatile private var loadedDescriptor: ModelDescriptor? = null
     @Volatile private var loadedModelType: String = "qwen3"
     @Volatile private var loadedContextLength: Int = 4096
+    @Volatile private var loadedBackend: String = "Provider selected by ONNX Runtime GenAI"
     @Volatile private var chatTemplate: String? = null
     private val stopRequested = AtomicBoolean(false)
     @Volatile private var latestGeneration: GenerationResult? = null
@@ -78,6 +79,7 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
                 loadedDescriptor = model
                 loadedModelType = type.ifBlank { "qwen3" }
                 loadedContextLength = (model.metadata.contextLength ?: 4096L).coerceIn(256L, 131072L).toInt()
+                loadedBackend = readRequestedBackend(model.path)
                 chatTemplate = readChatTemplate(model.path)
                 latestLoadTimeMs = (System.nanoTime() - started) / 1_000_000L
             }
@@ -91,6 +93,7 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
                 loadedModel = null
                 loadedDescriptor = null
                 chatTemplate = null
+                loadedBackend = "Provider selection failed during model load"
             }
             RuntimeDiagnosticsStore.recordNativeEvent("$TAG LOAD_FAILED type=${t::class.java.name} message=${t.message}")
             throw t
@@ -239,7 +242,7 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
     override fun runtimeInfo(): RuntimeInfo = RuntimeInfo(
         name = "onnxruntime-genai-android",
         version = GENAI_VERSION,
-        backend = "Configured by genai_config.json (default provider when unspecified)",
+        backend = loadedBackend,
         threads = null,
         gpuLayers = null,
         contextLength = loadedContextLength,
@@ -318,6 +321,32 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
             }
         }
     }
+
+    /**
+     * Reports the provider explicitly requested by a GenAI package. This is diagnostic
+     * metadata, not a claim that every operator runs on that provider: ORT may partition
+     * unsupported operators to a fallback provider.
+     */
+    private fun readRequestedBackend(modelPath: java.nio.file.Path): String = runCatching {
+        val config = JSONObject(String(Files.readAllBytes(modelPath.resolve("genai_config.json")), Charsets.UTF_8))
+        val model = config.optJSONObject("model")
+        val decoder = model?.optJSONObject("decoder")
+        val sessionOptions = decoder?.optJSONObject("session_options")
+        val providers = sessionOptions?.optJSONArray("provider_options")
+        val requested = (0 until (providers?.length() ?: 0)).asSequence()
+            .mapNotNull { providers?.optJSONObject(it) }
+            .flatMap { provider -> provider.keys().asSequence().map { it.lowercase() } }
+            .firstOrNull()
+        when (requested) {
+            "webgpu" -> "WebGPU requested by genai_config.json (operator fallback may occur)"
+            "cuda" -> "CUDA requested by genai_config.json (operator fallback may occur)"
+            "qnn" -> "QNN requested by genai_config.json (operator fallback may occur)"
+            "dml", "directml" -> "DirectML requested by genai_config.json (operator fallback may occur)"
+            "cpu" -> "CPU requested by genai_config.json"
+            null -> "Provider selected by ONNX Runtime GenAI"
+            else -> "$requested requested by genai_config.json (operator fallback may occur)"
+        }
+    }.getOrDefault("Provider configuration could not be read")
 
     private fun readChatTemplate(modelPath: java.nio.file.Path): String? = runCatching {
         val configPath = modelPath.resolve("tokenizer_config.json")
