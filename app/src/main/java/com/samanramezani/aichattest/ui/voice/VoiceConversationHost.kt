@@ -20,6 +20,7 @@ import com.samanramezani.aichattest.ui.voice.VoiceConversationPage
 import com.samanramezani.aichattest.voice.LocalMicrophone
 import com.samanramezani.aichattest.voice.VoiceAudioInputGuard
 import com.samanramezani.aichattest.voice.LocalPiperTts
+import com.samanramezani.aichattest.voice.SpeechSegmenter
 import com.samanramezani.aichattest.voice.LocalStreamingAsr
 import com.samanramezani.aichattest.voice.LocalAsr
 import com.samanramezani.aichattest.voice.LocalQwen3Asr
@@ -817,21 +818,10 @@ internal class VoiceConversationController(
             queue.trySend("متوجه شدم")
             onLine("دستیار", "متوجه شدم")
         }
-        val pending = StringBuilder()
+        val segmenter = SpeechSegmenter()
         fun enqueueCompleteSentences(token: String, flush: Boolean = false) {
-            for (char in token) {
-                pending.append(char)
-                if (char in charArrayOf('.', '!', '?', '؟', '؛', '\n') || pending.length >= 120 && char == ' ') {
-                    val segment = pending.toString().trim()
-                    pending.clear()
-                    if (segment.isNotBlank()) queue.trySend(segment)
-                }
-            }
-            if (flush) {
-                val segment = pending.toString().trim()
-                pending.clear()
-                if (segment.isNotBlank()) queue.trySend(segment)
-            }
+            val ready = segmenter.feed(token) + if (flush) segmenter.flush() else emptyList()
+            for (segment in ready) queue.trySend(segment)
         }
 
         try {

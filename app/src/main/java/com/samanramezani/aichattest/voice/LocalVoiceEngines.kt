@@ -31,17 +31,6 @@ import java.io.File
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicBoolean
 
-private fun normalizePersianTtsText(value: String): String =
-    java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFC)
-        .replace('ي', 'ی')
-        .replace('ى', 'ی')
-        .replace('ك', 'ک')
-        .replace("ۀ", "هٔ")
-        .replace('ة', 'ه')
-        .replace('\u0640'.toString(), "")
-        .replace(Regex("[\\t\\x0B\\f\\r ]+"), " ")
-        .trim()
-
 interface LocalTtsEngine : java.io.Closeable {
     suspend fun speak(
         text: String,
@@ -143,8 +132,11 @@ class LocalPiperTts(private val entry: VoiceModelEntry) : LocalTtsEngine {
         require(speed in 0.5f..1.5f) { "VOICE-TTS-008: سرعت گفتار خارج از محدودهٔ مجاز است." }
         require(playbackTailMs in 0L..2000L) { "VOICE-TTS-009: مکث انتهایی خارج از محدودهٔ مجاز است." }
         val synthesisStartedAtMs = SystemClock.elapsedRealtime()
-        val normalizedText = normalizePersianTtsText(text)
-        // Normalize common Arabic-script variants before espeak phonemization.
+        // Strip emoji/URLs, transliterate Latin words and fix "/" before espeak phonemization.
+        // A segment that is only emoji/symbols has nothing to say: skip it instead of
+        // throwing, because an exception here aborts the rest of the spoken reply.
+        val normalizedText = PersianSpeechText.normalize(text)
+        if (!PersianSpeechText.hasSpeakableContent(normalizedText)) return@withContext
         val audio = engine.generate(text = normalizedText, sid = 0, speed = speed)
         onSynthesisComplete(SystemClock.elapsedRealtime() - synthesisStartedAtMs)
         if (cancelled.get()) throw CancellationException("TTS interrupted")
