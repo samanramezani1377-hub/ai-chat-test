@@ -31,7 +31,7 @@ internal object RuntimeErrorMapper {
             "The model could not remain fully resident on the OpenCL GPU. " +
                 "CPU weight fallback is disabled; no model was activated."
         )
-        else -> ModelError.LoadFailed("llama.cpp failed to load the model (code=$code)")
+        else -> ModelError.LoadFailed("ONNX Runtime GenAI failed to load the model (code=$code)")
     }
 
     fun inferenceFailure(throwable: Throwable): ModelError =
