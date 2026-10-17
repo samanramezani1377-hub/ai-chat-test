@@ -25,6 +25,7 @@ import com.samanramezani.aichattest.ui.diagnostics.DiagnosticsPage
 import com.samanramezani.aichattest.ui.navigation.AppDestination
 import com.samanramezani.aichattest.ui.state.*
 import com.samanramezani.aichattest.ui.workspace.WorkspacePage
+import com.samanramezani.aichattest.ui.webgpu.WebGpuChatPage
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.domain.ChatMessage
 import com.woogit.aicore.domain.InferenceSettings
