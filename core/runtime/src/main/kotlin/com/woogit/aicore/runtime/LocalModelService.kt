@@ -55,9 +55,9 @@ class LocalModelService(
         is ModelResult.Success -> {
             val model = result.value
             if (model != null && model.format != ModelFormat.ONNX_GENAI) {
-                repository.setActive(null)
+                val cleared = repository.setActive(null)
                 activeId = null
-                ModelResult.Success(null)
+                if (cleared is ModelResult.Failure) cleared else ModelResult.Success(null)
             } else result
         }
     }
