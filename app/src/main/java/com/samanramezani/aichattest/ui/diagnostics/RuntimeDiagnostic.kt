@@ -198,7 +198,6 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
 }
 
 internal fun RuntimeDiagnostic.errorReport(): String = buildString {
-    val perf = nativePerformance
     appendLine("AI Chat Test — Error Report")
     appendLine("Status: $status")
     appendLine("Execution: ${executionId ?: "N/A"}")
@@ -209,10 +208,10 @@ internal fun RuntimeDiagnostic.errorReport(): String = buildString {
     appendLine("Context: ${runtime.contextLength ?: "N/A"}")
     appendLine("Load Time: ${loadTimeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("TTFT: ${generation?.firstTokenTimeMs?.let { "$it ms" } ?: "N/A"}")
-    appendLine("Generation Time: ${perf.generationMs?.let { "$it ms" } ?: generation?.generationTimeMs?.let { "$it ms" } ?: "N/A"}")
-    appendLine("Prompt Tokens: ${perf.promptTokens ?: generation?.inputTokens ?: "N/A"}")
-    appendLine("Output Tokens: ${perf.generatedTokens ?: generation?.outputTokens ?: "N/A"}")
-    appendLine("Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: tokensPerSecond(generation)?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine("Generation Time: ${generation?.generationTimeMs?.let { "$it ms" } ?: "N/A"}")
+    appendLine("Prompt Tokens: ${generation?.inputTokens ?: "N/A"}")
+    appendLine("Output Tokens: ${generation?.outputTokens ?: "N/A"}")
+    appendLine("Tokens/sec: ${tokensPerSecond(generation)?.let { "%.2f".format(it) } ?: "N/A"}")
     appendLine()
     appendLine("Execution Provider: ${runtime.backend ?: "genai_config.json"}")
     appendLine()
