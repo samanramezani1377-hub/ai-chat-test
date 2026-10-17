@@ -3,57 +3,34 @@
 ```text
 Model Management
 ├── Import
-│   ├── Source URI
-│   ├── Access
-│   ├── Managed Storage
-│   ├── Integrity
-│   ├── Duplicate Detection
-│   ├── Cancellation
-│   └── Cleanup
-├── Inspection
-│   ├── Format
-│   ├── GGUF Header
-│   ├── Structure
-│   ├── Metadata
-│   ├── Architecture
-│   ├── Quantization
-│   └── Runtime Requirements
-├── Validation
-│   ├── File
-│   ├── GGUF
-│   ├── Metadata
-│   ├── Architecture
-│   ├── Quantization
-│   ├── Runtime Compatibility
-│   └── Resource Compatibility
+│   ├── Android SAF URI
+│   ├── ZIP package staging
+│   ├── Safe ZIP path validation
+│   ├── Managed model directory
+│   └── Temporary archive cleanup
+├── Inspection / Validation
+│   ├── genai_config.json
+│   ├── At least one ONNX graph
+│   ├── Tokenizer assets
+│   ├── Model type and context metadata
+│   └── Expanded-size and entry-count limits
 ├── Repository
-│   ├── Register
-│   ├── Get
-│   ├── List
+│   ├── Register model directory and total size
+│   ├── Get / List
 │   ├── Active Model
-│   └── Unregister
+│   └── Unregister and recursive cleanup
 └── Lifecycle Manager
-    ├── NotImported
     ├── Importing
-    ├── Validating
-    ├── Imported
     ├── Ready
     ├── Loading
     ├── Active
     ├── Unloading
-    ├── Invalid
     └── Failed
 ```
 
-نام فایل به‌تنهایی مبنای تشخیص مدل یا Quantization نیست؛ metadata واقعی فایل مرجع است.
+در شاخهٔ `onnx-runtime-genai` بستهٔ مدل باید ZIP باشد و پس از استخراج، در ریشهٔ بسته `genai_config.json`، حداقل یک فایل `.onnx` و فایل‌های tokenizer موجود باشند. اگر بسته یک پوشهٔ ریشهٔ مشترک داشته باشد، importer آن پوشه را به‌عنوان ریشهٔ مدل انتخاب می‌کند.
 
-مدل‌های مرجع فعلی:
-
-- **Qwen3-1.7B · GGUF · Q6_K** — baseline اولیه
-- **Qwen3.5-2B · GGUF · Q6_K** — مدل Qwen3.5 با Q6_K
-- **Qwen3.8-2B Distill · GGUF · Q6_K** — مدل جدید پیشنهادی/مرجع، با معماری `qwen35`
-
-هر سه مدل از مسیر import عمومی GGUF استفاده می‌کنند و نام فایل به‌تنهایی مبنای تشخیص نیست؛ metadata واقعی GGUF مرجع است.
+فایل GGUF، فایل ONNX تکی یا ZIP ناقص فعال نمی‌شود. مدل‌های GGUF قدیمی در فهرست باقی می‌مانند تا کاربر بتواند آن‌ها را حذف کند، اما دکمهٔ فعال‌سازی برای آن‌ها غیرفعال است.
 
 ## ارجاعات
 
