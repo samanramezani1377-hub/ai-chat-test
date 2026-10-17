@@ -66,8 +66,9 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
                 loadedDescriptor = null
             }
             RuntimeDiagnosticsStore.recordNativeEvent("$TAG LOAD_BEGIN model=${model.displayName} path=${model.path}")
-            candidate = Model(model.path.toAbsolutePath().toString())
-            candidateTokenizer = Tokenizer(candidate)
+            val createdModel = Model(model.path.toAbsolutePath().toString())
+            candidate = createdModel
+            candidateTokenizer = Tokenizer(createdModel)
             val config = Files.readString(model.path.resolve("genai_config.json"))
             val type = Regex("""["']type["']\s*:\s*["']([^"']+)["']""")
                 .find(config)?.groupValues?.get(1)?.lowercase() ?: model.metadata.architecture.orEmpty().lowercase()
