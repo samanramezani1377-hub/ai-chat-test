@@ -62,8 +62,8 @@ class OnnxGenAiModelImporterTest {
             val file = temp.resolve("model.gguf")
             Files.writeString(file, "not a package")
             val result = OnnxGenAiModelImporter(temp.resolve("models")).import(file)
-            assertIs<ModelResult.Failure>(result)
-            assertTrue(result.error.message.contains("ZIP"))
+            val failure = assertIs<ModelResult.Failure>(result)
+            assertTrue(failure.error.message.contains("ZIP"))
         } finally {
             deleteTree(temp)
         }
