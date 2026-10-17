@@ -216,6 +216,14 @@ jobs:
           grep -q 'rawName.split.*any.*\.\.' core/runtime/src/main/kotlin/com/woogit/aicore/runtime/OnnxGenAiModelImporter.kt
           grep -q 'class OnnxRuntimeGenAiAndroidRuntimeAdapter' core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/OnnxRuntimeGenAiAndroidRuntimeAdapter.kt
           grep -q 'onnxruntime-genai-android-\$genAiVersion.aar' core/runtime-android/build.gradle.kts
+          # Keep the optional browser/WebGPU route separate from the native GenAI ZIP path.
+          grep -q 'AppDestination.WEBGPU -> WebGpuChatPage()' app/src/main/java/com/samanramezani/aichattest/MainScreen.kt
+          grep -q 'onnx-community/Qwen3.5-2B-ONNX-OPT' app/src/main/assets/webgpu/app.js
+          grep -q 'navigator.gpu.requestAdapter' app/src/main/assets/webgpu/app.js
+          test -s app/src/main/assets/webgpu/index.html
+          test -s app/src/main/assets/webgpu/style.css
+          test -s app/src/main/assets/webgpu/app.js
+          node --input-type=module --check < app/src/main/assets/webgpu/app.js
           grep -q 'f507ddbf0f635554ab12fcbf7dcfb115981eb664b925d90f28ed598dd8eb2ee7' core/runtime-android/build.gradle.kts
           ! grep -R 'LlamaCppAndroidRuntimeAdapter\|NativeLlamaCpp\|LLAMA_CPP_TAG\|GGML_OPENCL' -n app/src/main core/runtime-android core/runtime/src/main/kotlin
           echo "ONNX Runtime GenAI package import, activation, generation and pinned SDK wiring verified"
