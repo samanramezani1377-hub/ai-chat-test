@@ -9,9 +9,7 @@ import com.woogit.aicore.domain.ChatMessage
 import com.woogit.aicore.domain.GenerationRequest
 import com.woogit.aicore.domain.GenerationResult
 import com.woogit.aicore.domain.ModelDescriptor
-import com.woogit.aicore.domain.ModelError
 import com.woogit.aicore.domain.ModelFormat
-import com.woogit.aicore.domain.ModelResult
 import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
@@ -91,17 +89,6 @@ class OnnxRuntimeGenAiAndroidRuntimeAdapter : RuntimeAdapter, RuntimeMetrics {
             RuntimeDiagnosticsStore.recordNativeEvent("$TAG LOAD_FAILED type=${t::class.java.name} message=${t.message}")
             throw t
         }
-    }
-
-    /** Compatibility hook for the existing model manager; ONNX GenAI has no llama.cpp draft model. */
-    fun setDraftPath(path: String?) = Unit
-
-    /** Compatibility hook: report success only when this exact target is already loaded. */
-    suspend fun loadResult(model: ModelDescriptor): ModelResult<Unit> = try {
-        if (loadedDescriptor?.id != model.id) load(model)
-        ModelResult.Success(Unit)
-    } catch (t: Throwable) {
-        ModelResult.Failure(ModelError.LoadFailed(t.message ?: "Unable to load ONNX Runtime GenAI model", t))
     }
 
     override suspend fun unload() = withContext(Dispatchers.IO) {
