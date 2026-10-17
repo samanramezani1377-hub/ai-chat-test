@@ -171,6 +171,6 @@ CI پایه از ابتدا فعال است: Build، Unit Test، Integration Tes
 
 انتخاب منبع باید صریح و قابل مشاهده باشد؛ برنامه نباید بی‌اجازه از Local به Provider یا برعکس fallback کند. داده‌های ارسالی به Provider از دستگاه خارج می‌شوند، بنابراین وضعیت و مرز حریم خصوصی باید روشن باشد. قابلیت‌ها و تنظیمات وابسته به هر مسیر باید براساس پشتیبانی واقعی همان Adapter نمایش داده شوند.
 
-مدل مرجع تاریخی Prototype، **Qwen3-1.7B در GGUF/Q6_K با llama.cpp** بوده است؛ این مدل الزام معماری یا تنها مسیر اجرا نیست. Runtime و Provider باید قابل تعویض بمانند.
+در شاخهٔ `onnx-runtime-genai` موتور محلی اصلی **ONNX Runtime GenAI** است. ورود مدل از بستهٔ ZIP سازگار شامل `genai_config.json`، گراف‌های ONNX و فایل‌های tokenizer انجام می‌شود؛ فایل GGUF یا ONNX تکی قابل فعال‌سازی نیست. Runtime و Provider باید قابل تعویض بمانند.
 
 **مرجع اصلی تصمیم‌های فنی:** [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md)
