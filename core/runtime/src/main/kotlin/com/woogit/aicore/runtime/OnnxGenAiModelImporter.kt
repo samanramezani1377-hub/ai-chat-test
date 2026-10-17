@@ -48,7 +48,7 @@ class OnnxGenAiModelImporter(
                     val entry = zip.nextEntry ?: break
                     entryCount++
                     if (entryCount > maxEntries) throw IllegalArgumentException("بستهٔ مدل تعداد فایل غیرمجاز دارد.")
-                    val rawName = entry.name.replace('\\\\', '/')
+                    val rawName = entry.name.replace('\\', '/')
                     val relative = Path.of(rawName).normalize()
                     if (rawName.startsWith("/") || relative.isAbsolute ||
                         relative.toString() == "." || relative.startsWith("..") ||
