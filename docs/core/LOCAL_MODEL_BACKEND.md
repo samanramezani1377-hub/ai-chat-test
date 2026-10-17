@@ -25,7 +25,7 @@
 
 ## مدل هدف
 
-**Qwen3-1.7B · GGUF · Q6_K**
+**ONNX Runtime GenAI · ZIP package · genai_config.json + ONNX graphs + tokenizer assets**
 
 ## قانون مرجع واحد
 
