@@ -20,7 +20,7 @@ import kotlinx.coroutines.withContext
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** Android model façade: SAF import -> GGUF validation -> durable registry -> llama.cpp/OpenCL. */
+/** Android model façade: SAF ZIP import -> ONNX GenAI package validation -> durable registry -> ONNX Runtime GenAI. */
 class AndroidModelManager(
     private val contentResolver: ContentResolver,
     private val appContext: android.content.Context,
