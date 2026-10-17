@@ -42,7 +42,7 @@ class LocalModelService(
         return when (val registered = repository.register(model)) {
             is ModelResult.Success -> ModelResult.Success(model)
             is ModelResult.Failure -> {
-                java.nio.file.Files.deleteIfExists(model.path)
+                deleteModelPath(model.path)
                 registered
             }
         }
@@ -72,7 +72,7 @@ class LocalModelService(
                     is ModelResult.Failure -> return@withLock result
                 } ?: return@withLock ModelResult.Failure(ModelError.InvalidModel("Model is not registered"))
 
-                if (model.format != ModelFormat.GGUF || model.validation != ValidationStatus.VALID) {
+                if (model.format != ModelFormat.ONNX_GENAI || model.validation != ValidationStatus.VALID) {
                     return@withLock ModelResult.Failure(ModelError.InvalidModel("Model is not valid for activation"))
                 }
 
@@ -201,10 +201,21 @@ class LocalModelService(
                     is ModelResult.Success -> result.value
                     is ModelResult.Failure -> return@withLock result
                 } ?: return@withLock ModelResult.Failure(ModelError.InvalidModel("Model is not registered"))
-                java.nio.file.Files.deleteIfExists(model.path)
+                deleteModelPath(model.path)
                 repository.unregister(id)
             }
         }
+
+    private fun deleteModelPath(path: java.nio.file.Path) {
+        if (!java.nio.file.Files.exists(path)) return
+        if (java.nio.file.Files.isDirectory(path)) {
+            java.nio.file.Files.walk(path).use { paths ->
+                paths.sorted(java.util.Comparator.reverseOrder()).forEach { runCatching { java.nio.file.Files.deleteIfExists(it) } }
+            }
+        } else {
+            java.nio.file.Files.deleteIfExists(path)
+        }
+    }
 
     fun activeModelId(): String? = activeId
 }
