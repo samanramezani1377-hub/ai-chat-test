@@ -36,13 +36,13 @@ import com.woogit.aicore.domain.Verifier
 import com.woogit.aicore.observability.CentralObservability
 import com.woogit.aicore.observability.ErrorReport
 import com.woogit.aicore.observability.ExecutionTraceEvent
-import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
+import com.woogit.aicore.runtime.android.OnnxRuntimeGenAiAndroidRuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
 import java.nio.file.Files
 import java.nio.file.LinkOption
 
-/** Application composition root: local GGUF and optional provider-backed inference share one agent path. */
+/** Application composition root: local ONNX Runtime GenAI and optional provider-backed inference share one agent path. */
 class AppContainer(context: Context? = null) {
     companion object {
         @Volatile var latest: AppContainer? = null
@@ -60,7 +60,7 @@ class AppContainer(context: Context? = null) {
         traceStore = appContext?.let { AndroidExecutionTraceStore(it) } ?: com.woogit.aicore.observability.InMemoryExecutionTraceStore(),
     )
 
-    private val localModelRuntime = LlamaCppAndroidRuntimeAdapter()
+    private val localModelRuntime = OnnxRuntimeGenAiAndroidRuntimeAdapter()
     val providerStore: CloudflareProviderStore? = appContext?.let { CloudflareProviderStore(it) }
     val modelRuntime: RuntimeAdapter = if (providerStore != null) ProviderRoutingModelRuntime(localModelRuntime, providerStore) else localModelRuntime
     val conversationHistory: ConversationHistoryRepository = appContext?.let { AndroidConversationHistoryRepository(it) } ?: InMemoryConversationHistoryRepository()
