@@ -62,9 +62,9 @@ class LocalModelServiceConcurrencyTest {
     private fun model() = ModelDescriptor(
         id = "model-a",
         displayName = "Test model",
-        path = Path.of("/tmp/model-a.gguf"),
-        format = ModelFormat.GGUF,
-        quantization = Quantization.Q6_K,
+        path = Path.of("/tmp/model-a"),
+        format = ModelFormat.ONNX_GENAI,
+        quantization = Quantization.UNKNOWN,
         sizeBytes = 1024,
         metadata = ModelMetadata(architecture = "qwen2"),
         validation = ValidationStatus.VALID,
