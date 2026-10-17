@@ -35,14 +35,14 @@ The code and CI can validate packaging and syntax, but they cannot prove that a 
 3. Load the 2B model and wait for a clear `مدل آماده است` status.
 4. Send several Persian prompts and verify streamed output, stopping, and a fresh conversation.
 5. Inspect Android logcat for `DinaWebGPU` errors and the WebView console.
-6. Force-stop and reopen the app; verify the Qwen files are detected in the shared Laya model root and are not downloaded again.
+6. Force-stop and reopen the app; verify the Qwen files are detected in `Download/AI Chat Test/Qwen3.5-2B-ONNX-OPT/` and are not downloaded again.
 7. Record phone model, Android/WebView version, GPU adapter information (if exposed), first-load time, first-token latency, decode tokens/sec, memory pressure, heat, and any WebGPU validation errors.
 8. Repeat with WebGPU unavailable (or on a device where it is disabled) and verify the app shows an actionable error without claiming GPU acceleration.
 
 ## Current limits
 
 - This is an **experimental, independent chat route**, not yet merged into the native model manager, native conversation-history database, voice pipeline, or agent/action system.
-- The WebGPU model is stored next to Laya in app-private storage, but the native ONNX GenAI import/activate controls do not manage these weights.
+- The WebGPU model is stored in public Downloads under `AI Chat Test`, beside Laya’s public bundle, but the native ONNX GenAI import/activate controls do not manage these weights.
 - It has its own in-page conversation history; reset clears that in-memory history.
 - It is text-only. Image input and integration with Dina's voice/wake-word features are not wired up here.
 - No real-device execution or speed claim is made until the acceptance checklist passes on hardware.
