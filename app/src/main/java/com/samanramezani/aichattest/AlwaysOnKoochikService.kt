@@ -33,17 +33,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Wake-word control phrase: stop the current dialogue without disabling always-on wake listening.
  * The command is already extracted after «دینا», so match only the remaining short phrase.
  */
-internal fun isDinaSleepCommand(rawCommand: String): Boolean {
-    val normalized = rawCommand
-        .lowercase(java.util.Locale.ROOT)
-        .replace('ي', 'ی')
-        .replace('ك', 'ک')
-        .replace('‌', ' ')
-        .trim()
-        .replace(Regex("""[.!؟?،,؛;]+$"""), "")
-        .replace(Regex("""\s+"""), " ")
-    return normalized in setOf("خاموش شو", "خاموش", "برو بخواب", "فعلا خاموش شو")
-}
+internal fun isDinaSleepCommand(rawCommand: String): Boolean =
+    com.samanramezani.aichattest.voice.DinaSleepIntent.matchesCommand(rawCommand)
 
 /**
  * Always-on local Persian speech listener. Shenava Koochik ASR recognizes each bounded utterance;
@@ -268,7 +259,13 @@ class AlwaysOnKoochikService : Service() {
                 Log.d(TAG, "ASR endpoint: chars=${transcript.length}; wakeFound=${command != null || wakeSeenInRollingWindow}")
                 // Prefer the full utterance decoded at endpoint; use the last rolling result only
                 // if endpoint decoding omitted a phrase already detected in the rolling window.
-                val finalCommand = command ?: if (wakeSeenInRollingWindow) lastProbeCommand else null
+                // The sleep phrase may come with the wake word at the end («خاموش شو دینا»), a mis-heard
+                // wake word, or filler words; those would otherwise yield an empty/foreign command.
+                val finalCommand = if (com.samanramezani.aichattest.voice.DinaSleepIntent.matchesUtterance(transcript, requireWake = true)) {
+                    "خاموش شو"
+                } else {
+                    command ?: if (wakeSeenInRollingWindow) lastProbeCommand else null
+                }
                 if (finalCommand != null) {
                     if (isDinaSleepCommand(finalCommand)) {
                         // This is a conversation-level stop command, not a request to disable
