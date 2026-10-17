@@ -60,7 +60,7 @@ internal fun ChatPage(
             HintChip("نوشتن کد", Modifier.weight(1f))
         }
         Spacer(Modifier.height(18.dp))
-        Text("خصوصی · آفلاین · llama.cpp + OpenCL", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+        Text("خصوصی · آفلاین · ONNX Runtime GenAI", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
     }
 }
 
