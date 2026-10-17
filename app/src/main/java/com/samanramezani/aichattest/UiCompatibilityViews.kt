@@ -47,7 +47,7 @@ internal fun RuntimeDetailsDialog(
     RuntimeDetailsDialog(
         status = status,
         model = model,
-        runtimeName = "llama.cpp",
+        runtimeName = "ONNX Runtime GenAI",
         runtimeVersion = "N/A",
         backend = null,
         onDismiss = onDismiss,
