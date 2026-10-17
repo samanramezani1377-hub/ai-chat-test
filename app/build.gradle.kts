@@ -160,6 +160,7 @@ android.sourceSets.getByName("main").jniLibs.srcDir(onnxRuntimeJniDir)
 tasks.named("preBuild").configure { dependsOn(extractOnnxRuntimeJni, downloadSherpaStaticAar) }
 
 dependencies {
+    implementation("androidx.webkit:webkit:1.14.0")
     add(onnxRuntimeApiAar.name, "com.microsoft.onnxruntime:onnxruntime-android:1.28.0@aar")
     implementation(files(onnxRuntimeApiJar).builtBy(extractOnnxRuntimeApi))
     implementation(project(":core:domain"))
