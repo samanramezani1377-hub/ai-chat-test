@@ -260,6 +260,7 @@ jobs:
           --stacktrace
           --console=plain
           --parallel
+          --no-configuration-cache
 
       - name: Verify sherpa ONNX Runtime native linkage
         run: |
@@ -412,7 +413,7 @@ jobs:
           :app:lintDebug
           --stacktrace
           --console=plain
-          --configuration-cache
+          --no-configuration-cache
 
       - name: Upload lint report
         if: always()
