@@ -95,8 +95,7 @@ class OnnxGenAiModelImporter(
                 paths.anyMatch {
                     if (!Files.isRegularFile(it)) false else {
                         val name = it.fileName.toString().lowercase()
-                        name == "tokenizer.json" || name == "tokenizer.model" ||
-                            name == "tokenizer_config.json" || name == "vocab.json"
+                        name == "tokenizer.json" || name == "tokenizer.model" || name == "vocab.json"
                     }
                 }
             }
@@ -104,6 +103,9 @@ class OnnxGenAiModelImporter(
 
             val modelType = Regex("""["']type["']\\s*:\\s*["']([^"']+)["']""")
                 .find(configText)?.groupValues?.get(1)
+            if (!configText.trimStart().startsWith("{") || !configText.contains("\\\"model\\\"") || modelType.isNullOrBlank()) {
+                throw IllegalArgumentException("genai_config.json ناقص است یا نوع مدل در آن مشخص نشده است.")
+            }
             val context = Regex("""["']context_length["']\\s*:\\s*(\\d+)""")
                 .find(configText)?.groupValues?.get(1)?.toLongOrNull()
             val displayName = modelType?.replaceFirstChar { it.uppercase() }
