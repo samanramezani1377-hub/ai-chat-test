@@ -216,7 +216,7 @@ jobs:
           grep -q 'rawName.split.*any.*\.\.' core/runtime/src/main/kotlin/com/woogit/aicore/runtime/OnnxGenAiModelImporter.kt
           grep -q 'class OnnxRuntimeGenAiAndroidRuntimeAdapter' core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/OnnxRuntimeGenAiAndroidRuntimeAdapter.kt
           grep -q 'onnxruntime-genai-android-\$genAiVersion.aar' core/runtime-android/build.gradle.kts
-          grep -q 'c149c24af368825701314b0200b737890f6fd72c610b0c97e421c43943df0826' core/runtime-android/build.gradle.kts
+          grep -q 'f507ddbf0f635554ab12fcbf7dcfb115981eb664b925d90f28ed598dd8eb2ee7' core/runtime-android/build.gradle.kts
           ! grep -R 'LlamaCppAndroidRuntimeAdapter\|NativeLlamaCpp\|LLAMA_CPP_TAG\|GGML_OPENCL' -n app/src/main core/runtime-android core/runtime/src/main/kotlin
           echo "ONNX Runtime GenAI package import, activation, generation and pinned SDK wiring verified"
 
