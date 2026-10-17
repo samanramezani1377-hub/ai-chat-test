@@ -305,9 +305,29 @@ jobs:
           unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime-genai-jni.so'
           unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime.so'
           unzip -p "$apk" lib/arm64-v8a/libonnxruntime-genai.so > "$RUNNER_TEMP/libonnxruntime-genai.so"
+          unzip -p "$apk" lib/arm64-v8a/libonnxruntime-genai-jni.so > "$RUNNER_TEMP/libonnxruntime-genai-jni.so"
           readelf -d --wide "$RUNNER_TEMP/libonnxruntime-genai.so" > "$RUNNER_TEMP/genai-deps.txt"
-          grep -q 'libonnxruntime.so' "$RUNNER_TEMP/genai-deps.txt"
-          echo "Verified ONNX Runtime GenAI arm64 libraries are packaged with the matching ONNX Runtime."
+          readelf -d --wide "$RUNNER_TEMP/libonnxruntime-genai-jni.so" > "$RUNNER_TEMP/genai-jni-deps.txt"
+          # The GenAI Android AAR may statically link ONNX Runtime into
+          # libonnxruntime-genai.so. Do not require a DT_NEEDED entry for
+          # libonnxruntime.so: verify every dependency that is actually declared
+          # is either an Android system library or packaged in the APK.
+          for library in "$RUNNER_TEMP/libonnxruntime-genai.so" "$RUNNER_TEMP/libonnxruntime-genai-jni.so"; do
+            readelf -d --wide "$library" > "$RUNNER_TEMP/current-deps.txt"
+            while IFS= read -r dependency; do
+              case "$dependency" in
+                libc.so|libm.so|libdl.so|liblog.so|libandroid.so|libjnigraphics.so|libz.so|libstdc++.so|libc++_shared.so|libvulkan.so|libOpenSLES.so|libEGL.so|libGLESv2.so|libGLESv3.so|libmediandk.so|libnativewindow.so|libsync.so|libutils.so|libcutils.so|libbase.so|libbinder_ndk.so|libaaudio.so|libcamera2ndk.so|libamidi.so|libneuralnetworks.so|libjnigraphics.so|libandroid_runtime.so)
+                  ;;
+                *)
+                  if ! unzip -Z1 "$apk" | grep -Fxq "lib/arm64-v8a/$dependency"; then
+                    echo "::error::GenAI native library depends on '$dependency', but it is not packaged for arm64-v8a."
+                    exit 1
+                  fi
+                  ;;
+              esac
+            done < <(sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p' "$RUNNER_TEMP/current-deps.txt")
+          done
+          echo "Verified ONNX Runtime GenAI arm64 libraries and their declared native dependencies are packaged."
 
       - name: Verify APK ABI and size budget
         run: |
