@@ -26,8 +26,8 @@ class SettingsScreenTest {
         }
 
         composeRule.onNodeWithText("تنظیمات").assertExists()
-        composeRule.onNodeWithText("انتخاب فایل مدل از گوشی").assertExists()
-        composeRule.onNodeWithText("مدل محلی واردشده‌ای وجود ندارد.").assertExists()
+        composeRule.onNodeWithText("افزودن مدل").assertExists()
+        composeRule.onNodeWithText("هنوز بستهٔ ONNX Runtime GenAI وارد نشده است.").assertExists()
     }
 
     @Test
