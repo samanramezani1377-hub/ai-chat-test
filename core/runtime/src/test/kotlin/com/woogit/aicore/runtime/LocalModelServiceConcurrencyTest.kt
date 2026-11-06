@@ -26,6 +26,19 @@ import kotlin.test.assertTrue
 
 class LocalModelServiceConcurrencyTest {
     @Test
+    fun repeatedGenerationDoesNotReloadTheActiveModel() = runBlocking {
+        val runtime = RecordingRuntime()
+        val repository = RecordingRepository(model())
+        val service = LocalModelService(NoOpImporter(), repository, runtime)
+
+        assertTrue(service.activate("model-a") is ModelResult.Success<*>)
+        assertTrue(service.generate(listOf(com.woogit.aicore.domain.ChatMessage(com.woogit.aicore.domain.ChatMessage.Role.USER, "one")), com.woogit.aicore.domain.InferenceSettings(maxNewTokens = 1)) is ModelResult.Success<*>)
+        assertTrue(service.generate(listOf(com.woogit.aicore.domain.ChatMessage(com.woogit.aicore.domain.ChatMessage.Role.USER, "two")), com.woogit.aicore.domain.InferenceSettings(maxNewTokens = 1)) is ModelResult.Success<*>)
+
+        assertEquals(1, runtime.loadCount.get())
+        assertEquals(0, runtime.unloadCount.get())
+    }
+    @Test
     fun concurrentLifecycleOperationsAreSerialized() = runBlocking {
         val runtime = RecordingRuntime()
         val repository = RecordingRepository(model())
@@ -79,9 +92,15 @@ class LocalModelServiceConcurrencyTest {
         val concurrentOperations = AtomicInteger(0)
         val maxConcurrentOperations = AtomicInteger(0)
 
-        override suspend fun load(model: ModelDescriptor) = operation()
-        override suspend fun unload() = operation()
-        override suspend fun generate(request: GenerationRequest, onToken: suspend (String) -> Unit): GenerationResult = error("Not used by this test")
+        val loadCount = AtomicInteger(0)
+        val unloadCount = AtomicInteger(0)
+
+        override suspend fun load(model: ModelDescriptor) { loadCount.incrementAndGet(); operation() }
+        override suspend fun unload() { unloadCount.incrementAndGet(); operation() }
+        override suspend fun generate(request: GenerationRequest, onToken: suspend (String) -> Unit): GenerationResult {
+            onToken("ok")
+            return GenerationResult(text = "ok")
+        }
         override suspend fun stopGeneration() = operation()
         override fun runtimeInfo(): RuntimeInfo = RuntimeInfo("test", "1", "test")
 

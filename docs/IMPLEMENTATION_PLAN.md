@@ -9,8 +9,12 @@
 - AI Core interfaces
 - Model metadata
 - Model import/validation
-- Runtime adapter
+- Inference source contract and explicit user selection (Local / Provider)
+- Local runtime adapter
+- Remote provider adapter and configuration validation
 - basic local inference
+- provider-backed inference with network/error handling
+- no silent fallback between inference sources
 
 ## Phase 2 — Chat
 
@@ -18,6 +22,7 @@
 - streaming
 - stop generation
 - inference settings
+- persisted source selection and provider configuration
 - error handling
 
 ## Phase 3 — Action System

@@ -30,7 +30,7 @@ data class InferenceSettings(
     /** Balanced default for local instruction-following models. */
     val temperature: Double = 0.7,
     /** Practical response size that keeps mobile inference responsive. */
-    val maxNewTokens: Int = 512,
+    val maxNewTokens: Int = 2048,
     /** Common local-LLM sampling defaults; nullable means explicitly disabled only when chosen by the user. */
     val topK: Int? = 40,
     val topP: Double? = 0.9,
@@ -41,11 +41,13 @@ data class InferenceSettings(
     /** No forced stop strings by default; the model/runtime decides when generation naturally ends. */
     val stopSequences: List<String> = emptyList(),
     /** Conservative local default; runtime capability may further constrain this value. */
-    val contextLength: Int? = 4096,
+    val contextLength: Int? = 8192,
     /** Number of recent conversation messages included in generated context. */
     val recentMessages: Int = 10,
     /** Maximum number of real Action steps the Agent may execute for one request. */
     val maxActionSteps: Int = 4,
+    /** Disable reasoning-mode prefixes for chat templates that support a no-thinking mode. */
+    val enableThinking: Boolean = true,
 ) {
     init {
         require(recentMessages >= 0) { "recentMessages must be non-negative" }
@@ -78,6 +80,8 @@ data class ActionSchema(
 
 interface Action<in I, out O> {
     val id: String
+    /** Human-readable capability description exposed to the local agent prompt. */
+    val description: String get() = id
     val risk: RiskLevel
     val schema: ActionSchema get() = ActionSchema()
     val permission: String get() = "action:$id"
@@ -93,6 +97,8 @@ enum class RiskLevel { LOW, NORMAL, SENSITIVE }
 interface ActionRegistry {
     fun register(category: String, action: Action<Any, Any>)
     fun find(actionId: String): Action<Any, Any>?
+    /** Registered actions available to the agent; default keeps third-party implementations source-compatible. */
+    fun all(): List<Action<Any, Any>> = emptyList()
     fun categories(): Set<String>
 }
 

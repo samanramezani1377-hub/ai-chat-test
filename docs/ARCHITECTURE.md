@@ -16,6 +16,9 @@ UI
         │
         ↓
      AI Core
+        ├── Inference Source Selection / Routing
+        ├── Local Runtime Adapter
+        ├── Remote Provider Adapter(s)
         ├── Model Management
         ├── Inference
         ├── Context / Conversation
@@ -70,9 +73,9 @@ Contract باید عملیات عمومی مانند Load/Unload، Generate/Stre
 
 ## Model independence / Capability Contract — Decision 23
 
-AI Core باید **model-agnostic** باشد. `Qwen3-1.7B Q6_K` مدل مرجع فعلی برای تست و اعتبارسنجی است، نه مدل hard-coded پروژه. مدل‌های آینده، از جمله مدل‌های GGUF دیگر، باید بدون بازطراحی Core، Agent یا UI قابل import و استفاده باشند.
+AI Core باید **model-agnostic و provider-agnostic** باشد. کاربر منبع Inference را بین Local Runtime و Provider راه‌دورِ پشتیبانی‌شده انتخاب می‌کند. `Qwen3-1.7B Q6_K` مدل مرجع تاریخی تست است، نه مدل hard-coded پروژه. مدل‌های محلی و Providerها باید پشت Contractهای جدا و مشترک Core قرار بگیرند تا تعویض منبع، مدل یا Runtime مستلزم بازنویسی Chat، Agent یا UI نباشد.
 
-قابلیت‌های مدل و Runtime باید از طریق یک Contract عمومی مانند `ModelCapabilities` به Core ارائه شوند. نمونه مفهومی:
+قابلیت‌های مدل/Runtime محلی و Provider باید از طریق Contract عمومی مانند `ModelCapabilities` و `InferenceProviderCapabilities` به Core ارائه شوند. تنظیمات اختصاصی هر مسیر نباید به مسیر دیگر نشت کند. نمونه مفهومی:
 
 ```text
 Model Metadata + Runtime Capabilities
@@ -84,7 +87,7 @@ Model Metadata + Runtime Capabilities
 
 Capabilityهای مهم شامل مواردی مانند context length، thinking، tool calling، streaming، stop sequences و sampling parameters هستند. مقدار capability باید از metadata/runtime واقعی به‌دست آید؛ در نبود اطلاعات قابل اعتماد، سیستم نباید قابلیت را حدس بزند و باید وضعیت Unknown/Unsupported داشته باشد.
 
-`InferenceSettings` نیز عمومی و model-agnostic است. وجود setting در Contract به معنی پشتیبانی آن توسط همه مدل‌ها نیست؛ Runtime باید supported parameters را مشخص کند. `Min-P` نیز یک sampling parameter عمومی باقی می‌ماند و فقط در صورت عدم پشتیبانی Runtime غیرفعال می‌شود.
+`InferenceSettings` نیز عمومی و model-agnostic است؛ تنظیمات اتصال Provider (مانند endpoint، model ID و credential reference) باید در تنظیمات امن و مستقل نگهداری شوند. UI باید منبع فعال را نشان دهد و خطای Provider را به‌اشتباه به‌عنوان خطای Runtime محلی گزارش نکند. وجود setting در Contract به معنی پشتیبانی آن توسط همه مدل‌ها نیست؛ Runtime باید supported parameters را مشخص کند. `Min-P` نیز یک sampling parameter عمومی باقی می‌ماند و فقط در صورت عدم پشتیبانی Runtime غیرفعال می‌شود.
 
 Thinking، Tool Calling، Streaming و Context Length قابلیت‌های اختیاری هستند. UI و Agent باید بر اساس capability واقعی رفتار کنند و نباید بر اساس نام مدل branch اختصاصی داشته باشند.
 

@@ -11,6 +11,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
@@ -23,3 +24,4 @@ include(":core:settings")
 include(":core:runtime")
 include(":core:conversation")
 include(":core:agent")
+include(":core:runtime-android")

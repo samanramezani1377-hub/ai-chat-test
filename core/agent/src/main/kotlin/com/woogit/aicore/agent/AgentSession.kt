@@ -7,6 +7,7 @@ import com.woogit.aicore.conversation.DefaultContextProvider
 import com.woogit.aicore.domain.GenerationResult
 import com.woogit.aicore.domain.InferenceSettings
 import java.util.UUID
+import java.util.concurrent.CancellationException
 
 sealed interface AgentSessionResult {
     data class Reply(
@@ -40,25 +41,64 @@ class AgentSession(
         conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.USER, content, System.currentTimeMillis()))
         eventSink(AgentEvent.Started)
         return try {
-            var result = orchestrator.generate(effectiveSettings, effectiveRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+            // Honor an explicit recent-message limit (e.g. real-time voice); callers that do not
+            // specify one retain the complete history for normal chat/agent workflows.
+            val initialContext = conversationStore.recent(
+                if (requestedRecentMessages == null) Int.MAX_VALUE else effectiveRecentMessages
+            )
+            var result = generateTurn(effectiveSettings, effectiveRecentMessages, initialContext)
             var plan: ActionPlan? = null
             var actionResult: String? = null
             var steps = 0
+            var repairAttempts = 0
             var resultPersisted = false
             while (actionPlanCoordinator != null && steps < effectiveMaxActionSteps) {
                 conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
                 resultPersisted = true
-                plan = actionPlanCoordinator.prepare(contextProvider.build(effectiveRecentMessages), conversationId) ?: break
-                eventSink(AgentEvent.ActionPrepared(plan.prepared.executionId, plan.prepared.actionId))
-                if (plan.prepared.risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE) {
-                    eventSink(AgentEvent.ApprovalRequired(plan.prepared.executionId))
+                val context = contextProvider.build(Int.MAX_VALUE)
+                val nextPlan = try {
+                    actionPlanCoordinator.prepare(context, conversationId)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    null
+                }
+                if (nextPlan == null) {
+                    if (repairAttempts == 0 && actionPlanCoordinator.requiresAction(context)) {
+                        repairAttempts++
+                        conversationStore.append(ConversationMessage(
+                            UUID.randomUUID().toString(),
+                            ConversationMessage.Role.TOOL,
+                            "ACTION_PROTOCOL_REPAIR: Previous output was not a valid ActionRequest v1. Do not output Bash, shell commands, prose, or Markdown. Return only one JSON object for a registered action, with version, actionId, action, and arguments. Never claim success without a verified tool result.",
+                            System.currentTimeMillis()
+                        ))
+                        result = generateTurn(effectiveSettings, effectiveRecentMessages, conversationStore.recent(Int.MAX_VALUE))
+                        resultPersisted = false
+                        continue
+                    }
+                    if (repairAttempts > 0 && actionPlanCoordinator.requiresAction(context)) {
+                        result = result.copy(text = "نتوانستم درخواست اجرایی را به فراخوانی ابزار معتبر تبدیل کنم؛ هیچ عملیاتی اجرا نشد. لطفاً درخواست را دوباره با نام و محتوای دقیق فایل ارسال کن.")
+                        resultPersisted = false
+                    }
                     break
                 }
-                val executor = actionExecutor ?: break
-                var outcome = executor(plan)
+                plan = nextPlan
+                eventSink(AgentEvent.ActionPrepared(nextPlan.prepared.executionId, nextPlan.prepared.actionId))
+                if (nextPlan.prepared.risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE) {
+                    eventSink(AgentEvent.ApprovalRequired(nextPlan.prepared.executionId))
+                    break
+                }
+                val executor = actionExecutor
+                if (executor == null) {
+                    result = result.copy(text = "ابزار آمادهٔ اجرا نیست؛ هیچ عملیاتی انجام نشد.")
+                    eventSink(AgentEvent.Token(result.text))
+                    resultPersisted = false
+                    break
+                }
+                var outcome = executor(nextPlan)
                 actionResult = outcome.message
-                eventSink(AgentEvent.ActionExecuted(plan.prepared.executionId))
-                conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(plan), System.currentTimeMillis()))
+                eventSink(AgentEvent.ActionExecuted(nextPlan.prepared.executionId))
+                conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(nextPlan), System.currentTimeMillis()))
                 steps++
 
                 if (!outcome.success || !outcome.verified) {
@@ -66,30 +106,130 @@ class AgentSession(
                     // regenerate so the model can choose an alternative action/path.
                     val retry = actionRetryExecutor
                     if (retry != null && steps < effectiveMaxActionSteps) {
-                        val retried = runCatching { retry(plan) }.getOrElse {
+                        val retried = runCatching { retry(nextPlan) }.getOrElse {
                             ActionExecutionOutcome(false, false, it.message ?: "Retry failed", errorCode = "RETRY_FAILED")
                         }
                         actionResult = retried.message
-                        conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, retried.toProtocolResult(plan), System.currentTimeMillis()))
+                        conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, retried.toProtocolResult(nextPlan), System.currentTimeMillis()))
                         steps++
                         outcome = retried
                     }
-                    result = orchestrator.generate(effectiveSettings, effectiveRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+                    val retryContext = conversationStore.recent(Int.MAX_VALUE)
+                    result = generateTurn(effectiveSettings, effectiveRecentMessages, retryContext)
                     resultPersisted = false
                     if (outcome.success && outcome.verified) continue
                     continue
                 }
 
-                result = orchestrator.generate(effectiveSettings, effectiveRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+                val nextContext = conversationStore.recent(Int.MAX_VALUE)
+                result = generateTurn(effectiveSettings, effectiveRecentMessages, nextContext)
+                resultPersisted = false
+            }
+            val safeToReplaceActionOutput = plan?.prepared?.risk != com.woogit.aicore.domain.RiskLevel.SENSITIVE
+            val pendingUnexecutedToolCall = safeToReplaceActionOutput &&
+                actionPlanCoordinator != null && ActionProtocolParser().parse(result.text) != null
+            val actionStillRequired = safeToReplaceActionOutput &&
+                actionPlanCoordinator?.requiresAction(contextProvider.build(Int.MAX_VALUE)) == true
+            val unresolvedActionRequest = actionStillRequired && ActionProtocolParser().parse(result.text) == null
+            if (pendingUnexecutedToolCall || unresolvedActionRequest) {
+                result = result.copy(text = when {
+                    pendingUnexecutedToolCall -> "به سقف تعداد عملیات رسیدم؛ درخواست بعدی اجرا نشد. می‌توانی ادامهٔ کار را در پیام بعدی بخواهی."
+                    plan == null -> "نتوانستم درخواست اجرایی را با ابزار معتبر انجام بدهم؛ هیچ عملیاتی اجرا نشد."
+                    else -> "پاسخ نهایی ابزار معتبر نبود؛ نتیجهٔ عملیات قبلی را در گزارش اجرا بررسی کن. هیچ دستور پوسته‌ای اجرا نشد."
+                })
+                eventSink(AgentEvent.Token(result.text))
                 resultPersisted = false
             }
             if (!resultPersisted) conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
             eventSink(AgentEvent.Completed)
-            AgentSessionResult.Reply(result, plan, actionResult)
+            val userFacingResult = if (plan?.prepared?.risk == com.woogit.aicore.domain.RiskLevel.SENSITIVE) {
+                result.copy(text = "برای اجرای عملیات «${plan.intent.actionId}» تأیید شما لازم است.")
+            } else result
+            AgentSessionResult.Reply(userFacingResult, plan, actionResult)
         } catch (t: Throwable) {
             eventSink(AgentEvent.Failed(t.message ?: t::class.simpleName.orEmpty()))
             throw t
         }
+    }
+
+
+    /**
+     * Buffer native output until it is known whether the model produced a tool call.
+     * This prevents internal reasoning and raw tool JSON from leaking into chat.
+     */
+    private suspend fun generateTurn(
+        settings: InferenceSettings,
+        recentMessages: Int,
+        contextMessages: List<ConversationMessage>,
+    ): GenerationResult {
+        // Stream ordinary prose incrementally, but never expose structured actions or
+        // reasoning markers. With action planning enabled, wait for a short clean prefix:
+        // malformed legacy output can start with prose and then contain </think> + shell.
+        val prefix = StringBuilder()
+        var streamDecision: Boolean? = null
+        var streamPublished = false
+        val result = orchestrator.generate(settings, recentMessages, { chunk ->
+            if (chunk.isNotEmpty()) {
+                val hasReasoningMarker = chunk.contains("<think>") || chunk.contains("</think>")
+                if (streamDecision == null) {
+                    prefix.append(chunk)
+                    val first = prefix.firstOrNull { !it.isWhitespace() }
+                    if (first != null) {
+                        val accumulatedHasReasoning = prefix.contains("<think>") || prefix.contains("</think>")
+                        val structured = first == '{' || first == '<' || first == '`'
+                        val actionPrefixReady = actionPlanCoordinator == null || prefix.length >= 48
+                        if (accumulatedHasReasoning || structured) {
+                            streamDecision = false
+                        } else if (actionPrefixReady) {
+                            streamDecision = true
+                        }
+                        if (streamDecision == true) {
+                            eventSink(AgentEvent.Token(prefix.toString()))
+                            streamPublished = true
+                            prefix.setLength(0)
+                        }
+                    }
+                } else if (streamDecision == true) {
+                    if (hasReasoningMarker) {
+                        // Stop publishing if a malformed internal marker appears mid-stream.
+                        streamDecision = false
+                    } else {
+                        eventSink(AgentEvent.Token(chunk))
+                        streamPublished = true
+                    }
+                }
+            }
+        }, contextMessages)
+        val cleaned = stripReasoning(result.text)
+        val context = contextProvider.build(Int.MAX_VALUE)
+        val candidateContext = context.copy(
+            recentMessages = context.recentMessages + ConversationMessage(
+                UUID.randomUUID().toString(),
+                ConversationMessage.Role.ASSISTANT,
+                cleaned,
+                System.currentTimeMillis()
+            )
+        )
+        val actionRequired = actionPlanCoordinator?.requiresAction(candidateContext) == true
+        val toolCall = actionPlanCoordinator != null && ActionProtocolParser().parse(cleaned) != null
+        if (!toolCall && !actionRequired && cleaned.isNotBlank() && !streamPublished) {
+            // Structured/tool-shaped output is emitted only after classification. For ordinary
+            // prose already streamed above, do not append the final response a second time.
+            eventSink(AgentEvent.Token(cleaned))
+        }
+        return result.copy(text = cleaned)
+    }
+
+    private fun stripReasoning(raw: String): String {
+        var text = raw.trim()
+        val end = if (text.startsWith("{") || text.startsWith("```")) -1 else text.indexOf("</think>")
+        if (end >= 0) text = text.substring(end + "</think>".length).trimStart()
+        if (text.startsWith("<think>")) {
+            val closing = text.indexOf("</think>")
+            if (closing >= 0) text = text.substring(closing + "</think>".length).trimStart()
+            else return ""
+        }
+        return text.trim()
     }
 
     suspend fun resumeApproved(executionId: String, outcome: ActionExecutionOutcome, settings: InferenceSettings, requestedRecentMessages: Int? = null): AgentSessionResult.Reply {
@@ -100,7 +240,8 @@ class AgentSession(
         eventSink(AgentEvent.Started)
         conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.TOOL, outcome.toProtocolResult(executionId), System.currentTimeMillis()))
         return try {
-            val result = orchestrator.generate(effectiveSettings, effectiveRecentMessages) { token -> eventSink(AgentEvent.Token(token)) }
+            val resumeContext = conversationStore.recent(Int.MAX_VALUE)
+            val result = generateTurn(effectiveSettings, effectiveRecentMessages, resumeContext)
             conversationStore.append(ConversationMessage(UUID.randomUUID().toString(), ConversationMessage.Role.ASSISTANT, result.text, System.currentTimeMillis()))
             eventSink(AgentEvent.Completed)
             AgentSessionResult.Reply(result, null, outcome.message)

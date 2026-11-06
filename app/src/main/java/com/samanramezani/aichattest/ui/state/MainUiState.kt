@@ -25,6 +25,16 @@ internal data class DeletedConversation(
     val record: ConversationRecord,
 )
 
+internal data class ExecutionStep(
+    val id: String,
+    val title: String,
+    val detail: String = "",
+    val state: StepState = StepState.ACTIVE,
+    val timestamp: Long = System.currentTimeMillis(),
+)
+
+internal enum class StepState { PENDING, ACTIVE, DONE, FAILED }
+
 internal data class ExecutionState(
     val id: String,
     val action: String,
@@ -35,4 +45,5 @@ internal data class ExecutionState(
     val requestPreview: String = "",
     val resultPreview: String? = null,
     val approvalRequired: Boolean = false,
+    val steps: List<ExecutionStep> = emptyList(),
 )

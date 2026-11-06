@@ -2,6 +2,7 @@ package com.woogit.aicore.agent
 
 import com.woogit.aicore.conversation.ContextProvider
 import com.woogit.aicore.conversation.ConversationContext
+import com.woogit.aicore.conversation.ConversationMessage
 import com.woogit.aicore.domain.GenerationRequest
 import com.woogit.aicore.domain.GenerationResult
 import com.woogit.aicore.domain.InferenceSettings
@@ -47,11 +48,21 @@ class AgentOrchestrator(
 ) {
     suspend fun generate(
         settings: InferenceSettings,
-        requestedRecentMessages: Int = 10,
-        onToken: suspend (String) -> Unit
+        requestedRecentMessages: Int = Int.MAX_VALUE,
+        onToken: suspend (String) -> Unit,
+        contextMessages: List<ConversationMessage>? = null,
     ): GenerationResult {
-        val context = contextProvider.build(requestedRecentMessages)
-        val request = requestFactory.create(context, settings)
-        return runtime.generate(request, onToken)
+        // Do not use a small fixed message-count window for chat memory. The runtime
+        // already performs token-aware context trimming against the real model context.
+        // Keeping the complete stored history here guarantees the next turn sees the
+        // previous user message and the model's previous answer.
+        val contextLimit = if (requestedRecentMessages <= 0) Int.MAX_VALUE else requestedRecentMessages
+        val baseContext = contextProvider.build(contextLimit)
+        val context = if (contextMessages != null) {
+            baseContext.copy(recentMessages = contextMessages)
+        } else {
+            baseContext
+        }
+        return runtime.generate(requestFactory.create(context, settings), onToken)
     }
 }

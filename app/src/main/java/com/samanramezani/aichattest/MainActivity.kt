@@ -1,31 +1,38 @@
 package com.samanramezani.aichattest
 
+import android.annotation.SuppressLint
 import android.os.Bundle
+import android.view.KeyEvent
+import com.samanramezani.aichattest.voice.VoiceAudioInputGuard
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import com.woogit.aicore.domain.ApiProviderConfigStore
 
 class MainActivity : ComponentActivity() {
+    @SuppressLint("RestrictedApi")
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN &&
+            (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+        ) {
+            VoiceAudioInputGuard.suppressAfterVolumeKey()
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val context = applicationContext
-        val stored = ApiConfigStore(context).load()
-        ApiProviderConfigStore.current = stored
-        val container = (application as? AIChatApplication)?.container ?: AppContainer(this)
-        var configured by mutableStateOf(stored.apiKey.isNotBlank())
-        setContent {
-            if (configured) {
-                MainScreen(container)
+        val openVoiceFromWake = intent?.getBooleanExtra(AlwaysOnKoochikService.EXTRA_OPEN_VOICE_FROM_ALWAYS_ON, false) == true
+        if (openVoiceFromWake) {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
             } else {
-                ApiSetupScreen(stored) { config ->
-                    ApiConfigStore(context).save(config)
-                    ApiProviderConfigStore.current = config
-                    configured = true
-                }
+                window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
             }
+        }
+        val container = (application as? AIChatApplication)?.container ?: AppContainer(this)
+        setContent {
+            MainScreen(container, openVoiceInitially = openVoiceFromWake)
         }
     }
 }

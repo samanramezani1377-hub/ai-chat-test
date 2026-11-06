@@ -7,6 +7,8 @@
 ## Metrics
 
 ### Inference
+- Inference Source: Local یا Provider
+- Provider/Runtime و شناسه مدل فعال
 - First Token Time
 - Input Tokens
 - Output Tokens
@@ -125,7 +127,7 @@ Unavailable
 
 ## Network / Offline
 
-تمام Network Usage اپ باید به‌صورت واقعی مانیتور شود. Network Request/Connectionهای واقعی و میزان مصرف شبکه، در حد اطلاعاتی که Android/Runtime واقعاً ارائه می‌کند، ثبت شوند. تست Offline واقعی با قطع اینترنت انجام می‌شود. Firewall، DNS، Fresh Install و سناریوهای پیچیده جزو Requirement نیستند.
+تمام Network Usage اپ باید به‌صورت واقعی مانیتور شود. Network Request/Connectionهای واقعی و میزان مصرف شبکه، در حد اطلاعاتی که Android/Runtime واقعاً ارائه می‌کند، ثبت شوند. Metricهای Inference باید مسیر Local و Provider را از هم متمایز کنند؛ زمان شبکه/Provider نباید به‌عنوان زمان محاسبه محلی یا GPU گزارش شود. تست Offline واقعی با قطع اینترنت انجام می‌شود. Firewall، DNS، Fresh Install و سناریوهای پیچیده جزو Requirement نیستند.
 
 ## Performance History
 

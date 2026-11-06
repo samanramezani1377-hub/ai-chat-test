@@ -17,5 +17,7 @@ class InMemoryActionRegistry : ActionRegistry {
 
     override fun find(actionId: String): Action<Any, Any>? = actions[actionId]
 
+    override fun all(): List<Action<Any, Any>> = actions.values.sortedBy { it.id }
+
     override fun categories(): Set<String> = categoryMap.keys.toSet()
 }

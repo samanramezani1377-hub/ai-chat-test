@@ -1,7 +1,6 @@
 package com.samanramezani.aichattest
 
 import androidx.compose.runtime.Composable
-import com.samanramezani.aichattest.ui.components.QuickMenu
 import com.samanramezani.aichattest.ui.components.RuntimeDetailsDialog
 import com.samanramezani.aichattest.ui.components.Sidebar
 import com.samanramezani.aichattest.ui.state.ExecutionState
@@ -36,7 +35,7 @@ internal fun AppSidebar(
 
 @Composable
 internal fun AppQuickMenu(onDiagnostics: () -> Unit, onSettings: () -> Unit) {
-    QuickMenu(onDiagnostics = onDiagnostics, onSettings = onSettings)
+    AppQuickMenu(onDiagnostics = onDiagnostics, onSettings = onSettings)
 }
 
 @Composable

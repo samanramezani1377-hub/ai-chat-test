@@ -1,0 +1,358 @@
+package com.samanramezani.aichattest.ui.voice
+
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import com.samanramezani.aichattest.voice.VoiceModelEntry
+
+data class VoiceLine(val id: Long, val speaker: String, val text: String)
+
+@Composable
+internal fun VoiceConversationPage(
+    lines: List<VoiceLine>,
+    status: String,
+    diagnosticLogs: List<String>,
+    listening: Boolean,
+    busy: Boolean,
+    sttModels: List<VoiceModelEntry>,
+    ttsModels: List<VoiceModelEntry>,
+    missingKoochikComponents: List<String>,
+    missingTtsComponents: List<String>,
+    activeSttId: String?,
+    activeTtsId: String?,
+    layaModelReady: Boolean,
+    layaStatus: String,
+    onImportLaya: () -> Unit,
+    onDownloadLaya: () -> Unit,
+    onBack: () -> Unit,
+    onImportStt: () -> Unit,
+    onImportKoochikModel: () -> Unit,
+    onImportKoochikTokens: () -> Unit,
+    alwaysOnEnabled: Boolean,
+    onToggleAlwaysOn: (Boolean) -> Unit,
+    onImportTts: () -> Unit,
+    onImportTtsModel: () -> Unit,
+    onImportTtsConfig: () -> Unit,
+    onImportEspeakData: () -> Unit,
+    onSelectStt: (String) -> Unit,
+    onSelectTts: (String) -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onInterrupt: () -> Unit,
+) {
+    val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
+    val clipboard = LocalClipboardManager.current
+    var showSettings by remember { mutableStateOf(false) }
+    var permissionGranted by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+    }
+    var pendingAlwaysOnEnable by remember { mutableStateOf(false) }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        permissionGranted = granted
+        if (granted) {
+            if (pendingAlwaysOnEnable) {
+                pendingAlwaysOnEnable = false
+                onToggleAlwaysOn(true)
+            } else onStart()
+        } else {
+            pendingAlwaysOnEnable = false
+        }
+    }
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "بازگشت") }
+            Column(Modifier.weight(1f)) {
+                Text("مکالمه صوتی زنده", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("گفت‌وگوی محلی با امکان صحبت هم‌زمان و قطع پاسخ", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+            }
+            IconButton(onClick = { showSettings = !showSettings }) {
+                Icon(Icons.Default.Settings, contentDescription = "تنظیمات مکالمه صوتی")
+            }
+        }
+
+        if (showSettings) {
+            Column(
+                Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text("تنظیمات مکالمه صوتی", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { showSettings = false }) { Text("بازگشت به مکالمه") }
+                }
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("۱. تصمیم‌گیری محلی فارسی · Laya INT4", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "مدل تصمیم‌گیری Laya چندمرحله‌ای و کاملاً محلی است: ابتدا نوع درخواست، سپس عملیات دستگاه و در صورت نیاز سطح هدف را انتخاب می‌کند. فرمان‌های ساعت، تاریخ، صدا و روشنایی پیش از مدل گفت‌وگو اجرا می‌شوند. اگر تصمیم مدل مطمئن نباشد، فرمان دستگاه اجرا نمی‌شود و متن اصلی بدون تغییر به مدل گفت‌وگو فرستاده می‌شود. متن درخواست عادی بدون افزودن برچسب تصمیم‌گیری به مدل گفت‌وگو فرستاده می‌شود.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Button(onClick = onDownloadLaya, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (layaModelReady) "دریافت مجدد و تعمیر مدل رسمی Laya" else "دانلود و نصب خودکار Laya INT4 · حدود ۲۲۰ مگابایت")
+                        }
+                        OutlinedButton(onClick = onImportLaya, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text("وارد کردن بسته ZIP از حافظه")
+                        }
+                        Text("دانلود خودکار، فایل‌های رسمی مدل چندزبانه، وزن‌های خارجی، tokenizer و تنظیمات را مستقیم از Hugging Face می‌گیرد؛ دانلود به‌صورت جریانی در حافظه خصوصی برنامه ذخیره و پیش از فعال‌شدن بررسی می‌شود. مدل داخل APK نیست. اگر ZIP کامل را از قبل داری، می‌توانی آن را وارد کنی. بدون نصب موفق Laya تصمیم محلی اجرا نمی‌شود.", style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(
+                            onClick = { uriHandler.openUri("https://huggingface.co/androidli/laya-multilingual-onnx-int4/tree/main") },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("صفحه رسمی فایل‌های مدل Laya INT4") }
+                        Text(layaStatus, style = MaterialTheme.typography.bodySmall, color = if (layaModelReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("۲. تشخیص گفتار · STT", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("مدل اصلی STT گفتار فارسی را به متن تبدیل می‌کند. در این برنامه Shenava Koochik مدل اصلی این مسیر است؛ فایل‌های model.onnx و tokens.txt لازم‌اند.", style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(
+                            onClick = { uriHandler.openUri("https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx/resolve/main/model.onnx") },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("دانلود مدل Koochik · model.onnx") }
+                        OutlinedButton(
+                            onClick = { uriHandler.openUri("https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-sherpa-onnx/resolve/main/tokens.txt") },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("دانلود واژگان Koochik · tokens.txt") }
+                        OutlinedButton(onClick = onImportKoochikModel, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن مدل Koochik · model.onnx") }
+                        OutlinedButton(onClick = onImportKoochikTokens, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن واژگان Koochik · tokens.txt") }
+                        val koochikSteps = listOf("model.onnx", "tokens.txt")
+                        val koochikDone = koochikSteps.size - missingKoochikComponents.size
+                        LinearProgressIndicator(progress = { koochikDone.toFloat() / koochikSteps.size }, modifier = Modifier.fillMaxWidth())
+                        koochikSteps.forEach { step ->
+                            Text("${if (step !in missingKoochikComponents) "✓" else "○"}  $step", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(if (koochikDone == koochikSteps.size) "هر دو فایل Koochik وارد شده‌اند؛ مدل آماده است." else "پیشرفت ورود Koochik: $koochikDone از ${koochikSteps.size} فایل", style = MaterialTheme.typography.labelMedium)
+                        if (sttModels.isEmpty()) Text("مدل تشخیص گفتار واردشده و آماده‌ای وجود ندارد.", color = MaterialTheme.colorScheme.error)
+                        sttModels.forEach { model ->
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                RadioButton(selected = model.id == activeSttId, onClick = { onSelectStt(model.id) })
+                                Column(Modifier.weight(1f)) {
+                                    Text(model.title, fontWeight = FontWeight.Medium)
+                                    Text(when (model.asrMode) {
+                                        "qwen3-asr" -> "Qwen3-ASR · محلی"
+                                        "nemo-ctc" -> "Shenava Koochik CTC · فارسی · 114M"
+                                        else -> "Streaming Transducer · محلی"
+                                    }, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                }
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("۳. شنود دائمی فارسی · «دینا»", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "به‌جای مدل بیدارباش جداگانه، همین مدل Shenava Koochik گفتار فارسی را در قطعه‌های محدود تشخیص می‌دهد. وقتی «دینا» در یک جمله تشخیص داده شود، فقط متن بعد از آن به مدل گفتگو فرستاده می‌شود؛ متن جملات دیگر و تاریخچهٔ دائمی شنود نگه‌داری نمی‌شود. پس از تشخیص، TTS محلی می‌گوید «متوجه شدم».",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Button(
+                            onClick = {
+                                if (!alwaysOnEnabled && !permissionGranted) {
+                                    pendingAlwaysOnEnable = true
+                                    permission.launch(Manifest.permission.RECORD_AUDIO)
+                                } else onToggleAlwaysOn(!alwaysOnEnabled)
+                            },
+                            enabled = !busy && !listening,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(if (alwaysOnEnabled) "خاموش کردن شنود دائمی فارسی" else "روشن کردن شنود دائمی فارسی")
+                        }
+                        Text(
+                            if (alwaysOnEnabled) "شنود دائمی محلی فعال است؛ اعلان سرویس باید در نوار اعلان‌ها دیده شود."
+                            else "برای فعال‌سازی، مدل Shenava Koochik و مدل TTS باید وارد شده باشند. شنود در پس‌زمینه به مجوز میکروفون و محدودیت‌های اندروید وابسته است.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("۴. تولید گفتار · TTS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("مدل TTS پاسخ دستیار را به صدا تبدیل می‌کند. مدل Piper آماده‌شده باید فایل مدل، تنظیمات و داده‌های آواشناسی را داشته باشد.", style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(onClick = onImportTtsModel, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن مدل صوتی · ONNX") }
+                        OutlinedButton(onClick = onImportTtsConfig, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن تنظیمات Piper · JSON") }
+                        OutlinedButton(onClick = onImportEspeakData, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("وارد کردن espeak-ng-data · TAR.BZ2") }
+                        OutlinedButton(onClick = onImportTts, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("یا وارد کردن بسته کامل TTS · ZIP / TAR.BZ2") }
+                        Text("سه جزء را جداگانه و به هر ترتیبی وارد کن؛ پس از دریافت هر سه، برنامه آن‌ها را خودکار ترکیب و اعتبارسنجی می‌کند.", style = MaterialTheme.typography.bodySmall)
+                        val ttsSteps = listOf("فایل ONNX", "فایل JSON کنار مدل (معمولاً model.onnx.json)", "بسته espeak-ng-data")
+                        val ttsDone = ttsSteps.size - missingTtsComponents.size
+                        LinearProgressIndicator(progress = { ttsDone.toFloat() / ttsSteps.size }, modifier = Modifier.fillMaxWidth())
+                        ttsSteps.forEach { step ->
+                            Text("${if (step !in missingTtsComponents) "✓" else "○"}  $step", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(if (ttsDone == ttsSteps.size) "هر سه جزء وارد شده‌اند؛ مدل آماده است." else "پیشرفت ورود مدل: $ttsDone از ${ttsSteps.size} جزء", style = MaterialTheme.typography.labelMedium)
+                        if (ttsModels.isEmpty()) Text("مدل تولید گفتار واردشده و آماده‌ای وجود ندارد.", color = MaterialTheme.colorScheme.error)
+                        ttsModels.forEach { model ->
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                RadioButton(selected = model.id == activeTtsId, onClick = { onSelectTts(model.id) })
+                                Column(Modifier.weight(1f)) {
+                                    Text(model.title, fontWeight = FontWeight.Medium)
+                                    Text("آفلاین · ${model.modelFile.name}", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                }
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("۵. عیب‌یابی مکالمه صوتی", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Text("وضعیت فعلی، کد خطا و رخدادهای اخیر برای گزارش مشکل.", style = MaterialTheme.typography.bodySmall)
+                            }
+                            IconButton(onClick = {
+                                clipboard.setText(AnnotatedString(buildString {
+                                    appendLine("AI Chat Test — Live Voice Diagnostics")
+                                    appendLine("Status: $status")
+                                    appendLine("Listening: $listening")
+                                    appendLine("STT: ${sttModels.firstOrNull { it.id == activeSttId }?.title ?: "not selected"}")
+                                    appendLine("TTS: ${ttsModels.firstOrNull { it.id == activeTtsId }?.title ?: "not selected"}")
+                                    appendLine()
+                                    diagnosticLogs.forEach { appendLine(it) }
+                                }))
+                            }) { Icon(Icons.Default.ContentCopy, contentDescription = "کپی گزارش عیب‌یابی") }
+                        }
+                        Text(status, style = MaterialTheme.typography.bodyMedium)
+                        Text("گزارش قابل کپی", style = MaterialTheme.typography.labelLarge)
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = MaterialTheme.shapes.medium,
+                        ) {
+                            Text(
+                                diagnosticLogs.takeLast(80).joinToString("\n").ifBlank { "هنوز رخدادی ثبت نشده است." },
+                                modifier = Modifier.padding(10.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(buildString {
+                                    appendLine("AI Chat Test — Live Voice Diagnostics")
+                                    appendLine("Status: $status")
+                                    appendLine("Listening: $listening")
+                                    appendLine("STT: ${sttModels.firstOrNull { it.id == activeSttId }?.title ?: "not selected"}")
+                                    appendLine("TTS: ${ttsModels.firstOrNull { it.id == activeTtsId }?.title ?: "not selected"}")
+                                    appendLine()
+                                    diagnosticLogs.forEach { appendLine(it) }
+                                }))
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Icon(Icons.Default.ContentCopy, null); Spacer(Modifier.width(8.dp)); Text("کپی گزارش کامل و لاگ‌ها") }
+                    }
+                }
+            }
+        } else {
+            Card(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = MaterialTheme.shapes.extraLarge,
+                        color = if (listening) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                    ) {
+                        Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.padding(10.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(if (listening) "میکروفون فعال است" else "آماده شروع", fontWeight = FontWeight.SemiBold)
+                        Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (busy) CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            if (lines.isEmpty()) {
+                Column(
+                    Modifier.weight(1f).fillMaxWidth().padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Surface(
+                        shape = MaterialTheme.shapes.extraLarge,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                    ) {
+                        Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.padding(28.dp).size(44.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Text("برای گفت‌وگو آماده‌ای؟", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "ابتدا در تنظیمات، مدل تشخیص گفتار فارسی و موتور تولید گفتار Piper را انتخاب کن. بعد شروع را بزن و صحبت کن؛ پاسخ دستیار به‌صورت صوتی پخش می‌شود.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    TextButton(onClick = { showSettings = true }) { Icon(Icons.Default.Settings, null); Spacer(Modifier.width(6.dp)); Text("تنظیم مدل‌ها") }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(lines, key = { it.id }) { line ->
+                        val isUser = line.speaker == "شما"
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = if (isUser) Arrangement.Start else Arrangement.End,
+                        ) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(0.9f),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isUser) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer,
+                                ),
+                            ) {
+                                Column(Modifier.padding(12.dp)) {
+                                    Text(line.speaker, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(line.text, style = MaterialTheme.typography.bodyLarge)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { if (permissionGranted) onStart() else permission.launch(Manifest.permission.RECORD_AUDIO) },
+                    enabled = !busy && !listening && activeSttId != null &&
+                        (activeTtsId != null),
+                    modifier = Modifier.weight(1f).heightIn(min = 54.dp),
+                ) {
+                    Icon(Icons.Default.Mic, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (listening) "در حال گوش‌دادن" else "شروع مکالمه")
+                }
+                OutlinedButton(onClick = onInterrupt, enabled = listening, modifier = Modifier.heightIn(min = 54.dp)) {
+                    Text("قطع پاسخ")
+                }
+                OutlinedButton(onClick = onStop, enabled = listening || busy, modifier = Modifier.heightIn(min = 54.dp)) {
+                    Icon(Icons.Default.Stop, null)
+                    Text("توقف")
+                }
+            }
+        }
+    }
+}

@@ -1,5 +1,6 @@
 package com.samanramezani.aichattest.ui.workspace
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -34,11 +35,32 @@ internal fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, 
     var traceOpen by remember(execution?.id) { mutableStateOf(true) }
     var errorsOpen by remember { mutableStateOf(false) }
     var recoveryOpen by remember { mutableStateOf(false) }
+    var workspaceFiles by remember { mutableStateOf<List<AppContainer.WorkspaceFileEntry>>(emptyList()) }
+    var workspaceLoading by remember { mutableStateOf(false) }
+    var workspaceError by remember { mutableStateOf<String?>(null) }
+    var selectedFile by remember { mutableStateOf<String?>(null) }
+    var filePreview by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(execution?.id, liveTraces) {
         val id = execution?.id ?: return@LaunchedEffect
         checkpoint = container?.let { withContext(Dispatchers.Default) { it.executionCheckpoint(id) } }
     }
+
+    fun refreshWorkspace() {
+        scope.launch {
+            workspaceLoading = true
+            val result = withContext(Dispatchers.IO) { runCatching { container?.workspaceFiles().orEmpty() } }
+            workspaceFiles = result.getOrDefault(emptyList())
+            workspaceError = result.exceptionOrNull()?.message
+            if (selectedFile != null && workspaceFiles.none { it.path == selectedFile }) {
+                selectedFile = null
+                filePreview = null
+            }
+            workspaceLoading = false
+        }
+    }
+
+    LaunchedEffect(container, liveTraces) { refreshWorkspace() }
 
     val executionTraces = remember(execution?.id, liveTraces) {
         if (execution == null) emptyList() else liveTraces.filter { it.executionId == execution.id }.sortedBy { it.timestampMs }
@@ -54,6 +76,48 @@ internal fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, 
             StatusRow("Lifecycle", checkpoint?.state?.toString() ?: execution?.status ?: "آماده")
             if (execution != null) StatusRow("مدت", durationText(execution))
             actionMessage?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+        }
+
+        SectionCard("فایل‌ها و خروجی‌های واقعی Workspace") {
+            Text(
+                "فایل‌هایی که ابزارهای برنامه ساخته‌اند در فضای خصوصی خود برنامه ذخیره می‌شوند و از این فهرست قابل مشاهده‌اند.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("${workspaceFiles.size} فایل", style = MaterialTheme.typography.titleSmall)
+                TextButton(onClick = { refreshWorkspace() }, enabled = !workspaceLoading) {
+                    Text(if (workspaceLoading) "در حال تازه‌سازی…" else "تازه‌سازی")
+                }
+            }
+            workspaceError?.let { Text("خواندن Workspace ناموفق بود: $it", color = MaterialTheme.colorScheme.error) }
+            if (workspaceFiles.isEmpty() && !workspaceLoading) {
+                Text("هنوز فایلی در Workspace پیدا نشد. پس از ساخت فایل، «تازه‌سازی» را بزنید.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            workspaceFiles.forEach { file ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        selectedFile = file.path
+                        filePreview = null
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) { runCatching { container?.readWorkspaceFile(file.path) ?: "Workspace در دسترس نیست." } }
+                            filePreview = result.getOrElse { "خواندن فایل ناموفق بود: ${it.message ?: "خطای ناشناخته"}" }
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f),
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(file.path, style = MaterialTheme.typography.titleSmall)
+                        Text("${file.sizeBytes} بایت", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            if (selectedFile != null) {
+                DetailBlock("پیش‌نمایش: $selectedFile") {
+                    Text(filePreview ?: "در حال خواندن فایل…", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
         }
 
         SectionCard("Execution جاری") {

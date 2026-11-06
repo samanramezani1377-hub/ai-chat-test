@@ -2,6 +2,8 @@ package com.samanramezani.aichattest
 
 import android.content.Context
 import android.os.Build
+import com.samanramezani.aichattest.providers.CloudflareProviderStore
+import com.samanramezani.aichattest.providers.ProviderRoutingModelRuntime
 import com.woogit.aicore.actions.ActionExecutionService
 import com.woogit.aicore.actions.ActionExecutionState
 import com.woogit.aicore.actions.ActionLifecycle
@@ -19,6 +21,7 @@ import com.woogit.aicore.agent.ActionPlanCoordinator
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.agent.AgentOrchestrator
 import com.woogit.aicore.agent.AgentSession
+import com.woogit.aicore.agent.ActionToolPrompt
 import com.woogit.aicore.agent.ProtocolActionIntentPlanner
 import com.woogit.aicore.conversation.ConversationHistoryRepository
 import com.woogit.aicore.conversation.ConversationMessage
@@ -26,8 +29,6 @@ import com.woogit.aicore.conversation.ConversationStore
 import com.woogit.aicore.conversation.DefaultContextProvider
 import com.woogit.aicore.conversation.InMemoryConversationHistoryRepository
 import com.woogit.aicore.domain.ActionRegistry
-import com.woogit.aicore.domain.ApiProviderConfig
-import com.woogit.aicore.domain.ApiProviderConfigStore
 import com.woogit.aicore.domain.CapabilityProvider
 import com.woogit.aicore.domain.ModelResult
 import com.woogit.aicore.domain.VerificationResult
@@ -35,12 +36,13 @@ import com.woogit.aicore.domain.Verifier
 import com.woogit.aicore.observability.CentralObservability
 import com.woogit.aicore.observability.ErrorReport
 import com.woogit.aicore.observability.ExecutionTraceEvent
-import com.woogit.aicore.runtime.RemoteApiRuntimeAdapter
+import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
 import java.nio.file.Files
+import java.nio.file.LinkOption
 
-/** Application composition root. Inference is remote/API based; no local model runtime is wired. */
+/** Application composition root: local GGUF and optional provider-backed inference share one agent path. */
 class AppContainer(context: Context? = null) {
     companion object {
         @Volatile var latest: AppContainer? = null
@@ -58,12 +60,13 @@ class AppContainer(context: Context? = null) {
         traceStore = appContext?.let { AndroidExecutionTraceStore(it) } ?: com.woogit.aicore.observability.InMemoryExecutionTraceStore(),
     )
 
-    val modelRuntime: RuntimeAdapter = RemoteApiRuntimeAdapter { ApiProviderConfigStore.current }
+    private val localModelRuntime = LlamaCppAndroidRuntimeAdapter()
+    val providerStore: CloudflareProviderStore? = appContext?.let { CloudflareProviderStore(it) }
+    val modelRuntime: RuntimeAdapter = if (providerStore != null) ProviderRoutingModelRuntime(localModelRuntime, providerStore) else localModelRuntime
     val conversationHistory: ConversationHistoryRepository = appContext?.let { AndroidConversationHistoryRepository(it) } ?: InMemoryConversationHistoryRepository()
-    val modelManager: AndroidModelManager? = appContext?.let { AndroidModelManager(it.contentResolver, it.filesDir.toPath().resolve("models"), modelRuntime) }
-
-    fun apiConfig(): ApiProviderConfig = ApiProviderConfigStore.current
-    fun updateApiConfig(config: ApiProviderConfig) { ApiProviderConfigStore.current = config }
+    val modelManager: AndroidModelManager? = appContext?.let {
+        AndroidModelManager(it.contentResolver, it, it.filesDir.toPath().resolve("models"), localModelRuntime)
+    }
 
     val actionRegistry: ActionRegistry = DefaultActionRegistry().also { registry ->
         if (workspaceRoot != null) {
@@ -71,8 +74,8 @@ class AppContainer(context: Context? = null) {
             registry.registerBuiltinFileActions(workspaceRoot)
             registry.registerProviderActions(
                 modelInfo = {
-                    val config = ApiProviderConfigStore.current
-                    "provider=${config.providerId}, model=${config.model}"
+                    val info = modelRuntime.runtimeInfo()
+                    "runtime=${info.name}, backend=${info.backend ?: "unknown"}"
                 },
                 performanceStats = {
                     val info = modelRuntime.runtimeInfo()
@@ -131,6 +134,34 @@ class AppContainer(context: Context? = null) {
         ActionExecutionOutcome(false, false, it.message ?: "Retry failed", errorCode = "RETRY_FAILED")
     }
 
+    data class WorkspaceFileEntry(val path: String, val sizeBytes: Long, val modifiedAtMs: Long)
+
+    /** Lists actual files created in the same app-private Workspace used by filesystem actions. */
+    fun workspaceFiles(): List<WorkspaceFileEntry> {
+        val root = workspaceRoot ?: return emptyList()
+        if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(root)) return emptyList()
+        return Files.walk(root).use { paths ->
+            paths.filter { path ->
+                path != root && !Files.isSymbolicLink(path) && Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+            }.map { path ->
+                WorkspaceFileEntry(
+                    path = root.relativize(path).toString().replace(java.io.File.separatorChar, '/'),
+                    sizeBytes = Files.size(path),
+                    modifiedAtMs = Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toMillis(),
+                )
+            }.sorted(compareBy<WorkspaceFileEntry> { it.path.lowercase() }).collect(java.util.stream.Collectors.toList())
+        }
+    }
+
+    /** Reads a Workspace file without allowing traversal outside the app-private Workspace. */
+    fun readWorkspaceFile(relativePath: String): String {
+        val root = requireNotNull(workspaceRoot) { "Workspace is unavailable" }
+        val path = com.woogit.aicore.actions.WorkspacePathResolver(root).resolve(relativePath)
+        require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) { "File not found" }
+        require(Files.size(path) <= 1_048_576L) { "File exceeds 1 MiB preview limit" }
+        return path.toFile().readText(Charsets.UTF_8)
+    }
+
     fun actionTraces() = actionTraceSink.snapshot()
     fun actionErrors() = actionErrorLogSink.snapshot()
 
@@ -160,19 +191,35 @@ class AppContainer(context: Context? = null) {
     suspend fun traceForExecution(executionId: String): List<ExecutionTraceEvent> = observability.traces(executionId)
 
     suspend fun recordRuntimeFailure(message: String, raw: String = message, taskId: String? = null) {
-        reportError("Runtime", "RUNTIME_FAILED", message.ifBlank { "اجرای API با خطا مواجه شد." }, IllegalStateException(raw), taskId = taskId)
+        reportError("Runtime", "RUNTIME_FAILED", message.ifBlank { "اجرای مدل محلی با خطا مواجه شد." }, IllegalStateException(raw), taskId = taskId)
     }
 
-    fun createAgentSession(conversationId: String, eventSink: suspend (AgentEvent) -> Unit = {}): AgentSession? {
+    fun createAgentSession(
+        conversationId: String,
+        includeAgentTools: Boolean = true,
+        eventSink: suspend (AgentEvent) -> Unit = {},
+    ): AgentSession? {
         if (appContext == null) return null
         val store = HistoryConversationStore(conversationHistory, conversationId)
-        val contextProvider = DefaultContextProvider(conversationStore = store, systemContext = { null }, persistentTaskContext = { null }, workspaceContext = { workspaceRoot?.toString() })
+        // Real-time voice is a direct conversation path, not an agent/action request.
+        // Do not inject the action catalog, workspace instructions, or action execution loop
+        // into its system prompt; regular text chat keeps the full agent capability by default.
+        val contextProvider = DefaultContextProvider(
+            conversationStore = store,
+            systemContext = { if (includeAgentTools) ActionToolPrompt.build(actionRegistry) else null },
+            persistentTaskContext = { null },
+            workspaceContext = {
+                if (includeAgentTools) workspaceRoot?.let {
+                    "Workspace files are restricted to the app-private directory. Use relative paths with filesystem actions; do not claim access outside the Workspace."
+                } else null
+            },
+        )
         return AgentSession(
             orchestrator = AgentOrchestrator(contextProvider = contextProvider, runtime = modelRuntime),
             conversationStore = store,
-            actionPlanCoordinator = coordinator,
-            actionExecutor = actionExecutor,
-            actionRetryExecutor = actionRetryExecutor,
+            actionPlanCoordinator = if (includeAgentTools) coordinator else null,
+            actionExecutor = if (includeAgentTools) actionExecutor else null,
+            actionRetryExecutor = if (includeAgentTools) actionRetryExecutor else null,
             eventSink = { event ->
                 when (event) {
                     AgentEvent.Started -> observability.trace("agent:$conversationId", ExecutionTraceEvent.Phase.PREPARED, taskId = conversationId, message = "Agent started")
@@ -192,9 +239,14 @@ class AppContainer(context: Context? = null) {
 
     val actionExecutionService = ActionExecutionService(lifecycle, ApprovalController(lifecycle))
 
+    fun isCloudflareConfigured(): Boolean = providerStore?.load()?.let {
+        it.mode == com.samanramezani.aichattest.providers.InferenceProviderMode.CLOUDFLARE &&
+            it.accountId.isNotBlank() && it.apiToken.isNotBlank() && it.model.isNotBlank()
+    } == true
+
     private suspend fun reportError(component: String, code: String, userMessageFa: String, throwable: Throwable, actionId: String? = null, taskId: String? = null, executionId: String? = null) {
         val trace = executionId?.let { observability.traces(it) }?.joinToString("\n") { "${it.timestamp} ${it.phase}: ${it.message ?: ""}" }
-        observability.error(appVersion = appVersion, component = component, errorCode = code, userMessageFa = userMessageFa, rawMachineError = throwable.stackTraceToString(), actionId = actionId, taskId = taskId, trace = trace, runtimeInfo = modelRuntime.runtimeInfo().toString(), modelInfo = ApiProviderConfigStore.current.toString())
+        observability.error(appVersion = appVersion, component = component, errorCode = code, userMessageFa = userMessageFa, rawMachineError = throwable.stackTraceToString(), actionId = actionId, taskId = taskId, trace = trace, runtimeInfo = modelRuntime.runtimeInfo().toString(), modelInfo = modelRuntime.runtimeInfo().toString())
     }
 }
 

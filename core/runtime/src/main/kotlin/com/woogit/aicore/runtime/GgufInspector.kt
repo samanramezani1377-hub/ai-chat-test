@@ -88,8 +88,13 @@ class GgufInspector : ModelInspector {
         9 -> Quantization.Q5_1
         10 -> Quantization.Q2_K
         11 -> Quantization.Q3_K_S
+        12 -> Quantization.Q3_K_M
+        13 -> Quantization.Q3_K_L
         14 -> Quantization.Q4_K_S
+        15 -> Quantization.Q4_K_M
+        17 -> Quantization.Q5_K_M
         18 -> Quantization.Q6_K
+        19 -> Quantization.Q5_K_S
         else -> Quantization.UNKNOWN
     }
 

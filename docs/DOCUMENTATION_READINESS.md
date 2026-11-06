@@ -9,6 +9,9 @@
 - Core / UI / Runtime boundary
 - Action Registry / Contract / Capability / Adapter / Executor / Verifier boundary
 - Central Settings Contract + Versioning + Migration
+- Explicit Local / Provider inference selection and routing contract
+- Local vs Provider data-boundary and privacy documentation
+- UI source-selection and no-silent-fallback requirements
 - Central Observability + Error Center
 - Canonical ErrorReport Schema
 - Hideable Technical Error Panel بدون حذف Logging

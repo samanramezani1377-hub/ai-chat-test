@@ -31,6 +31,50 @@ class GgufInspectorTest {
     }
 
     @Test
+    fun `inspects modern Q5_K_M and Q5_K_S file types`() {
+        val cases = listOf(17 to Quantization.Q5_K_M, 19 to Quantization.Q5_K_S)
+        cases.forEach { (fileType, expected) ->
+            val file = Files.createTempFile("q5-test-", ".gguf")
+            try {
+                Files.write(file, buildMinimalWithFileType(fileType))
+                val result = kotlinx.coroutines.runBlocking { GgufInspector().inspect(file) }
+                val inspection = assertIs<ModelResult.Success<*>>(result).value as com.woogit.aicore.domain.ModelInspection
+                assertEquals(expected, inspection.quantization)
+            } finally {
+                Files.deleteIfExists(file)
+            }
+        }
+    }
+
+    @Test
+    fun `inspects Qwen3_5 GGUF with Q6_K quantization`() {
+        val file = Files.createTempFile("qwen35-test-", ".gguf")
+        try {
+            Files.write(file, buildMinimalQwen35Q6K())
+            val result = kotlinx.coroutines.runBlocking { GgufInspector().inspect(file) }
+            val inspection = assertIs<ModelResult.Success<*>>(result).value as com.woogit.aicore.domain.ModelInspection
+            assertEquals("qwen35", inspection.metadata.architecture)
+            assertEquals(Quantization.Q6_K, inspection.quantization)
+        } finally {
+            Files.deleteIfExists(file)
+        }
+    }
+
+    @Test
+    fun `inspects Qwen3_8 Distill GGUF with Q6_K quantization`() {
+        val file = Files.createTempFile("qwen38-test-", ".gguf")
+        try {
+            Files.write(file, buildMinimalQwen35Q6K())
+            val result = kotlinx.coroutines.runBlocking { GgufInspector().inspect(file) }
+            val inspection = assertIs<ModelResult.Success<*>>(result).value as com.woogit.aicore.domain.ModelInspection
+            assertEquals("qwen35", inspection.metadata.architecture)
+            assertEquals(Quantization.Q6_K, inspection.quantization)
+        } finally {
+            Files.deleteIfExists(file)
+        }
+    }
+
+    @Test
     fun `inspects GGUF metadata containing tokenizer sized arrays without retaining every element`() {
         val file = Files.createTempFile("qwen3-large-metadata-", ".gguf")
         try {
@@ -40,7 +84,7 @@ class GgufInspectorTest {
             val inspection = assertIs<ModelResult.Success<*>>(result).value as com.woogit.aicore.domain.ModelInspection
 
             assertEquals("qwen3", inspection.metadata.architecture)
-            assertEquals(151_936L, (inspection.metadata.raw["tokenizer.ggml.tokens"] as? Any)?.let { arrayInfoCount(it) })
+            assertEquals(151_936L, arrayInfoCount(inspection.metadata.raw["tokenizer.ggml.tokens"]!!))
             assertEquals(Quantization.Q6_K, inspection.quantization)
         } finally {
             Files.deleteIfExists(file)
@@ -51,6 +95,21 @@ class GgufInspectorTest {
         val field = value.javaClass.getDeclaredField("count")
         field.isAccessible = true
         return field.getLong(value)
+    }
+
+    private fun buildMinimalWithFileType(fileType: Int): ByteArray {
+        val out = mutableListOf<Byte>()
+        out.addAll("GGUF".encodeToByteArray().toList())
+        out.writeIntLE(3)
+        out.writeLongLE(1)
+        out.writeLongLE(2)
+        out.writeString("general.architecture")
+        out.writeIntLE(8)
+        out.writeString("qwen3")
+        out.writeString("general.file_type")
+        out.writeIntLE(4)
+        out.writeIntLE(fileType)
+        return out.toByteArray()
     }
 
     private fun buildMinimalQwen3Q6K(): ByteArray {
@@ -80,6 +139,21 @@ class GgufInspectorTest {
         out.writeIntLE(4)
         out.writeIntLE(18)
 
+        return out.toByteArray()
+    }
+
+    private fun buildMinimalQwen35Q6K(): ByteArray {
+        val out = mutableListOf<Byte>()
+        out.addAll("GGUF".encodeToByteArray().toList())
+        out.writeIntLE(3)
+        out.writeLongLE(1)
+        out.writeLongLE(2)
+        out.writeString("general.architecture")
+        out.writeIntLE(8)
+        out.writeString("qwen35")
+        out.writeString("general.file_type")
+        out.writeIntLE(4)
+        out.writeIntLE(18)
         return out.toByteArray()
     }
 

@@ -8,7 +8,7 @@ AI Chat Test باید برای مدل‌های فعلی و مدل‌هایی ک�
 
 ## Reference model vs architecture contract
 
-Qwen3-1.7B Q6_K در نسخه فعلی پروژه یک **reference/baseline model** است. از قابلیت‌های آن برای تست و اعتبارسنجی استفاده می‌شود، از جمله:
+Qwen3-1.7B Q6_K در نسخه فعلی پروژه یک **reference/baseline model** است. علاوه بر آن، Qwen3.5-2B Q6_K و Qwen3.8-2B Distill Q6_K نیز به‌عنوان پروفایل‌های مرجع GGUF پشتیبانی می‌شوند. Qwen3.8-2B Distill در GGUF از معماری `qwen35` استفاده می‌کند؛ بنابراین نباید برای آن مسیر Runtime جداگانه یا hard-code مدل‌محور ساخته شود. از قابلیت‌های آن برای تست و اعتبارسنجی استفاده می‌شود، از جمله:
 
 - context نسبتاً بزرگ
 - thinking / non-thinking در صورت پشتیبانی Runtime
