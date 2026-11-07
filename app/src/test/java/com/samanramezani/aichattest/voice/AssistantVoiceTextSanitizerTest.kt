@@ -25,7 +25,7 @@ class AssistantVoiceTextSanitizerTest {
     }
 
     @Test fun stripsClosingChannelAfterFinalAnswer() {
-        assertEquals("ساعت ۹ است.", sanitizeAssistantVoiceText("<|channel|>final\\nساعت ۹ است.</channel>"))
+        assertEquals("ساعت ۹ است.", sanitizeAssistantVoiceText("<|channel|>final\nساعت ۹ است.</channel>"))
     }
 
     @Test fun doesNotLeakIncompleteFinalChannelName() {
