@@ -793,19 +793,28 @@ internal class VoiceConversationController(
                     val segmentPlaybackStarted = AtomicBoolean(false)
                     try {
                         // Mark speaking only when audio playback actually starts, not during synthesis.
-                        engine.speak(
-                            segment,
-                            turnCancel,
-                            onStarted = {
-                                val playbackStart = SystemClock.elapsedRealtime()
-                                segmentPlaybackStarted.set(true)
-                                lastTtsPlaybackAtMs.set(playbackStart)
-                                speaking.set(true)
-                            },
-                            onSynthesisComplete = { synthesisMs ->
-                                onDiagnostic("VOICE-TTS-PERF: synthesisMs=$synthesisMs chars=${segment.length}")
-                            },
-                        )
+                        try {
+                            engine.speak(
+                                segment,
+                                turnCancel,
+                                onStarted = {
+                                    val playbackStart = SystemClock.elapsedRealtime()
+                                    segmentPlaybackStarted.set(true)
+                                    lastTtsPlaybackAtMs.set(playbackStart)
+                                    speaking.set(true)
+                                },
+                                onSynthesisComplete = { synthesisMs ->
+                                    onDiagnostic("VOICE-TTS-PERF: synthesisMs=$synthesisMs chars=${segment.length}")
+                                },
+                            )
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (failure: Throwable) {
+                            // A damaged/temporarily stalled segment must not kill the remaining
+                            // speech queue or the always-on microphone conversation.
+                            onDiagnostic("VOICE-TTS-SEGMENT-FAILED chars=${segment.length}\n${failure.stackTraceToString()}")
+                            onStatus("VOICE-TTS-005: پخش این بخش گفتار ناموفق بود؛ ادامه پاسخ و شنود فعال می‌ماند.")
+                        }
                     } finally {
                         // Record the actual end even when cancellation interrupts AudioTrack.write().
                         if (segmentPlaybackStarted.get()) lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
