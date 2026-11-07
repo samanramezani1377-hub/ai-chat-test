@@ -451,6 +451,7 @@ internal fun sanitizeAssistantVoiceText(raw: String): String {
     if (raw.startsWith("<|channel|") && !raw.contains(Regex("""<\|channel\|>"""))) return ""
     val channelMarker = Regex("""(?i)<\|channel\|?>\s*(analysis|thought|reasoning|final|answer|commentary)\b""")
     val channels = channelMarker.findAll(raw).toList()
+    if (raw.startsWith("<|channel|>") && channels.isEmpty()) return ""
     var source = raw
     if (channels.isNotEmpty()) {
         val finalChannel = channels.lastOrNull {
@@ -463,7 +464,8 @@ internal fun sanitizeAssistantVoiceText(raw: String): String {
     }
     // Streaming chunks can end halfway through a markup/control token. Hold that tail until
     // the next token arrives instead of sending it to the transcript or Piper.
-    if (source.trimStart().startsWith("<|") && !source.contains(">")) return ""
+    val trimmedSource = source.trimStart()
+    if ((trimmedSource.startsWith("<|") || trimmedSource.startsWith("</")) && !source.contains(">")) return ""
     return source
         .replace(Regex("""(?is)</?channel\s*>"""), " ")
         .replace(Regex("""(?is)<think\b(?!\s*/)[^>]*>.*?(?:</think\s*>|<think\s*/\s*>|$)"""), " ")
