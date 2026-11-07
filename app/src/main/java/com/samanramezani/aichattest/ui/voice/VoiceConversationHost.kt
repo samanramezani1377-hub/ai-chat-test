@@ -31,6 +31,7 @@ import com.samanramezani.aichattest.voice.SmallSttComponent
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
 import com.samanramezani.aichattest.voice.CactusNeedleModelStore
 import com.samanramezani.aichattest.voice.CactusDecisionEngine
+import com.samanramezani.aichattest.voice.shouldForwardNeedleRequestToChat
 import com.samanramezani.aichattest.voice.DinaDeviceCommandExecutor
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.conversation.ConversationMessage
@@ -857,7 +858,7 @@ internal class VoiceConversationController(
             // Cactus is the sole decision-maker for local voice actions.
             // Never infer an intent or extract a number with a parallel rule/regex parser.
             // If Cactus is unavailable or abstains, forward the exact original transcript to chat.
-            if (needleDecision == null && decisionEngine.lastToolSelected) {
+            if (needleDecision == null && !shouldForwardNeedleRequestToChat(decisionEngine.lastToolSelected)) {
                 // Needle selected a tool but its call failed validation/confidence checks.
                 // This is not a chat abstention: do not hand a device command to the LLM.
                 val clarification = "فرمان دستگاه تشخیص داده شد، اما برای اجرای امن آن اطلاعات کافی یا مطمئن نبود. لطفاً درخواست را واضح‌تر تکرار کن."
