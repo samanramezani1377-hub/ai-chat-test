@@ -399,7 +399,7 @@ class AlwaysOnKoochikService : Service() {
                 onStatus = { status ->
                     val state = when {
                         status.contains("VOICE-START-001") || status.contains("VOICE-CHAT-003") ||
-                            status.contains("VOICE-TTS-005") || status.contains("VOICE-STT-002") ||
+                            status.contains("VOICE-STT-002") ||
                             status.contains("VOICE-LLM-001") -> "CONVERSATION_ERROR"
                         status.contains("متوقف شد") -> "CONVERSATION_STOPPED"
                         status.contains("گوش‌دادن") -> "CONVERSATION_ACTIVE"
