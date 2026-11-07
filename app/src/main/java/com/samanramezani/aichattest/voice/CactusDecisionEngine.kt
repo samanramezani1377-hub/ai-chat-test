@@ -215,6 +215,9 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
     }
 }
 
+/** A tool selection is never re-routed to the conversational LLM. */
+internal fun shouldForwardNeedleRequestToChat(toolSelected: Boolean): Boolean = !toolSelected
+
 private object CactusNeedleNative {
     init {
         System.loadLibrary("cactus_needle_jni")
