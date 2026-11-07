@@ -448,8 +448,8 @@ internal fun sanitizeAssistantVoiceText(raw: String): String {
     if (raw.isBlank()) return ""
     // Never expose a dangling/closing channel token or a partially streamed control marker.
     if (raw.trim() == "</channel>" || raw.trim() == "<|channel|>") return ""
-    if (raw.startsWith("<|channel|") && !raw.contains(Regex("""<\\|channel\\|>"""))) return ""
-    val channelMarker = Regex("""(?i)<\\|channel\\|?>\\s*(analysis|thought|reasoning|final|answer|commentary)\\b""")
+    if (raw.startsWith("<|channel|") && !raw.contains(Regex("""<\|channel\|>"""))) return ""
+    val channelMarker = Regex("""(?i)<\|channel\|?>\s*(analysis|thought|reasoning|final|answer|commentary)\b""")
     val channels = channelMarker.findAll(raw).toList()
     var source = raw
     if (channels.isNotEmpty()) {
@@ -458,30 +458,30 @@ internal fun sanitizeAssistantVoiceText(raw: String): String {
         } ?: return ""
         source = raw.substring(finalChannel.range.last + 1)
         source = source.substring(0, channelMarker.find(source)?.range?.first ?: source.length)
-    } else if (Regex("""(?i)</?channel\\b""").containsMatchIn(raw)) {
+    } else if (Regex("""(?i)</?channel\b""").containsMatchIn(raw)) {
         return ""
     }
     // Streaming chunks can end halfway through a markup/control token. Hold that tail until
     // the next token arrives instead of sending it to the transcript or Piper.
     if (source.trimStart().startsWith("<|") && !source.contains(">")) return ""
     return source
-        .replace(Regex("""(?is)</?channel\\s*>"""), " ")
-        .replace(Regex("""(?is)<think\\b(?!\\s*/)[^>]*>.*?(?:</think\\s*>|<think\\s*/\\s*>|$)"""), " ")
-        .replace(Regex("""(?is)<think\\s*/\\s*>"""), " ")
-        .replace(Regex("""(?is)</?think\\b[^>]*>"""), " ")
-        .replace(Regex("""(?is)<(analysis|reasoning|scratchpad)\\b[^>]*>.*?</\\1\\s*>"""), " ")
-        .replace(Regex("""(?is)<\\|(?:turn|end_of_turn|endofturn|im_end|fim_suffix)\\|?>.*$"""), " ")
-        .replace(Regex("""(?m)^\\s*\`{3,}[^\\n]*"""), " ")
-        .replace(Regex("""(?m)^\\s*#{1,6}\\s*"""), "")
-        .replace(Regex("""(?m)^\\s*(?:[-*_]\\s*){3,}$"""), " ")
-        .replace(Regex("""(?m)^\\s*[-*+]\\s+"""), "")
-        .replace(Regex("""(?m)^\\s*\\d+[.)]\\s+"""), "")
-        .replace(Regex("""(?<!\\w)(?:\\*\\*|__)(?=\\S)|(?<=\\S)(?:\\*\\*|__)"""), "")
-        .replace(Regex("""(?<!\\w)[*_~](?=\\S)|(?<=\\S)[*_~](?!\\w)"""), "")
+        .replace(Regex("""(?is)</?channel\s*>"""), " ")
+        .replace(Regex("""(?is)<think\b(?!\s*/)[^>]*>.*?(?:</think\s*>|<think\s*/\s*>|$)"""), " ")
+        .replace(Regex("""(?is)<think\s*/\s*>"""), " ")
+        .replace(Regex("""(?is)</?think\b[^>]*>"""), " ")
+        .replace(Regex("""(?is)<(analysis|reasoning|scratchpad)\b[^>]*>.*?</\1\s*>"""), " ")
+        .replace(Regex("""(?is)<\|(?:turn|end_of_turn|endofturn|im_end|fim_suffix)\|?>.*$"""), " ")
+        .replace(Regex("""(?m)^\s*\`{3,}[^\n]*"""), " ")
+        .replace(Regex("""(?m)^\s*#{1,6}\s*"""), "")
+        .replace(Regex("""(?m)^\s*(?:[-*_]\s*){3,}$"""), " ")
+        .replace(Regex("""(?m)^\s*[-*+]\s+"""), "")
+        .replace(Regex("""(?m)^\s*\d+[.)]\s+"""), "")
+        .replace(Regex("""(?<!\w)(?:\*\*|__)(?=\S)|(?<=\S)(?:\*\*|__)"""), "")
+        .replace(Regex("""(?<!\w)[*_~](?=\S)|(?<=\S)[*_~](?!\w)"""), "")
         .replace(Regex("""(?is)<[^>]+>"""), " ")
-        .replace(Regex("""[ \\t]+"""), " ")
-        .replace(Regex(""" *\\n *"""), "\\n")
-        .replace(Regex("""\\n{3,}"""), "\\n\\n")
+        .replace(Regex("""[ \t]+"""), " ")
+        .replace(Regex(""" *\n *"""), "\n")
+        .replace(Regex("""\n{3,}"""), "\n\n")
         .trim()
 }
 
