@@ -155,38 +155,76 @@ class LocalPiperTts(private val entry: VoiceModelEntry) : LocalTtsEngine {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         try {
-            track.play()
-            onStarted()
-            var offset = 0
-            val pcm = ShortArray(4096)
-            while (offset < samples.size && !cancelled.get()) {
-                val count = minOf(pcm.size, samples.size - offset)
-                for (i in 0 until count) pcm[i] = (samples[offset + i].coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
-                var written = 0
-                while (written < count && !cancelled.get()) {
-                    val n = track.write(pcm, written, count - written, AudioTrack.WRITE_BLOCKING)
-                    if (n < 0) error("VOICE-TTS-004: پخش صوت متوقف شد (AudioTrack=$n).")
-                    written += n
-                }
-                offset += count
+            check(track.state == AudioTrack.STATE_INITIALIZED) {
+                "VOICE-TTS-003: ساخت AudioTrack کامل نشد (state=${track.state})."
             }
-            if (cancelled.get()) {
-                track.pause()
-            } else {
-                // Drain queued PCM before releasing AudioTrack; otherwise the final syllable can be clipped.
-                val framesToPlay = samples.size
-                val expectedPlaybackMs = (framesToPlay * 1000L / rate).coerceAtLeast(1L)
-                val drainDeadlineMs = SystemClock.elapsedRealtime() + expectedPlaybackMs + 1500L
-                while (!cancelled.get() && track.playbackHeadPosition.toLong() < framesToPlay &&
-                    SystemClock.elapsedRealtime() < drainDeadlineMs
-                ) {
+            val pcm = ShortArray(4096)
+            suspend fun writeAllSamples() {
+                var offset = 0
+                var zeroWrites = 0
+                val writeDeadline = SystemClock.elapsedRealtime() + 5000L
+                while (offset < samples.size && !cancelled.get()) {
+                    val count = minOf(pcm.size, samples.size - offset)
+                    for (i in 0 until count) {
+                        pcm[i] = (samples[offset + i].coerceIn(-1f, 1f) * Short.MAX_VALUE).toInt().toShort()
+                    }
+                    var written = 0
+                    while (written < count && !cancelled.get()) {
+                        val n = track.write(pcm, written, count - written, AudioTrack.WRITE_BLOCKING)
+                        if (n < 0) error("VOICE-TTS-004: پخش صوت متوقف شد (AudioTrack.write=$n).")
+                        if (n == 0) {
+                            zeroWrites++
+                            if (zeroWrites > 250 || SystemClock.elapsedRealtime() >= writeDeadline) {
+                                error("VOICE-TTS-004: AudioTrack داده صوتی را نپذیرفت (write=0).")
+                            }
+                            kotlinx.coroutines.delay(4)
+                        } else {
+                            zeroWrites = 0
+                            written += n
+                        }
+                    }
+                    offset += count
+                }
+            }
+            suspend fun awaitPlaybackDrain(extraMs: Long): Boolean {
+                val expectedPlaybackMs = (samples.size * 1000L / rate).coerceAtLeast(1L)
+                val deadline = SystemClock.elapsedRealtime() + expectedPlaybackMs + extraMs
+                while (!cancelled.get() && SystemClock.elapsedRealtime() < deadline) {
+                    // AudioTrack exposes a signed Int; interpret its frame counter as unsigned.
+                    val playedFrames = track.playbackHeadPosition.toLong() and 0xffffffffL
+                    if (playedFrames >= samples.size.toLong()) return true
+                    if (track.playState != AudioTrack.PLAYSTATE_PLAYING &&
+                        track.playState != AudioTrack.PLAYSTATE_PAUSED
+                    ) return false
                     kotlinx.coroutines.delay(20)
                 }
-                if (!cancelled.get() && track.playbackHeadPosition.toLong() < framesToPlay) {
-                    error("VOICE-TTS-010: پخش صوت پیش از پایان بافر متوقف شد؛ playbackHead=" +
-                        track.playbackHeadPosition + "/" + framesToPlay)
+                return (track.playbackHeadPosition.toLong() and 0xffffffffL) >= samples.size.toLong()
+            }
+
+            track.play()
+            onStarted()
+            writeAllSamples()
+            if (!cancelled.get() && !awaitPlaybackDrain(2000L)) {
+                // Some Android audio routes leave a freshly-created streaming track stalled at
+                // playbackHead=0. Re-prime the same track once before declaring TTS failure.
+                onSynthesisComplete(0L)
+                runCatching { track.pause() }
+                runCatching { track.flush() }
+                check(track.state == AudioTrack.STATE_INITIALIZED) {
+                    "VOICE-TTS-010: AudioTrack پس از توقف قابل بازیابی نبود (state=${track.state})."
                 }
-                if (!cancelled.get() && playbackTailMs > 0L) kotlinx.coroutines.delay(playbackTailMs)
+                track.play()
+                writeAllSamples()
+                if (!cancelled.get() && !awaitPlaybackDrain(2500L)) {
+                    error("VOICE-TTS-010: پخش صوت پس از تلاش مجدد کامل نشد؛ playbackHead=" +
+                        (track.playbackHeadPosition.toLong() and 0xffffffffL) + "/${samples.size}; " +
+                        "playState=${track.playState}; trackState=${track.state}")
+                }
+            }
+            if (cancelled.get()) {
+                runCatching { track.pause() }
+            } else {
+                if (playbackTailMs > 0L) kotlinx.coroutines.delay(playbackTailMs)
                 if (!cancelled.get()) track.stop()
             }
         } finally {
