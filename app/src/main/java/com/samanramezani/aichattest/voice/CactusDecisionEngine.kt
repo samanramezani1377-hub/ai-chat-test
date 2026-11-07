@@ -2,6 +2,7 @@ package com.samanramezani.aichattest.voice
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 import java.io.File
 
 /** Needle is the only semantic router for voice actions; no regex classifier runs beside it. */

@@ -17,7 +17,7 @@ The model controls stay in the existing Voice conversation > Settings > Local Pe
 
 The Android module builds the official android-arm64/libneedle.a from the same pinned Hugging Face revision and links it into libcactus_needle_jni.so. The archive download is checked for its expected byte length and SHA-256 fingerprint. The app remains arm64-v8a only.
 
-The C API is process-global and not thread-safe. The JNI bridge serializes every call with one mutex. The Kotlin router initializes the model and tool schemas once, resets the conversation before each independent utterance, and sends the original transcript plus current device date/time facts.
+The C API is process-global and not thread-safe. The JNI bridge serializes every call with one mutex. The Kotlin router initializes the model and tool schemas once, resets the conversation before each independent utterance, and sends the original transcript unchanged. Current date/time values are resolved by the Android device executor when the corresponding tool is run.
 
 ## Tool contract
 
