@@ -21,15 +21,28 @@ The C API is process-global and not thread-safe. The JNI bridge serializes every
 
 ## Tool contract
 
-Needle is given five tools only:
+Needle receives five compact tool schemas, matching the official recommendation to keep the catalogue at five or fewer because Needle 3 has no retrieval head:
 
-- get_clock: choose time or date for a direct request for the current local time or today's date.
-- adjust_volume: increase, decrease, mute, or unmute media audio.
-- set_volume: set an explicitly stated target on a 0–10 scale. A bare number from 0–10 is a level; any explicit percentage (even 7%) and any bare number above 10 are rounded to the nearest 10% step.
-- adjust_brightness: increase or decrease screen brightness.
-- set_brightness: set an explicitly stated target using the same 0–10 / nearest-10%-step rule.
+- get_clock: read current local time or today's date, selected by the `action` enum.
+- adjust_volume: increase/decrease media volume or mute/unmute, selected by the `action` enum.
+- set_volume: set a target media volume. `value` preserves the number spoken (0–100); `is_percent` is true only when the user explicitly said percent / درصد. Bare values are interpreted as device steps when possible, with the executor retaining the existing percent fallback for values above the device's maximum.
+- adjust_brightness: increase or decrease screen brightness, selected by the `action` enum.
+- set_brightness: set screen brightness to the stated percentage (0–100).
 
-The model does not generate conversational answers. The existing chat model receives the unchanged utterance only when Needle emits no tool call (including an explicit suppressed/no-call result). If Needle emits a tool call but it is malformed, unknown, missing required arguments, or below the confidence gate, the app does not forward that request to the chat model; it returns a short clarification/error instead. A valid tool call is executed locally and the chat model is not invoked. No regex or keyword classifier is used as a fallback. State-changing actions require confidence >= 0.70; read-only time/date requests require >= 0.50. Persian confidence calibration has not been validated on the user's device, so this is a conservative gate rather than a measured accuracy claim.
+Each schema includes official Needle 3 `triggers` regexes for common Persian request forms. These are part of the model's tool schema; there is no parallel Kotlin keyword/regex classifier. Descriptions include common colloquial Persian phrasings and parameter meanings. The catalogue deliberately remains at five tools because the current official Needle 3 reference states that it has no retrieval head.
+
+The native response is handled using the official envelope: `type`, `success`, `function_calls`, `suppressed_calls`, `reasoning`, and `confidence`. Multiple calls in one response are validated as a complete set before any command executes. A non-empty `suppressed_calls` list is a withheld tool decision, never a chat fallback. Only `type=call`, `success=true`, empty `function_calls`, and empty `suppressed_calls` is treated as an explicit no-tool abstention and forwarded to the conversational Qwen model. Runtime failures, malformed envelopes, unknown tools, invalid arguments, and low-confidence calls do not fall through to Qwen.
+
+State-changing actions require confidence >= 0.70; read-only time/date requests require >= 0.50. Cactus documents that confidence is calibrated on the base model but non-English deployments need their own validation; Persian calibration has not been measured on the target phone. The app logs the exact ASR transcript, bounded raw Needle response, selected/suppressed calls, reasoning, confidence and runtime metrics for diagnosis.
+
+## Android permissions for the current tool set
+
+- Current time/date: no Android permission is required.
+- Media volume: `MODIFY_AUDIO_SETTINGS` is already declared in the manifest; it is a normal permission and does not require a runtime dialog.
+- Screen brightness: `WRITE_SETTINGS` is declared. Android treats this as special app access, not a runtime permission; the executor opens `ACTION_MANAGE_WRITE_SETTINGS` only when the user asks to change brightness and access has not been granted.
+- Voice input itself uses `RECORD_AUDIO`; always-on operation additionally uses the existing foreground-service and notification permissions. These are requested by the voice workflow, not by Needle tool selection.
+
+The app does not request unrelated permissions in advance.
 
 ## Native engine source
 

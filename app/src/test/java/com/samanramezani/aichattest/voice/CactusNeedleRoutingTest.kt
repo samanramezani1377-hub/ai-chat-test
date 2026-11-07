@@ -5,8 +5,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CactusNeedleRoutingTest {
-    @Test fun chatFallbackIsAllowedOnlyWhenNeedleSelectedNoTool() {
-        assertTrue(shouldForwardNeedleRequestToChat(toolSelected = false))
-        assertFalse(shouldForwardNeedleRequestToChat(toolSelected = true))
+    @Test fun onlyOfficialExplicitEmptyCallCanFallBackToChat() {
+        assertTrue(shouldForwardNeedleRequestToChat(true, false))
+    }
+
+    @Test fun suppressedToolCallNeverFallsBackToChat() {
+        assertFalse(shouldForwardNeedleRequestToChat(false, true))
+    }
+
+    @Test fun runtimeOrProtocolFailureNeverPretendsToBeAbstention() {
+        assertFalse(shouldForwardNeedleRequestToChat(false, false))
+    }
+
+    @Test fun explicitAbstentionCannotOverrideAnySelectedTool() {
+        assertFalse(shouldForwardNeedleRequestToChat(true, true))
     }
 }

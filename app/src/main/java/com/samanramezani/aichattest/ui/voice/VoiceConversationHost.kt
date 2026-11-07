@@ -851,17 +851,27 @@ internal class VoiceConversationController(
             decisionEngine.lastError?.let { modelError ->
                 if (lastLoggedIntentModelError != modelError) {
                     lastLoggedIntentModelError = modelError
-                    onDiagnostic(modelError + "؛ هیچ فرمانی بدون تصمیم معتبر Cactus اجرا نمی‌شود و متن اصلی به مدل گفت‌وگو می‌رود.")
+                    onDiagnostic(modelError + "؛ به‌دلیل نامعتبر بودن تصمیم‌گیر، درخواست به مدل گفت‌وگو ارسال نمی‌شود.")
                 }
             }
             decisionEngine.lastTrace.forEach { onDiagnostic("CACTUS-DECISION: $it") }
+            onDiagnostic("CACTUS-INPUT: transcript="+utterance.replace("\n", " ").take(320))
             // Cactus is the sole decision-maker for local voice actions.
             // Never infer an intent or extract a number with a parallel rule/regex parser.
             // If Cactus is unavailable or abstains, forward the exact original transcript to chat.
-            if (needleDecision == null && !shouldForwardNeedleRequestToChat(decisionEngine.lastToolSelected)) {
-                // Needle selected a tool but its call failed validation/confidence checks.
-                // This is not a chat abstention: do not hand a device command to the LLM.
-                val clarification = "فرمان دستگاه تشخیص داده شد، اما برای اجرای امن آن اطلاعات کافی یا مطمئن نبود. لطفاً درخواست را واضح‌تر تکرار کن."
+            if (needleDecision == null &&
+                !shouldForwardNeedleRequestToChat(
+                    explicitAbstention = decisionEngine.lastExplicitAbstention,
+                    toolSelectedOrSuppressed = decisionEngine.lastToolSelected,
+                )
+            ) {
+                // Only a successful official empty-call response may reach Qwen.
+                // Suppressed, malformed, low-confidence, and runtime-error responses stay local.
+                val clarification = if (decisionEngine.lastToolSelected) {
+                    "فرمان دستگاه شناسایی شد، اما Needle نتوانست آن را با اطمینان و پارامترهای معتبر تأیید کند. لطفاً درخواست را واضح‌تر تکرار کن."
+                } else {
+                    "مدل تصمیم‌گیر ابزار در دسترس نبود یا پاسخ معتبری نداد؛ برای جلوگیری از اجرای اشتباه، درخواست به مدل اصلی ارسال نشد. لطفاً دوباره تلاش کن."
+                }
                 persistUserMessageIfMissing(utterance)
                 queue.trySend(clarification)
                 queue.close()
@@ -869,28 +879,29 @@ internal class VoiceConversationController(
                 if (!turnCancel.get()) {
                     persistAssistantReplyIfMissing(clarification)
                     onLine("دستیار", clarification)
-                    onStatus("فرمان ابزار توسط Needle انتخاب شد اما اعتبارسنجی نشد؛ مدل اصلی فراخوانی نشد.")
+                    onStatus(if (decisionEngine.lastToolSelected)
+                        "Needle ابزار را انتخاب کرد اما فراخوانی تأیید نشد؛ مدل اصلی فراخوانی نشد."
+                    else "پاسخ معتبر از Needle دریافت نشد؛ fallback به مدل اصلی مسدود شد.")
                 }
                 return
             }
-            val command = needleDecision?.command
-                ?: com.samanramezani.aichattest.voice.DinaCommand(
-                    com.samanramezani.aichattest.voice.DinaIntent.CHAT
-                )
-            if (needleDecision != null && command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) {
+            if (needleDecision != null && needleDecision.commands.isNotEmpty()) {
                 val localReply = runCatching {
-                    DinaDeviceCommandExecutor(context).execute(command)
-                        ?: error("ابزار انتخاب‌شده پاسخ اجرایی معتبری برنگرداند.")
+                    val executor = DinaDeviceCommandExecutor(context)
+                    needleDecision.commands.map { command ->
+                        executor.execute(command)
+                            ?: error("ابزار انتخاب‌شده پاسخ اجرایی معتبری برنگرداند: ${command.intent.name}")
+                    }.joinToString("\n")
                 }.getOrElse { "اجرای ابزار محلی ناموفق بود: ${it.message ?: it.javaClass.simpleName}" }
                 persistUserMessageIfMissing(utterance)
-                onDiagnostic("DINA-LOCAL-COMMAND: intent=${command.intent.name} parameter=${command.value ?: "none"} tool=${needleDecision.route} confidence=${needleDecision.confidence} model=local-device-executor")
+                onDiagnostic("DINA-LOCAL-COMMAND: intents=${needleDecision.commands.joinToString(",") { it.intent.name }} tools=${needleDecision.route} confidence=${needleDecision.confidence} count=${needleDecision.commands.size} model=local-device-executor")
                 queue.trySend(localReply)
                 queue.close()
                 activeSpeechJob.join()
                 if (!turnCancel.get()) {
                     persistAssistantReplyIfMissing(localReply)
                     onLine("دستیار", localReply)
-                    onStatus("ابزار محلی اجرا شد؛ مدل گفت‌وگو فراخوانی نشد.")
+                    onStatus("ابزارهای محلی اجرا شدند؛ مدل گفت‌وگو فراخوانی نشد.")
                 }
                 return
             }
