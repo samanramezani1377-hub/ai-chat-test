@@ -27,8 +27,8 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
     private var loadedLength = 0L
 
     companion object {
-        private const val MIN_READ_ONLY_CONFIDENCE = 0.45
-        private const val MIN_MUTATION_CONFIDENCE = 0.62
+        private const val MIN_READ_ONLY_CONFIDENCE = 0.50
+        private const val MIN_MUTATION_CONFIDENCE = 0.70
 
         private val systemPrompt = """
             You are the on-device Persian voice-action router for an Android phone.
@@ -43,7 +43,9 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             the nearest 10% level (7% becomes level 1; 47% becomes level 5). Only a bare
             number without a percent marker from 0 to 10 is already a level (7 means 70%).
             A bare number above 10 through 100 is treated as a percentage (40 becomes level 4).
-            Never guess a missing value.
+            Never guess a missing value. Require high confidence for every state-changing
+            action; if confidence is not high enough, abstain and let the chat model handle
+            the unchanged utterance.
             "Increase" and "decrease" do not require a value.
             Mute and unmute are volume actions. Do not confuse current time with work
             hours, durations, event times, or changing the clock. get_date means today's
