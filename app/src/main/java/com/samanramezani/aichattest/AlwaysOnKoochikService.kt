@@ -312,7 +312,7 @@ class AlwaysOnKoochikService : Service() {
             if (worker === Thread.currentThread()) worker = null
         }
 
-        if (detectedCommand == null &&
+        if (detectedCommand == null && failure == null &&
             getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_ENABLED, false) &&
             voiceController == null && !transitioningToConversation
         ) {
