@@ -20,7 +20,7 @@ import androidx.core.content.ContextCompat
 import com.samanramezani.aichattest.ui.voice.VoiceConversationController
 import com.samanramezani.aichattest.voice.LocalMicrophone
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
-import com.samanramezani.aichattest.voice.LayaDecisionEngine
+import com.samanramezani.aichattest.voice.CactusDecisionEngine
 import com.samanramezani.aichattest.voice.VoiceModelKind
 import com.samanramezani.aichattest.voice.VoiceModelStore
 import com.samanramezani.aichattest.voice.extractDinaCommand
@@ -395,7 +395,7 @@ class AlwaysOnKoochikService : Service() {
             val controller = VoiceConversationController(
                 context = this,
                 container = container,
-                decisionEngine = LayaDecisionEngine(File(filesDir, "voice-models/laya-int4")),
+                decisionEngine = CactusDecisionEngine(File(filesDir, "voice-models/cactus-needle3")),
                 onStatus = { status ->
                     val state = when {
                         status.contains("VOICE-START-001") || status.contains("VOICE-CHAT-003") ||

@@ -1,45 +1,439 @@
-# Cactus Needle 3 on Android
+name: CI
 
-This branch replaces the retired Laya INT4 decision router with the official Cactus Needle 3 native Android engine. WebGPU is intentionally not part of this implementation.
+on:
+  # Run CI for every branch, not only main. This keeps feature branches honest
+  # and makes a new branch's first push trigger validation automatically.
+  push:
+    branches:
+      - '**'
+  # Validate pull requests targeting any branch, including non-main integration branches.
+  pull_request:
+    branches:
+      - '**'
+  workflow_dispatch:
 
-## User-facing workflow
+permissions:
+  contents: read
 
-The model controls stay in the existing Voice conversation > Settings > Local Persian decision model card.
+concurrency:
+  # Push and pull_request events for the same branch share one concurrency group.
+  # This prevents two full Android/native builds for a single commit.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
 
-- Download fetches the pinned official needle3.cact archive from Hugging Face.
-- The active copy is kept under the app's private files/voice-models/cactus-needle3/ directory.
-- The downloaded model is also published through Android MediaStore into Download/AI Chat Test/Cactus/needle3.cact, so it is visible in file managers.
-- Import from phone storage accepts a .cact file and copies it into the app's active model directory.
-- Model weights are not bundled in the APK.
-- The downloaded weights are pinned to Hugging Face revision d6c7d6a2e9655505e0f8e23339356dd1705900eb, expected size 35,335,380 bytes, and checked against the indexed SHA-256 prefix/suffix before activation.
+env:
+  GRADLE_VERSION: '8.11.1'
+  JAVA_VERSION: '17'
 
-## Runtime
+jobs:
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
 
-The Android module builds the official android-arm64/libneedle.a from the same pinned Hugging Face revision and links it into libcactus_needle_jni.so. The archive download is checked for its expected byte length and SHA-256 fingerprint. The app remains arm64-v8a only.
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
 
-The C API is process-global and not thread-safe. The JNI bridge serializes every call with one mutex. The Kotlin router initializes the model and tool schemas once, resets the conversation before each independent utterance, and sends the original transcript plus current device date/time facts.
+      - name: Set up Android SDK and the pinned NDK
+        uses: android-actions/setup-android@v4
 
-## Tool contract
+      - name: Install the project's Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=("ndk;27.2.12479018" "platforms;android-36")
+          # sdkmanager occasionally receives a truncated/corrupt package archive.
+          # Retry from a clean temporary download area instead of failing the job
+          # on the first SeekableByteChannel/ZIP extraction error.
+          for attempt in 1 2 3; do
+            echo "Android SDK package install attempt ${attempt}/3"
+            if sdkmanager --install "${packages[@]}"; then
+              test -d "$ANDROID_HOME/ndk/27.2.12479018"
+              test -d "$ANDROID_HOME/platforms/android-36"
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::SDK/NDK package installation failed; clearing incomplete downloads before retry."
+              rm -rf "$ANDROID_HOME/temp" "$ANDROID_HOME/.temp"
+              rm -rf "$ANDROID_HOME/ndk/27.2.12479018"
+              sleep $((attempt * 5))
+            fi
+          done
+          echo "::error::Could not install Android NDK 27.2.12479018 and Android platform 36 after 3 attempts."
+          exit 1
 
-Needle is given four tools only:
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
 
-- get_time: direct request for the current local time.
-- get_date: direct request for today's date.
-- set_volume: increase, decrease, mute, unmute, or set an explicitly stated target on Laya's 0–10 scale. A bare 0–10 value is a level; a percentage or bare number above 10 is rounded to the nearest 10% step.
-- set_brightness: increase, decrease, or set an explicitly stated target using the same 0–10 / nearest-10%-step rule.
+      - name: Run JVM and Android unit tests
+        run: >-
+          gradle
+          :core:actions:test
+          :core:agent:test
+          :core:conversation:test
+          :core:domain:test
+          :core:observability:test
+          :core:runtime:test
+          :core:runtime-android:test
+          :core:settings:test
+          :app:testDebugUnitTest
+          --stacktrace
+          --console=plain
+          --parallel
 
-The model does not generate conversational answers. If it returns no single valid tool call, returns a suppressed call, has insufficient confidence, omits a required numeric target, or returns an unknown tool, the router abstains and the unchanged utterance continues to the existing conversation model. No regex or keyword classifier is used as a fallback. State-changing actions use a higher confidence threshold than read-only time/date requests.
+  android-build:
+    name: Android debug build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPILERCHECK: content
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
 
-## Native engine source
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
 
-- Model: Cactus-Compute/needle3
-- Pinned model/engine revision: d6c7d6a2e9655505e0f8e23339356dd1705900eb
-- Platform library: android-arm64/libneedle.a
-- API: needle_load, needle_init, needle_complete, needle_reset
-- License: Apache-2.0
+      - name: Set up Android SDK and the pinned NDK
+        uses: android-actions/setup-android@v4
 
-The official Cactus API exposes one process-global model and conversation. Do not add parallel inference calls or bypass the JNI mutex. Do not claim GPU acceleration: this branch links the vendor's Android ARM64 native engine and does not enable WebGPU.
+      - name: Install the project's Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=("ndk;27.2.12479018" "platforms;android-36")
+          # sdkmanager occasionally receives a truncated/corrupt package archive.
+          # Retry from a clean temporary download area instead of failing the job
+          # on the first SeekableByteChannel/ZIP extraction error.
+          for attempt in 1 2 3; do
+            echo "Android SDK package install attempt ${attempt}/3"
+            if sdkmanager --install "${packages[@]}"; then
+              test -d "$ANDROID_HOME/ndk/27.2.12479018"
+              test -d "$ANDROID_HOME/platforms/android-36"
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::SDK/NDK package installation failed; clearing incomplete downloads before retry."
+              rm -rf "$ANDROID_HOME/temp" "$ANDROID_HOME/.temp"
+              rm -rf "$ANDROID_HOME/ndk/27.2.12479018"
+              sleep $((attempt * 5))
+            fi
+          done
+          echo "::error::Could not install Android NDK 27.2.12479018 and Android platform 36 after 3 attempts."
+          exit 1
 
-## Removed Laya components
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
 
-The Laya decision engine, ONNX tokenizer wrapper, Rust tokenizer module, model bundle manager, and Laya-specific router documentation are removed from this branch. The Sherpa-ONNX static AAR remains for the independent STT/TTS path; the Microsoft ONNX Runtime Java/JNI dependency used by Laya is removed.
+      - name: Verify Android SDK
+        run: |
+          test -n "${ANDROID_HOME:-}"
+          test -d "$ANDROID_HOME/platforms/android-36"
+
+      - name: Cache native CMake state
+        uses: actions/cache@v4
+        with:
+          path: |
+            core/runtime-android/.cxx
+            core/runtime-android/src/.cxx
+          key: >-
+            native-${{ runner.os }}-
+            ${{ hashFiles(
+              'gradle.properties',
+              'settings.gradle.kts',
+              'build.gradle.kts',
+              'app/build.gradle.kts',
+              'gradle/libs.versions.toml',
+              'core/runtime-android/build.gradle.kts',
+              'core/runtime-android/src/main/cpp/**',
+              'core/runtime-android/src/main/cpp/cmake/**'
+            ) }}
+          restore-keys: |
+            native-${{ runner.os }}-
+      - name: Install and cache native compiler cache
+        shell: bash
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: 2G
+          CCACHE_COMPILERCHECK: content
+        run: |
+          set -euo pipefail
+          if ! command -v ccache >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ccache
+          fi
+          mkdir -p "$CCACHE_DIR"
+          ccache --version
+          ccache -M "$CCACHE_MAXSIZE"
+      - name: Restore native compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: >-
+            ccache-${{ runner.os }}-ndk27-arm64-
+            ${{ hashFiles(
+              'core/runtime-android/build.gradle.kts',
+              'core/runtime-android/src/main/cpp/**',
+              'core/runtime-android/src/main/cpp/cmake/**'
+            ) }}
+          restore-keys: |
+            ccache-${{ runner.os }}-ndk27-arm64-
+
+      - name: Verify OpenCL-first runtime invariants
+        run: |
+          set -euo pipefail
+          ! grep -R "GGML_OPENCL_ADRENO_XMEM_GEMM.*1" -n core/runtime-android/src/main/cpp
+          grep -q 'OPENCL_KERNEL_POLICY=UPSTREAM_DEVICE_CAPABILITY_SELECTION' core/runtime-android/src/main/cpp/native_runtime.cpp
+          # Never spoof device families: upstream kernels have family-specific
+          # subgroup assumptions, so unsupported devices must fail closed.
+          grep -q 'Do not spoof an unsupported GPU family' core/runtime-android/src/main/cpp/CMakeLists.txt
+          ! grep -q 'AI_CHAT_ADRENO_A7X_FAMILY_EXPANSION_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          # Match a real setenv call, not unsetenv (which contains setenv as a substring).
+          ! grep -Eq '(^|[^[:alnum:]_])setenv\("GGML_OPENCL_Q6K_GEMV_TILED"' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'GGML_OPENCL_USE_ADRENO_KERNELS OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'GGML_CPU_KLEIDIAI ON' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'GGML_OPENMP ON' core/runtime-android/src/main/cpp/CMakeLists.txt
+          # The generic CPU backend must stay on a portable ARMv8-A baseline.
+          # ISA-specialized kernels may dispatch at runtime, but global native/i8mm
+          # flags must never be forced on all arm64-v8a devices.
+          grep -q 'GGML_NATIVE OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'GGML_CPU_ARM_ARCH "armv8-a"' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'GGML_CPU_ARM_ARCH=armv8-a' core/runtime-android/build.gradle.kts
+          grep -q 'AI_CHAT_CPU_ARCH_POLICY baseline=armv8-a' core/runtime-android/src/main/cpp/CMakeLists.txt
+          ! grep -Eq -- '-mcpu=native|-march=armv8\.[2-9].*i8mm|-march=armv8\.[2-9].*dotprod' core/runtime-android/src/main/cpp/CMakeLists.txt
+          ! grep -Eq 'GGML_NATIVE=ON|GGML_NATIVE ON' core/runtime-android/build.gradle.kts core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'GGML_CPU_KLEIDIAI=ON' core/runtime-android/build.gradle.kts
+          grep -q 'GGML_OPENMP=ON' core/runtime-android/build.gradle.kts
+          grep -q 'LLAMA_LOAD_MODE_AUTO' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'NATIVE_OPENMP_POLICY enabled=1 linkage=static' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'NATIVE_KLEIDIAI_POLICY enabled=1 cpuRuntimeDispatch=1' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'NATIVE_CPU_ARCH_POLICY baseline=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'NATIVE_EXECUTION_POLICY mode=OPENCL_GPU_PREFERRED' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'wholeModelCpuFallback=enabled' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'OPENCL_ATTEMPT_FAILED reason=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'CPU_FALLBACK_STARTED gpuAttempted=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'CPU_FALLBACK_FAILED reason=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'OPENCL_MODEL_RESIDENCY_POLICY mode=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'NATIVE_EXECUTION_PROFILE mode=' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V3' core/runtime-android/src/main/cpp/cmake/patch_backend_assignment_trace.cmake
+          grep -q 'AI_CHAT_BACKEND_SPLIT_TIMING' core/runtime-android/src/main/cpp/cmake/patch_backend_assignment_trace.cmake
+          grep -q 'AI_CHAT_OPENCL_PROFILING=ON' core/runtime-android/build.gradle.kts
+          grep -q 'resident_max + 1' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          # Hybrid/recurrent memory is never rolled back by arbitrary token position.
+          # A sequence-state snapshot preserves the invariant global system prefix across sessions.
+          grep -q 'NATIVE_KV_CACHE_HYBRID_EXACT_REUSE' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'NATIVE_KV_CACHE_SYSTEM_PREFIX_SAVED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'NATIVE_KV_CACHE_SYSTEM_PREFIX_RESTORED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'NATIVE_KV_CACHE_TURN_PREFIX_SAVED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'NATIVE_KV_CACHE_TURN_PREFIX_RESTORED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'llama_state_seq_get_data' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'llama_state_seq_set_data' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'formatSystemPrefix' core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/Qwen3PromptFormatter.kt
+          grep -q 'cachePrefixTokens = cachePrefixTokens' core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/LlamaCppAndroidRuntimeAdapter.kt
+          grep -q 'continuationPrefixTokens = continuationPrefixTokens' core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/LlamaCppAndroidRuntimeAdapter.kt
+          grep -q 'resident_hybrid_exact_prefix' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          grep -q 'prompt_tokens.size() > g_cached_prompt_tokens.size()' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          ! grep -q 'NATIVE_KV_CACHE_HYBRID_DISABLED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
+          echo "OpenCL-first fallback policy, backend assignment, profiling, and KV-cache invariants verified"
+
+      - name: Assemble debug APK
+        run: >-
+          gradle
+          :core:runtime-android:assembleDebug
+          :app:assembleDebug
+          --stacktrace
+          --console=plain
+          --parallel
+
+      - name: Verify Cactus Needle, MiniLM ONNX and sherpa native linkage
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$apk"
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libsherpa-onnx-jni.so'
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libcactus_needle_jni.so'
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime.so'
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime4j_jni.so'
+          if unzip -Z1 "$apk" | grep -Eq '\.cact$'; then
+            echo "::error::Needle model weights must remain user-downloadable and must not be bundled in the APK"
+            exit 1
+          fi
+          unzip -p "$apk" lib/arm64-v8a/libonnxruntime4j_jni.so > "$RUNNER_TEMP/libonnxruntime4j_jni.so"
+          readelf -d --wide "$RUNNER_TEMP/libonnxruntime4j_jni.so" | grep -F 'libonnxruntime.so'
+          unzip -p "$apk" lib/arm64-v8a/libonnxruntime.so > "$RUNNER_TEMP/libonnxruntime.so"
+          readelf --dyn-syms --wide "$RUNNER_TEMP/libonnxruntime.so" > "$RUNNER_TEMP/onnxruntime-symbols.txt"
+          if ! awk '$7 != "UND" && $8 ~ /^OrtGetApiBase([@].*)?$/ { found=1 } END { exit !found }' "$RUNNER_TEMP/onnxruntime-symbols.txt"; then
+            echo "::error::Packaged libonnxruntime.so does not DEFINE OrtGetApiBase required by libonnxruntime4j_jni.so"
+            grep -F 'OrtGetApiBase' "$RUNNER_TEMP/onnxruntime-symbols.txt" || true
+            exit 1
+          fi
+          unzip -p "$apk" lib/arm64-v8a/libcactus_needle_jni.so > "$RUNNER_TEMP/libcactus_needle_jni.so"
+          if readelf -d --wide "$RUNNER_TEMP/libcactus_needle_jni.so" | grep -F 'libonnxruntime.so' > /dev/null; then
+            echo "::error::Cactus Needle JNI unexpectedly depends on ONNX Runtime"
+            exit 1
+          fi
+          unzip -p "$apk" lib/arm64-v8a/libsherpa-onnx-jni.so > "$RUNNER_TEMP/libsherpa-onnx-jni.so"
+          if readelf -d --wide "$RUNNER_TEMP/libsherpa-onnx-jni.so" | grep -F 'Shared library: [libonnxruntime.so]' > /dev/null; then
+            echo "::error::sherpa JNI dynamically depends on libonnxruntime.so; static-link AAR was not used"
+            exit 1
+          fi
+          echo "Verified: Needle JNI is packaged, MiniLM ONNX runtime/JNI match, and sherpa ORT is statically linked."
+
+      - name: Verify OpenCL profiling and static backend linkage
+        run: |
+          set -euo pipefail
+          source_file="$(find core/runtime-android -path '*/.cxx/*' -path '*/llama_cpp-src/ggml/src/ggml-opencl/ggml-opencl.cpp' -print -quit)"
+          test -n "$source_file"
+          grep -q 'AI_CHAT_OPENCL_PROFILE_PATCH_V4' "$source_file"
+          grep -q 'fperf_live' "$source_file"
+          grep -q 'cmd_queued_duration_ns' "$source_file"
+          grep -q 'cmd_submit_duration_ns' "$source_file"
+          grep -q 'cmd_complete_duration_ns' "$source_file"
+          grep -q 'cl_profiling.csv' "$source_file"
+
+          # The production runtime is intentionally static. Fail CI if the
+          # OpenCL backend target disappeared or the ggml registry was built
+          # without GGML_USE_OPENCL.
+          opencl_target="$(find core/runtime-android -path '*/.cxx/*' -type f \( -name 'build.ninja' -o -name 'rules.ninja' \) -print0 | xargs -0 grep -l 'ggml-opencl' | head -n 1 || true)"
+          test -n "$opencl_target"
+          native_dirs=()
+          for dir in core/runtime-android/.cxx core/runtime-android/src/.cxx; do
+            if [ -d "$dir" ]; then native_dirs+=( "$dir" ); fi
+          done
+          test "${#native_dirs[@]}" -gt 0
+          grep -R 'GGML_USE_OPENCL' "${native_dirs[@]}" >/dev/null
+          grep -R 'ggml-opencl' "${native_dirs[@]}" >/dev/null
+          grep -R 'GGML_USE_OPENMP' "${native_dirs[@]}" >/dev/null
+          grep -R 'GGML_USE_CPU_KLEIDIAI' "${native_dirs[@]}" >/dev/null
+          grep -R 'GGML_OPENMP_ENABLED' "${native_dirs[@]}" >/dev/null
+          echo "Static OpenCL backend, OpenMP and KleidiAI build integration verified: $opencl_target"
+          echo "OpenCL profiling instrumentation is present in the compiled llama.cpp source: $source_file"
+
+      - name: Verify APK ABI and size budget
+        run: |
+          set -euo pipefail
+          apk="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name "*.apk" -print -quit)"
+          test -n "$apk"
+          size_bytes="$(stat -c "%s" "$apk")"
+          size_mib="$((size_bytes / 1024 / 1024))"
+          echo "APK: $apk"
+          echo "APK size: ${size_mib} MiB (${size_bytes} bytes)"
+          echo "Largest packaged entries:"
+          unzip -l "$apk" | sort -nr | head -n 18 || true
+          unexpected_abis="$(unzip -Z1 "$apk" | grep -E "^lib/[^/]+/" | cut -d/ -f2 | sort -u | grep -v "^arm64-v8a$" || true)"
+          if [ -n "$unexpected_abis" ]; then
+            echo "::error::Unexpected native ABIs packaged: $unexpected_abis"
+            exit 1
+          fi
+          if [ "$size_bytes" -gt $((100 * 1024 * 1024)) ]; then
+            echo "::warning::Debug APK exceeds 100 MiB; keep the build artifact and review the size breakdown above."
+          fi
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-chat-test-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
+  android-lint:
+    name: Android lint
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Android SDK and the pinned NDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install the project's Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=("ndk;27.2.12479018" "platforms;android-36")
+          # sdkmanager occasionally receives a truncated/corrupt package archive.
+          # Retry from a clean temporary download area instead of failing the job
+          # on the first SeekableByteChannel/ZIP extraction error.
+          for attempt in 1 2 3; do
+            echo "Android SDK package install attempt ${attempt}/3"
+            if sdkmanager --install "${packages[@]}"; then
+              test -d "$ANDROID_HOME/ndk/27.2.12479018"
+              test -d "$ANDROID_HOME/platforms/android-36"
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::SDK/NDK package installation failed; clearing incomplete downloads before retry."
+              rm -rf "$ANDROID_HOME/temp" "$ANDROID_HOME/.temp"
+              rm -rf "$ANDROID_HOME/ndk/27.2.12479018"
+              sleep $((attempt * 5))
+            fi
+          done
+          echo "::error::Could not install Android NDK 27.2.12479018 and Android platform 36 after 3 attempts."
+          exit 1
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Cache exact native build state
+        uses: actions/cache@v4
+        with:
+          path: |
+            core/runtime-android/.cxx
+            core/runtime-android/src/.cxx
+          key: >-
+            native-lint-${{ runner.os }}-
+            ${{ hashFiles(
+              'gradle.properties',
+              'settings.gradle.kts',
+              'build.gradle.kts',
+              'gradle/libs.versions.toml',
+              'core/runtime-android/build.gradle.kts',
+              'core/runtime-android/src/main/cpp/**',
+              'core/runtime-android/src/main/cpp/cmake/**'
+            ) }}
+          restore-keys: |
+            native-lint-${{ runner.os }}-
+
+      - name: Run Android lint
+        run: >-
+          gradle
+          :app:lintDebug
+          --stacktrace
+          --console=plain
+          --configuration-cache
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-lint-report
+          path: |
+            app/build/reports/lint-results-debug.html
+            app/build/reports/lint-results-debug.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
