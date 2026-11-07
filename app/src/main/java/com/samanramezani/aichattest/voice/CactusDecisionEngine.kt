@@ -122,9 +122,10 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
 
             val calls = output.optJSONArray("function_calls") ?: JSONArray()
             // A rejected/ambiguous tool call is still a tool decision: never reinterpret it as chat.
-            lastToolSelected = output.optString("type") == "call" && calls.length() > 0
+            lastToolSelected = calls.length() > 0
             val suppressedCalls = output.optJSONArray("suppressed_calls")
             if (suppressedCalls != null && suppressedCalls.length() > 0) {
+                lastToolSelected = false
                 trace += "route=CHAT reason=needle-suppressed-call"
                 lastTrace = trace
                 return@synchronized null
