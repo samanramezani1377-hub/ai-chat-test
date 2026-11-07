@@ -39,9 +39,11 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             ambiguous intent, or anything not covered by the tools, return no tool call.
             Never infer a numeric target that the user did not say. For set_volume and
             set_brightness, "set" requires an explicit level from 0 through 10. A bare
-            number from 0 to 10 is already a level (7 means 70%). A number above 10
-            through 100 is a percentage and must be rounded to the nearest 10% level
-            (47% becomes level 5; 40 becomes level 4). Never guess a missing value.
+            An explicitly stated percentage (including 7% or 10%) must be rounded to
+            the nearest 10% level (7% becomes level 1; 47% becomes level 5). Only a bare
+            number without a percent marker from 0 to 10 is already a level (7 means 70%).
+            A bare number above 10 through 100 is treated as a percentage (40 becomes level 4).
+            Never guess a missing value.
             "Increase" and "decrease" do not require a value.
             Mute and unmute are volume actions. Do not confuse current time with work
             hours, durations, event times, or changing the clock. get_date means today's
@@ -66,7 +68,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             ))
             val volumeProperties = JSONObject()
                 .put("action", enumProperty("increase", "decrease", "set", "mute", "unmute"))
-                .put("value", integerProperty("Explicit target media volume level, 0 to 10. Bare 0-10 is a level; percentages or numbers above 10 are rounded to the nearest 10% step.", 0, 10))
+                .put("value", integerProperty("Explicit target media volume level, 0 to 10. A bare 0-10 is a level; any explicit percentage or bare number above 10 is rounded to the nearest 10% step.", 0, 10))
             tools.put(tool(
                 "set_volume",
                 "Change this phone's media volume. Persian requests include بلندتر، کم‌تر، قطع صدا، وصل صدا or تنظیم روی درصد. Never infer value.",
@@ -75,7 +77,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             ))
             val brightnessProperties = JSONObject()
                 .put("action", enumProperty("increase", "decrease", "set"))
-                .put("value", integerProperty("Explicit target screen brightness level, 0 to 10. Bare 0-10 is a level; percentages or numbers above 10 are rounded to the nearest 10% step.", 0, 10))
+                .put("value", integerProperty("Explicit target screen brightness level, 0 to 10. A bare 0-10 is a level; any explicit percentage or bare number above 10 is rounded to the nearest 10% step.", 0, 10))
             tools.put(tool(
                 "set_brightness",
                 "Change this phone's screen brightness. Use only for an explicit command to increase, decrease or set the display brightness.",
@@ -186,7 +188,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
                     "unmute" -> DinaCommand(DinaIntent.UNMUTE)
                     "set" -> {
                         val value = args.optInt("value", -1)
-                        if (value !in 0..100) return@synchronized null
+                        if (value !in 0..10) return@synchronized null
                         DinaCommand(DinaIntent.SET_VOLUME, value * 10, valueIsPercent = true)
                     }
                     else -> return@synchronized null
@@ -196,7 +198,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
                     "decrease" -> DinaCommand(DinaIntent.DECREASE_BRIGHTNESS)
                     "set" -> {
                         val value = args.optInt("value", -1)
-                        if (value !in 0..100) return@synchronized null
+                        if (value !in 0..10) return@synchronized null
                         DinaCommand(DinaIntent.SET_BRIGHTNESS, value * 10, valueIsPercent = true)
                     }
                     else -> return@synchronized null
