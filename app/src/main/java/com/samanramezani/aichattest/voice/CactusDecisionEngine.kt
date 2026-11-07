@@ -224,7 +224,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
         val length = modelFile.length()
         if (initialized && loadedLastModified == modified && loadedLength == length) return
         initialized = false
-        check(CactusNeedleNative.loadModelNative(modelFile.absolutePath)) {
+        check(CactusNeedleNative.loadModelNative(modelFile.absolutePath, modified, length)) {
             "بارگذاری فایل needle3.cact ناموفق بود."
         }
         val prefixTokens = CactusNeedleNative.initNative(systemPrompt, toolsJson)
@@ -247,7 +247,7 @@ private object CactusNeedleNative {
         System.loadLibrary("cactus_needle_jni")
     }
 
-    external fun loadModelNative(path: String): Boolean
+    external fun loadModelNative(path: String, lastModified: Long, length: Long): Boolean
     external fun initNative(systemPrompt: String, toolsJson: String): Int
     external fun completeNative(input: String, maxNewTokens: Int): String
     external fun resetNative()

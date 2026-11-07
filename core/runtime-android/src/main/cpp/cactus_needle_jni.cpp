@@ -11,6 +11,8 @@ namespace {
 std::mutex g_needle_mutex;
 std::string g_loaded_model_path;
 bool g_model_loaded = false;
+jlong g_loaded_last_modified = 0;
+jlong g_loaded_length = 0;
 
 void throwIllegalState(JNIEnv* env, const std::string& message) {
     jclass exception = env->FindClass("java/lang/IllegalStateException");
@@ -25,12 +27,18 @@ std::string needleError(const char* fallback) {
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_samanramezani_aichattest_voice_CactusNeedleNative_loadModelNative(
-    JNIEnv* env, jobject /* thiz */, jstring model_path) {
+    JNIEnv* env, jobject /* thiz */, jstring model_path,
+    jlong last_modified, jlong expected_length) {
     std::lock_guard<std::mutex> guard(g_needle_mutex);
     const char* raw_path = env->GetStringUTFChars(model_path, nullptr);
     if (raw_path == nullptr) return JNI_FALSE;
     const std::string path(raw_path);
     env->ReleaseStringUTFChars(model_path, raw_path);
+
+    if (g_model_loaded && g_loaded_model_path == path &&
+        g_loaded_last_modified == last_modified && g_loaded_length == expected_length) {
+        return JNI_TRUE;
+    }
 
     std::ifstream input(path, std::ios::binary | std::ios::ate);
     if (!input) {
@@ -38,7 +46,7 @@ Java_com_samanramezani_aichattest_voice_CactusNeedleNative_loadModelNative(
         return JNI_FALSE;
     }
     const std::streamsize size = input.tellg();
-    if (size <= 0 || size > 128LL * 1024LL * 1024LL) {
+    if (size <= 0 || size != expected_length || size > 128LL * 1024LL * 1024LL) {
         throwIllegalState(env, "Needle .cact model has an invalid size.");
         return JNI_FALSE;
     }
@@ -56,6 +64,8 @@ Java_com_samanramezani_aichattest_voice_CactusNeedleNative_loadModelNative(
         return JNI_FALSE;
     }
     g_loaded_model_path = path;
+    g_loaded_last_modified = last_modified;
+    g_loaded_length = expected_length;
     g_model_loaded = true;
     return JNI_TRUE;
 }
