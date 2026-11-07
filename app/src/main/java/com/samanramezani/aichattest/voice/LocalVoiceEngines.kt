@@ -207,7 +207,6 @@ class LocalPiperTts(private val entry: VoiceModelEntry) : LocalTtsEngine {
             if (!cancelled.get() && !awaitPlaybackDrain(2000L)) {
                 // Some Android audio routes leave a freshly-created streaming track stalled at
                 // playbackHead=0. Re-prime the same track once before declaring TTS failure.
-                onSynthesisComplete(0L)
                 runCatching { track.pause() }
                 runCatching { track.flush() }
                 check(track.state == AudioTrack.STATE_INITIALIZED) {
