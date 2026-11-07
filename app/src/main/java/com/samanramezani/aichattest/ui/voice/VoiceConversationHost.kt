@@ -29,8 +29,8 @@ import com.samanramezani.aichattest.voice.VoiceModelStore
 import com.samanramezani.aichattest.voice.PiperComponent
 import com.samanramezani.aichattest.voice.SmallSttComponent
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
-import com.samanramezani.aichattest.voice.LayaDecisionModelStore
-import com.samanramezani.aichattest.voice.LayaDecisionEngine
+import com.samanramezani.aichattest.voice.CactusNeedleModelStore
+import com.samanramezani.aichattest.voice.CactusDecisionEngine
 import com.samanramezani.aichattest.voice.DinaDeviceCommandExecutor
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.conversation.ConversationMessage
@@ -59,11 +59,11 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     val context = LocalContext.current
     val uiScope = rememberCoroutineScope()
     val store = remember(context) { VoiceModelStore(context.contentResolver, File(context.filesDir, "voice-models")) }
-    val layaStore = remember(context) {
-        LayaDecisionModelStore(context.contentResolver, File(context.filesDir, "voice-models/laya-int4"))
+    val needleStore = remember(context) {
+        CactusNeedleModelStore(context, File(context.filesDir, "voice-models/cactus-needle3"))
     }
-    var layaReady by remember { mutableStateOf(layaStore.isReady()) }
-    var layaStatus by remember { mutableStateOf(layaStore.status()) }
+    var needleReady by remember { mutableStateOf(needleStore.isReady()) }
+    var needleStatus by remember { mutableStateOf(needleStore.status()) }
     var sttModels by remember { mutableStateOf(store.list(VoiceModelKind.STT)) }
     var ttsModels by remember { mutableStateOf(store.list(VoiceModelKind.TTS)) }
     var missingKoochikComponents by remember { mutableStateOf(store.missingKoochikComponents()) }
@@ -124,7 +124,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
 
     val controller = remember(container, context) {
         VoiceConversationController(context, container,
-            LayaDecisionEngine(File(context.filesDir, "voice-models/laya-int4")),
+            CactusDecisionEngine(needleStore.modelFile),
             onStatus = { value -> uiScope.launch(Dispatchers.Main.immediate) { updateVoiceStatus(value) } },
             onDiagnostic = { value -> uiScope.launch(Dispatchers.Main.immediate) { diagnosticLogs = (diagnosticLogs + "[${System.currentTimeMillis()}] $value").takeLast(200) } },
             onListening = { value -> uiScope.launch(Dispatchers.Main.immediate) { listening = value; busy = false } },
@@ -299,45 +299,44 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         }
     }
 
-    val layaPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+    val needlePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) uiScope.launch {
             busy = true
-            layaStatus = "در حال وارد کردن و اعتبارسنجی مدل محلی Laya INT4…"
+            needleStatus = "در حال وارد کردن فایل Cactus Needle 3…"
             try {
-                layaStatus = withContext(Dispatchers.IO) { layaStore.importBundle(uri) }
-                layaReady = layaStore.isReady()
-                updateVoiceStatus(layaStatus)
+                needleStatus = withContext(Dispatchers.IO) { needleStore.importModel(uri) }
+                needleReady = needleStore.isReady()
+                updateVoiceStatus(needleStatus)
             } catch (t: Throwable) {
-                layaStatus = "LAYA-IMPORT: ${t.message ?: t.javaClass.simpleName}"
-                updateVoiceStatus(layaStatus)
+                needleStatus = "CACTUS-IMPORT: ${t.message ?: t.javaClass.simpleName}"
+                updateVoiceStatus(needleStatus)
             } finally { busy = false }
         }
     }
 
-
-    fun downloadLayaModel() {
+    fun downloadNeedleModel() {
         uiScope.launch {
             busy = true
             val downloadFinished = AtomicBoolean(false)
-            layaStatus = "در حال اتصال به Hugging Face و دریافت بستهٔ رسمی Laya INT4…"
-            updateVoiceStatus(layaStatus)
+            needleStatus = "در حال دریافت مدل رسمی Cactus Needle 3…"
+            updateVoiceStatus(needleStatus)
             try {
                 val result = withContext(Dispatchers.IO) {
-                    layaStore.downloadOfficialBundle { progress ->
+                    needleStore.downloadOfficialModel { progress ->
                         uiScope.launch(Dispatchers.Main.immediate) {
-                            if (!downloadFinished.get()) layaStatus = progress
+                            if (!downloadFinished.get()) needleStatus = progress
                         }
                     }
                 }
                 downloadFinished.set(true)
-                layaReady = layaStore.isReady()
-                layaStatus = result
+                needleReady = needleStore.isReady()
+                needleStatus = result
                 updateVoiceStatus(result)
             } catch (t: Throwable) {
                 downloadFinished.set(true)
-                layaReady = layaStore.isReady()
-                layaStatus = "LAYA-DOWNLOAD: ${t.message ?: t.javaClass.simpleName}"
-                updateVoiceStatus(layaStatus)
+                needleReady = needleStore.isReady()
+                needleStatus = "CACTUS-DOWNLOAD: ${t.message ?: t.javaClass.simpleName}"
+                updateVoiceStatus(needleStatus)
             } finally {
                 downloadFinished.set(true)
                 busy = false
@@ -358,10 +357,10 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
         missingTtsComponents = missingTtsComponents,
         activeSttId = activeSttId,
         activeTtsId = activeTtsId,
-        layaModelReady = layaReady,
-        layaStatus = layaStatus,
-        onImportLaya = { layaPicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
-        onDownloadLaya = { downloadLayaModel() },
+        needleModelReady = needleReady,
+        needleStatus = needleStatus,
+        onImportNeedle = { needlePicker.launch(arrayOf("application/octet-stream", "*/*")) },
+        onDownloadNeedle = { downloadNeedleModel() },
         onBack = onBack,
         onImportStt = { sttPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-bzip2", "application/octet-stream")) },
         onImportKoochikModel = { koochikModelPicker.launch(arrayOf("application/onnx", "application/octet-stream", "*/*")) },
@@ -488,7 +487,7 @@ internal fun shouldInterruptForVoiceBargeIn(
 internal class VoiceConversationController(
     private val context: Context,
     private val container: AppContainer,
-    private val decisionEngine: LayaDecisionEngine,
+    private val decisionEngine: CactusDecisionEngine,
     private val onStatus: (String) -> Unit,
     private val onDiagnostic: (String) -> Unit,
     private val onListening: (Boolean) -> Unit,
@@ -825,7 +824,7 @@ internal class VoiceConversationController(
         try {
             onStatus("در حال بررسی درخواست فارسی روی دستگاه…")
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            val layaDecision = runCatching {
+            val needleDecision = runCatching {
                 decisionEngine.classify(
                     utterance,
                     audioManager.getStreamVolume(AudioManager.STREAM_MUSIC),
@@ -835,14 +834,14 @@ internal class VoiceConversationController(
             decisionEngine.lastError?.let { modelError ->
                 if (lastLoggedIntentModelError != modelError) {
                     lastLoggedIntentModelError = modelError
-                    onDiagnostic(modelError + "؛ هیچ فرمانی بدون تصمیم معتبر Laya اجرا نمی‌شود و متن اصلی به مدل گفت‌وگو می‌رود.")
+                    onDiagnostic(modelError + "؛ هیچ فرمانی بدون تصمیم معتبر Cactus اجرا نمی‌شود و متن اصلی به مدل گفت‌وگو می‌رود.")
                 }
             }
-            layaDecision?.trace?.forEach { onDiagnostic("LAYA-DECISION: $it") }
-            // Laya is the sole decision-maker for local voice actions.
+            needleDecision?.trace?.forEach { onDiagnostic("CACTUS-DECISION: $it") }
+            // Cactus is the sole decision-maker for local voice actions.
             // Never infer an intent or extract a number with a parallel rule/regex parser.
-            // If Laya is unavailable or abstains, forward the exact original transcript to chat.
-            val command = layaDecision?.command
+            // If Cactus is unavailable or abstains, forward the exact original transcript to chat.
+            val command = needleDecision?.command
                 ?: com.samanramezani.aichattest.voice.DinaCommand(
                     com.samanramezani.aichattest.voice.DinaIntent.CHAT
                 )
@@ -852,7 +851,7 @@ internal class VoiceConversationController(
                     .orEmpty()
                 if (localReply.isNotBlank()) {
                     persistUserMessageIfMissing(utterance)
-                    onDiagnostic("DINA-LOCAL-COMMAND: intent=${command.intent.name} parameter=${command.value ?: "none"} classifier=${if (layaDecision != null && layaDecision.command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) "laya-multilingual-int4" else "safe-rules"} model=local-device-executor")
+                    onDiagnostic("DINA-LOCAL-COMMAND: intent=${command.intent.name} parameter=${command.value ?: "none"} classifier=${if (needleDecision != null && CactusDecision.command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) "Cactus-multilingual-int4" else "needle-abstain"} model=local-device-executor")
                     queue.trySend(localReply)
                     queue.close()
                     activeSpeechJob.join()

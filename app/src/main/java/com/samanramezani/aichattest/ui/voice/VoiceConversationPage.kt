@@ -43,10 +43,10 @@ internal fun VoiceConversationPage(
     missingTtsComponents: List<String>,
     activeSttId: String?,
     activeTtsId: String?,
-    layaModelReady: Boolean,
-    layaStatus: String,
-    onImportLaya: () -> Unit,
-    onDownloadLaya: () -> Unit,
+    needleModelReady: Boolean,
+    needleStatus: String,
+    onImportNeedle: () -> Unit,
+    onDownloadNeedle: () -> Unit,
     onBack: () -> Unit,
     onImportStt: () -> Unit,
     onImportKoochikModel: () -> Unit,
@@ -106,23 +106,23 @@ internal fun VoiceConversationPage(
                 }
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("۱. تصمیم‌گیری محلی فارسی · Laya INT4", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("۱. تصمیم‌گیری محلی فارسی · Cactus Needle 3", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "مدل تصمیم‌گیری Laya چندمرحله‌ای و کاملاً محلی است: ابتدا نوع درخواست، سپس عملیات دستگاه و در صورت نیاز سطح هدف را انتخاب می‌کند. فرمان‌های ساعت، تاریخ، صدا و روشنایی پیش از مدل گفت‌وگو اجرا می‌شوند. اگر تصمیم مدل مطمئن نباشد، فرمان دستگاه اجرا نمی‌شود و متن اصلی بدون تغییر به مدل گفت‌وگو فرستاده می‌شود. متن درخواست عادی بدون افزودن برچسب تصمیم‌گیری به مدل گفت‌وگو فرستاده می‌شود.",
+                            "Needle 3 به‌صورت کاملاً محلی درخواست فارسی را به ابزارهای ساعت، تاریخ، صدا و روشنایی نگاشت می‌کند و مقدارهای عددی را از خود درخواست استخراج می‌کند. اگر ابزار معتبر یا اطمینان کافی وجود نداشته باشد، هیچ فرمانی اجرا نمی‌شود و متن اصلی بدون تغییر به مدل مکالمه سپرده می‌شود.",
                             style = MaterialTheme.typography.bodySmall,
                         )
-                        Button(onClick = onDownloadLaya, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                            Text(if (layaModelReady) "دریافت مجدد و تعمیر مدل رسمی Laya" else "دانلود و نصب خودکار Laya INT4 · حدود ۲۲۰ مگابایت")
+                        Button(onClick = onDownloadNeedle, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (needleModelReady) "دریافت مجدد مدل رسمی Cactus Needle 3" else "دانلود مدل Cactus Needle 3 · حدود ۳۵ مگابایت")
                         }
-                        OutlinedButton(onClick = onImportLaya, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                            Text("وارد کردن بسته ZIP از حافظه")
+                        OutlinedButton(onClick = onImportNeedle, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text("وارد کردن فایل .cact از حافظه گوشی")
                         }
-                        Text("دانلود خودکار، فایل‌های رسمی مدل چندزبانه، وزن‌های خارجی، tokenizer و تنظیمات را مستقیم از Hugging Face می‌گیرد؛ دانلود به‌صورت جریانی در حافظه خصوصی برنامه ذخیره و پیش از فعال‌شدن بررسی می‌شود. مدل داخل APK نیست. اگر ZIP کامل را از قبل داری، می‌توانی آن را وارد کنی. بدون نصب موفق Laya تصمیم محلی اجرا نمی‌شود.", style = MaterialTheme.typography.bodySmall)
+                        Text("فایل needle3.cact از نسخه ثابت‌شده رسمی Hugging Face دریافت، از نظر اندازه و SHA-256 بررسی و در پوشه Download/AI Chat Test/Cactus ذخیره می‌شود؛ نسخه فعال نیز در فضای داخلی برنامه نگه‌داری می‌شود. برای ورود دستی، فایل .cact را از حافظه گوشی انتخاب کن. بدون بارگذاری موفق مدل، هیچ فرمان محلی اجرا نمی‌شود.", style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(
-                            onClick = { uriHandler.openUri("https://huggingface.co/androidli/laya-multilingual-onnx-int4/tree/main") },
+                            onClick = { uriHandler.openUri("https://huggingface.co/Cactus-Compute/needle3/tree/d6c7d6a2e9655505e0f8e23339356dd1705900eb") },
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text("صفحه رسمی فایل‌های مدل Laya INT4") }
-                        Text(layaStatus, style = MaterialTheme.typography.bodySmall, color = if (layaModelReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        ) { Text("صفحه رسمی فایل‌های مدل Cactus Needle 3") }
+                        Text(needleStatus, style = MaterialTheme.typography.bodySmall, color = if (needleModelReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 Card(Modifier.fillMaxWidth()) {

@@ -213,3 +213,68 @@ if (ANDROID)
         VISIBILITY_INLINES_HIDDEN ON
     )
 endif()
+
+
+# Cactus Needle 3: pinned official Android arm64 engine, linked into a small JNI bridge.
+# The model weights remain a user-downloadable .cact file and are never bundled in the APK.
+if (ANDROID)
+    if (NOT CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
+        message(FATAL_ERROR "Cactus Needle 3 engine is published for arm64-v8a only")
+    endif()
+
+    set(CACTUS_NEEDLE_REVISION "d6c7d6a2e9655505e0f8e23339356dd1705900eb")
+    set(CACTUS_NEEDLE_DIR "\${CMAKE_CURRENT_BINARY_DIR}/cactus-needle3")
+    set(CACTUS_NEEDLE_ARCHIVE "\${CACTUS_NEEDLE_DIR}/libneedle.a")
+    file(MAKE_DIRECTORY "\${CACTUS_NEEDLE_DIR}")
+
+    if (EXISTS "\${CACTUS_NEEDLE_ARCHIVE}")
+        file(SIZE "\${CACTUS_NEEDLE_ARCHIVE}" CACTUS_NEEDLE_EXISTING_SIZE)
+        if (NOT CACTUS_NEEDLE_EXISTING_SIZE EQUAL 2177676)
+            file(REMOVE "\${CACTUS_NEEDLE_ARCHIVE}")
+        endif()
+    endif()
+
+    if (NOT EXISTS "\${CACTUS_NEEDLE_ARCHIVE}")
+        file(DOWNLOAD
+            "https://huggingface.co/Cactus-Compute/needle3/resolve/\${CACTUS_NEEDLE_REVISION}/android-arm64/libneedle.a"
+            "\${CACTUS_NEEDLE_ARCHIVE}"
+            TLS_VERIFY ON
+            EXPECTED_SIZE 2177676
+            STATUS CACTUS_NEEDLE_DOWNLOAD_STATUS
+        )
+        list(GET CACTUS_NEEDLE_DOWNLOAD_STATUS 0 CACTUS_NEEDLE_DOWNLOAD_CODE)
+        if (NOT CACTUS_NEEDLE_DOWNLOAD_CODE EQUAL 0)
+            file(REMOVE "\${CACTUS_NEEDLE_ARCHIVE}")
+            message(FATAL_ERROR "Could not download the pinned Cactus Needle 3 Android engine: \${CACTUS_NEEDLE_DOWNLOAD_STATUS}")
+        endif()
+    endif()
+
+    file(SIZE "\${CACTUS_NEEDLE_ARCHIVE}" CACTUS_NEEDLE_ARCHIVE_SIZE)
+    if (NOT CACTUS_NEEDLE_ARCHIVE_SIZE EQUAL 2177676)
+        message(FATAL_ERROR "Cactus Needle 3 Android engine size mismatch: \${CACTUS_NEEDLE_ARCHIVE_SIZE}")
+    endif()
+    file(SHA256 "\${CACTUS_NEEDLE_ARCHIVE}" CACTUS_NEEDLE_ARCHIVE_SHA256)
+    string(SUBSTRING "\${CACTUS_NEEDLE_ARCHIVE_SHA256}" 0 8 CACTUS_NEEDLE_SHA_PREFIX)
+    string(LENGTH "\${CACTUS_NEEDLE_ARCHIVE_SHA256}" CACTUS_NEEDLE_SHA_LENGTH)
+    math(EXPR CACTUS_NEEDLE_SHA_SUFFIX_OFFSET "\${CACTUS_NEEDLE_SHA_LENGTH} - 6")
+    string(SUBSTRING "\${CACTUS_NEEDLE_ARCHIVE_SHA256}" \${CACTUS_NEEDLE_SHA_SUFFIX_OFFSET} 6 CACTUS_NEEDLE_SHA_SUFFIX)
+    if (NOT CACTUS_NEEDLE_SHA_PREFIX STREQUAL "7aa6de61" OR
+        NOT CACTUS_NEEDLE_SHA_SUFFIX STREQUAL "3a2fa0")
+        message(FATAL_ERROR "Cactus Needle 3 Android engine SHA-256 fingerprint mismatch")
+    endif()
+
+    add_library(cactus_needle_engine STATIC IMPORTED GLOBAL)
+    set_target_properties(cactus_needle_engine PROPERTIES
+        IMPORTED_LOCATION "\${CACTUS_NEEDLE_ARCHIVE}"
+    )
+
+    add_library(cactus_needle_jni SHARED cactus_needle_jni.cpp)
+    target_include_directories(cactus_needle_jni PRIVATE "\${CMAKE_CURRENT_LIST_DIR}")
+    target_compile_options(cactus_needle_jni PRIVATE -Os -ffunction-sections -fdata-sections)
+    target_link_options(cactus_needle_jni PRIVATE -Wl,--gc-sections -Wl,--strip-all)
+    target_link_libraries(cactus_needle_jni PRIVATE cactus_needle_engine android log m dl)
+    set_target_properties(cactus_needle_jni PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+    )
+endif()
