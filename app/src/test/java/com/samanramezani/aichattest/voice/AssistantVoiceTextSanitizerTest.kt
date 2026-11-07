@@ -20,6 +20,23 @@ class AssistantVoiceTextSanitizerTest {
         assertEquals("پاسخ نهایی", sanitizeAssistantVoiceText("<think>تفکر داخلی</think>پاسخ نهایی"))
     }
 
+    @Test fun dropsClosingChannelOnly() {
+        assertEquals("", sanitizeAssistantVoiceText("</channel>"))
+    }
+
+    @Test fun stripsClosingChannelAfterFinalAnswer() {
+        assertEquals("ساعت ۹ است.", sanitizeAssistantVoiceText("<|channel|>final\\nساعت ۹ است.</channel>"))
+    }
+
+    @Test fun doesNotLeakIncompleteFinalChannelName() {
+        assertEquals("", sanitizeAssistantVoiceText("<|channel|>fin"))
+    }
+
+    @Test fun holdsPartialChannelControlToken() {
+        assertEquals("", sanitizeAssistantVoiceText("<|chan"))
+        assertEquals("", sanitizeAssistantVoiceText("</chan"))
+    }
+
     @Test fun preservesOrdinaryPlainText() {
         assertEquals("سلام، چطور کمک کنم؟", sanitizeAssistantVoiceText("سلام، چطور کمک کنم؟"))
     }
