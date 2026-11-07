@@ -38,7 +38,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             quoted commands, negated commands, hypothetical requests, other devices,
             ambiguous intent, or anything not covered by the tools, return no tool call.
             Never infer a numeric target that the user did not say. For set_volume and
-            set_brightness, "set" requires an explicit level from 0 through 10. A bare
+            set_brightness, "set" requires an explicit level from 0 through 10.
             An explicitly stated percentage (including 7% or 10%) must be rounded to
             the nearest 10% level (7% becomes level 1; 47% becomes level 5). Only a bare
             number without a percent marker from 0 to 10 is already a level (7 means 70%).

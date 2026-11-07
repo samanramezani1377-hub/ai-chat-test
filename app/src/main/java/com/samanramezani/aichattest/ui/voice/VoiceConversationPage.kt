@@ -117,7 +117,7 @@ internal fun VoiceConversationPage(
                         OutlinedButton(onClick = onImportNeedle, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                             Text("وارد کردن فایل .cact از حافظه گوشی")
                         }
-                        Text("فایل needle3.cact از نسخه ثابت‌شده رسمی Hugging Face دریافت، از نظر اندازه و SHA-256 بررسی و در پوشه Download/AI Chat Test/Cactus ذخیره می‌شود؛ نسخه فعال نیز در فضای داخلی برنامه نگه‌داری می‌شود. برای ورود دستی، فایل .cact را از حافظه گوشی انتخاب کن. بدون بارگذاری موفق مدل، هیچ فرمان محلی اجرا نمی‌شود.", style = MaterialTheme.typography.bodySmall)
+                        Text("فایل needle3.cact از نسخه ثابت‌شده رسمی Hugging Face دریافت، از نظر اندازه و اثر انگشت SHA-256 بررسی و در پوشه Download/AI Chat Test/Cactus ذخیره می‌شود؛ نسخه فعال نیز در فضای داخلی برنامه نگه‌داری می‌شود. برای ورود دستی، فایل .cact را از حافظه گوشی انتخاب کن. بدون بارگذاری موفق مدل، هیچ فرمان محلی اجرا نمی‌شود.", style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(
                             onClick = { uriHandler.openUri("https://huggingface.co/Cactus-Compute/needle3/tree/d6c7d6a2e9655505e0f8e23339356dd1705900eb") },
                             modifier = Modifier.fillMaxWidth(),
