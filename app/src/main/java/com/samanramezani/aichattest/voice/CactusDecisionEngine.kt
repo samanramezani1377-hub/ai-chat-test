@@ -28,30 +28,14 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
         private const val MIN_READ_ONLY_CONFIDENCE = 0.50
         private const val MIN_MUTATION_CONFIDENCE = 0.70
 
-        private val systemPrompt = """
-            You are the on-device Persian voice-action router for an Android phone.
-            Select a tool only when the user's current utterance explicitly requests
-            an action on this phone. The user's language is primarily Persian (Farsi).
-            Do not answer conversational questions. For greetings, knowledge questions,
-            quoted commands, negated commands, hypothetical requests, other devices,
-            ambiguous intent, or anything not covered by the tools, return no tool call.
-            Never infer a numeric target that the user did not say. set_volume and
-            set_brightness require an explicit target level from 0 through 10.
-            An explicitly stated percentage (including 7% or 10%) must be rounded to
-            the nearest 10% level (7% becomes level 1; 47% becomes level 5). Only a bare
-            number without a percent marker from 0 to 10 is already a level (7 means 70%).
-            A bare number above 10 through 100 is treated as a percentage (40 becomes level 4).
-            Never guess a missing value. adjust_volume and adjust_brightness do not
-            require a numeric value. get_clock action must be either time or date.
-            Never call more than one tool for one utterance. Be conservative: abstain
-            rather than guess.
-        """.trimIndent()
+        // Needle treats the system turn as environment facts, not behavioural instructions.
+        private val systemFacts = "locale: fa-IR; device: Android phone"
 
         private val toolsJson: String by lazy {
             val tools = JSONArray()
             tools.put(tool(
                 "get_clock",
-                "Read the current local time or today's date on this Android phone.",
+                "Read the current local time or today's date on this Android phone; Persian requests include ساعت الان چنده and تاریخ امروز چنده.",
                 JSONObject().put("action", enumProperty("time", "date")),
                 JSONArray().put("action"),
             ))
@@ -63,19 +47,19 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             ))
             tools.put(tool(
                 "set_volume",
-                "Set this phone's media volume to an explicitly stated target level from 0 to 10.",
+                "Set this phone's media volume to a stated 0–10 level. Persian requests include تنظیم صدا روی عدد یا درصد مشخص.",
                 JSONObject().put("value", integerProperty("Target media volume level, 0 to 10. A bare 0-10 is a level; an explicit percentage or bare number above 10 is rounded to the nearest 10% step.", 0, 10)),
                 JSONArray().put("value"),
             ))
             tools.put(tool(
                 "adjust_brightness",
-                "Increase or decrease this phone's screen brightness.",
+                "Increase or decrease this phone's screen brightness. Persian phrases include روشن‌تر، کم‌نورتر، نور صفحه را زیاد کن، نور صفحه را کم کن.",
                 JSONObject().put("action", enumProperty("increase", "decrease")),
                 JSONArray().put("action"),
             ))
             tools.put(tool(
                 "set_brightness",
-                "Set this phone's screen brightness to an explicitly stated target level from 0 to 10.",
+                "Set this phone's screen brightness to a stated 0–10 level. Persian requests include تنظیم نور صفحه روی عدد یا درصد مشخص.",
                 JSONObject().put("value", integerProperty("Target screen brightness level, 0 to 10. A bare 0-10 is a level; an explicit percentage or bare number above 10 is rounded to the nearest 10% step.", 0, 10)),
                 JSONArray().put("value"),
             ))
@@ -210,7 +194,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
         check(CactusNeedleNative.loadModelNative(modelFile.absolutePath, modified, length)) {
             "بارگذاری فایل needle3.cact ناموفق بود."
         }
-        val prefixTokens = CactusNeedleNative.initNative(systemPrompt, toolsJson)
+        val prefixTokens = CactusNeedleNative.initNative(systemFacts, toolsJson)
         check(prefixTokens >= 0) { "ساخت زمینه ابزارهای Needle ناموفق بود." }
         loadedLastModified = modified
         loadedLength = length
