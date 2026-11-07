@@ -57,7 +57,7 @@ Java_com_samanramezani_aichattest_voice_CactusNeedleNative_loadModelNative(
         return JNI_FALSE;
     }
 
-    needle_reset();
+    if (g_model_loaded) needle_reset();
     const int result = needle_load(bytes.data(), static_cast<unsigned long long>(bytes.size()));
     if (result < 0 || (needle_models() & NEEDLE_TEXT) == 0) {
         throwIllegalState(env, needleError("Needle model loading failed."));
