@@ -239,7 +239,6 @@ if (ANDROID)
             "https://huggingface.co/Cactus-Compute/needle3/resolve/${CACTUS_NEEDLE_REVISION}/android-arm64/libneedle.a"
             "${CACTUS_NEEDLE_ARCHIVE}"
             TLS_VERIFY ON
-            EXPECTED_SIZE 2177676
             STATUS CACTUS_NEEDLE_DOWNLOAD_STATUS
         )
         list(GET CACTUS_NEEDLE_DOWNLOAD_STATUS 0 CACTUS_NEEDLE_DOWNLOAD_CODE)
