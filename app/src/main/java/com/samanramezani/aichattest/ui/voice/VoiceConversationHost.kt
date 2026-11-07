@@ -837,7 +837,7 @@ internal class VoiceConversationController(
                     onDiagnostic(modelError + "؛ هیچ فرمانی بدون تصمیم معتبر Cactus اجرا نمی‌شود و متن اصلی به مدل گفت‌وگو می‌رود.")
                 }
             }
-            needleDecision?.trace?.forEach { onDiagnostic("CACTUS-DECISION: $it") }
+            decisionEngine.lastTrace.forEach { onDiagnostic("CACTUS-DECISION: $it") }
             // Cactus is the sole decision-maker for local voice actions.
             // Never infer an intent or extract a number with a parallel rule/regex parser.
             // If Cactus is unavailable or abstains, forward the exact original transcript to chat.

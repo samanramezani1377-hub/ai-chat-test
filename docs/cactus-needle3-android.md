@@ -25,8 +25,8 @@ Needle is given four tools only:
 
 - get_time: direct request for the current local time.
 - get_date: direct request for today's date.
-- set_volume: increase, decrease, mute, unmute, or set an explicitly stated 0–100 percentage.
-- set_brightness: increase, decrease, or set an explicitly stated 0–100 percentage.
+- set_volume: increase, decrease, mute, unmute, or set an explicitly stated target on Laya's 0–10 scale. A bare 0–10 value is a level; a percentage or bare number above 10 is rounded to the nearest 10% step.
+- set_brightness: increase, decrease, or set an explicitly stated target using the same 0–10 / nearest-10%-step rule.
 
 The model does not generate conversational answers. If it returns no single valid tool call, returns a suppressed call, has insufficient confidence, omits a required numeric target, or returns an unknown tool, the router abstains and the unchanged utterance continues to the existing conversation model. No regex or keyword classifier is used as a fallback. State-changing actions use a higher confidence threshold than read-only time/date requests.
 

@@ -38,8 +38,11 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             quoted commands, negated commands, hypothetical requests, other devices,
             ambiguous intent, or anything not covered by the tools, return no tool call.
             Never infer a numeric target that the user did not say. For set_volume and
-            set_brightness, the action "set" requires an explicit integer value from
-            0 through 100. "Increase" and "decrease" do not require a value.
+            set_brightness, "set" requires an explicit level from 0 through 10. A bare
+            number from 0 to 10 is already a level (7 means 70%). A number above 10
+            through 100 is a percentage and must be rounded to the nearest 10% level
+            (47% becomes level 5; 40 becomes level 4). Never guess a missing value.
+            "Increase" and "decrease" do not require a value.
             Mute and unmute are volume actions. Do not confuse current time with work
             hours, durations, event times, or changing the clock. get_date means today's
             date only, not a historical or future date. Never call more than one tool
@@ -63,7 +66,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             ))
             val volumeProperties = JSONObject()
                 .put("action", enumProperty("increase", "decrease", "set", "mute", "unmute"))
-                .put("value", integerProperty("Explicit target media volume percentage, 0 to 100. Required only for action=set.", 0, 100))
+                .put("value", integerProperty("Explicit target media volume level, 0 to 10. Bare 0-10 is a level; percentages or numbers above 10 are rounded to the nearest 10% step.", 0, 10))
             tools.put(tool(
                 "set_volume",
                 "Change this phone's media volume. Persian requests include بلندتر، کم‌تر، قطع صدا، وصل صدا or تنظیم روی درصد. Never infer value.",
@@ -72,7 +75,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             ))
             val brightnessProperties = JSONObject()
                 .put("action", enumProperty("increase", "decrease", "set"))
-                .put("value", integerProperty("Explicit target screen brightness percentage, 0 to 100. Required only for action=set.", 0, 100))
+                .put("value", integerProperty("Explicit target screen brightness level, 0 to 10. Bare 0-10 is a level; percentages or numbers above 10 are rounded to the nearest 10% step.", 0, 10))
             tools.put(tool(
                 "set_brightness",
                 "Change this phone's screen brightness. Use only for an explicit command to increase, decrease or set the display brightness.",
@@ -125,8 +128,15 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             CactusNeedleNative.resetNative()
             val dateFact = ZonedDateTime.now()
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd E HH:mm:ss", Locale.US))
-            val contextualInput = "date: $dateFact; locale: fa-IR; device: Android phone\n" +
-                "User utterance (verbatim; this is the only request to classify):\n$rawText"
+            val currentLevel = if (currentVolume != null && maxVolume != null && maxVolume > 0) {
+                (currentVolume * 10.0 / maxVolume).toInt().coerceIn(0, 10)
+            } else null
+            val contextualInput = buildString {
+                append("date: $dateFact; locale: fa-IR; device: Android phone")
+                if (currentLevel != null) append("; current_media_volume_level: $currentLevel of 10")
+                append("\nUser utterance (verbatim; this is the only request to classify):\n")
+                append(rawText)
+            }
             val output = JSONObject(CactusNeedleNative.completeNative(contextualInput, 160))
             val confidence = if (output.isNull("confidence")) 0.0 else output.optDouble("confidence", 0.0)
             val trace = mutableListOf(
@@ -177,7 +187,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
                     "set" -> {
                         val value = args.optInt("value", -1)
                         if (value !in 0..100) return@synchronized null
-                        DinaCommand(DinaIntent.SET_VOLUME, value, valueIsPercent = true)
+                        DinaCommand(DinaIntent.SET_VOLUME, value * 10, valueIsPercent = true)
                     }
                     else -> return@synchronized null
                 }
@@ -187,7 +197,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
                     "set" -> {
                         val value = args.optInt("value", -1)
                         if (value !in 0..100) return@synchronized null
-                        DinaCommand(DinaIntent.SET_BRIGHTNESS, value, valueIsPercent = true)
+                        DinaCommand(DinaIntent.SET_BRIGHTNESS, value * 10, valueIsPercent = true)
                     }
                     else -> return@synchronized null
                 }
