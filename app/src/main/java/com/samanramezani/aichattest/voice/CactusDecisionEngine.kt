@@ -18,6 +18,9 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
         private set
     @Volatile var lastTrace: List<String> = emptyList()
         private set
+    /** True when Needle emitted at least one tool call, even if it was rejected as unsafe/invalid. */
+    @Volatile var lastToolSelected: Boolean = false
+        private set
 
     private val lock = Any()
     private var initialized = false
@@ -91,6 +94,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
     fun classify(rawText: String): Decision? = synchronized(lock) {
         lastTrace = emptyList()
         lastError = null
+        lastToolSelected = false
         if (rawText.isBlank()) {
             lastTrace = listOf("inputChars=0 reason=blank-user-input")
             return@synchronized null
@@ -117,6 +121,8 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             if (output.has("peak_ram_mb")) trace += "peak_ram_mb=${output.optDouble("peak_ram_mb")}"
 
             val calls = output.optJSONArray("function_calls") ?: JSONArray()
+            // A rejected/ambiguous tool call is still a tool decision: never reinterpret it as chat.
+            lastToolSelected = output.optString("type") == "call" && calls.length() > 0
             val suppressedCalls = output.optJSONArray("suppressed_calls")
             if (suppressedCalls != null && suppressedCalls.length() > 0) {
                 trace += "route=CHAT reason=needle-suppressed-call"
