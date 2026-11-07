@@ -395,7 +395,7 @@ class AlwaysOnKoochikService : Service() {
             val controller = VoiceConversationController(
                 context = this,
                 container = container,
-                decisionEngine = CactusDecisionEngine(File(filesDir, "voice-models/cactus-needle3")),
+                decisionEngine = CactusDecisionEngine(File(filesDir, "voice-models/cactus-needle3/needle3.cact")),
                 onStatus = { status ->
                     val state = when {
                         status.contains("VOICE-START-001") || status.contains("VOICE-CHAT-003") ||
