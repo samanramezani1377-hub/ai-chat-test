@@ -3,7 +3,6 @@ package com.samanramezani.aichattest.voice
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
-import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import java.io.File
@@ -27,8 +26,7 @@ internal class CactusNeedleModelStore(
         private const val MIN_MODEL_BYTES = 1L * 1024L * 1024L
         private const val MODEL_URL =
             "https://huggingface.co/Cactus-Compute/needle3/resolve/$MODEL_REVISION/needle3.cact"
-        private const val DOWNLOAD_RELATIVE_PATH =
-            "\${Environment.DIRECTORY_DOWNLOADS}/AI Chat Test/Cactus"
+        private const val DOWNLOAD_RELATIVE_PATH = "Download/AI Chat Test/Cactus"
     }
 
     val modelFile: File get() = File(root, MODEL_FILE)
@@ -41,7 +39,7 @@ internal class CactusNeedleModelStore(
         modelFile.length() in MIN_MODEL_BYTES..MAX_IMPORT_BYTES
 
     fun status(): String = if (isReady()) {
-        "مدل Cactus Needle 3 آماده است (\${modelFile.length() / (1024 * 1024)} مگابایت)."
+        "مدل Cactus Needle 3 آماده است (${modelFile.length() / (1024 * 1024)} مگابایت)."
     } else {
         "مدل Cactus Needle 3 هنوز نصب نشده است؛ آن را دانلود یا از حافظه گوشی وارد کن."
     }
@@ -102,7 +100,7 @@ internal class CactusNeedleModelStore(
         try {
             connection.connect()
             require(connection.responseCode == HttpURLConnection.HTTP_OK) {
-                "CACTUS-DOWNLOAD-001: دریافت فایل از Hugging Face ناموفق بود (HTTP \${connection.responseCode})."
+                "CACTUS-DOWNLOAD-001: دریافت فایل از Hugging Face ناموفق بود (HTTP ${connection.responseCode})."
             }
             val announcedLength = connection.contentLengthLong
             require(announcedLength <= 0L || announcedLength == MODEL_BYTES) {
@@ -155,12 +153,18 @@ internal class CactusNeedleModelStore(
         check(temporary.isFile && temporary.length() >= MIN_MODEL_BYTES) {
             "CACTUS-MODEL-001: فایل مدل معتبر نیست."
         }
+        val backup = File(root, ".$MODEL_FILE.previous")
+        backup.delete()
         if (modelFile.exists()) {
-            check(modelFile.delete()) { "CACTUS-MODEL-002: جایگزینی مدل قبلی ناموفق بود." }
+            check(modelFile.renameTo(backup)) {
+                "CACTUS-MODEL-002: پشتیبان‌گیری از مدل قبلی ناموفق بود."
+            }
         }
-        check(temporary.renameTo(modelFile)) {
-            "CACTUS-MODEL-003: انتقال فایل مدل به پوشه داخلی برنامه ناموفق بود."
+        if (!temporary.renameTo(modelFile)) {
+            if (backup.exists()) backup.renameTo(modelFile)
+            error("CACTUS-MODEL-003: انتقال فایل مدل به پوشه داخلی برنامه ناموفق بود.")
         }
+        backup.delete()
     }
 
     private fun publishToDownloads(source: File) {
@@ -169,7 +173,7 @@ internal class CactusNeedleModelStore(
         resolver.query(
             MediaStore.Downloads.EXTERNAL_CONTENT_URI,
             projection,
-            "\${MediaStore.MediaColumns.DISPLAY_NAME}=? AND \${MediaStore.MediaColumns.RELATIVE_PATH}=?",
+            "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?",
             arrayOf(MODEL_FILE, "$DOWNLOAD_RELATIVE_PATH/"),
             null,
         )?.use { cursor ->

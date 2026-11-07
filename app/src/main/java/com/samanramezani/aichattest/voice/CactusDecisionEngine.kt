@@ -23,6 +23,8 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
 
     private val lock = Any()
     private var initialized = false
+    private var loadedLastModified = 0L
+    private var loadedLength = 0L
 
     companion object {
         private const val MIN_READ_ONLY_CONFIDENCE = 0.45
@@ -128,17 +130,23 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             val output = JSONObject(CactusNeedleNative.completeNative(contextualInput, 160))
             val confidence = if (output.isNull("confidence")) 0.0 else output.optDouble("confidence", 0.0)
             val trace = mutableListOf(
-                "engine=Cactus Needle 3 inputChars=\${rawText.length}",
-                "responseType=\${output.optString("type", "missing")} confidence=\${"%.3f".format(Locale.US, confidence)}",
+                "engine=Cactus Needle 3 inputChars=${rawText.length}",
+                "responseType=${output.optString("type", "missing")} confidence=${"%.3f".format(Locale.US, confidence)}",
             )
             output.optString("reasoning").takeIf { it.isNotBlank() }?.let {
-                trace += "reasoning=\${it.take(500)}"
+                trace += "reasoning=${it.take(500)}"
             }
-            if (output.has("prefill_tps")) trace += "prefill_tps=\${output.optDouble("prefill_tps")}"
-            if (output.has("decode_tps")) trace += "decode_tps=\${output.optDouble("decode_tps")}"
-            if (output.has("peak_ram_mb")) trace += "peak_ram_mb=\${output.optDouble("peak_ram_mb")}"
+            if (output.has("prefill_tps")) trace += "prefill_tps=${output.optDouble("prefill_tps")}"
+            if (output.has("decode_tps")) trace += "decode_tps=${output.optDouble("decode_tps")}"
+            if (output.has("peak_ram_mb")) trace += "peak_ram_mb=${output.optDouble("peak_ram_mb")}"
 
             val calls = output.optJSONArray("function_calls") ?: JSONArray()
+            val suppressedCalls = output.optJSONArray("suppressed_calls")
+            if (suppressedCalls != null && suppressedCalls.length() > 0) {
+                trace += "route=CHAT reason=needle-suppressed-call"
+                lastTrace = trace
+                return@synchronized null
+            }
             if (output.optString("type") != "call" || !output.optBoolean("success", true) || calls.length() != 1) {
                 trace += "route=CHAT reason=no-single-grounded-tool-call"
                 lastTrace = trace
@@ -189,23 +197,28 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
                     return@synchronized null
                 }
             }
-            trace += "route=$name confidence=\${"%.3f".format(Locale.US, confidence)}"
+            trace += "route=$name confidence=${"%.3f".format(Locale.US, confidence)}"
             lastTrace = trace
             Decision(command, name, confidence, trace)
         } catch (failure: Throwable) {
-            lastError = "CACTUS-INFER-001: اجرای محلی Needle ناموفق بود: \${failure.message ?: failure.javaClass.simpleName}"
+            lastError = "CACTUS-INFER-001: اجرای محلی Needle ناموفق بود: ${failure.message ?: failure.javaClass.simpleName}"
             lastTrace = listOf("engine=Cactus Needle 3", "error=$lastError")
             null
         }
     }
 
     private fun ensureInitialized() {
-        if (initialized) return
+        val modified = modelFile.lastModified()
+        val length = modelFile.length()
+        if (initialized && loadedLastModified == modified && loadedLength == length) return
+        initialized = false
         check(CactusNeedleNative.loadModelNative(modelFile.absolutePath)) {
             "بارگذاری فایل needle3.cact ناموفق بود."
         }
         val prefixTokens = CactusNeedleNative.initNative(systemPrompt, toolsJson)
         check(prefixTokens >= 0) { "ساخت زمینه ابزارهای Needle ناموفق بود." }
+        loadedLastModified = modified
+        loadedLength = length
         initialized = true
     }
 

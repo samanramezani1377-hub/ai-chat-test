@@ -32,8 +32,6 @@ Java_com_samanramezani_aichattest_voice_CactusNeedleNative_loadModelNative(
     const std::string path(raw_path);
     env->ReleaseStringUTFChars(model_path, raw_path);
 
-    if (g_model_loaded && g_loaded_model_path == path) return JNI_TRUE;
-
     std::ifstream input(path, std::ios::binary | std::ios::ate);
     if (!input) {
         throwIllegalState(env, "Cannot open Needle .cact model file.");
@@ -53,7 +51,7 @@ Java_com_samanramezani_aichattest_voice_CactusNeedleNative_loadModelNative(
 
     needle_reset();
     const int result = needle_load(bytes.data(), static_cast<unsigned long long>(bytes.size()));
-    if (result < 0) {
+    if (result < 0 || (needle_models() & NEEDLE_TEXT) == 0) {
         throwIllegalState(env, needleError("Needle model loading failed."));
         return JNI_FALSE;
     }
