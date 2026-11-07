@@ -33,6 +33,8 @@ internal class CactusNeedleModelStore(
 
     init {
         if (!root.exists()) root.mkdirs()
+        // The previous app-managed Laya weights are obsolete after this migration.
+        root.parentFile?.resolve("laya-int4")?.deleteRecursively()
     }
 
     fun isReady(): Boolean = modelFile.isFile &&
