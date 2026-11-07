@@ -851,7 +851,7 @@ internal class VoiceConversationController(
                     .orEmpty()
                 if (localReply.isNotBlank()) {
                     persistUserMessageIfMissing(utterance)
-                    onDiagnostic("DINA-LOCAL-COMMAND: intent=${command.intent.name} parameter=${command.value ?: "none"} classifier=${if (needleDecision != null && CactusDecision.command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) "Cactus-multilingual-int4" else "needle-abstain"} model=local-device-executor")
+                    onDiagnostic("DINA-LOCAL-COMMAND: intent=${command.intent.name} parameter=${command.value ?: "none"} classifier=${if (needleDecision != null && needleDecision.command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) "cactus-needle3" else "needle-abstain"} model=local-device-executor")
                     queue.trySend(localReply)
                     queue.close()
                     activeSpeechJob.join()
