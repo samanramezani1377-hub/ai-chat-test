@@ -445,7 +445,11 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
  * Raw Kotlin strings keep regex escapes exact (not double-escaped into literal backslashes).
  */
 internal fun sanitizeAssistantVoiceText(raw: String): String {
-    val channelMarker = Regex("""(?i)<\|channel\|?>\s*(analysis|thought|reasoning|final|answer|commentary)\b""")
+    if (raw.isBlank()) return ""
+    // Never expose a dangling/closing channel token or a partially streamed control marker.
+    if (raw.trim() == "</channel>" || raw.trim() == "<|channel|>") return ""
+    if (raw.startsWith("<|channel|") && !raw.contains(Regex("""<\\|channel\\|>"""))) return ""
+    val channelMarker = Regex("""(?i)<\\|channel\\|?>\\s*(analysis|thought|reasoning|final|answer|commentary)\\b""")
     val channels = channelMarker.findAll(raw).toList()
     var source = raw
     if (channels.isNotEmpty()) {
@@ -454,24 +458,30 @@ internal fun sanitizeAssistantVoiceText(raw: String): String {
         } ?: return ""
         source = raw.substring(finalChannel.range.last + 1)
         source = source.substring(0, channelMarker.find(source)?.range?.first ?: source.length)
+    } else if (Regex("""(?i)</?channel\\b""").containsMatchIn(raw)) {
+        return ""
     }
+    // Streaming chunks can end halfway through a markup/control token. Hold that tail until
+    // the next token arrives instead of sending it to the transcript or Piper.
+    if (source.trimStart().startsWith("<|") && !source.contains(">")) return ""
     return source
-        .replace(Regex("""(?is)<think\b(?!\s*/)[^>]*>.*?(?:</think\s*>|<think\s*/\s*>|$)"""), " ")
-        .replace(Regex("""(?is)<think\s*/\s*>"""), " ")
-        .replace(Regex("""(?is)</?think\b[^>]*>"""), " ")
-        .replace(Regex("""(?is)<(analysis|reasoning|scratchpad)\b[^>]*>.*?</\1\s*>"""), " ")
-        .replace(Regex("""(?is)<\|(?:turn|end_of_turn|endofturn|im_end|fim_suffix)\|?>.*$"""), " ")
-        .replace(Regex("""(?m)^\s*`{3,}[^\n]*"""), " ")
-        .replace(Regex("""(?m)^\s*#{1,6}\s*"""), "")
-        .replace(Regex("""(?m)^\s*(?:[-*_]\s*){3,}$"""), " ")
-        .replace(Regex("""(?m)^\s*[-*+]\s+"""), "")
-        .replace(Regex("""(?m)^\s*\d+[.)]\s+"""), "")
-        .replace(Regex("""(?<!\w)(?:\*\*|__)(?=\S)|(?<=\S)(?:\*\*|__)"""), "")
-        .replace(Regex("""(?<!\w)[*_~](?=\S)|(?<=\S)[*_~](?!\w)"""), "")
+        .replace(Regex("""(?is)</?channel\\s*>"""), " ")
+        .replace(Regex("""(?is)<think\\b(?!\\s*/)[^>]*>.*?(?:</think\\s*>|<think\\s*/\\s*>|$)"""), " ")
+        .replace(Regex("""(?is)<think\\s*/\\s*>"""), " ")
+        .replace(Regex("""(?is)</?think\\b[^>]*>"""), " ")
+        .replace(Regex("""(?is)<(analysis|reasoning|scratchpad)\\b[^>]*>.*?</\\1\\s*>"""), " ")
+        .replace(Regex("""(?is)<\\|(?:turn|end_of_turn|endofturn|im_end|fim_suffix)\\|?>.*$"""), " ")
+        .replace(Regex("""(?m)^\\s*\`{3,}[^\\n]*"""), " ")
+        .replace(Regex("""(?m)^\\s*#{1,6}\\s*"""), "")
+        .replace(Regex("""(?m)^\\s*(?:[-*_]\\s*){3,}$"""), " ")
+        .replace(Regex("""(?m)^\\s*[-*+]\\s+"""), "")
+        .replace(Regex("""(?m)^\\s*\\d+[.)]\\s+"""), "")
+        .replace(Regex("""(?<!\\w)(?:\\*\\*|__)(?=\\S)|(?<=\\S)(?:\\*\\*|__)"""), "")
+        .replace(Regex("""(?<!\\w)[*_~](?=\\S)|(?<=\\S)[*_~](?!\\w)"""), "")
         .replace(Regex("""(?is)<[^>]+>"""), " ")
-        .replace(Regex("""[ \t]+"""), " ")
-        .replace(Regex(""" *\n *"""), "\n")
-        .replace(Regex("""\n{3,}"""), "\n\n")
+        .replace(Regex("""[ \\t]+"""), " ")
+        .replace(Regex(""" *\\n *"""), "\\n")
+        .replace(Regex("""\\n{3,}"""), "\\n\\n")
         .trim()
 }
 
@@ -836,27 +846,41 @@ internal class VoiceConversationController(
             // Cactus is the sole decision-maker for local voice actions.
             // Never infer an intent or extract a number with a parallel rule/regex parser.
             // If Cactus is unavailable or abstains, forward the exact original transcript to chat.
+            if (needleDecision == null && decisionEngine.lastToolSelected) {
+                // Needle selected a tool but its call failed validation/confidence checks.
+                // This is not a chat abstention: do not hand a device command to the LLM.
+                val clarification = "فرمان دستگاه تشخیص داده شد، اما برای اجرای امن آن اطلاعات کافی یا مطمئن نبود. لطفاً درخواست را واضح‌تر تکرار کن."
+                persistUserMessageIfMissing(utterance)
+                queue.trySend(clarification)
+                queue.close()
+                activeSpeechJob.join()
+                if (!turnCancel.get()) {
+                    persistAssistantReplyIfMissing(clarification)
+                    onLine("دستیار", clarification)
+                    onStatus("فرمان ابزار توسط Needle انتخاب شد اما اعتبارسنجی نشد؛ مدل اصلی فراخوانی نشد.")
+                }
+                return
+            }
             val command = needleDecision?.command
                 ?: com.samanramezani.aichattest.voice.DinaCommand(
                     com.samanramezani.aichattest.voice.DinaIntent.CHAT
                 )
-            if (command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) {
-                val localReply = runCatching { DinaDeviceCommandExecutor(context).execute(command) }
-                    .getOrElse { "انجام فرمان ناموفق بود: ${it.message ?: it.javaClass.simpleName}" }
-                    .orEmpty()
-                if (localReply.isNotBlank()) {
-                    persistUserMessageIfMissing(utterance)
-                    onDiagnostic("DINA-LOCAL-COMMAND: intent=${command.intent.name} parameter=${command.value ?: "none"} classifier=${if (needleDecision != null && needleDecision.command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) "cactus-needle3" else "needle-abstain"} model=local-device-executor")
-                    queue.trySend(localReply)
-                    queue.close()
-                    activeSpeechJob.join()
-                    if (!turnCancel.get()) {
-                        persistAssistantReplyIfMissing(localReply)
-                        onLine("دستیار", localReply)
-                        onStatus("فرمان محلی اجرا شد؛ مدل گفت‌وگو فراخوانی نشد.")
-                    }
-                    return
+            if (needleDecision != null && command.intent != com.samanramezani.aichattest.voice.DinaIntent.CHAT) {
+                val localReply = runCatching {
+                    DinaDeviceCommandExecutor(context).execute(command)
+                        ?: error("ابزار انتخاب‌شده پاسخ اجرایی معتبری برنگرداند.")
+                }.getOrElse { "اجرای ابزار محلی ناموفق بود: ${it.message ?: it.javaClass.simpleName}" }
+                persistUserMessageIfMissing(utterance)
+                onDiagnostic("DINA-LOCAL-COMMAND: intent=${command.intent.name} parameter=${command.value ?: "none"} tool=${needleDecision.route} confidence=${needleDecision.confidence} model=local-device-executor")
+                queue.trySend(localReply)
+                queue.close()
+                activeSpeechJob.join()
+                if (!turnCancel.get()) {
+                    persistAssistantReplyIfMissing(localReply)
+                    onLine("دستیار", localReply)
+                    onStatus("ابزار محلی اجرا شد؛ مدل گفت‌وگو فراخوانی نشد.")
                 }
+                return
             }
             onStatus("در حال پردازش گفتار و تولید پاسخ محلی…")
             val id = conversationId ?: error("VOICE-CHAT-001: شناسه مکالمه ایجاد نشده است.")
@@ -898,8 +922,8 @@ internal class VoiceConversationController(
             )
             if (!turnCancel.get()) {
                 val generation = result.generation
-                persistAssistantReplyIfMissing(generation.text)
                 val answer = sanitizeAssistantVoiceText(generation.text)
+                if (answer.isNotBlank()) persistAssistantReplyIfMissing(answer)
                 // Flush only text not already handed to the sentence queue while streaming.
                 val streamedSafe = voiceStreamSafeFed.toString()
                 if (answer.startsWith(streamedSafe)) {
