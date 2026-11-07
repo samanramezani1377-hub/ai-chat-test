@@ -260,24 +260,31 @@ jobs:
           --console=plain
           --parallel
 
-      - name: Verify Cactus Needle and sherpa native linkage
+      - name: Verify Cactus Needle, MiniLM ONNX and sherpa native linkage
         run: |
           set -euo pipefail
           apk="app/build/outputs/apk/debug/app-debug.apk"
           test -f "$apk"
           unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libsherpa-onnx-jni.so'
           unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libcactus_needle_jni.so'
-          if unzip -Z1 "$apk" | grep -Eq 'lib/arm64-v8a/lib(onnxruntime|onnxruntime4j_jni)\.so'; then
-            echo "::error::Retired ONNX Runtime libraries are still packaged"
-            exit 1
-          fi
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime.so'
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime4j_jni.so'
           if unzip -Z1 "$apk" | grep -Eq '\.cact$'; then
             echo "::error::Needle model weights must remain user-downloadable and must not be bundled in the APK"
             exit 1
           fi
+          unzip -p "$apk" lib/arm64-v8a/libonnxruntime4j_jni.so > "$RUNNER_TEMP/libonnxruntime4j_jni.so"
+          readelf -d --wide "$RUNNER_TEMP/libonnxruntime4j_jni.so" | grep -F 'libonnxruntime.so'
+          unzip -p "$apk" lib/arm64-v8a/libonnxruntime.so > "$RUNNER_TEMP/libonnxruntime.so"
+          readelf --dyn-syms --wide "$RUNNER_TEMP/libonnxruntime.so" > "$RUNNER_TEMP/onnxruntime-symbols.txt"
+          if ! awk '$7 != "UND" && $8 ~ /^OrtGetApiBase([@].*)?$/ { found=1 } END { exit !found }' "$RUNNER_TEMP/onnxruntime-symbols.txt"; then
+            echo "::error::Packaged libonnxruntime.so does not DEFINE OrtGetApiBase required by libonnxruntime4j_jni.so"
+            grep -F 'OrtGetApiBase' "$RUNNER_TEMP/onnxruntime-symbols.txt" || true
+            exit 1
+          fi
           unzip -p "$apk" lib/arm64-v8a/libcactus_needle_jni.so > "$RUNNER_TEMP/libcactus_needle_jni.so"
           if readelf -d --wide "$RUNNER_TEMP/libcactus_needle_jni.so" | grep -F 'libonnxruntime.so' > /dev/null; then
-            echo "::error::Cactus Needle JNI unexpectedly depends on the retired ONNX Runtime shared library"
+            echo "::error::Cactus Needle JNI unexpectedly depends on ONNX Runtime"
             exit 1
           fi
           unzip -p "$apk" lib/arm64-v8a/libsherpa-onnx-jni.so > "$RUNNER_TEMP/libsherpa-onnx-jni.so"
@@ -285,7 +292,7 @@ jobs:
             echo "::error::sherpa JNI dynamically depends on libonnxruntime.so; static-link AAR was not used"
             exit 1
           fi
-          echo "Verified: Cactus Needle JNI is packaged, retired ONNX JNI is absent, model weights are not bundled, and sherpa ORT is statically linked."
+          echo "Verified: Needle JNI is packaged, MiniLM ONNX runtime/JNI match, and sherpa ORT is statically linked."
 
       - name: Verify OpenCL profiling and static backend linkage
         run: |

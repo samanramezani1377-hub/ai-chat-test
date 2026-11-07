@@ -1,45 +1,182 @@
-# Cactus Needle 3 on Android
+import java.net.URL
+import java.security.MessageDigest
+import java.util.zip.ZipFile
 
-This branch replaces the retired Laya INT4 decision router with the official Cactus Needle 3 native Android engine. WebGPU is intentionally not part of this implementation.
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
 
-## User-facing workflow
+android {
+    namespace = "com.samanramezani.aichattest"
+    compileSdk = 36
+    ndkVersion = "27.2.12479018"
 
-The model controls stay in the existing Voice conversation > Settings > Local Persian decision model card.
+    defaultConfig {
+        applicationId = "com.samanramezani.aichattest"
+        minSdk = 29
+        targetSdk = 35
+        versionCode = 1
+        versionName = "0.1.0"
+        // The native inference runtime is built only for arm64-v8a. Restrict the
+        // app package too, otherwise sherpa-onnx contributes four ABI copies
+        // (arm64, 32-bit ARM, x86, x86_64) and bloats the APK without adding
+        // runnable support for those extra ABIs.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+    }
 
-- Download fetches the pinned official needle3.cact archive from Hugging Face.
-- The active copy is kept under the app's private files/voice-models/cactus-needle3/ directory.
-- The downloaded model is also published through Android MediaStore into Download/AI Chat Test/Cactus/needle3.cact, so it is visible in file managers.
-- Import from phone storage accepts a .cact file and copies it into the app's active model directory.
-- Model weights are not bundled in the APK.
-- The downloaded weights are pinned to Hugging Face revision d6c7d6a2e9655505e0f8e23339356dd1705900eb, expected size 35,335,380 bytes, and checked against the indexed SHA-256 prefix/suffix before activation.
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
-## Runtime
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
 
-The Android module builds the official android-arm64/libneedle.a from the same pinned Hugging Face revision and links it into libcactus_needle_jni.so. The archive download is checked for its expected byte length and SHA-256 fingerprint. The app remains arm64-v8a only.
+    kotlinOptions {
+        jvmTarget = "17"
+    }
 
-The C API is process-global and not thread-safe. The JNI bridge serializes every call with one mutex. The Kotlin router initializes the model and tool schemas once, resets the conversation before each independent utterance, and sends the original transcript plus current device date/time facts.
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
 
-## Tool contract
+    packagingOptions {
+        resources {
+            // sherpa-onnx's AAR also ships macOS and Windows runtime binaries as
+            // Java resources. They are never loaded by Android and add tens of
+            // megabytes to the APK; keep the Android JNI libraries untouched.
+            excludes += setOf("sherpa-onnx/native/**")
+        }
+        jniLibs {
+            // ONNX Runtime and its JNI bridge come from the same Microsoft AAR;
+            // sherpa uses its static-link AAR to avoid a duplicate SONAME.
+            // Keep native libraries uncompressed and avoid a second extracted copy on disk.
+            useLegacyPackaging = false
+        }
+    }
+}
 
-Needle is given four tools only:
 
-- get_time: direct request for the current local time.
-- get_date: direct request for today's date.
-- set_volume: increase, decrease, mute, unmute, or set an explicitly stated target on Laya's 0–10 scale. A bare 0–10 value is a level; a percentage or bare number above 10 is rounded to the nearest 10% step.
-- set_brightness: increase, decrease, or set an explicitly stated target using the same 0–10 / nearest-10%-step rule.
+// MiniLM intent routers use the Microsoft ONNX Runtime Java/JNI pair. Keep
+// sherpa on its static-link AAR so it does not collide with that shared runtime.
+val sherpaStaticAar = layout.buildDirectory.file("generated/sherpa/sherpa-onnx-static-link-onnxruntime-1.13.8.aar")
+val downloadSherpaStaticAar by tasks.registering {
+    outputs.file(sherpaStaticAar)
+    doLast {
+        val output = outputs.files.singleFile
+        output.parentFile.mkdirs()
+        URL("https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-static-link-onnxruntime-1.13.8.aar")
+            .openStream().use { input ->
+                output.outputStream().use { destination -> input.copyTo(destination) }
+            }
+        val actual = MessageDigest.getInstance("SHA-256").digest(output.readBytes())
+            .joinToString("") { "%02x".format(it) }
+        check(actual == "b22c3fc1b6a45666d28892bb2f7694beeb77a8362d7ebd77c1a5431ec9435471") {
+            "sherpa static-link AAR checksum mismatch: $actual"
+        }
+    }
+}
 
-The model does not generate conversational answers. If it returns no single valid tool call, returns a suppressed call, has insufficient confidence, omits a required numeric target, or returns an unknown tool, the router abstains and the unchanged utterance continues to the existing conversation model. No regex or keyword classifier is used as a fallback. State-changing actions use a higher confidence threshold than read-only time/date requests.
+// Resolve ONNX Runtime's Java API and both matching native libraries from one AAR.
+val onnxRuntimeApiAar by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
 
-## Native engine source
+val onnxRuntimeApiJar = layout.buildDirectory.file("generated/onnxruntime-api/classes.jar")
+val onnxRuntimeJniDir = layout.buildDirectory.dir("generated/onnxruntime-jni")
+val extractOnnxRuntimeApi by tasks.registering {
+    // Declare all task I/O through Gradle's task model. Do not capture the
+    // script-level Configuration or Provider inside doLast: that breaks the
+    // configuration cache used by CI.
+    inputs.files(onnxRuntimeApiAar)
+    outputs.file(onnxRuntimeApiJar)
+    doLast {
+        val aar = inputs.files.singleFile
+        val output = outputs.files.singleFile
+        output.parentFile.mkdirs()
+        ZipFile(aar).use { zip ->
+            val entry = zip.getEntry("classes.jar")
+                ?: error("ONNX Runtime AAR does not contain classes.jar: ${aar.name}")
+            zip.getInputStream(entry).use { input ->
+                output.outputStream().use { destination -> input.copyTo(destination) }
+            }
+        }
+    }
+}
 
-- Model: Cactus-Compute/needle3
-- Pinned model/engine revision: d6c7d6a2e9655505e0f8e23339356dd1705900eb
-- Platform library: android-arm64/libneedle.a
-- API: needle_load, needle_init, needle_complete, needle_reset
-- License: Apache-2.0
+// Package the native runtime and JNI bridge from the same Microsoft 1.28.0
+// AAR. Do not mix its JNI bridge with sherpa's separately-built ORT runtime.
+val extractOnnxRuntimeJni by tasks.registering {
+    inputs.files(onnxRuntimeApiAar)
+    outputs.dir(onnxRuntimeJniDir)
+    doLast {
+        val aar = inputs.files.singleFile
+        val outputDir = outputs.files.singleFile
+        val abiDir = outputDir.resolve("arm64-v8a")
+        abiDir.mkdirs()
+        ZipFile(aar).use { zip ->
+            listOf("libonnxruntime.so", "libonnxruntime4j_jni.so").forEach { library ->
+                val path = "jni/arm64-v8a/$library"
+                val entry = zip.getEntry(path) ?: error("ONNX Runtime AAR does not contain $path: ${aar.name}")
+                zip.getInputStream(entry).use { input ->
+                    abiDir.resolve(library).outputStream().use { destination -> input.copyTo(destination) }
+                }
+            }
+        }
+    }
+}
 
-The official Cactus API exposes one process-global model and conversation. Do not add parallel inference calls or bypass the JNI mutex. Do not claim GPU acceleration: this branch links the vendor's Android ARM64 native engine and does not enable WebGPU.
+android.sourceSets.getByName("main").jniLibs.srcDir(onnxRuntimeJniDir)
+tasks.named("preBuild").configure { dependsOn(extractOnnxRuntimeJni, downloadSherpaStaticAar) }
 
-## Removed Laya components
+dependencies {
+    add(onnxRuntimeApiAar.name, "com.microsoft.onnxruntime:onnxruntime-android:1.28.0@aar")
+    implementation(files(onnxRuntimeApiJar).builtBy(extractOnnxRuntimeApi))
+    implementation(project(":core:domain"))
+    implementation(project(":core:actions"))
+    implementation(project(":core:observability"))
+    implementation(project(":core:settings"))
+    implementation(project(":core:runtime"))
+    implementation(project(":core:runtime-android"))
+    implementation(project(":core:conversation"))
+    implementation(project(":core:agent"))
 
-The Laya decision engine, ONNX tokenizer wrapper, Rust tokenizer module, model bundle manager, and Laya-specific router documentation are removed from this branch. The Sherpa-ONNX static AAR remains for independent STT/TTS. Microsoft ONNX Runtime Java/JNI remains because the separate MiniLM intent-routing classes still use it; only the Laya-specific tokenizer and router dependencies are removed.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // Local-only ASR/TTS engines; no network inference or cloud API.
+    // Static-link variant keeps sherpa STT/TTS separate from the MiniLM ONNX Runtime.
+    implementation(files(sherpaStaticAar).builtBy(downloadSherpaStaticAar))
+    implementation("org.apache.commons:commons-compress:1.28.0")
+
+    // Keep all Compose artifacts on Google's stable BOM so Gradle cannot resolve
+    // unversioned Compose modules to an incompatible alpha release.
+    val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
+    implementation(composeBom)
+    androidTestImplementation(composeBom)
+
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.foundation:foundation-layout")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("junit:junit:4.13.2")
+}
