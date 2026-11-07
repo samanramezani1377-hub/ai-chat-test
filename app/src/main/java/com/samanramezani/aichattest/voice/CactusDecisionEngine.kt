@@ -35,53 +35,49 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             Do not answer conversational questions. For greetings, knowledge questions,
             quoted commands, negated commands, hypothetical requests, other devices,
             ambiguous intent, or anything not covered by the tools, return no tool call.
-            Never infer a numeric target that the user did not say. For set_volume and
-            set_brightness, "set" requires an explicit level from 0 through 10.
+            Never infer a numeric target that the user did not say. set_volume and
+            set_brightness require an explicit target level from 0 through 10.
             An explicitly stated percentage (including 7% or 10%) must be rounded to
             the nearest 10% level (7% becomes level 1; 47% becomes level 5). Only a bare
             number without a percent marker from 0 to 10 is already a level (7 means 70%).
             A bare number above 10 through 100 is treated as a percentage (40 becomes level 4).
-            Never guess a missing value. Require high confidence for every state-changing
-            action; if confidence is not high enough, abstain and let the chat model handle
-            the unchanged utterance.
-            "Increase" and "decrease" do not require a value.
-            Mute and unmute are volume actions. Do not confuse current time with work
-            hours, durations, event times, or changing the clock. get_date means today's
-            date only, not a historical or future date. Never call more than one tool
-            for one utterance. Be conservative: abstain rather than guess.
+            Never guess a missing value. adjust_volume and adjust_brightness do not
+            require a numeric value. get_clock action must be either time or date.
+            Never call more than one tool for one utterance. Be conservative: abstain
+            rather than guess.
         """.trimIndent()
 
         private val toolsJson: String by lazy {
             val tools = JSONArray()
             tools.put(tool(
-                "get_time",
-                "Return the current local time of this Android phone. Use only when the user directly asks what time it is now.",
-                JSONObject(),
-                JSONArray(),
+                "get_clock",
+                "Read the current local time or today's date on this Android phone.",
+                JSONObject().put("action", enumProperty("time", "date")),
+                JSONArray().put("action"),
             ))
             tools.put(tool(
-                "get_date",
-                "Return today's local date. Use only when the user directly asks for today's date.",
-                JSONObject(),
-                JSONArray(),
+                "adjust_volume",
+                "Increase or decrease this phone's media volume, or mute and unmute its media audio. Persian phrases include بلندتر، کم‌تر، قطع صدا، وصل صدا.",
+                JSONObject().put("action", enumProperty("increase", "decrease", "mute", "unmute")),
+                JSONArray().put("action"),
             ))
-            val volumeProperties = JSONObject()
-                .put("action", enumProperty("increase", "decrease", "set", "mute", "unmute"))
-                .put("value", integerProperty("Explicit target media volume level, 0 to 10. A bare 0-10 is a level; any explicit percentage or bare number above 10 is rounded to the nearest 10% step.", 0, 10))
             tools.put(tool(
                 "set_volume",
-                "Change this phone's media volume. Persian requests include بلندتر، کم‌تر، قطع صدا، وصل صدا or تنظیم روی درصد. Never infer value.",
-                volumeProperties,
+                "Set this phone's media volume to an explicitly stated target level from 0 to 10.",
+                JSONObject().put("value", integerProperty("Target media volume level, 0 to 10. A bare 0-10 is a level; an explicit percentage or bare number above 10 is rounded to the nearest 10% step.", 0, 10)),
+                JSONArray().put("value"),
+            ))
+            tools.put(tool(
+                "adjust_brightness",
+                "Increase or decrease this phone's screen brightness.",
+                JSONObject().put("action", enumProperty("increase", "decrease")),
                 JSONArray().put("action"),
             ))
-            val brightnessProperties = JSONObject()
-                .put("action", enumProperty("increase", "decrease", "set"))
-                .put("value", integerProperty("Explicit target screen brightness level, 0 to 10. A bare 0-10 is a level; any explicit percentage or bare number above 10 is rounded to the nearest 10% step.", 0, 10))
             tools.put(tool(
                 "set_brightness",
-                "Change this phone's screen brightness. Use only for an explicit command to increase, decrease or set the display brightness.",
-                brightnessProperties,
-                JSONArray().put("action"),
+                "Set this phone's screen brightness to an explicitly stated target level from 0 to 10.",
+                JSONObject().put("value", integerProperty("Target screen brightness level, 0 to 10. A bare 0-10 is a level; an explicit percentage or bare number above 10 is rounded to the nearest 10% step.", 0, 10)),
+                JSONArray().put("value"),
             ))
             tools.toString()
         }
@@ -154,7 +150,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             }
             val name = call.optString("name")
             val args = call.optJSONObject("arguments") ?: JSONObject()
-            val readOnly = name == "get_time" || name == "get_date"
+            val readOnly = name == "get_clock"
             val minimum = if (readOnly) MIN_READ_ONLY_CONFIDENCE else MIN_MUTATION_CONFIDENCE
             if (confidence < minimum) {
                 trace += "route=CHAT reason=confidence-below-$minimum"
@@ -163,29 +159,32 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             }
 
             val command = when (name) {
-                "get_time" -> DinaCommand(DinaIntent.GET_TIME)
-                "get_date" -> DinaCommand(DinaIntent.GET_DATE)
-                "set_volume" -> when (args.optString("action")) {
+                "get_clock" -> when (args.optString("action")) {
+                    "time" -> DinaCommand(DinaIntent.GET_TIME)
+                    "date" -> DinaCommand(DinaIntent.GET_DATE)
+                    else -> return@synchronized null
+                }
+                "adjust_volume" -> when (args.optString("action")) {
                     "increase" -> DinaCommand(DinaIntent.INCREASE_VOLUME)
                     "decrease" -> DinaCommand(DinaIntent.DECREASE_VOLUME)
                     "mute" -> DinaCommand(DinaIntent.MUTE)
                     "unmute" -> DinaCommand(DinaIntent.UNMUTE)
-                    "set" -> {
-                        val value = args.optInt("value", -1)
-                        if (value !in 0..10) return@synchronized null
-                        DinaCommand(DinaIntent.SET_VOLUME, value * 10, valueIsPercent = true)
-                    }
                     else -> return@synchronized null
                 }
-                "set_brightness" -> when (args.optString("action")) {
+                "set_volume" -> {
+                    val value = args.optInt("value", -1)
+                    if (value !in 0..10) return@synchronized null
+                    DinaCommand(DinaIntent.SET_VOLUME, value * 10, valueIsPercent = true)
+                }
+                "adjust_brightness" -> when (args.optString("action")) {
                     "increase" -> DinaCommand(DinaIntent.INCREASE_BRIGHTNESS)
                     "decrease" -> DinaCommand(DinaIntent.DECREASE_BRIGHTNESS)
-                    "set" -> {
-                        val value = args.optInt("value", -1)
-                        if (value !in 0..10) return@synchronized null
-                        DinaCommand(DinaIntent.SET_BRIGHTNESS, value * 10, valueIsPercent = true)
-                    }
                     else -> return@synchronized null
+                }
+                "set_brightness" -> {
+                    val value = args.optInt("value", -1)
+                    if (value !in 0..10) return@synchronized null
+                    DinaCommand(DinaIntent.SET_BRIGHTNESS, value * 10, valueIsPercent = true)
                 }
                 else -> {
                     trace += "route=CHAT reason=unknown-tool:$name"

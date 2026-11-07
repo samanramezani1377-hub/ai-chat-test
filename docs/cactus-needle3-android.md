@@ -21,12 +21,13 @@ The C API is process-global and not thread-safe. The JNI bridge serializes every
 
 ## Tool contract
 
-Needle is given four tools only:
+Needle is given five tools only:
 
-- get_time: direct request for the current local time.
-- get_date: direct request for today's date.
-- set_volume: increase, decrease, mute, unmute, or set an explicitly stated target on a 0–10 scale. A bare number from 0–10 is a level; any explicit percentage (even 7%) and any bare number above 10 are rounded to the nearest 10% step.
-- set_brightness: increase, decrease, or set an explicitly stated target using the same 0–10 / nearest-10%-step rule.
+- get_clock: choose time or date for a direct request for the current local time or today's date.
+- adjust_volume: increase, decrease, mute, or unmute media audio.
+- set_volume: set an explicitly stated target on a 0–10 scale. A bare number from 0–10 is a level; any explicit percentage (even 7%) and any bare number above 10 are rounded to the nearest 10% step.
+- adjust_brightness: increase or decrease screen brightness.
+- set_brightness: set an explicitly stated target using the same 0–10 / nearest-10%-step rule.
 
 The model does not generate conversational answers. If it returns no single valid tool call, returns a suppressed call, has insufficient confidence, omits a required numeric target, or returns an unknown tool, the router abstains and the unchanged utterance continues to the existing conversation model. No regex or keyword classifier is used as a fallback. State-changing actions require confidence >= 0.70; read-only time/date requests require >= 0.50. Below the threshold the router abstains and forwards the original utterance to the existing chat model. Persian confidence calibration has not been validated on the user's device, so this is a conservative gate rather than a measured accuracy claim.
 
