@@ -68,11 +68,6 @@ jobs:
           echo "::error::Could not install Android NDK 27.2.12479018 and Android platform 36 after 3 attempts."
           exit 1
 
-      - name: Set up Rust for the official Laya tokenizer
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -140,11 +135,6 @@ jobs:
           echo "::error::Could not install Android NDK 27.2.12479018 and Android platform 36 after 3 attempts."
           exit 1
 
-      - name: Set up Rust for the official Laya tokenizer
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -161,7 +151,6 @@ jobs:
           path: |
             core/runtime-android/.cxx
             core/runtime-android/src/.cxx
-            rs-laya-tokenizers/target
           key: >-
             native-${{ runner.os }}-
             ${{ hashFiles(
@@ -170,8 +159,6 @@ jobs:
               'build.gradle.kts',
               'app/build.gradle.kts',
               'gradle/libs.versions.toml',
-              'rs-laya-tokenizers/Cargo.toml',
-              'rs-laya-tokenizers/src/**',
               'core/runtime-android/build.gradle.kts',
               'core/runtime-android/src/main/cpp/**',
               'core/runtime-android/src/main/cpp/cmake/**'
@@ -273,38 +260,32 @@ jobs:
           --console=plain
           --parallel
 
-      - name: Verify sherpa ONNX Runtime native linkage
+      - name: Verify Cactus Needle and sherpa native linkage
         run: |
           set -euo pipefail
           apk="app/build/outputs/apk/debug/app-debug.apk"
           test -f "$apk"
           unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libsherpa-onnx-jni.so'
-          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime.so'
-          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime4j_jni.so'
-          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/liblaya_tokenizers.so'
-          unzip -p "$apk" lib/arm64-v8a/libonnxruntime4j_jni.so > "$RUNNER_TEMP/libonnxruntime4j_jni.so"
-          readelf -d --wide "$RUNNER_TEMP/libonnxruntime4j_jni.so" | grep -F 'libonnxruntime.so'
-          unzip -p "$apk" lib/arm64-v8a/libonnxruntime.so > "$RUNNER_TEMP/libonnxruntime.so"
-          # Do not pipe readelf directly into grep -q under pipefail: grep may
-          # exit early and cause readelf to receive SIGPIPE, producing a false failure.
-          readelf --dyn-syms --wide "$RUNNER_TEMP/libonnxruntime.so" > "$RUNNER_TEMP/onnxruntime-symbols.txt"
-          # Match only a DEFINED dynamic symbol. A plain grep also matches UND
-          # entries and previously let a broken runtime/JNI pairing pass CI.
-          if ! awk '$7 != "UND" && $8 ~ /^OrtGetApiBase([@].*)?$/ { found=1 } END { exit !found }' "$RUNNER_TEMP/onnxruntime-symbols.txt"; then
-            echo "::error::Packaged libonnxruntime.so does not DEFINE OrtGetApiBase required by libonnxruntime4j_jni.so"
-            echo "ONNX Runtime dynamic symbols containing 'OrtGetApiBase':"
-            grep -F 'OrtGetApiBase' "$RUNNER_TEMP/onnxruntime-symbols.txt" || true
-            unzip -p "$apk" lib/arm64-v8a/libonnxruntime4j_jni.so > "$RUNNER_TEMP/libonnxruntime4j_jni.so"
-            echo "ONNX Runtime JNI dynamic dependencies:"
-            readelf -d --wide "$RUNNER_TEMP/libonnxruntime4j_jni.so" | grep -E 'NEEDED|SONAME' || true
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libcactus_needle_jni.so'
+          if unzip -Z1 "$apk" | grep -Eq 'lib/arm64-v8a/lib(onnxruntime|onnxruntime4j_jni)\.so'; then
+            echo "::error::Retired ONNX Runtime libraries are still packaged"
+            exit 1
+          fi
+          if unzip -Z1 "$apk" | grep -Eq '\.cact$'; then
+            echo "::error::Needle model weights must remain user-downloadable and must not be bundled in the APK"
+            exit 1
+          fi
+          unzip -p "$apk" lib/arm64-v8a/libcactus_needle_jni.so > "$RUNNER_TEMP/libcactus_needle_jni.so"
+          if readelf -d --wide "$RUNNER_TEMP/libcactus_needle_jni.so" | grep -F 'libonnxruntime.so' > /dev/null; then
+            echo "::error::Cactus Needle JNI unexpectedly depends on the retired ONNX Runtime shared library"
             exit 1
           fi
           unzip -p "$apk" lib/arm64-v8a/libsherpa-onnx-jni.so > "$RUNNER_TEMP/libsherpa-onnx-jni.so"
           if readelf -d --wide "$RUNNER_TEMP/libsherpa-onnx-jni.so" | grep -F 'Shared library: [libonnxruntime.so]' > /dev/null; then
-            echo "::error::sherpa JNI still dynamically depends on libonnxruntime.so; static-link AAR was not used"
+            echo "::error::sherpa JNI dynamically depends on libonnxruntime.so; static-link AAR was not used"
             exit 1
           fi
-          echo "Verified: Laya JNI and its defined OrtGetApiBase are from the same ORT AAR; sherpa ORT is statically linked."
+          echo "Verified: Cactus Needle JNI is packaged, retired ONNX JNI is absent, model weights are not bundled, and sherpa ORT is statically linked."
 
       - name: Verify OpenCL profiling and static backend linkage
         run: |
@@ -404,11 +385,6 @@ jobs:
           done
           echo "::error::Could not install Android NDK 27.2.12479018 and Android platform 36 after 3 attempts."
           exit 1
-
-      - name: Set up Rust for the official Laya tokenizer
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
