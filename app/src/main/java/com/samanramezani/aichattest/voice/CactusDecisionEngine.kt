@@ -3,9 +3,6 @@ package com.samanramezani.aichattest.voice
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 /** Needle is the only semantic router for voice actions; no regex classifier runs beside it. */
 internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable {
@@ -50,8 +47,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
             Mute and unmute are volume actions. Do not confuse current time with work
             hours, durations, event times, or changing the clock. get_date means today's
             date only, not a historical or future date. Never call more than one tool
-            for one utterance. The supplied date/time context is environment information,
-            not a user command. Be conservative: abstain rather than guess.
+            for one utterance. Be conservative: abstain rather than guess.
         """.trimIndent()
 
         private val toolsJson: String by lazy {
@@ -111,11 +107,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
 
     fun isReady(): Boolean = modelFile.isFile && modelFile.length() >= 1_000_000L
 
-    fun classify(
-        rawText: String,
-        currentVolume: Int? = null,
-        maxVolume: Int? = null,
-    ): Decision? = synchronized(lock) {
+    fun classify(rawText: String): Decision? = synchronized(lock) {
         lastTrace = emptyList()
         lastError = null
         if (rawText.isBlank()) {
@@ -130,18 +122,7 @@ internal class CactusDecisionEngine(private val modelFile: File) : AutoCloseable
         try {
             ensureInitialized()
             CactusNeedleNative.resetNative()
-            val dateFact = ZonedDateTime.now()
-                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd E HH:mm:ss", Locale.US))
-            val currentLevel = if (currentVolume != null && maxVolume != null && maxVolume > 0) {
-                (currentVolume * 10.0 / maxVolume).toInt().coerceIn(0, 10)
-            } else null
-            val contextualInput = buildString {
-                append("date: $dateFact; locale: fa-IR; device: Android phone")
-                if (currentLevel != null) append("; current_media_volume_level: $currentLevel of 10")
-                append("\nUser utterance (verbatim; this is the only request to classify):\n")
-                append(rawText)
-            }
-            val output = JSONObject(CactusNeedleNative.completeNative(contextualInput, 160))
+            val output = JSONObject(CactusNeedleNative.completeNative(rawText, 160))
             val confidence = if (output.isNull("confidence")) 0.0 else output.optDouble("confidence", 0.0)
             val trace = mutableListOf(
                 "engine=Cactus Needle 3 inputChars=${rawText.length}",

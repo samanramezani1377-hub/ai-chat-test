@@ -823,13 +823,8 @@ internal class VoiceConversationController(
 
         try {
             onStatus("در حال بررسی درخواست فارسی روی دستگاه…")
-            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
             val needleDecision = runCatching {
-                decisionEngine.classify(
-                    utterance,
-                    audioManager.getStreamVolume(AudioManager.STREAM_MUSIC),
-                    audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
-                )
+                decisionEngine.classify(utterance)
             }.getOrNull()
             decisionEngine.lastError?.let { modelError ->
                 if (lastLoggedIntentModelError != modelError) {
