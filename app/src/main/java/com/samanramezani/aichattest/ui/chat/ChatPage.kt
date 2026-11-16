@@ -154,37 +154,48 @@ private fun ProgressStep(step: ExecutionStep) {
 @Composable
 private fun MessageRow(message: UiMessage, onCopy: (String) -> Unit) {
     val user = message.role == ChatMessage.Role.USER
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (user) Alignment.End else Alignment.Start) {
-        if (!user) Text("مدل محلی", Modifier.padding(start = 4.dp, bottom = 5.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
-        Surface(
-            Modifier.widthIn(max = 760.dp),
-            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = if (user) 20.dp else 5.dp, bottomEnd = if (user) 5.dp else 20.dp),
-            color = if (user) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
-            tonalElevation = if (user) 0.dp else 1.dp,
-        ) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 13.dp)) {
-                if (user) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(message.text.ifBlank { "…" }, Modifier.weight(1f), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.bodyLarge)
-                        if (message.text.isNotBlank()) {
-                            IconButton(onClick = { onCopy(message.text) }, modifier = Modifier.size(34.dp).semantics { contentDescription = "کپی پیام" }) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = "کپی", tint = MaterialTheme.colorScheme.onPrimary)
-                            }
-                        }
-                    }
-                } else {
+    Column(
+        Modifier.fillMaxWidth(),
+        horizontalAlignment = if (user) Alignment.End else Alignment.Start,
+    ) {
+        if (user) {
+            Surface(
+                Modifier.widthIn(max = 760.dp),
+                shape = RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+            ) {
+                Row(
+                    Modifier.padding(start = 16.dp, end = 8.dp, top = 11.dp, bottom = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        message.text.ifBlank { "…" },
+                        Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
                     if (message.text.isNotBlank()) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            IconButton(onClick = { onCopy(message.text) }, modifier = Modifier.size(34.dp).semantics { contentDescription = "کپی پاسخ" }) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = "کپی")
-                            }
-                        }
+                        IconButton(
+                            onClick = { onCopy(message.text) },
+                            modifier = Modifier.size(34.dp).semantics { contentDescription = "کپی پیام" },
+                        ) { Icon(Icons.Default.ContentCopy, contentDescription = "کپی پیام", tint = MaterialTheme.colorScheme.onSecondaryContainer) }
                     }
-                    if (message.text.isBlank()) {
-                        Text("در حال آماده‌سازی پاسخ…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
-                    } else {
-                        AssistantMarkdown(message.text)
+                }
+            }
+        } else {
+            Column(Modifier.widthIn(max = 800.dp).fillMaxWidth()) {
+                if (message.text.isNotBlank()) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        IconButton(
+                            onClick = { onCopy(message.text) },
+                            modifier = Modifier.size(34.dp).semantics { contentDescription = "کپی پاسخ" },
+                        ) { Icon(Icons.Default.ContentCopy, contentDescription = "کپی پاسخ") }
                     }
+                }
+                if (message.text.isBlank()) {
+                    Text("در حال آماده‌سازی پاسخ…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
+                } else {
+                    AssistantMarkdown(message.text)
                 }
             }
         }
