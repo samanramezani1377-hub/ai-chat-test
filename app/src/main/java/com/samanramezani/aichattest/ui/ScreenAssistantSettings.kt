@@ -76,6 +76,7 @@ internal fun ScreenAssistantSettings() {
             }
         }
 
+        ScreenVisionModelControls()
         HorizontalDivider()
         Text("مشاهده صفحه", style = MaterialTheme.typography.titleLarge)
         Text("تا وقتی نشست فعال است، دریافت فریم‌ها ادامه دارد. فقط آخرین تصویر کم‌حجم در حافظه موقت نگه داشته می‌شود؛ تحلیل مدل بینایی باید فقط با درخواست تو اجرا شود.", color = MaterialTheme.colorScheme.onSurfaceVariant)
