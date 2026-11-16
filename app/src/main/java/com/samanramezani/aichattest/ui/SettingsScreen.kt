@@ -40,7 +40,7 @@ private const val KEY_SEED = "seed"
 private const val KEY_STOPS = "stop_sequences"
 private const val KEY_MAX_ACTION_STEPS = "max_action_steps"
 
-private val sections = listOf("مدل", "پاسخ", "زمینه", "عامل")
+private val sections = listOf("مدل", "صدا", "پاسخ", "زمینه", "عامل")
 
 private enum class InferencePreset(val title: String, val description: String, val settings: InferenceSettings) {
     FAST("سریع", "برای گفت‌وگوی روزمره", InferenceSettings(temperature=.7, maxNewTokens=256, topK=32, topP=.9, minP=0.0, repeatPenalty=1.1, contextLength=2048, recentMessages=6, maxActionSteps=2)),
@@ -56,6 +56,7 @@ fun SettingsScreen(
     onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)? = null, onDelete: (String) -> Unit,
     onProviderChanged: () -> Unit = {},
     providerStore: CloudflareProviderStore? = null,
+    voiceSettingsContent: @Composable () -> Unit = {},
 ) {
     var section by remember { mutableStateOf("مدل") }
     LazyColumn(
@@ -83,6 +84,7 @@ fun SettingsScreen(
         item {
             when (section) {
                 "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete, onProviderChanged, providerStore)
+                "صدا" -> voiceSettingsContent()
                 "پاسخ" -> InferenceControls()
                 "زمینه" -> ContextControls()
                 "عامل" -> AgentControls()
