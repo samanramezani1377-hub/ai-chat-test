@@ -93,7 +93,7 @@ class FloatingAssistantService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val view = TextView(this).apply {
-            text = "د"
+            text = "🤖"
             textSize = 22f
             setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.CENTER
