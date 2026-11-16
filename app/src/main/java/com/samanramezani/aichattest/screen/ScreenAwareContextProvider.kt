@@ -27,7 +27,7 @@ class ScreenAwareContextProvider(
         val question = base.recentMessages.lastOrNull {
             it.role == ConversationMessage.Role.USER
         }?.content?.trim().orEmpty()
-        if (question.isBlank()) return base
+        if (question.isBlank() || !isScreenQuestion(question)) return base
 
         val frame = ScreenFrameStore.latest(maxAgeMs = 5_000L) ?: return base
         val paths = ScreenVisionModelStore.paths(appContext) ?: return base
@@ -60,5 +60,18 @@ class ScreenAwareContextProvider(
             The screenshot is not stored in conversation history. Do not assume the screen is unchanged in later turns.
         """.trimIndent()
         return base.copy(system = listOfNotNull(base.system?.takeIf { it.isNotBlank() }, screenContext).joinToString("\n\n"))
+    }
+    private fun isScreenQuestion(raw: String): Boolean {
+        val q = raw.lowercase().replace('ي', 'ی').replace('ك', 'ک').replace('‌', ' ')
+        val phrases = listOf(
+            "صفحه", "روی گوشی", "روی نمایشگر", "اینجا چی", "اینجا چه", "این قسمت",
+            "این دکمه", "این برنامه", "این ارور", "این خطا", "چی نوشته", "چه نوشته",
+            "این چیه", "این چیست", "این کجاست", "از روی صفحه", "متن تصویر", "اسکرین",
+            "عکس صفحه", "دکمه", "آیکون", "آیکن", "گزینه", "منو", "فرم", "پنجره",
+            "نوشته روی", "ببین چی", "می بینی", "میبینی", "صفحه نمایش",
+            "this screen", "on the screen", "what is on", "what's on", "what does this say",
+            "read this", "this button", "this app", "screen says", "screen error"
+        )
+        return phrases.any { q.contains(it) }
     }
 }
