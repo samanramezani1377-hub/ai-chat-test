@@ -57,6 +57,7 @@ class HomeWidgetAssistantService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val busy = AtomicBoolean(false)
     private val voiceFinished = AtomicBoolean(false)
+    private val voiceAsrLock = Any()
     @Volatile private var microphone: LocalMicrophone? = null
     @Volatile private var recognizer: LocalNemoCtcAsr? = null
     @Volatile private var tts: LocalPiperTts? = null
@@ -187,7 +188,7 @@ class HomeWidgetAssistantService : Service() {
             voiceFinished.set(false)
             mic.start { frame ->
                 if (voiceFinished.get()) return@start
-                val update = runCatching { asr.accept(frame.samples, 16000, frame.speech) }.getOrElse { error ->
+                val update = runCatching { synchronized(voiceAsrLock) { asr.accept(frame.samples, 16000, frame.speech) } }.getOrElse { error ->
                     if (voiceFinished.compareAndSet(false, true)) {
                         scope.launch { finishVoiceFailure(mic, asr, error) }
                     }
@@ -197,7 +198,7 @@ class HomeWidgetAssistantService : Service() {
                     scope.launch {
                         mic.stop()
                         microphone = null
-                        runCatching { asr.close() }
+                        runCatching { synchronized(voiceAsrLock) { asr.close() } }
                         recognizer = null
                         switchToInferenceForeground()
                         HomeWidgetState.updateVoice(this@HomeWidgetAssistantService, "گفتار دریافت شد؛ در حال پاسخ‌گویی…")
@@ -230,7 +231,7 @@ class HomeWidgetAssistantService : Service() {
                 if (voiceFinished.compareAndSet(false, true)) {
                     mic.stop()
                     microphone = null
-                    runCatching { asr.close() }
+                    runCatching { synchronized(voiceAsrLock) { asr.close() } }
                     recognizer = null
                     HomeWidgetState.updateVoice(this@HomeWidgetAssistantService, "زمان ضبط تمام شد؛ اگر آماده‌ای دوباره لمس کن.")
                     busy.set(false)
@@ -240,7 +241,7 @@ class HomeWidgetAssistantService : Service() {
         } catch (t: Throwable) {
             if (voiceFinished.compareAndSet(false, true)) {
                 runCatching { localMic?.stop() }
-                runCatching { localAsr?.close() }
+                runCatching { synchronized(voiceAsrLock) { localAsr?.close() } }
                 microphone = null
                 recognizer = null
                 HomeWidgetState.updateVoice(this, "خطا: ${t.message ?: t.javaClass.simpleName}")
@@ -252,7 +253,7 @@ class HomeWidgetAssistantService : Service() {
 
     private suspend fun finishVoiceFailure(mic: LocalMicrophone, asr: LocalNemoCtcAsr, error: Throwable) {
         runCatching { mic.stop() }
-        runCatching { asr.close() }
+        runCatching { synchronized(voiceAsrLock) { asr.close() } }
         microphone = null
         recognizer = null
         HomeWidgetState.updateVoice(this, "خطا در ضبط یا تشخیص: ${error.message ?: error.javaClass.simpleName}")
@@ -336,7 +337,7 @@ class HomeWidgetAssistantService : Service() {
     override fun onDestroy() {
         runCatching { microphone?.stop() }
         microphone = null
-        runCatching { recognizer?.close() }
+        runCatching { synchronized(voiceAsrLock) { recognizer?.close() } }
         recognizer = null
         runCatching { tts?.close() }
         tts = null
