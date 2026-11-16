@@ -128,7 +128,7 @@ class ScreenSessionService : Service() {
     /** Keep the capture surface aligned with rotation and display-size changes. */
     private fun resizeCaptureForDisplayChange() {
         val currentReader = reader ?: return
-        val currentDisplayManager = displayManager ?: return
+        if (displayManager == null) return
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
