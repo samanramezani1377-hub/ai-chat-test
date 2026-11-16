@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 class ScreenAwareContextProvider(
     private val delegate: ContextProvider,
     context: Context,
+    private val allowScreenContentToModel: () -> Boolean = { true },
 ) : ContextProvider {
     private val appContext = context.applicationContext
 
@@ -28,6 +29,9 @@ class ScreenAwareContextProvider(
         }?.content?.trim().orEmpty()
         if (question.isBlank() || !isScreenQuestion(question)) return base
 
+        if (!allowScreenContentToModel()) {
+            return withScreenNote(base, "The selected inference provider is cloud-based. Screen contents are local-only and have not been shared; switch to the local provider to ask about the screen.")
+        }
         if (!ScreenSessionService.isRunning) {
             return withScreenNote(base, "No screen-sharing session is active. Do not claim to see the user's screen; ask them to start screen observation.")
         }
