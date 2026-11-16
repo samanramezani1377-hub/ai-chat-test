@@ -42,6 +42,7 @@
 UI مستندات ساختاریافته و جداگانه دارد تا Specification نهایی به یک فایل طولانی تبدیل نشود:
 
 - [`docs/ui/README.md`](docs/ui/README.md) — نقطه ورود مستندات UI
+- [`docs/widgets/HOME_SCREEN_WIDGETS.md`](docs/widgets/HOME_SCREEN_WIDGETS.md) — ویجت چت و مکالمه صوتی نوبتی صفحه اصلی
 - [`docs/ui/REDESIGN_V2.md`](docs/ui/REDESIGN_V2.md) — بازطراحی Chat-first، تاریخچه و تنظیمات یکپارچه
 - [`docs/ui/DESIGN_SYSTEM.md`](docs/ui/DESIGN_SYSTEM.md) — Design System
 - [`docs/ui/NAVIGATION.md`](docs/ui/NAVIGATION.md) — Navigation Contract
