@@ -43,6 +43,24 @@ The AAR currently exposes full completion rather than incremental token Flow str
 
 The upstream llama.cpp Android example demonstrates the same architectural boundary: GGUF metadata inspection from a `Uri`/private file, loading through an inference engine, and collecting generated tokens in Kotlin `Flow`. citeturn1search6
 
+## Backend selection and CPU fallback policy
+
+CPU execution and CPU fallback are valid, supported runtime outcomes. The application is **not GPU-only**. GPU acceleration may be used when the device, driver, backend build, model operations and runtime configuration support it, but the absence or failure of GPU execution must not by itself make local inference unavailable.
+
+When GPU initialization, device discovery, memory allocation, kernel execution or offloading is unavailable or fails, the runtime may continue or retry inference on CPU when the CPU backend is available and the model can fit the available resources. This fallback is acceptable and must not be treated as an application error solely because execution moved to CPU.
+
+Runtime selection and fallback must remain truthful and observable:
+- Report the backend that actually performs inference (for example, OpenCL/GPU or CPU), not merely the requested/preferred backend.
+- Diagnostics should distinguish requested GPU offload, successfully offloaded layers/operations, GPU availability, and actual CPU execution/fallback.
+- Do not report GPU acceleration as active when inference is running on CPU.
+- Preserve the original GPU initialization/offload failure as diagnostic context when CPU fallback succeeds.
+- If both GPU and CPU execution fail, surface the real load/generation error; do not report a successful fallback.
+- Resource limits, cancellation, model compatibility and device stability still apply to either backend.
+
+The exact backend preference and fallback behavior may be configurable, but a GPU-only policy or a rule forbidding CPU fallback is **not** a project requirement.
+
+This policy concerns backend selection *inside local inference*. It does not authorize silently switching the selected inference source between Local and a remote Provider. Local/Provider selection has a separate privacy and consent boundary: never send local conversation data to a Provider without explicit user selection/authorization.
+
 ## Model compatibility
 
 The runtime accepts GGUF models. Qwen3 is a supported architecture in llama.cpp, and upstream model schemas include `Q6_K` tensors. citeturn0search5turn4search3
