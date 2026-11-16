@@ -19,6 +19,7 @@ import android.os.IBinder
 import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.view.WindowManager
+import android.view.Display
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.samanramezani.aichattest.R
@@ -53,6 +54,15 @@ class ScreenSessionService : Service() {
     private var displayWidth = 0
     private var displayHeight = 0
     private var densityDpi = 0
+    private var displayManager: DisplayManager? = null
+
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+        override fun onDisplayRemoved(displayId: Int) = Unit
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId == Display.DEFAULT_DISPLAY) handler?.post { resizeCaptureForDisplayChange() }
+        }
+    }
 
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
@@ -103,6 +113,9 @@ class ScreenSessionService : Service() {
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader!!.surface, null, handler
             )
             reader?.setOnImageAvailableListener({ imageReader -> scheduleSample(imageReader) }, handler)
+            displayManager = getSystemService(DisplayManager::class.java).also {
+                it.registerDisplayListener(displayListener, handler)
+            }
             isRunning = true
             getSharedPreferences("screen_assistant", MODE_PRIVATE).edit().putBoolean("capture_running", true).apply()
         } catch (_: Throwable) {
@@ -110,6 +123,38 @@ class ScreenSessionService : Service() {
             stopSelf()
         }
         return START_NOT_STICKY
+    }
+
+    /** Keep the capture surface aligned with rotation and display-size changes. */
+    private fun resizeCaptureForDisplayChange() {
+        val currentReader = reader ?: return
+        val currentDisplayManager = displayManager ?: return
+        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        val metrics = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        wm.defaultDisplay.getRealMetrics(metrics)
+        if (metrics.widthPixels == displayWidth &&
+            metrics.heightPixels == displayHeight &&
+            metrics.densityDpi == densityDpi
+        ) return
+
+        val nextReader = runCatching {
+            ImageReader.newInstance(metrics.widthPixels, metrics.heightPixels, PixelFormat.RGBA_8888, 3)
+        }.getOrNull() ?: return
+        nextReader.setOnImageAvailableListener({ imageReader -> scheduleSample(imageReader) }, handler)
+        try {
+            virtualDisplay?.resize(metrics.widthPixels, metrics.heightPixels, metrics.densityDpi)
+            virtualDisplay?.setSurface(nextReader.surface)
+            reader = nextReader
+            displayWidth = metrics.widthPixels
+            displayHeight = metrics.heightPixels
+            densityDpi = metrics.densityDpi
+            currentReader.setOnImageAvailableListener(null, null)
+            currentReader.close()
+        } catch (_: Throwable) {
+            nextReader.setOnImageAvailableListener(null, null)
+            nextReader.close()
+        }
     }
 
     private fun scheduleSample(imageReader: ImageReader) {
@@ -196,6 +241,10 @@ class ScreenSessionService : Service() {
         isRunning = false
         getSharedPreferences("screen_assistant", MODE_PRIVATE).edit().putBoolean("capture_running", false).apply()
         ScreenFrameStore.clear()
+        displayManager?.let { manager ->
+            runCatching { manager.unregisterDisplayListener(displayListener) }
+        }
+        displayManager = null
         runCatching { virtualDisplay?.release() }
         virtualDisplay = null
         runCatching { reader?.setOnImageAvailableListener(null, null) }
