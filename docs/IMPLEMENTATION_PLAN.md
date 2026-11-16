@@ -12,9 +12,9 @@
 - Inference source contract and explicit user selection (Local / Provider)
 - Local runtime adapter
 - Remote provider adapter and configuration validation
-- basic local inference
+- basic local inference (CPU execution is valid; GPU acceleration is optional)
 - provider-backed inference with network/error handling
-- no silent fallback between inference sources
+- no silent fallback between inference sources (Local ↔ Provider); backend fallback within Local inference, including GPU → CPU, is allowed and must be observable
 
 ## Phase 2 — Chat
 
