@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -11,6 +12,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -29,12 +31,17 @@ internal fun ChatPage(
     messages: List<UiMessage>, composer: String, generating: Boolean, approvalBusy: Boolean,
     onComposer: (String) -> Unit, onSend: () -> Unit, onStop: () -> Unit,
     execution: ExecutionState?, onApprove: () -> Unit, onReject: () -> Unit, onWorkspace: () -> Unit, onCopy: (String) -> Unit, onVoice: () -> Unit,
-) {
+ ) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length, generating, execution?.status) {
+        val last = listState.layoutInfo.totalItemsCount - 1
+        if (last >= 0) listState.animateScrollToItem(last)
+    }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.End) {
             OutlinedButton(onClick = onVoice, modifier = Modifier.heightIn(min = 42.dp)) { Text("مکالمه صوتی زنده") }
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             if (messages.isEmpty()) item { WelcomeState() }
             items(messages, key = { it.id }) { MessageRow(it, onCopy) }
             if (generating) item { AgentProgress(execution, approvalBusy) }
@@ -52,7 +59,7 @@ internal fun ChatPage(
         Spacer(Modifier.height(20.dp))
         Text("شروع کنیم.", style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center)
         Spacer(Modifier.height(8.dp))
-        Text("هر چیزی را بنویس. پاسخ همین‌جا و روی خود دستگاه تولید می‌شود.", Modifier.widthIn(max = 520.dp), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("هر چیزی را بنویس؛ پاسخ در منبع انتخاب‌شدهٔ تو تولید می‌شود.", Modifier.widthIn(max = 520.dp), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(22.dp))
         Row(Modifier.widthIn(max = 560.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HintChip("خلاصه‌کردن", Modifier.weight(1f))
@@ -60,7 +67,7 @@ internal fun ChatPage(
             HintChip("نوشتن کد", Modifier.weight(1f))
         }
         Spacer(Modifier.height(18.dp))
-        Text("خصوصی · آفلاین · llama.cpp + OpenCL", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+        Text("گفت‌وگوی متنی و صوتی · تاریخچهٔ ماندگار", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
     }
 }
 
@@ -133,7 +140,7 @@ private fun ProgressStep(step: ExecutionStep) {
                 ),
             )
             Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (generating) "تولید روی دستگاه در حال اجراست" else "Enter برای ارسال · متن بلند هم مشکلی ندارد", Modifier.weight(1f).padding(start = 10.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (generating) "تولید روی دستگاه در حال اجراست" else "برای ارسال از دکمه استفاده کن", Modifier.weight(1f).padding(start = 10.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FilledIconButton(
                     onClick = if (generating) onStop else onSend,
                     enabled = !approvalBusy && (generating || value.isNotBlank()),
