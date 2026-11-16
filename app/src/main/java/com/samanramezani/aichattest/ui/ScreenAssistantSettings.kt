@@ -22,7 +22,7 @@ internal fun ScreenAssistantSettings() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember(context) { context.getSharedPreferences("screen_assistant", Context.MODE_PRIVATE) }
     var overlayEnabled by remember { mutableStateOf(prefs.getBoolean("overlay_enabled", false)) }
-    var captureRunning by remember { mutableStateOf(prefs.getBoolean("capture_running", false)) }
+    var captureRunning by remember { mutableStateOf(ScreenSessionService.isRunning) }
     var status by remember { mutableStateOf<String?>(null) }
 
     fun enableOverlay() {
