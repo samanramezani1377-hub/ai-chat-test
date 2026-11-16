@@ -110,7 +110,7 @@ object ScreenVisionModelStore {
                 return
             }
             // Do not let a corrupt cached entry shadow a valid replacement with the same name.
-            runCatching { context.contentResolver.delete(cached, null, null) }
+            deleteDownload(context, cached)
         }
 
         // Older app versions kept the runtime copy privately. Promote it to Downloads
@@ -198,7 +198,7 @@ object ScreenVisionModelStore {
             val existingIsValid = copyUriToFile(context, existingUri, checkFile) && isGguf(checkFile)
             checkFile.delete()
             if (existingIsValid) return
-            runCatching { context.contentResolver.delete(existingUri, null, null) }
+            deleteDownload(context, existingUri)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -235,15 +235,25 @@ object ScreenVisionModelStore {
     private fun copyUriToFile(context: Context, uri: Uri, destination: File): Boolean {
         val temp = File(destination.parentFile, destination.name + ".copying")
         return try {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(temp).use { output -> input.copyTo(output, 128 * 1024) }
-            } ?: error("Cannot read cached model")
+            val input = if (uri.scheme == "file") FileInputStream(File(uri.path.orEmpty()))
+                else context.contentResolver.openInputStream(uri)
+                    ?: error("Cannot read cached model")
+            input.use { source ->
+                FileOutputStream(temp).use { output -> source.copyTo(output, 128 * 1024) }
+            }
             if (!isGguf(temp)) error("Cached GGUF is invalid")
             replaceAtomically(temp, destination)
             true
         } catch (_: Throwable) {
             temp.delete()
             false
+        }
+    }
+
+    private fun deleteDownload(context: Context, uri: Uri) {
+        runCatching {
+            if (uri.scheme == "file") File(uri.path.orEmpty()).delete()
+            else context.contentResolver.delete(uri, null, null)
         }
     }
 
