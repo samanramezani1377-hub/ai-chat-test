@@ -32,12 +32,33 @@ internal object HomeWidgetState {
         val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(CHAT_STATUS, status)
         if (reply != null) editor.putString(CHAT_REPLY, reply.take(1800))
         editor.apply()
-        renderChat(context)
+        updateChatContent(context)
     }
 
     fun updateVoice(context: Context, status: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(VOICE_STATUS, status).apply()
-        renderVoice(context)
+        updateVoiceContent(context)
+    }
+
+    private fun updateChatContent(context: Context) {
+        val manager = AppWidgetManager.getInstance(context)
+        val ids = manager.getAppWidgetIds(ComponentName(context, ChatAssistantWidgetProvider::class.java))
+        if (ids.isEmpty()) return
+        val partial = RemoteViews(context.packageName, R.layout.widget_chat_assistant).apply {
+            setTextViewText(R.id.widget_chat_status, chatStatus(context))
+            setTextViewText(R.id.widget_chat_reply, chatReply(context))
+        }
+        manager.partiallyUpdateAppWidget(ids, partial)
+    }
+
+    private fun updateVoiceContent(context: Context) {
+        val manager = AppWidgetManager.getInstance(context)
+        val ids = manager.getAppWidgetIds(ComponentName(context, VoiceAssistantWidgetProvider::class.java))
+        if (ids.isEmpty()) return
+        val partial = RemoteViews(context.packageName, R.layout.widget_voice_assistant).apply {
+            setTextViewText(R.id.widget_voice_status, voiceStatus(context))
+        }
+        manager.partiallyUpdateAppWidget(ids, partial)
     }
 
     fun renderChat(context: Context) {
