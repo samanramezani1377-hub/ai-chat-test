@@ -57,8 +57,10 @@ fun SettingsScreen(
     onProviderChanged: () -> Unit = {},
     providerStore: CloudflareProviderStore? = null,
     voiceSettingsContent: @Composable () -> Unit = {},
+    initialSection: String = "مدل",
+    onSectionChanged: (String) -> Unit = {},
 ) {
-    var section by remember { mutableStateOf("مدل") }
+    var section by remember(initialSection) { mutableStateOf(initialSection) }
     Column(Modifier.fillMaxSize()) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -75,7 +77,7 @@ fun SettingsScreen(
                 sections.forEach { name ->
                     FilterChip(
                         selected = section == name,
-                        onClick = { section = name },
+                        onClick = { section = name; onSectionChanged(name) },
                         label = { Text(name) },
                     )
                 }
