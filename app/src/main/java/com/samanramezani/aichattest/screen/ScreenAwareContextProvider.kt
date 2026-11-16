@@ -31,7 +31,7 @@ class ScreenAwareContextProvider(
         if (!ScreenSessionService.isRunning) {
             return withScreenNote(base, "No screen-sharing session is active. Do not claim to see the user's screen; ask them to start screen observation.")
         }
-        val frame = ScreenFrameStore.latest(maxAgeMs = 5_000L)
+        val frame = ScreenFrameStore.latest(maxAgeMs = 2_500L)
             ?: return withScreenNote(base, "No fresh screen frame is available. Do not infer what is on screen; ask the user to wait or restart screen observation.")
         val paths = ScreenVisionModelStore.paths(appContext)
             ?: return withScreenNote(base, "The screen stream is active, but no local Vision model and matching mmproj are installed. Do not claim to have inspected the screen.")
