@@ -48,6 +48,8 @@ internal fun VoiceConversationPage(
     onImportLaya: () -> Unit,
     onDownloadLaya: () -> Unit,
     onBack: () -> Unit,
+    settingsOnly: Boolean = false,
+    onOpenSettings: () -> Unit = {},
     onImportStt: () -> Unit,
     onImportKoochikModel: () -> Unit,
     onImportKoochikTokens: () -> Unit,
@@ -66,7 +68,7 @@ internal fun VoiceConversationPage(
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     val clipboard = LocalClipboardManager.current
-    var showSettings by remember { mutableStateOf(false) }
+    var showSettings by remember(settingsOnly) { mutableStateOf(settingsOnly) }
     var permissionGranted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
     }
@@ -83,26 +85,26 @@ internal fun VoiceConversationPage(
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().then(if (settingsOnly) Modifier else Modifier.fillMaxSize()).padding(horizontal = 16.dp, vertical = 8.dp)) {
+        if (!settingsOnly) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "بازگشت") }
             Column(Modifier.weight(1f)) {
                 Text("مکالمه صوتی زنده", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text("گفت‌وگوی محلی با امکان صحبت هم‌زمان و قطع پاسخ", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
             }
-            IconButton(onClick = { showSettings = !showSettings }) {
-                Icon(Icons.Default.Settings, contentDescription = "تنظیمات مکالمه صوتی")
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Default.Settings, contentDescription = "تنظیمات صدا")
             }
         }
 
-        if (showSettings) {
+        if (settingsOnly || showSettings) {
             Column(
                 Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("تنظیمات مکالمه صوتی", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { showSettings = false }) { Text("بازگشت به مکالمه") }
+                    Text("تنظیمات صدا و شنوا", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                    if (!settingsOnly) TextButton(onClick = onOpenSettings) { Text("همه تنظیمات") }
                 }
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
