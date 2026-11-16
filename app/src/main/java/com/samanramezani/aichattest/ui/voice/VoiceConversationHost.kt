@@ -137,6 +137,7 @@ internal fun VoiceConversationHost(
             onListening = { value -> uiScope.launch(Dispatchers.Main.immediate) { listening = value; busy = false } },
             onLine = { speaker, text -> uiScope.launch(Dispatchers.Main.immediate) {
                 if (text.isNotBlank()) {
+                    if (speaker == "شما") streamingAssistantLineId = null
                     val partialId = if (speaker == "دستیار") streamingAssistantLineId else null
                     if (partialId != null) {
                         lines = lines.map { if (it.id == partialId) it.copy(text = text) else it }
