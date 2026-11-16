@@ -69,6 +69,7 @@ internal fun AppHeader(
 ) {
     val title = when (destination) {
         AppDestination.CHAT -> "گفت‌وگو"
+        AppDestination.HISTORY -> "تاریخچه گفتگوها"
         AppDestination.VOICE -> "مکالمه صوتی"
         AppDestination.WORK, AppDestination.WORKSPACE -> "فضای کار"
         AppDestination.DIAGNOSTICS -> "عیب‌یابی"
@@ -147,6 +148,7 @@ internal fun Sidebar(
                 }
                 item { DrawerSection("برنامه") }
                 item { DrawerItem(Icons.Default.ChatBubbleOutline, "گفت‌وگو", destination == AppDestination.CHAT) { onDestination(AppDestination.CHAT) } }
+                item { DrawerItem(Icons.Default.History, "تاریخچه گفتگوها", destination == AppDestination.HISTORY) { onDestination(AppDestination.HISTORY) } }
                 item { DrawerItem(Icons.Default.Mic, "مکالمه صوتی زنده", destination == AppDestination.VOICE) { onDestination(AppDestination.VOICE) } }
                 item { DrawerItem(Icons.Default.WorkOutline, "فضای کار", destination == AppDestination.WORK || destination == AppDestination.WORKSPACE) { onDestination(AppDestination.WORK) } }
                 item { DrawerItem(Icons.Default.Settings, "تنظیمات", destination == AppDestination.SETTINGS) { onDestination(AppDestination.SETTINGS) } }
