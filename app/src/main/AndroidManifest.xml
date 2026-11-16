@@ -40,6 +40,8 @@
             android:name=".widgets.ui.WidgetComposeActivity"
             android:exported="false"
             android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="com.samanramezani.aichattest.widget"
             android:theme="@style/Theme.WidgetComposeDialog"
             android:windowSoftInputMode="adjustResize|stateAlwaysVisible" />
         <receiver
