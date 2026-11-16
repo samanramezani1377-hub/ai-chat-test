@@ -24,6 +24,8 @@ import java.util.Date
 internal fun ConversationHistoryPage(
     conversations: List<ConversationRecord>,
     currentId: String?,
+    searchIndex: Map<String, String> = emptyMap(),
+    previews: Map<String, String> = emptyMap(),
     onOpen: (ConversationRecord) -> Unit,
     onNew: () -> Unit,
     onRename: (ConversationRecord) -> Unit,
@@ -34,7 +36,10 @@ internal fun ConversationHistoryPage(
     var query by remember { mutableStateOf("") }
     val filtered = remember(conversations, query) {
         if (query.isBlank()) conversations
-        else conversations.filter { it.title.contains(query.trim(), ignoreCase = true) }
+        else conversations.filter { record ->
+            record.title.contains(query.trim(), ignoreCase = true) ||
+                searchIndex[record.id].orEmpty().contains(query.trim(), ignoreCase = true)
+        }
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -84,6 +89,7 @@ internal fun ConversationHistoryPage(
                     HistoryRow(
                         record = record,
                         active = record.id == currentId,
+                        preview = previews[record.id].orEmpty(),
                         onOpen = { onOpen(record) },
                         onRename = { onRename(record) },
                         onDelete = { onDelete(record) },
@@ -105,6 +111,7 @@ internal fun ConversationHistoryPage(
 private fun HistoryRow(
     record: ConversationRecord,
     active: Boolean,
+    preview: String,
     onOpen: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
@@ -126,6 +133,7 @@ private fun HistoryRow(
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(record.title, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                if (preview.isNotBlank()) Text(preview, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
                 Text(
                     "${record.messageCount} پیام  ·  $timestamp",
                     style = MaterialTheme.typography.bodySmall,
