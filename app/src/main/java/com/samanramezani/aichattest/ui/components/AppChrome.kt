@@ -106,6 +106,36 @@ internal fun AppHeader(
 }
 
 @Composable
+internal fun AppBottomNavigation(
+    destination: AppDestination,
+    onNavigate: (AppDestination) -> Unit,
+) {
+    NavigationBar(
+        containerColor = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+    ) {
+        NavigationBarItem(
+            selected = destination == AppDestination.CHAT,
+            onClick = { onNavigate(AppDestination.CHAT) },
+            icon = { Icon(Icons.Default.ChatBubbleOutline, contentDescription = null) },
+            label = { Text("گفت‌وگو") },
+        )
+        NavigationBarItem(
+            selected = destination == AppDestination.HISTORY,
+            onClick = { onNavigate(AppDestination.HISTORY) },
+            icon = { Icon(Icons.Default.History, contentDescription = null) },
+            label = { Text("تاریخچه") },
+        )
+        NavigationBarItem(
+            selected = destination == AppDestination.SETTINGS,
+            onClick = { onNavigate(AppDestination.SETTINGS) },
+            icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+            label = { Text("تنظیمات") },
+        )
+    }
+}
+
+@Composable
 internal fun AppQuickMenu(onDiagnostics: () -> Unit, onSettings: () -> Unit) {
     Box(Modifier.fillMaxSize().padding(top = 66.dp, start = 12.dp), contentAlignment = Alignment.TopStart) {
         Surface(Modifier.width(230.dp), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 8.dp) {
