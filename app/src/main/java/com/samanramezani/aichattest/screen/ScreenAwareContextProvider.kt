@@ -54,7 +54,7 @@ class ScreenAwareContextProvider(
                 answer
             }
         } catch (t: Throwable) {
-            return withScreenNote(base, "Local Vision inspection failed (\${t.message ?: t.javaClass.simpleName}). Do not guess or claim screen contents.")
+            return withScreenNote(base, "Local Vision inspection failed (${t.message ?: t.javaClass.simpleName}). Do not guess or claim screen contents.")
         } ?: return withScreenNote(base, "Local Vision returned no usable observations. Do not guess or claim screen contents.")
 
         val screenContext = """
