@@ -95,11 +95,12 @@ class ScreenAwareContextProvider(
             "صفحه", "روی گوشی", "روی نمایشگر", "اینجا چی", "اینجا چه", "این قسمت",
             "این دکمه", "این برنامه", "این ارور", "این خطا", "چی نوشته", "چه نوشته",
             "این چیه", "این چیست", "این کجاست", "از روی صفحه", "متن تصویر", "اسکرین",
-            "عکس صفحه", "دکمه", "آیکون", "آیکن", "گزینه", "منو", "فرم", "پنجره",
-            "نوشته روی", "ببین چی", "می بینی", "میبینی", "صفحه نمایش", "این پیام",
+            "عکس صفحه", "نوشته روی", "ببین چی", "می بینی", "میبینی", "صفحه نمایش", "این پیام",
             "این نوشته", "این گزینه", "این آیکن", "این آیکون",
             "this screen", "on the screen", "what is on", "what's on", "what does this say",
-            "read this", "this button", "this app", "screen says", "screen error"
+            "read this", "this button", "this app", "screen says", "screen error",
+            "what is this", "what's this", "how do i fix this", "what should i click",
+            "what should i select", "what does this mean"
         )
         if (directPhrases.any { q.contains(it) }) return true
 
