@@ -282,7 +282,7 @@ class HomeWidgetAssistantService : Service() {
                         HomeWidgetState.updateChat(
                             this@HomeWidgetAssistantService,
                             "در حال تولید پاسخ…",
-                            "شما: $userText\\n\\nدستیار: $partial",
+                            "شما: $userText\n\nدستیار: $partial",
                         )
                     }
                 }
