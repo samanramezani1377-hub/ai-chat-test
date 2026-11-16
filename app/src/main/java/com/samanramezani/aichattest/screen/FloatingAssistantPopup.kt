@@ -1,6 +1,5 @@
 package com.samanramezani.aichattest.screen
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -16,7 +15,6 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.samanramezani.aichattest.AIChatApplication
-import com.samanramezani.aichattest.AppContainer
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.conversation.ConversationMessage
 import com.woogit.aicore.domain.InferenceSettings
