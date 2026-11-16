@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -61,6 +62,7 @@ class HomeWidgetAssistantService : Service() {
     @Volatile private var microphone: LocalMicrophone? = null
     @Volatile private var recognizer: LocalNemoCtcAsr? = null
     @Volatile private var tts: LocalPiperTts? = null
+    @Volatile private var cpuWakeLock: PowerManager.WakeLock? = null
     private val container: AppContainer
         get() = (application as AIChatApplication).container
 
@@ -93,11 +95,14 @@ class HomeWidgetAssistantService : Service() {
             return START_NOT_STICKY
         }
 
+        runCatching { acquireCpuWakeLock() }
+
         when (action) {
             ACTION_SEND_TEXT -> {
                 val text = intent.getStringExtra(EXTRA_TEXT).orEmpty().trim()
                 if (text.isBlank()) {
                     busy.set(false)
+                    releaseCpuWakeLock()
                     HomeWidgetState.updateChat(this, "پیام خالی است")
                     stopSelfResult(startId)
                 } else {
@@ -110,6 +115,7 @@ class HomeWidgetAssistantService : Service() {
                             HomeWidgetState.updateChat(this@HomeWidgetAssistantService, "خطا", "پاسخ تولید نشد: ${t.message ?: t.javaClass.simpleName}")
                         } finally {
                             busy.set(false)
+                            releaseCpuWakeLock()
                             stopSelfResult(startId)
                         }
                     }
@@ -220,6 +226,7 @@ class HomeWidgetAssistantService : Service() {
                             runCatching { tts?.close() }
                             tts = null
                             busy.set(false)
+                            releaseCpuWakeLock()
                             stopSelfResult(startId)
                         }
                     }
@@ -235,6 +242,7 @@ class HomeWidgetAssistantService : Service() {
                     recognizer = null
                     HomeWidgetState.updateVoice(this@HomeWidgetAssistantService, "زمان ضبط تمام شد؛ اگر آماده‌ای دوباره لمس کن.")
                     busy.set(false)
+                    releaseCpuWakeLock()
                     stopSelfResult(startId)
                 }
             }
@@ -246,6 +254,7 @@ class HomeWidgetAssistantService : Service() {
                 recognizer = null
                 HomeWidgetState.updateVoice(this, "خطا: ${t.message ?: t.javaClass.simpleName}")
                 busy.set(false)
+                releaseCpuWakeLock()
                 stopSelfResult(startId)
             }
         }
@@ -258,6 +267,7 @@ class HomeWidgetAssistantService : Service() {
         recognizer = null
         HomeWidgetState.updateVoice(this, "خطا در ضبط یا تشخیص: ${error.message ?: error.javaClass.simpleName}")
         busy.set(false)
+        releaseCpuWakeLock()
         stopSelf()
     }
 
@@ -314,6 +324,21 @@ class HomeWidgetAssistantService : Service() {
         }
     }
 
+    private fun acquireCpuWakeLock() {
+        if (cpuWakeLock?.isHeld == true) return
+        val manager = getSystemService(PowerManager::class.java) ?: return
+        cpuWakeLock = manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:HomeWidgetRequest").apply {
+            setReferenceCounted(false)
+            acquire(10 * 60 * 1000L)
+        }
+    }
+
+    private fun releaseCpuWakeLock() {
+        val lock = cpuWakeLock ?: return
+        cpuWakeLock = null
+        runCatching { if (lock.isHeld) lock.release() }
+    }
+
     private fun createNotificationChannel() {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
@@ -341,6 +366,7 @@ class HomeWidgetAssistantService : Service() {
         recognizer = null
         runCatching { tts?.close() }
         tts = null
+        releaseCpuWakeLock()
         scope.cancel()
         super.onDestroy()
     }
