@@ -180,13 +180,13 @@ class HomeWidgetAssistantService : Service() {
                 ?: error("مدل Piper برای پاسخ صوتی وارد نشده است؛ ابتدا مدل TTS را در تنظیمات صدا وارد کن.")
 
             HomeWidgetState.updateVoice(this, "در حال شنیدن؛ پس از مکث کوتاه ضبط خودکار تمام می‌شود.")
-            localAsr = withContext(Dispatchers.IO) { LocalNemoCtcAsr(stt) }
-            localMic = LocalMicrophone()
-            recognizer = localAsr
-            microphone = localMic
+            val asr = withContext(Dispatchers.IO) { LocalNemoCtcAsr(stt) }
+            val mic = LocalMicrophone()
+            localAsr = asr
+            localMic = mic
+            recognizer = asr
+            microphone = mic
             voiceFinished.set(false)
-            val asr = localAsr
-            val mic = localMic
             mic.start { frame ->
                 if (voiceFinished.get()) return@start
                 val update = runCatching { asr.accept(frame.samples, 16000, frame.speech) }.getOrElse { error ->
@@ -272,6 +272,7 @@ class HomeWidgetAssistantService : Service() {
         if (existing == null) preferences.edit().putString("conversation_id", record.id).apply()
 
         val lastUpdate = AtomicLong(0L)
+        val streamedText = StringBuilder()
         val session = container.createAgentSession(record.id, includeAgentTools = false) { event ->
             if (event is AgentEvent.Token) {
                 val now = SystemClock.elapsedRealtime()
