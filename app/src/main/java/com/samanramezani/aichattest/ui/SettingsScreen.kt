@@ -59,19 +59,19 @@ fun SettingsScreen(
     voiceSettingsContent: @Composable () -> Unit = {},
 ) {
     var section by remember { mutableStateOf("مدل") }
-    LazyColumn(
-        Modifier.fillMaxSize().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 40.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item {
+    Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text("تنظیمات", style = MaterialTheme.typography.headlineMedium)
-                Text("اینجا فقط چیزهایی را می‌بینی که روی تجربه مدل اثر می‌گذارند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("مدل‌ها، صدا و رفتار دستیار را از یکجا مدیریت کن.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }
-        item {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 sections.forEach { name ->
                     FilterChip(
                         selected = section == name,
@@ -81,13 +81,24 @@ fun SettingsScreen(
                 }
             }
         }
-        item {
-            when (section) {
-                "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete, onProviderChanged, providerStore)
-                "صدا" -> voiceSettingsContent()
-                "پاسخ" -> InferenceControls()
-                "زمینه" -> ContextControls()
-                "عامل" -> AgentControls()
+        if (section == "صدا") {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                voiceSettingsContent()
+            }
+        } else {
+            LazyColumn(
+                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(top = 8.dp, bottom = 40.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                item {
+                    when (section) {
+                        "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete, onProviderChanged, providerStore)
+                        "پاسخ" -> InferenceControls()
+                        "زمینه" -> ContextControls()
+                        "عامل" -> AgentControls()
+                    }
+                }
             }
         }
     }
