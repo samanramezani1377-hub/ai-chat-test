@@ -1,9 +1,7 @@
 package com.samanramezani.aichattest.screen
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.graphics.PixelFormat
@@ -17,13 +15,13 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import com.samanramezani.aichattest.MainActivity
-import com.samanramezani.aichattest.R
 import kotlin.math.abs
 
-/** User-enabled, draggable edge robot. It does not own or read screen content. */
+/** User-enabled floating Dina bubble and in-place chat window. Neither tap launches the app. */
 class FloatingAssistantService : Service() {
     companion object {
         const val ACTION_ENABLE = "com.samanramezani.aichattest.screen.FLOATING_ENABLE"
@@ -36,14 +34,17 @@ class FloatingAssistantService : Service() {
 
         @Volatile private var instance: FloatingAssistantService? = null
 
+        /** Hide every Dina overlay for one compositor frame so capture sees the app beneath it. */
         fun setTemporarilyTransparent(transparent: Boolean) {
-            instance?.setBubbleAlpha(if (transparent) 0f else 1f)
+            instance?.setOverlayAlpha(if (transparent) 0f else 1f)
         }
     }
 
     private lateinit var windowManager: WindowManager
     private var bubble: TextView? = null
-    private var params: WindowManager.LayoutParams? = null
+    private var popup: ComposeView? = null
+    private var bubbleParams: WindowManager.LayoutParams? = null
+    private var popupParams: WindowManager.LayoutParams? = null
     private var downX = 0f
     private var downY = 0f
     private var startX = 0
@@ -77,8 +78,8 @@ class FloatingAssistantService : Service() {
     private fun startForegroundCompat() {
         val notification = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_view)
-            .setContentTitle("دستیار شناور فعال است")
-            .setContentText("برای باز کردن دستیار، روی حباب دینا بزن.")
+            .setContentTitle("دستیار شناور دینا فعال است")
+            .setContentText("با لمس حباب، پنجره گفت‌وگوی شناور باز می‌شود.")
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
@@ -106,9 +107,13 @@ class FloatingAssistantService : Service() {
             setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.CENTER
             setTextColor(android.graphics.Color.WHITE)
-            setBackground(GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF4F46E5.toInt()); setStroke((2 * resources.displayMetrics.density).toInt(), android.graphics.Color.WHITE) })
+            setBackground(GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0xFF4F46E5.toInt())
+                setStroke((2 * resources.displayMetrics.density).toInt(), android.graphics.Color.WHITE)
+            })
             elevation = 12f
-            contentDescription = "باز کردن دستیار دینا"
+            contentDescription = "باز کردن گفت‌وگوی شناور دینا"
         }
         val size = (52 * resources.displayMetrics.density).toInt()
         val layout = WindowManager.LayoutParams(
@@ -143,10 +148,7 @@ class FloatingAssistantService : Service() {
                         prefs.edit().putInt(KEY_X, layout.x).putInt(KEY_Y, layout.y).apply()
                         runCatching { windowManager.updateViewLayout(v, layout) }
                     } else {
-                        val open = Intent(this, MainActivity::class.java)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                            .putExtra("open_screen_assistant", true)
-                        startActivity(open)
+                        if (popup == null) showPopup() else closePopup()
                     }
                     true
                 }
@@ -155,22 +157,63 @@ class FloatingAssistantService : Service() {
         }
         windowManager.addView(view, layout)
         bubble = view
-        params = layout
+        bubbleParams = layout
     }
 
-    private fun setBubbleAlpha(alpha: Float) {
-        val view = bubble ?: return
-        view.post {
-            view.alpha = alpha.coerceIn(0f, 1f)
-            view.visibility = if (alpha <= 0f) View.INVISIBLE else View.VISIBLE
+    private fun showPopup() {
+        if (popup != null) return
+        val density = resources.displayMetrics.density
+        val screenWidth = resources.displayMetrics.widthPixels
+        val screenHeight = resources.displayMetrics.heightPixels
+        val width = minOf((380 * density).toInt(), (screenWidth - 20 * density).toInt()).coerceAtLeast(1)
+        val height = minOf((540 * density).toInt(), (screenHeight - 80 * density).toInt()).coerceAtLeast(1)
+        val view = ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setContent { FloatingAssistantPopup(onClose = { closePopup() }) }
         }
+        val layout = WindowManager.LayoutParams(
+            width,
+            height,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            y = (72 * density).toInt()
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            setTitle("Dina floating chat")
+        }
+        try {
+            windowManager.addView(view, layout)
+            popup = view
+            popupParams = layout
+        } catch (t: Throwable) {
+            view.disposeComposition()
+            throw t
+        }
+    }
+
+    private fun closePopup() {
+        popup?.let { view ->
+            runCatching { windowManager.removeView(view) }
+            view.disposeComposition()
+        }
+        popup = null
+        popupParams = null
+    }
+
+    private fun setOverlayAlpha(alpha: Float) {
+        val value = alpha.coerceIn(0f, 1f)
+        bubble?.post { bubble?.alpha = value; bubble?.visibility = if (value == 0f) View.INVISIBLE else View.VISIBLE }
+        popup?.post { popup?.alpha = value; popup?.visibility = if (value == 0f) View.INVISIBLE else View.VISIBLE }
     }
 
     override fun onDestroy() {
         instance = null
+        closePopup()
         bubble?.let { runCatching { windowManager.removeView(it) } }
         bubble = null
-        params = null
+        bubbleParams = null
         super.onDestroy()
     }
 }
