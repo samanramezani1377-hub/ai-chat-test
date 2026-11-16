@@ -17,7 +17,6 @@ import androidx.core.content.ContextCompat
 import com.samanramezani.aichattest.AIChatApplication
 import com.samanramezani.aichattest.AlwaysOnKoochikService
 import com.samanramezani.aichattest.AppContainer
-import com.samanramezani.aichattest.R
 import com.samanramezani.aichattest.providers.InferenceProviderMode
 import com.samanramezani.aichattest.voice.LocalMicrophone
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
