@@ -25,6 +25,16 @@ internal fun ScreenAssistantSettings() {
     var captureRunning by remember { mutableStateOf(ScreenSessionService.isRunning) }
     var status by remember { mutableStateOf<String?>(null) }
 
+    DisposableEffect(prefs) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == "capture_running") {
+                captureRunning = prefs.getBoolean("capture_running", false)
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
     fun enableOverlay() {
         if (!Settings.canDrawOverlays(context)) return
         ContextCompat.startForegroundService(context, Intent(context, FloatingAssistantService::class.java).setAction(FloatingAssistantService.ACTION_ENABLE))
@@ -48,8 +58,7 @@ internal fun ScreenAssistantSettings() {
                 .putExtra(ScreenSessionService.EXTRA_RESULT_CODE, result.resultCode)
                 .putExtra(ScreenSessionService.EXTRA_RESULT_DATA, data)
             ContextCompat.startForegroundService(context, service)
-            captureRunning = true
-            status = "نشست مشاهده صفحه شروع شد."
+            status = "درخواست شروع نشست ارسال شد؛ پس از آماده‌شدن سرویس وضعیت فعال نمایش داده می‌شود."
         } else { captureRunning = false; status = "اجازه مشاهده صفحه داده نشد." }
     }
 
@@ -79,7 +88,7 @@ internal fun ScreenAssistantSettings() {
         ScreenVisionModelControls()
         HorizontalDivider()
         Text("مشاهده صفحه", style = MaterialTheme.typography.titleLarge)
-        Text("تا وقتی نشست فعال است، دریافت فریم‌ها ادامه دارد. فقط آخرین تصویر کم‌حجم در حافظه موقت نگه داشته می‌شود؛ تحلیل مدل بینایی باید فقط با درخواست تو اجرا شود.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("وقتی پنجره مجوز Android باز شد، «کل صفحه / Entire screen» را انتخاب کن. تا وقتی نشست فعال است دریافت فریم‌ها ادامه دارد؛ فقط آخرین تصویر کم‌حجم در حافظه موقت می‌ماند و تحلیل Vision فقط هنگام سؤال مرتبط اجرا می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(if (captureRunning) "نشست صفحه فعال است" else "نشست صفحه متوقف است", style = MaterialTheme.typography.titleMedium)
