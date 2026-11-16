@@ -91,7 +91,7 @@ internal fun VoiceConversationPage(
         }
     }
 
-    Column(Modifier.fillMaxWidth().then(if (settingsOnly) Modifier else Modifier.fillMaxSize()).padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
         if (!settingsOnly) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "بازگشت") }
             Column(Modifier.weight(1f)) {
