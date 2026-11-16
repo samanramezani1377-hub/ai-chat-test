@@ -43,6 +43,9 @@ internal fun FloatingAssistantPopup(onClose: () -> Unit) {
         val prefs = context.getSharedPreferences("screen_assistant", android.content.Context.MODE_PRIVATE)
         val savedId = prefs.getString("floating_chat_conversation_id", null)
         val record = withContext(Dispatchers.IO) {
+            if (container.providerStore?.load()?.mode != com.samanramezani.aichattest.providers.InferenceProviderMode.CLOUDFLARE) {
+                container.modelManager?.restoreActive()
+            }
             val existing = savedId?.let { id -> container.conversationHistory.recent(500).firstOrNull { it.id == id } }
             existing ?: container.conversationHistory.create("گفت‌وگوی شناور دینا")
         }
