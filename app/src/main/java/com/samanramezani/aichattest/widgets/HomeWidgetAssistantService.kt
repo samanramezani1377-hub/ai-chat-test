@@ -18,7 +18,6 @@ import com.samanramezani.aichattest.AIChatApplication
 import com.samanramezani.aichattest.AlwaysOnKoochikService
 import com.samanramezani.aichattest.AppContainer
 import com.samanramezani.aichattest.R
-import com.samanramezani.aichattest.providers.InferenceProviderMode
 import com.samanramezani.aichattest.voice.LocalMicrophone
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
 import com.samanramezani.aichattest.voice.LocalPiperTts
@@ -35,7 +34,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -59,7 +57,6 @@ class HomeWidgetAssistantService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val busy = AtomicBoolean(false)
     private val voiceFinished = AtomicBoolean(false)
-    private val lastWidgetUpdateMs = AtomicLong(0L)
     @Volatile private var microphone: LocalMicrophone? = null
     @Volatile private var recognizer: LocalNemoCtcAsr? = null
     @Volatile private var tts: LocalPiperTts? = null
@@ -75,22 +72,23 @@ class HomeWidgetAssistantService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
-        try {
-            startForegroundFor(action == ACTION_VOICE_TURN)
-        } catch (t: Throwable) {
-            val message = "سرویس ویجت شروع نشد: ${t.message ?: t.javaClass.simpleName}"
-            HomeWidgetState.updateChat(this, "خطا", message)
-            HomeWidgetState.updateVoice(this, message)
-            stopSelfResult(startId)
-            return START_NOT_STICKY
-        }
-
         if (!busy.compareAndSet(false, true)) {
             if (action == ACTION_VOICE_TURN) {
                 HomeWidgetState.updateVoice(this, "درخواست قبلی هنوز در حال اجراست.")
             } else {
                 HomeWidgetState.updateChat(this, "در حال پاسخ‌گویی", "یک درخواست دیگر هنوز در حال پردازش است.")
             }
+            return START_NOT_STICKY
+        }
+
+        try {
+            startForegroundFor(action == ACTION_VOICE_TURN)
+        } catch (t: Throwable) {
+            busy.set(false)
+            val message = "سرویس ویجت شروع نشد: ${t.message ?: t.javaClass.simpleName}"
+            HomeWidgetState.updateChat(this, "خطا", message)
+            HomeWidgetState.updateVoice(this, message)
+            stopSelfResult(startId)
             return START_NOT_STICKY
         }
 
