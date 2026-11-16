@@ -49,7 +49,7 @@ internal fun ScreenVisionModelControls() {
     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Text("مدل بینایی محلی", style = MaterialTheme.typography.titleMedium)
-            Text("برای فهم واقعی تصویر، فایل مدل Vision و فایل mmproj متناظر لازم است. این مدل مستقل از مدل متنی فعلی اجرا می‌شود.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("برای فهم واقعی تصویر، فایل مدل Vision و فایل mmproj متناظر لازم است. هر دو فایل در Downloads/AI Chat Test/Screen Vision نگه‌داری می‌شوند؛ اگر قبلاً دانلود شده باشند، از همان نسخه استفاده می‌شود و دانلود تکراری انجام نمی‌شود. مدل متنی فعلی مستقل و فعال می‌ماند.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("مدل: " + (files.first ?: "وارد نشده"), style = MaterialTheme.typography.bodySmall)
             Text("Projector: " + (files.second ?: "وارد نشده"), style = MaterialTheme.typography.bodySmall)
             Button(
@@ -62,7 +62,7 @@ internal fun ScreenVisionModelControls() {
                                 mainHandler.post { status = progress }
                             }
                             files = ScreenVisionModelStore.fileNames(context)
-                            status = "مدل و projector با کنترل SHA-256 آماده شدند."
+                            status = "مدل و projector آماده‌اند؛ نسخه‌های اصلی در Downloads/AI Chat Test/Screen Vision نگه‌داری می‌شوند."
                         } catch (t: Throwable) {
                             status = t.message ?: "دانلود مدل بینایی ناموفق بود."
                         } finally { busy = false }
