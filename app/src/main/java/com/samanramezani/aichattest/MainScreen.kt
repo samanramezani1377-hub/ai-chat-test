@@ -100,7 +100,7 @@ internal fun MainScreen(container: AppContainer, openVoiceInitially: Boolean = f
             refreshModels()
         }
     }
-    BackHandler(enabled = sidebarOpen || quickMenuOpen) { if (sidebarOpen) sidebarOpen = false else quickMenuOpen = false }
+    BackHandler(enabled = sidebarOpen || quickMenuOpen || destination != AppDestination.CHAT) { when { sidebarOpen -> sidebarOpen = false; quickMenuOpen -> quickMenuOpen = false; else -> destination = AppDestination.CHAT } }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri == null || manager == null) return@rememberLauncherForActivityResult; importBusy = true; runtimeStatus = "در حال وارد کردن مدل…"; diagnostic = null; scope.launch { try { val result = withContext(Dispatchers.IO) { manager.import(uri) }; when (result) { is ModelResult.Success -> { runtimeStatus = "مدل وارد شد؛ برای فعال‌سازی آماده است."; diagnostic = null }; is ModelResult.Failure -> diagnostic = formatDiagnostic(result.error.message) } } catch (t: Throwable) { diagnostic = formatDiagnostic(t.message ?: "وارد کردن مدل ناموفق بود.", "وارد کردن مدل") } finally { withContext(Dispatchers.Main) { importBusy = false; if (diagnostic == null && activeModel == null) runtimeStatus = "مدل وارد شد؛ برای فعال‌سازی آماده است." else if (diagnostic != null) runtimeStatus = "خطا" }; refreshModels() } } }
     val draftPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null || manager == null) return@rememberLauncherForActivityResult
