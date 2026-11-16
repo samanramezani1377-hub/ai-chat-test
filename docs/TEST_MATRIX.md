@@ -12,7 +12,11 @@
 | Chat | Persian prompt with Provider selected | request sent to selected provider; provider response/error surfaced |
 | Settings | Change inference source | selected source persists and is shown in UI |
 | Privacy | Provider selected | only request-required conversation context is sent; secrets redacted from logs |
-| Routing | Selected source unavailable | explicit error; no silent fallback to other source |
+| Routing | Selected source unavailable | explicit error; no silent fallback to another inference source (Local ↔ Provider) |
+| Runtime backend | GPU available and supported | actual GPU backend/offload is reported accurately |
+| Runtime backend | GPU unavailable or initialization/offload fails; CPU is available | local inference continues on CPU when feasible; diagnostics identify CPU as actual backend and retain GPU failure context |
+| Runtime backend | GPU and CPU both unavailable or fail | explicit runtime error with diagnostic evidence |
+| Runtime backend | CPU fallback succeeds | successful local generation; must not be classified as failure solely because CPU performed inference |
 | Generation | Stop | generation stops without fake completion |
 | Action | Valid request | executor result + verification |
 | Action | Invalid JSON | parser error, no execution |
