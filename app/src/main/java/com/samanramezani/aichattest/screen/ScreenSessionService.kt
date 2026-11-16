@@ -192,6 +192,7 @@ class ScreenSessionService : Service() {
     }
 
     private fun stopCapture() {
+        FloatingAssistantService.setTemporarilyTransparent(false)
         isRunning = false
         getSharedPreferences("screen_assistant", MODE_PRIVATE).edit().putBoolean("capture_running", false).apply()
         ScreenFrameStore.clear()
