@@ -76,7 +76,7 @@ class FloatingAssistantService : Service() {
 
     private fun startForegroundCompat() {
         val notification = NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(android.R.drawable.ic_menu_view)
             .setContentTitle("دستیار شناور فعال است")
             .setContentText("برای باز کردن دستیار، روی حباب دینا بزن.")
             .setOngoing(true)
