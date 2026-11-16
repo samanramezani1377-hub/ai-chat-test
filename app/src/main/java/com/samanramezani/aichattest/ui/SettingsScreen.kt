@@ -40,7 +40,7 @@ private const val KEY_SEED = "seed"
 private const val KEY_STOPS = "stop_sequences"
 private const val KEY_MAX_ACTION_STEPS = "max_action_steps"
 
-private val sections = listOf("مدل", "صدا", "پاسخ", "زمینه", "عامل")
+private val sections = listOf("مدل", "صدا", "پاسخ", "زمینه", "عامل", "حباب و صفحه")
 
 private enum class InferencePreset(val title: String, val description: String, val settings: InferenceSettings) {
     FAST("سریع", "برای گفت‌وگوی روزمره", InferenceSettings(temperature=.7, maxNewTokens=256, topK=32, topP=.9, minP=0.0, repeatPenalty=1.1, contextLength=2048, recentMessages=6, maxActionSteps=2)),
@@ -99,6 +99,7 @@ fun SettingsScreen(
                         "پاسخ" -> InferenceControls()
                         "زمینه" -> ContextControls()
                         "عامل" -> AgentControls()
+                        "حباب و صفحه" -> ScreenAssistantSettings()
                     }
                 }
             }
