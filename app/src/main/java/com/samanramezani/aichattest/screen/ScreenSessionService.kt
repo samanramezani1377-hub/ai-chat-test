@@ -168,7 +168,7 @@ class ScreenSessionService : Service() {
         val stopPending = PendingIntent.getService(this, 7412, stopIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(android.R.drawable.ic_menu_view)
             .setContentTitle("مشاهده صفحه فعال است")
             .setContentText("تصویر صفحه فقط در حافظه موقت نگه داشته می‌شود.")
             .setOngoing(true)
