@@ -8,6 +8,7 @@
 ├── App Shell
 │   ├── Header / Runtime Status
 │   ├── Sidebar
+│   ├── Primary Bottom Navigation: CHAT / HISTORY / SETTINGS
 │   └── Content Host
 ├── CHAT (Default)
 │   ├── Conversation Messages
