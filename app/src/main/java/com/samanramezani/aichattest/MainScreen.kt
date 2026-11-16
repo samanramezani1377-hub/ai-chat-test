@@ -45,6 +45,8 @@ internal fun MainScreen(container: AppContainer, openVoiceInitially: Boolean = f
     var destination by remember { mutableStateOf(if (openVoiceInitially) AppDestination.VOICE else AppDestination.CHAT) }
     var current by remember { mutableStateOf<ConversationRecord?>(null) }
     var conversations by remember { mutableStateOf(emptyList<ConversationRecord>()) }
+    var conversationSearchIndex by remember { mutableStateOf(emptyMap<String, String>()) }
+    var conversationPreviews by remember { mutableStateOf(emptyMap<String, String>()) }
     var messages by remember { mutableStateOf(emptyList<UiMessage>()) }
     var composer by remember { mutableStateOf("") }
     var generating by remember { mutableStateOf(false) }
@@ -71,19 +73,26 @@ internal fun MainScreen(container: AppContainer, openVoiceInitially: Boolean = f
         val conversations: List<ConversationRecord>,
         val record: ConversationRecord,
         val messages: List<UiMessage>,
+        val searchIndex: Map<String, String>,
+        val previews: Map<String, String>,
     )
 
     fun loadConversation(record: ConversationRecord) { current = record; messages = history.messages(record.id).map { UiMessage(it.role, it.content, it.id) } }
     fun refreshModels() { scope.launch(Dispatchers.Default) { val listed = manager?.models(); val drafts = manager?.draftModels(); val active = manager?.activeModel(); val draft = (active as? ModelResult.Success)?.value?.let { manager?.draftForModel(it.id) }; withContext(Dispatchers.Main) { models = (listed as? ModelResult.Success)?.value ?: emptyList(); draftModels = (drafts as? ModelResult.Success)?.value ?: emptyList(); activeModel = (active as? ModelResult.Success)?.value; activeDraft = (draft as? ModelResult.Success)?.value; if (!generating && !approvalBusy && !importBusy && !activationBusy) runtimeStatus = if (activeModel != null || container.isCloudflareConfigured()) "آماده" else "خارج از دسترس" } } }
-    fun refreshHistory() { scope.launch(Dispatchers.Default) { val records = history.recent(recentLimit); withContext(Dispatchers.Main) { conversations = records } } }
+    fun refreshHistory() { scope.launch(Dispatchers.Default) { val records = history.recent(recentLimit); val allText = records.associate { record -> record.id to history.messages(record.id).joinToString(" ") { it.content } }; val previews = records.associate { record -> record.id to history.messages(record.id).lastOrNull()?.content.orEmpty().take(180) }; withContext(Dispatchers.Main) { conversations = records; conversationSearchIndex = allText; conversationPreviews = previews } } }
     LaunchedEffect(Unit) {
         val startup = withContext(Dispatchers.Default) {
             val records = history.recent(recentLimit)
             val record = records.firstOrNull() ?: history.create("گفت‌وگوی جدید")
+            val visibleRecords = if (records.isEmpty()) listOf(record) else records
+            val searchIndex = visibleRecords.associate { item -> item.id to history.messages(item.id).joinToString(" ") { it.content } }
+            val previews = visibleRecords.associate { item -> item.id to history.messages(item.id).lastOrNull()?.content.orEmpty().take(180) }
             val loadedMessages = history.messages(record.id).map { UiMessage(it.role, it.content, it.id) }
-            StartupSnapshot(records, record, loadedMessages)
+            StartupSnapshot(visibleRecords, record, loadedMessages, searchIndex, previews)
         }
         conversations = startup.conversations
+        conversationSearchIndex = startup.searchIndex
+        conversationPreviews = startup.previews
         current = startup.record
         messages = startup.messages
         scope.launch(Dispatchers.Default) {
@@ -156,7 +165,7 @@ internal fun MainScreen(container: AppContainer, openVoiceInitially: Boolean = f
     fun openConversation(record: ConversationRecord) { loadConversation(record); destination = AppDestination.CHAT; sidebarOpen = false }
     fun deleteConversation(record: ConversationRecord) { scope.launch(Dispatchers.Default) { val removed = history.delete(record.id) ?: return@launch; val replacement = if (current?.id == removed.id) history.recent(1).firstOrNull() else null; withContext(Dispatchers.Main) { if (replacement != null) loadConversation(replacement) else if (current?.id == removed.id) { current = null; messages = emptyList() }; conversations = history.recent(recentLimit); deleted = DeletedConversation(removed) } } }
     fun restoreDeleted(record: ConversationRecord) { scope.launch(Dispatchers.Default) { if (history.restore(record)) withContext(Dispatchers.Main) { loadConversation(record); conversations = history.recent(recentLimit); deleted = null } } }
-    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) { AppTheme { Surface(Modifier.fillMaxSize()) { Box(Modifier.fillMaxSize()) { Column(Modifier.fillMaxSize()) { AppHeader(destination, runtimeStatus, activeModel, { destination = it; quickMenuOpen = false }, { quickMenuOpen = !quickMenuOpen }, { quickMenuOpen = false; sidebarOpen = !sidebarOpen }, { runtimeDetailsOpen = !runtimeDetailsOpen }); when (destination) { AppDestination.VOICE -> VoiceConversationHost(container, onBack = { destination = AppDestination.CHAT }, onHistoryChanged = ::refreshHistory, onOpenSettings = { destination = AppDestination.SETTINGS }); AppDestination.HISTORY -> ConversationHistoryPage(conversations = conversations, currentId = current?.id, onOpen = ::openConversation, onNew = ::createConversation, onRename = { renameTarget = it }, onDelete = ::deleteConversation, onMore = { recentLimit += 20; refreshHistory() }, canShowMore = conversations.size >= recentLimit); AppDestination.CHAT -> ChatPage(messages, composer, generating, approvalBusy, { composer = it }, ::send, ::stop, execution, ::approveExecution, ::rejectExecution, { destination = AppDestination.WORK }, { value ->
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) { AppTheme { Surface(Modifier.fillMaxSize()) { Box(Modifier.fillMaxSize()) { Column(Modifier.fillMaxSize()) { AppHeader(destination, runtimeStatus, activeModel, { destination = it; quickMenuOpen = false }, { quickMenuOpen = !quickMenuOpen }, { quickMenuOpen = false; sidebarOpen = !sidebarOpen }, { runtimeDetailsOpen = !runtimeDetailsOpen }); when (destination) { AppDestination.VOICE -> VoiceConversationHost(container, onBack = { destination = AppDestination.CHAT }, onHistoryChanged = ::refreshHistory, onOpenSettings = { destination = AppDestination.SETTINGS }); AppDestination.HISTORY -> ConversationHistoryPage(conversations = conversations, currentId = current?.id, searchIndex = conversationSearchIndex, previews = conversationPreviews, onOpen = ::openConversation, onNew = ::createConversation, onRename = { renameTarget = it }, onDelete = ::deleteConversation, onMore = { recentLimit += 20; refreshHistory() }, canShowMore = conversations.size >= recentLimit); AppDestination.CHAT -> ChatPage(messages, composer, generating, approvalBusy, { composer = it }, ::send, ::stop, execution, ::approveExecution, ::rejectExecution, { destination = AppDestination.WORK }, { value ->
                             try {
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 clipboard.setPrimaryClip(ClipData.newPlainText("پاسخ", value))
