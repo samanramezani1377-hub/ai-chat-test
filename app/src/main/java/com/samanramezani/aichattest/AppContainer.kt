@@ -215,7 +215,9 @@ class AppContainer(context: Context? = null) {
                 } else null
             },
         )
-        val contextProvider = ScreenAwareContextProvider(baseContextProvider, appContext)
+        val contextProvider = ScreenAwareContextProvider(baseContextProvider, appContext) {
+            providerStore?.load()?.mode != com.samanramezani.aichattest.providers.InferenceProviderMode.CLOUDFLARE
+        }
         return AgentSession(
             orchestrator = AgentOrchestrator(contextProvider = contextProvider, runtime = modelRuntime),
             conversationStore = store,
