@@ -55,7 +55,13 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.ConcurrentLinkedQueue
 
 @Composable
-internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) {
+internal fun VoiceConversationHost(
+    container: AppContainer,
+    onBack: () -> Unit,
+    settingsOnly: Boolean = false,
+    onHistoryChanged: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+) {
     val context = LocalContext.current
     val uiScope = rememberCoroutineScope()
     val store = remember(context) { VoiceModelStore(context.contentResolver, File(context.filesDir, "voice-models")) }
@@ -73,6 +79,7 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     var activeSttId by remember { mutableStateOf(sttModels.firstOrNull { it.id.startsWith("stt-shenava-koochik-") }?.id ?: sttModels.firstOrNull()?.id) }
     var activeTtsId by remember { mutableStateOf(ttsModels.firstOrNull()?.id) }
     var lines by remember { mutableStateOf(emptyList<VoiceLine>()) }
+    var streamingAssistantLineId by remember { mutableStateOf<Long?>(null) }
     var status by remember { mutableStateOf("برای شروع، مدل‌های محلی STT و TTS را انتخاب یا وارد کنید.") }
     var diagnosticLogs by remember {
         mutableStateOf(
@@ -129,7 +136,27 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
             onDiagnostic = { value -> uiScope.launch(Dispatchers.Main.immediate) { diagnosticLogs = (diagnosticLogs + "[${System.currentTimeMillis()}] $value").takeLast(200) } },
             onListening = { value -> uiScope.launch(Dispatchers.Main.immediate) { listening = value; busy = false } },
             onLine = { speaker, text -> uiScope.launch(Dispatchers.Main.immediate) {
-                if (text.isNotBlank()) lines = lines + VoiceLine(System.nanoTime(), speaker, text)
+                if (text.isNotBlank()) {
+                    if (speaker == "شما") streamingAssistantLineId = null
+                    val partialId = if (speaker == "دستیار") streamingAssistantLineId else null
+                    if (partialId != null) {
+                        lines = lines.map { if (it.id == partialId) it.copy(text = text) else it }
+                        streamingAssistantLineId = null
+                    } else {
+                        lines = lines + VoiceLine(System.nanoTime(), speaker, text)
+                    }
+                    if (speaker == "دستیار") onHistoryChanged()
+                }
+            } },
+            onPartialAssistant = { text -> uiScope.launch(Dispatchers.Main.immediate) {
+                if (text.isNotBlank()) {
+                    val id = streamingAssistantLineId ?: System.nanoTime().also { streamingAssistantLineId = it }
+                    lines = if (lines.any { it.id == id }) {
+                        lines.map { if (it.id == id) it.copy(text = text) else it }
+                    } else {
+                        lines + VoiceLine(id, "دستیار", text)
+                    }
+                }
             } },
         )
     }
@@ -348,6 +375,8 @@ internal fun VoiceConversationHost(container: AppContainer, onBack: () -> Unit) 
     VoiceConversationPage(
         lines = lines,
         status = status,
+        settingsOnly = settingsOnly,
+        onOpenSettings = onOpenSettings,
         diagnosticLogs = diagnosticLogs,
         listening = listening,
         busy = busy,
@@ -493,6 +522,7 @@ internal class VoiceConversationController(
     private val onDiagnostic: (String) -> Unit,
     private val onListening: (Boolean) -> Unit,
     private val onLine: (String, String) -> Unit,
+    private val onPartialAssistant: (String) -> Unit = {},
     private val onWakeShutdown: (LocalAsr?) -> Unit = {},
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -878,6 +908,7 @@ internal class VoiceConversationController(
                         // entire model response before starting audio playback.
                         voiceStreamRaw.append(event.value)
                         val safe = sanitizeAssistantVoiceText(voiceStreamRaw.toString())
+                        if (safe.isNotBlank()) onPartialAssistant(safe)
                         val alreadyFed = voiceStreamSafeFed.toString()
                         if (safe.startsWith(alreadyFed)) {
                             val delta = safe.substring(alreadyFed.length)

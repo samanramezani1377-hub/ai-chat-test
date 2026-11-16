@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -48,6 +49,8 @@ internal fun VoiceConversationPage(
     onImportLaya: () -> Unit,
     onDownloadLaya: () -> Unit,
     onBack: () -> Unit,
+    settingsOnly: Boolean = false,
+    onOpenSettings: () -> Unit = {},
     onImportStt: () -> Unit,
     onImportKoochikModel: () -> Unit,
     onImportKoochikTokens: () -> Unit,
@@ -66,7 +69,12 @@ internal fun VoiceConversationPage(
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     val clipboard = LocalClipboardManager.current
-    var showSettings by remember { mutableStateOf(false) }
+    val transcriptListState = rememberLazyListState()
+    LaunchedEffect(lines.size, lines.lastOrNull()?.text?.length) {
+        val last = lines.lastIndex
+        if (last >= 0) transcriptListState.animateScrollToItem(last)
+    }
+    var showSettings by remember(settingsOnly) { mutableStateOf(settingsOnly) }
     var permissionGranted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
     }
@@ -84,25 +92,25 @@ internal fun VoiceConversationPage(
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        if (!settingsOnly) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "بازگشت") }
             Column(Modifier.weight(1f)) {
                 Text("مکالمه صوتی زنده", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text("گفت‌وگوی محلی با امکان صحبت هم‌زمان و قطع پاسخ", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
             }
-            IconButton(onClick = { showSettings = !showSettings }) {
-                Icon(Icons.Default.Settings, contentDescription = "تنظیمات مکالمه صوتی")
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Default.Settings, contentDescription = "تنظیمات صدا")
             }
         }
 
-        if (showSettings) {
+        if (settingsOnly || showSettings) {
             Column(
                 Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("تنظیمات مکالمه صوتی", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { showSettings = false }) { Text("بازگشت به مکالمه") }
+                    Text("تنظیمات صدا و شنوا", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                    if (!settingsOnly) TextButton(onClick = onOpenSettings) { Text("همه تنظیمات") }
                 }
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -308,6 +316,7 @@ internal fun VoiceConversationPage(
                 }
             } else {
                 LazyColumn(
+                    state = transcriptListState,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentPadding = PaddingValues(vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),

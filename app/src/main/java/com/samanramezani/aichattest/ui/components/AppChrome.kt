@@ -69,6 +69,7 @@ internal fun AppHeader(
 ) {
     val title = when (destination) {
         AppDestination.CHAT -> "گفت‌وگو"
+        AppDestination.HISTORY -> "تاریخچه گفتگوها"
         AppDestination.VOICE -> "مکالمه صوتی"
         AppDestination.WORK, AppDestination.WORKSPACE -> "فضای کار"
         AppDestination.DIAGNOSTICS -> "عیب‌یابی"
@@ -81,26 +82,56 @@ internal fun AppHeader(
         }
         Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
             Text(title, style = MaterialTheme.typography.titleLarge)
-            Text(if (destination == AppDestination.CHAT) "اجرای محلی روی دستگاه" else "رابط و ابزارهای مدل محلی",
+            Text(if (destination == AppDestination.CHAT) "گفتگوی هوشمند" else "مدیریت و ابزارهای برنامه",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Surface(
             Modifier.clickable(onClick = onRuntime).heightIn(min = 44.dp),
             shape = RoundedCornerShape(14.dp),
-            color = if (model != null) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+            color = if (status == "خطا") MaterialTheme.colorScheme.errorContainer else if (status == "آماده" || status.contains("در حال")) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
         ) {
             Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(7.dp).background(if (model != null) Accent2 else Warning, RoundedCornerShape(50)))
+                Box(Modifier.size(7.dp).background(if (status == "خطا") MaterialTheme.colorScheme.error else if (status == "آماده" || status.contains("در حال")) Accent2 else Warning, RoundedCornerShape(50)))
                 Spacer(Modifier.width(7.dp))
                 Column {
-                    Text(if (model != null) "آماده" else "بدون مدل", style = MaterialTheme.typography.labelLarge)
-                    Text("OpenCL", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(status, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                    Text(model?.displayName ?: "منبع پاسخ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
             }
         }
         IconButton(onClick = onQuick, Modifier.size(48.dp).semantics { contentDescription = "گزینه‌های بیشتر" }) {
             Icon(Icons.Default.MoreVert, "بیشتر")
         }
+    }
+}
+
+@Composable
+internal fun AppBottomNavigation(
+    destination: AppDestination,
+    onNavigate: (AppDestination) -> Unit,
+) {
+    NavigationBar(
+        containerColor = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+    ) {
+        NavigationBarItem(
+            selected = destination == AppDestination.CHAT,
+            onClick = { onNavigate(AppDestination.CHAT) },
+            icon = { Icon(Icons.Default.ChatBubbleOutline, contentDescription = null) },
+            label = { Text("گفت‌وگو") },
+        )
+        NavigationBarItem(
+            selected = destination == AppDestination.HISTORY,
+            onClick = { onNavigate(AppDestination.HISTORY) },
+            icon = { Icon(Icons.Default.History, contentDescription = null) },
+            label = { Text("تاریخچه") },
+        )
+        NavigationBarItem(
+            selected = destination == AppDestination.SETTINGS,
+            onClick = { onNavigate(AppDestination.SETTINGS) },
+            icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+            label = { Text("تنظیمات") },
+        )
     }
 }
 
@@ -147,6 +178,7 @@ internal fun Sidebar(
                 }
                 item { DrawerSection("برنامه") }
                 item { DrawerItem(Icons.Default.ChatBubbleOutline, "گفت‌وگو", destination == AppDestination.CHAT) { onDestination(AppDestination.CHAT) } }
+                item { DrawerItem(Icons.Default.History, "تاریخچه گفتگوها", destination == AppDestination.HISTORY) { onDestination(AppDestination.HISTORY) } }
                 item { DrawerItem(Icons.Default.Mic, "مکالمه صوتی زنده", destination == AppDestination.VOICE) { onDestination(AppDestination.VOICE) } }
                 item { DrawerItem(Icons.Default.WorkOutline, "فضای کار", destination == AppDestination.WORK || destination == AppDestination.WORKSPACE) { onDestination(AppDestination.WORK) } }
                 item { DrawerItem(Icons.Default.Settings, "تنظیمات", destination == AppDestination.SETTINGS) { onDestination(AppDestination.SETTINGS) } }
@@ -220,7 +252,7 @@ internal fun Sidebar(
 }
 
 @Composable internal fun RuntimeDetailsDialog(status: String, model: ModelDescriptor?, runtimeName: String, runtimeVersion: String, backend: String?, onDismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("اجرای محلی") }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { RuntimeLine("وضعیت", status); RuntimeLine("مدل", model?.displayName ?: "مدلی فعال نیست"); RuntimeLine("Runtime", runtimeName); RuntimeLine("نسخه", runtimeVersion); RuntimeLine("Backend", backend ?: "OpenCL") } }, confirmButton = { TextButton(onClick = onDismiss) { Text("بستن") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("اجرای محلی") }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { RuntimeLine("وضعیت", status); RuntimeLine("مدل", model?.displayName ?: "مدلی فعال نیست"); RuntimeLine("Runtime", runtimeName); RuntimeLine("نسخه", runtimeVersion); RuntimeLine("Backend", backend ?: "نامشخص") } }, confirmButton = { TextButton(onClick = onDismiss) { Text("بستن") } })
 }
 
 @Composable private fun RuntimeLine(label: String, value: String) {

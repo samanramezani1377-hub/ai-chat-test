@@ -40,7 +40,7 @@ private const val KEY_SEED = "seed"
 private const val KEY_STOPS = "stop_sequences"
 private const val KEY_MAX_ACTION_STEPS = "max_action_steps"
 
-private val sections = listOf("مدل", "پاسخ", "زمینه", "عامل")
+private val sections = listOf("مدل", "صدا", "پاسخ", "زمینه", "عامل")
 
 private enum class InferencePreset(val title: String, val description: String, val settings: InferenceSettings) {
     FAST("سریع", "برای گفت‌وگوی روزمره", InferenceSettings(temperature=.7, maxNewTokens=256, topK=32, topP=.9, minP=0.0, repeatPenalty=1.1, contextLength=2048, recentMessages=6, maxActionSteps=2)),
@@ -56,36 +56,51 @@ fun SettingsScreen(
     onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)? = null, onDelete: (String) -> Unit,
     onProviderChanged: () -> Unit = {},
     providerStore: CloudflareProviderStore? = null,
+    voiceSettingsContent: @Composable () -> Unit = {},
+    initialSection: String = "مدل",
+    onSectionChanged: (String) -> Unit = {},
 ) {
-    var section by remember { mutableStateOf("مدل") }
-    LazyColumn(
-        Modifier.fillMaxSize().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 40.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item {
+    var section by remember(initialSection) { mutableStateOf(initialSection) }
+    Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text("تنظیمات", style = MaterialTheme.typography.headlineMedium)
-                Text("اینجا فقط چیزهایی را می‌بینی که روی تجربه مدل اثر می‌گذارند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("مدل‌ها، صدا و رفتار دستیار را از یکجا مدیریت کن.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }
-        item {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 sections.forEach { name ->
                     FilterChip(
                         selected = section == name,
-                        onClick = { section = name },
+                        onClick = { section = name; onSectionChanged(name) },
                         label = { Text(name) },
                     )
                 }
             }
         }
-        item {
-            when (section) {
-                "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete, onProviderChanged, providerStore)
-                "پاسخ" -> InferenceControls()
-                "زمینه" -> ContextControls()
-                "عامل" -> AgentControls()
+        if (section == "صدا") {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                voiceSettingsContent()
+            }
+        } else {
+            LazyColumn(
+                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(top = 8.dp, bottom = 40.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                item {
+                    when (section) {
+                        "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete, onProviderChanged, providerStore)
+                        "پاسخ" -> InferenceControls()
+                        "زمینه" -> ContextControls()
+                        "عامل" -> AgentControls()
+                    }
+                }
             }
         }
     }

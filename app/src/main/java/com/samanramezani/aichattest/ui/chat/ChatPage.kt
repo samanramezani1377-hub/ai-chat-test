@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -11,6 +12,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -29,12 +31,18 @@ internal fun ChatPage(
     messages: List<UiMessage>, composer: String, generating: Boolean, approvalBusy: Boolean,
     onComposer: (String) -> Unit, onSend: () -> Unit, onStop: () -> Unit,
     execution: ExecutionState?, onApprove: () -> Unit, onReject: () -> Unit, onWorkspace: () -> Unit, onCopy: (String) -> Unit, onVoice: () -> Unit,
-) {
+ ) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length, generating, execution?.status) {
+        val extraItems = (if (messages.isEmpty()) 1 else 0) + (if (generating) 1 else 0) + (if (!generating && execution != null && execution.action != "درخواست Agent") 1 else 0)
+        val last = messages.size + extraItems - 1
+        if (last >= 0) listState.animateScrollToItem(last)
+    }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.End) {
             OutlinedButton(onClick = onVoice, modifier = Modifier.heightIn(min = 42.dp)) { Text("مکالمه صوتی زنده") }
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             if (messages.isEmpty()) item { WelcomeState() }
             items(messages, key = { it.id }) { MessageRow(it, onCopy) }
             if (generating) item { AgentProgress(execution, approvalBusy) }
@@ -52,7 +60,7 @@ internal fun ChatPage(
         Spacer(Modifier.height(20.dp))
         Text("شروع کنیم.", style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center)
         Spacer(Modifier.height(8.dp))
-        Text("هر چیزی را بنویس. پاسخ همین‌جا و روی خود دستگاه تولید می‌شود.", Modifier.widthIn(max = 520.dp), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("هر چیزی را بنویس؛ پاسخ در منبع انتخاب‌شدهٔ تو تولید می‌شود.", Modifier.widthIn(max = 520.dp), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(22.dp))
         Row(Modifier.widthIn(max = 560.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HintChip("خلاصه‌کردن", Modifier.weight(1f))
@@ -60,7 +68,7 @@ internal fun ChatPage(
             HintChip("نوشتن کد", Modifier.weight(1f))
         }
         Spacer(Modifier.height(18.dp))
-        Text("خصوصی · آفلاین · llama.cpp + OpenCL", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+        Text("گفت‌وگوی متنی و صوتی · تاریخچهٔ ماندگار", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
     }
 }
 
@@ -133,7 +141,7 @@ private fun ProgressStep(step: ExecutionStep) {
                 ),
             )
             Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (generating) "تولید روی دستگاه در حال اجراست" else "Enter برای ارسال · متن بلند هم مشکلی ندارد", Modifier.weight(1f).padding(start = 10.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (generating) "تولید روی دستگاه در حال اجراست" else "برای ارسال از دکمه استفاده کن", Modifier.weight(1f).padding(start = 10.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FilledIconButton(
                     onClick = if (generating) onStop else onSend,
                     enabled = !approvalBusy && (generating || value.isNotBlank()),
@@ -147,37 +155,48 @@ private fun ProgressStep(step: ExecutionStep) {
 @Composable
 private fun MessageRow(message: UiMessage, onCopy: (String) -> Unit) {
     val user = message.role == ChatMessage.Role.USER
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (user) Alignment.End else Alignment.Start) {
-        if (!user) Text("مدل محلی", Modifier.padding(start = 4.dp, bottom = 5.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
-        Surface(
-            Modifier.widthIn(max = 760.dp),
-            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = if (user) 20.dp else 5.dp, bottomEnd = if (user) 5.dp else 20.dp),
-            color = if (user) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
-            tonalElevation = if (user) 0.dp else 1.dp,
-        ) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 13.dp)) {
-                if (user) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(message.text.ifBlank { "…" }, Modifier.weight(1f), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.bodyLarge)
-                        if (message.text.isNotBlank()) {
-                            IconButton(onClick = { onCopy(message.text) }, modifier = Modifier.size(34.dp).semantics { contentDescription = "کپی پیام" }) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = "کپی", tint = MaterialTheme.colorScheme.onPrimary)
-                            }
-                        }
-                    }
-                } else {
+    Column(
+        Modifier.fillMaxWidth(),
+        horizontalAlignment = if (user) Alignment.End else Alignment.Start,
+    ) {
+        if (user) {
+            Surface(
+                Modifier.widthIn(max = 760.dp),
+                shape = RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+            ) {
+                Row(
+                    Modifier.padding(start = 16.dp, end = 8.dp, top = 11.dp, bottom = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        message.text.ifBlank { "…" },
+                        Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
                     if (message.text.isNotBlank()) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            IconButton(onClick = { onCopy(message.text) }, modifier = Modifier.size(34.dp).semantics { contentDescription = "کپی پاسخ" }) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = "کپی")
-                            }
-                        }
+                        IconButton(
+                            onClick = { onCopy(message.text) },
+                            modifier = Modifier.size(34.dp).semantics { contentDescription = "کپی پیام" },
+                        ) { Icon(Icons.Default.ContentCopy, contentDescription = "کپی پیام", tint = MaterialTheme.colorScheme.onSecondaryContainer) }
                     }
-                    if (message.text.isBlank()) {
-                        Text("در حال آماده‌سازی پاسخ…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
-                    } else {
-                        AssistantMarkdown(message.text)
+                }
+            }
+        } else {
+            Column(Modifier.widthIn(max = 800.dp).fillMaxWidth()) {
+                if (message.text.isNotBlank()) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        IconButton(
+                            onClick = { onCopy(message.text) },
+                            modifier = Modifier.size(34.dp).semantics { contentDescription = "کپی پاسخ" },
+                        ) { Icon(Icons.Default.ContentCopy, contentDescription = "کپی پاسخ") }
                     }
+                }
+                if (message.text.isBlank()) {
+                    Text("در حال آماده‌سازی پاسخ…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
+                } else {
+                    AssistantMarkdown(message.text)
                 }
             }
         }
