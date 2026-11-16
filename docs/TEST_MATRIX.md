@@ -44,6 +44,17 @@
 | Voice UI | Partial assistant output | Sanitized assistant text appears during token streaming without waiting for TTS completion |
 | Voice UI | Transcript growth | Latest recognized and generated lines remain visible through automatic scrolling |
 | Export | Report | exported data matches source |
+| Home widget | Provider discovery | Chat and voice providers appear as two separately addable home-screen widgets |
+| Home widget chat | Compose interaction | Tap opens only compact composer activity; MainActivity is not launched |
+| Home widget chat | Send and stream | Text request runs through AppContainer in a foreground service and streamed/final reply updates RemoteViews |
+| Home widget chat | Persistence | Widget conversation is visible in app history after opening the full app |
+| Home widget voice | One-shot capture | One tap starts microphone capture; Shenava endpoint silence ends capture and microphone is released |
+| Home widget voice | No continuous listening | After one response, microphone stays off until the next explicit widget tap |
+| Home widget voice | Spoken response | Piper speaks the assistant answer and widget status returns to ready |
+| Home widget voice | Permission missing | Service does not attempt capture; actionable permission guidance is displayed |
+| Home widget service | Background work | Foreground notification is present during inference/capture and removed after completion |
+| Home widget service | Concurrent requests | A second request is rejected while a widget request is already running |
+| Home widget service | Process/model state | Active local model is restored if possible; unavailable model/provider error is explicit |
 
 ## Evidence rules
 
