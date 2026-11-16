@@ -11,6 +11,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -62,8 +63,14 @@ class FloatingAssistantService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (!Settings.canDrawOverlays(this)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         startForegroundCompat()
-        if (bubble == null) showBubble()
+        if (bubble == null) {
+            try { showBubble() } catch (_: Throwable) { stopSelf(); return START_NOT_STICKY }
+        }
         return START_STICKY
     }
 
@@ -104,10 +111,8 @@ class FloatingAssistantService : Service() {
             contentDescription = "باز کردن دستیار دینا"
         }
         val size = (52 * resources.displayMetrics.density).toInt()
-        val windowType = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
         val layout = WindowManager.LayoutParams(
-            size, size, windowType,
+            size, size, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
