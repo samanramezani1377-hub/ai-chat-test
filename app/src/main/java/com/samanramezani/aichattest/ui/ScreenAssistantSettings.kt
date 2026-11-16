@@ -64,7 +64,7 @@ internal fun ScreenAssistantSettings() {
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("حباب شناور دینا", style = MaterialTheme.typography.titleLarge)
-        Text("حباب روی برنامه‌های دیگر نمایش داده می‌شود، قابل جابه‌جایی است و با لمس آن دستیار باز می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("حباب روی برنامه‌های دیگر نمایش داده می‌شود و قابل جابه‌جایی است. با لمس آن یک پنجره گفت‌وگوی شناور باز می‌شود؛ برنامه اصلی بسته یا به پیش‌زمینه آورده نمی‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
             Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column(Modifier.weight(1f)) {
