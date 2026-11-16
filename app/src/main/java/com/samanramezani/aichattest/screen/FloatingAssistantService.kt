@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
 import android.view.Gravity
@@ -98,7 +99,7 @@ class FloatingAssistantService : Service() {
             setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.CENTER
             setTextColor(android.graphics.Color.WHITE)
-            setBackgroundResource(android.R.drawable.btn_default)
+            setBackground(GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF4F46E5.toInt()); setStroke((2 * resources.displayMetrics.density).toInt(), android.graphics.Color.WHITE) })
             elevation = 12f
             contentDescription = "باز کردن دستیار دینا"
         }
