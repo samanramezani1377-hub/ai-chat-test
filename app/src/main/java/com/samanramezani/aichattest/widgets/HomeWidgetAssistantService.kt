@@ -200,12 +200,19 @@ class HomeWidgetAssistantService : Service() {
                     }
                     return@start
                 }
-                if (update.endpoint && update.text.isNotBlank() && voiceFinished.compareAndSet(false, true)) {
+                if (update.endpoint && voiceFinished.compareAndSet(false, true)) {
                     scope.launch {
                         mic.stop()
                         microphone = null
                         runCatching { synchronized(voiceAsrLock) { asr.close() } }
                         recognizer = null
+                        if (update.text.isBlank()) {
+                            HomeWidgetState.updateVoice(this@HomeWidgetAssistantService, "گفتار قابل تشخیص نبود؛ برای تلاش دوباره لمس کن.")
+                            busy.set(false)
+                            releaseCpuWakeLock()
+                            stopSelfResult(startId)
+                            return@launch
+                        }
                         switchToInferenceForeground()
                         HomeWidgetState.updateVoice(this@HomeWidgetAssistantService, "گفتار دریافت شد؛ در حال پاسخ‌گویی…")
                         try {
