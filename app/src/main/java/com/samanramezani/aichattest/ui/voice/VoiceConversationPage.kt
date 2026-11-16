@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -68,6 +69,11 @@ internal fun VoiceConversationPage(
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     val clipboard = LocalClipboardManager.current
+    val transcriptListState = rememberLazyListState()
+    LaunchedEffect(lines.size, lines.lastOrNull()?.text?.length) {
+        val last = lines.lastIndex
+        if (last >= 0) transcriptListState.animateScrollToItem(last)
+    }
     var showSettings by remember(settingsOnly) { mutableStateOf(settingsOnly) }
     var permissionGranted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
@@ -310,6 +316,7 @@ internal fun VoiceConversationPage(
                 }
             } else {
                 LazyColumn(
+                    state = transcriptListState,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentPadding = PaddingValues(vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
