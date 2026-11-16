@@ -272,13 +272,24 @@ class HomeWidgetAssistantService : Service() {
         val lastUpdate = AtomicLong(0L)
         val streamedText = StringBuilder()
         val session = container.createAgentSession(record.id, includeAgentTools = false) { event ->
-            if (event is AgentEvent.Token) {
-                val now = SystemClock.elapsedRealtime()
-                if (now - lastUpdate.get() >= 300L && lastUpdate.getAndSet(now) <= now) {
-                    HomeWidgetState.updateChat(this@HomeWidgetAssistantService, "در حال تولید پاسخ…", "شما: $userText\n\nدستیار: ${event.value}")
+            when (event) {
+                is AgentEvent.Token -> {
+                    val now = SystemClock.elapsedRealtime()
+                    synchronized(streamedText) { streamedText.append(event.value) }
+                    if (now - lastUpdate.get() >= 300L) {
+                        lastUpdate.set(now)
+                        val partial = synchronized(streamedText) { streamedText.toString() }
+                        HomeWidgetState.updateChat(
+                            this@HomeWidgetAssistantService,
+                            "در حال تولید پاسخ…",
+                            "شما: $userText\\n\\nدستیار: $partial",
+                        )
+                    }
                 }
-            } else if (event is AgentEvent.Failed) {
-                HomeWidgetState.updateChat(this@HomeWidgetAssistantService, "خطا در تولید پاسخ", event.message)
+                is AgentEvent.Failed -> HomeWidgetState.updateChat(
+                    this@HomeWidgetAssistantService, "خطا در تولید پاسخ", event.message,
+                )
+                else -> Unit
             }
         } ?: error("Agent در دسترس نیست.")
         val result = session.send(
