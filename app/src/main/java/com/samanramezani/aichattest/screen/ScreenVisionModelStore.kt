@@ -104,9 +104,13 @@ object ScreenVisionModelStore {
         onProgress: (String) -> Unit,
     ) {
         val cached = findDownload(context, fileName)
-        if (cached != null && copyUriToFile(context, cached, runtimeFile) && isGguf(runtimeFile)) {
-            onProgress("از Downloads موجود بازیابی شد؛ دانلود مجدد انجام نشد.")
-            return
+        if (cached != null) {
+            if (copyUriToFile(context, cached, runtimeFile) && isGguf(runtimeFile)) {
+                onProgress("از Downloads موجود بازیابی شد؛ دانلود مجدد انجام نشد.")
+                return
+            }
+            // Do not let a corrupt cached entry shadow a valid replacement with the same name.
+            runCatching { context.contentResolver.delete(cached, null, null) }
         }
 
         // Older app versions kept the runtime copy privately. Promote it to Downloads
@@ -188,13 +192,14 @@ object ScreenVisionModelStore {
 
     private fun publishFileToDownloads(context: Context, source: File, fileName: String) {
         require(isGguf(source)) { "فایل GGUF برای ذخیره در Downloads معتبر نیست." }
-        if (findDownload(context, fileName)?.let { uri ->
-                val existing = File(source.parentFile, "$fileName.cached-check")
-                val copied = copyUriToFile(context, uri, existing) && isGguf(existing)
-                existing.delete()
-                copied
-            } == true
-        ) return
+        val existingUri = findDownload(context, fileName)
+        if (existingUri != null) {
+            val checkFile = File(source.parentFile, "$fileName.cached-check")
+            val existingIsValid = copyUriToFile(context, existingUri, checkFile) && isGguf(checkFile)
+            checkFile.delete()
+            if (existingIsValid) return
+            runCatching { context.contentResolver.delete(existingUri, null, null) }
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
@@ -227,15 +232,20 @@ object ScreenVisionModelStore {
         File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir,
             "AI Chat Test/Screen Vision").apply { check(isDirectory || mkdirs()) }
 
-    private fun copyUriToFile(context: Context, uri: Uri, destination: File): Boolean = runCatching {
+    private fun copyUriToFile(context: Context, uri: Uri, destination: File): Boolean {
         val temp = File(destination.parentFile, destination.name + ".copying")
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            FileOutputStream(temp).use { output -> input.copyTo(output, 128 * 1024) }
-        } ?: error("Cannot read cached model")
-        if (!isGguf(temp)) error("Cached GGUF is invalid")
-        replaceAtomically(temp, destination)
-        true
-    }.getOrDefault(false)
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(temp).use { output -> input.copyTo(output, 128 * 1024) }
+            } ?: error("Cannot read cached model")
+            if (!isGguf(temp)) error("Cached GGUF is invalid")
+            replaceAtomically(temp, destination)
+            true
+        } catch (_: Throwable) {
+            temp.delete()
+            false
+        }
+    }
 
     private fun displayName(context: Context, uri: Uri): String? =
         context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
