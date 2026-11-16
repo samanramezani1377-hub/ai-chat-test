@@ -34,7 +34,8 @@ internal fun ChatPage(
  ) {
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length, generating, execution?.status) {
-        val last = listState.layoutInfo.totalItemsCount - 1
+        val extraItems = (if (messages.isEmpty()) 1 else 0) + (if (generating) 1 else 0) + (if (!generating && execution != null && execution.action != "درخواست Agent") 1 else 0)
+        val last = messages.size + extraItems - 1
         if (last >= 0) listState.animateScrollToItem(last)
     }
     Column(Modifier.fillMaxSize()) {
