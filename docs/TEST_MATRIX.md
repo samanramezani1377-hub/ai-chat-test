@@ -36,6 +36,12 @@
 | Network | Offline | no required cloud dependency |
 | Network | Network use | actual usage observable |
 | Persistence | History | save/read/delete behavior verified |
+| UI Navigation | Normal cold launch | Chat is the initial destination; Wake Word entry may open Voice |
+| Settings | Voice settings | Shenava/STT, Piper/TTS, Laya and always-on listener controls are reachable from central Settings |
+| History | Search | Title and loaded conversation message text are searchable |
+| History | Open voice conversation | Voice transcript is available from the shared conversation history and can be continued in Chat |
+| Voice UI | Partial assistant output | Sanitized assistant text appears during token streaming without waiting for TTS completion |
+| Voice UI | Transcript growth | Latest recognized and generated lines remain visible through automatic scrolling |
 | Export | Report | exported data matches source |
 
 ## Evidence rules
