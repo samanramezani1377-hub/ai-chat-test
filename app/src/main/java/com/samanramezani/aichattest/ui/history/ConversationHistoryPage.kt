@@ -34,7 +34,7 @@ internal fun ConversationHistoryPage(
     canShowMore: Boolean,
 ) {
     var query by remember { mutableStateOf("") }
-    val filtered = remember(conversations, query) {
+    val filtered = remember(conversations, query, searchIndex) {
         if (query.isBlank()) conversations
         else conversations.filter { record ->
             record.title.contains(query.trim(), ignoreCase = true) ||
@@ -72,7 +72,7 @@ internal fun ConversationHistoryPage(
         )
         Spacer(Modifier.height(10.dp))
         if (filtered.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(38.dp))
                     Text(if (query.isBlank()) "هنوز گفتگویی ذخیره نشده است." else "گفتگویی با این عنوان پیدا نشد.")
@@ -81,7 +81,7 @@ internal fun ConversationHistoryPage(
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(bottom = 28.dp, top = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
