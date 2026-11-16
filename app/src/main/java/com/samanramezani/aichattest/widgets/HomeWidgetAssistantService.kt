@@ -18,6 +18,7 @@ import com.samanramezani.aichattest.AIChatApplication
 import com.samanramezani.aichattest.AlwaysOnKoochikService
 import com.samanramezani.aichattest.AppContainer
 import com.samanramezani.aichattest.R
+import com.samanramezani.aichattest.providers.InferenceProviderMode
 import com.samanramezani.aichattest.voice.LocalMicrophone
 import com.samanramezani.aichattest.voice.LocalNemoCtcAsr
 import com.samanramezani.aichattest.voice.LocalPiperTts
@@ -302,7 +303,7 @@ class HomeWidgetAssistantService : Service() {
 
     private suspend fun ensureInferenceReady() {
         // Provider mode is honored as configured; this widget never silently switches sources.
-        if (container.isCloudflareConfigured()) return
+        if (container.providerStore?.load()?.mode == InferenceProviderMode.CLOUDFLARE) return
         val manager = container.modelManager ?: error("مدیر مدل محلی در دسترس نیست.")
         val active = manager.activeModel()
         if (active !is ModelResult.Success || active.value == null) {
