@@ -1,8 +1,13 @@
 package com.samanramezani.aichattest.screen
 
+import java.util.concurrent.Executors
+
 /** Independent local vision runtime; it never changes the active text-model/provider selection. */
 object VisionNativeRuntime {
     private val lock = Any()
+    private val unloadExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "screen-vision-unload").apply { isDaemon = true }
+    }
     @Volatile private var loadedModel: String? = null
     @Volatile private var loadedProjector: String? = null
 
@@ -19,6 +24,9 @@ object VisionNativeRuntime {
             }
             nativeDescribe(jpeg, question, 192)
         }
+
+    /** Queue native teardown off the UI/service callback thread; describe() and unload() serialize on lock. */
+    fun unloadAsync() { unloadExecutor.execute { runCatching { unload() } } }
 
     fun unload() = synchronized(lock) {
         nativeUnload()
