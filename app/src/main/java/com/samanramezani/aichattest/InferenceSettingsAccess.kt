@@ -45,6 +45,7 @@ object InferenceSettingsAccess {
             seed = if (prefs.contains(KEY_SEED)) prefs.getLong(KEY_SEED, defaults.seed ?: 0L) else defaults.seed,
             stopSequences = prefs.getString(KEY_STOPS, null)?.split("\u001f")?.filter { it.isNotEmpty() } ?: defaults.stopSequences,
             maxActionSteps = prefs.getInt(KEY_MAX_ACTION_STEPS, defaults.maxActionSteps).coerceAtLeast(0),
+            enableThinking = false,
         ).also { InferenceSettingsStore.current = it }
     }
 }
