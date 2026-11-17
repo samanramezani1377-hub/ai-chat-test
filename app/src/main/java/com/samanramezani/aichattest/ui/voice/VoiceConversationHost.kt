@@ -899,7 +899,7 @@ internal class VoiceConversationController(
             val modelFailure = AtomicReference<String?>(null)
             val voiceStreamRaw = StringBuilder()
             val voiceStreamSafeFed = StringBuilder()
-            val session = container.createAgentSession(id, eventSink = { event ->
+            val session = container.createAgentSession(id, includeAgentTools = false, eventSink = { event ->
                 when (event) {
                     is AgentEvent.Token -> {
                         // Voice has its own streaming consumer: sanitize the accumulated output,
