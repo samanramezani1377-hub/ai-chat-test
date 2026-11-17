@@ -44,6 +44,16 @@
 | Voice UI | Partial assistant output | Sanitized assistant text appears during token streaming without waiting for TTS completion |
 | Voice UI | Transcript growth | Latest recognized and generated lines remain visible through automatic scrolling |
 | Export | Report | exported data matches source |
+| Screen Awareness | Persian direct screen question | Screen-question classifier routes page/button/error questions to local Vision |
+| Screen Awareness | Persian deictic follow-up | Contextual phrases such as «اینو چطور حل کنم؟» trigger screen inspection |
+| Screen Awareness | Generic chat question | Unrelated questions do not trigger screen capture or Vision inference |
+| Screen Awareness | Frame freshness and privacy | Only latest in-memory frame is returned; stale frames expire and returned bytes are defensive copies |
+| Screen Awareness | Stop screen session | Frame buffer clears and native Vision model unload is queued |
+| Screen Awareness | Vision idle timeout | Native Vision model unloads after 60 seconds without another visual request |
+| Screen Awareness | Cloud provider selected | Screen pixels and visual observations remain local; no screen data is sent to the provider |
+| Floating bubble | Display bounds | Initial and dragged bubble coordinates keep the full bubble inside display bounds |
+| Floating bubble | Service state | Persisted enabled state follows successful overlay creation and actual service teardown |
+| Vision model files | Atomic replacement | Failed replacement preserves the last known-good model file |
 | Home widget | Provider discovery | Chat and voice providers appear as two separately addable home-screen widgets |
 | Home widget chat | Compose interaction | Tap opens only compact composer activity; MainActivity is not launched |
 | Home widget chat | Send and stream | Text request runs through AppContainer in a foreground service and streamed/final reply updates RemoteViews |
