@@ -63,10 +63,12 @@ class FloatingAssistantService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_DISABLE) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, false).apply()
             stopSelf()
             return START_NOT_STICKY
         }
         if (!Settings.canDrawOverlays(this)) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, false).apply()
             stopSelf()
             return START_NOT_STICKY
         }
