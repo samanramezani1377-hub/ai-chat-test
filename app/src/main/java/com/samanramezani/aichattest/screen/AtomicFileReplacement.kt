@@ -25,7 +25,7 @@ internal object AtomicFileReplacement {
                 StandardCopyOption.REPLACE_EXISTING,
             )
             return
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
             // Some Android filesystems do not support ATOMIC_MOVE with replacement.
             // Fall through to a rollback-safe same-directory rename.
         }
