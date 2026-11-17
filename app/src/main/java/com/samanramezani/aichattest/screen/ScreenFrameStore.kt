@@ -8,7 +8,7 @@ object ScreenFrameStore {
     data class Frame(val jpeg: ByteArray, val capturedAtMs: Long, val width: Int, val height: Int)
 
     @Volatile private var latest: Frame? = null
-    @Volatile private var clock: () -> Long = { clock() }
+    @Volatile private var clock: () -> Long = { android.os.SystemClock.elapsedRealtime() }
 
     internal fun setClockForTests(now: () -> Long) { clock = now }
     internal fun resetClockForTests() { clock = { android.os.SystemClock.elapsedRealtime() } }
