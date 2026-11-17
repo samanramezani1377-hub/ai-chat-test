@@ -10,6 +10,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        const val EXTRA_OPEN_SETTINGS_SECTION = "com.samanramezani.aichattest.OPEN_SETTINGS_SECTION"
+    }
     @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN &&
@@ -23,6 +26,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val openVoiceFromWake = intent?.getBooleanExtra(AlwaysOnKoochikService.EXTRA_OPEN_VOICE_FROM_ALWAYS_ON, false) == true
+        val initialSettingsSection = intent?.getStringExtra(EXTRA_OPEN_SETTINGS_SECTION)
         if (openVoiceFromWake) {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
                 setShowWhenLocked(true)
@@ -33,7 +37,7 @@ class MainActivity : ComponentActivity() {
         }
         val container = (application as? AIChatApplication)?.container ?: AppContainer(this)
         setContent {
-            MainScreen(container)
+            MainScreen(container, initialSettingsSection = initialSettingsSection)
         }
         if (openVoiceFromWake) {
             val voiceIntent = Intent(this, VoiceConversationActivity::class.java)
