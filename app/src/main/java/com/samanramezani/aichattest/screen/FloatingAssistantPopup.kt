@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.samanramezani.aichattest.AIChatApplication
+import com.samanramezani.aichattest.InferenceSettingsAccess
 import com.woogit.aicore.agent.AgentEvent
 import com.woogit.aicore.conversation.ConversationMessage
 import com.woogit.aicore.domain.InferenceSettings
@@ -92,7 +93,7 @@ internal fun FloatingAssistantPopup(onClose: () -> Unit) {
                     },
                 ) ?: error("Agent Session در دسترس نیست.")
                 val result = withContext(Dispatchers.Default) {
-                    session.send(text, InferenceSettings(maxNewTokens = 2048, enableThinking = false), requestedRecentMessages = Int.MAX_VALUE)
+                    session.send(text, InferenceSettingsAccess.load(context), requestedRecentMessages = InferenceSettingsAccess.load(context).recentMessages)
                 }
                 messages = messages.toMutableList().also { list ->
                     if (responseIndex in list.indices) list[responseIndex] = list[responseIndex].copy(text = result.generation.text)
