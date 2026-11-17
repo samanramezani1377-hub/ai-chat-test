@@ -276,8 +276,7 @@ object ScreenVisionModelStore {
     }
 
     private fun replaceAtomically(source: File, destination: File) {
-        if (destination.exists()) check(destination.delete()) { "حذف نسخه قبلی فایل ناموفق بود." }
-        check(source.renameTo(destination)) { "انتقال فایل مدل ناموفق بود." }
+        AtomicFileReplacement.replace(source, destination)
     }
 
     private fun download(url: String, destination: File, progress: (String) -> Unit) {
