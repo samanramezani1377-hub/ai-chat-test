@@ -8,6 +8,10 @@ object ScreenFrameStore {
     data class Frame(val jpeg: ByteArray, val capturedAtMs: Long, val width: Int, val height: Int)
 
     @Volatile private var latest: Frame? = null
+    @Volatile private var clock: () -> Long = { clock() }
+
+    internal fun setClockForTests(now: () -> Long) { clock = now }
+    internal fun resetClockForTests() { clock = { android.os.SystemClock.elapsedRealtime() } }
 
     fun publish(jpeg: ByteArray, width: Int, height: Int) {
         if (jpeg.isEmpty() || width <= 0 || height <= 0) return
