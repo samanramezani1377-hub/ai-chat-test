@@ -33,6 +33,8 @@ class FloatingAssistantService : Service() {
         private const val KEY_Y = "bubble_y"
 
         @Volatile private var instance: FloatingAssistantService? = null
+        val isRunning: Boolean get() = instance != null
+        private const val KEY_ENABLED = "overlay_enabled"
 
         /** Hide every Dina overlay for one compositor frame so capture sees the app beneath it. */
         fun setTemporarilyTransparent(transparent: Boolean) {
@@ -70,7 +72,14 @@ class FloatingAssistantService : Service() {
         }
         startForegroundCompat()
         if (bubble == null) {
-            try { showBubble() } catch (_: Throwable) { stopSelf(); return START_NOT_STICKY }
+            try {
+                showBubble()
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, true).apply()
+            } catch (_: Throwable) {
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, false).apply()
+                stopSelf()
+                return START_NOT_STICKY
+            }
         }
         return START_STICKY
     }
@@ -122,8 +131,8 @@ class FloatingAssistantService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.LEFT
-            x = prefs.getInt(KEY_X, 0)
-            y = prefs.getInt(KEY_Y, 260)
+            x = BubbleBounds.clampX(prefs.getInt(KEY_X, 0), resources.displayMetrics.widthPixels, size)
+            y = BubbleBounds.clampY(prefs.getInt(KEY_Y, 260), resources.displayMetrics.heightPixels, size)
         }
         view.setOnTouchListener { v, event ->
             when (event.action) {
@@ -136,15 +145,17 @@ class FloatingAssistantService : Service() {
                     val dx = (event.rawX - downX).toInt()
                     val dy = (event.rawY - downY).toInt()
                     if (abs(dx) + abs(dy) > 8) moved = true
-                    layout.x = (startX + dx).coerceAtLeast(0)
-                    layout.y = (startY + dy).coerceAtLeast(0)
+                    layout.x = BubbleBounds.clampX(startX + dx, resources.displayMetrics.widthPixels, size)
+                    layout.y = BubbleBounds.clampY(startY + dy, resources.displayMetrics.heightPixels, size)
                     runCatching { windowManager.updateViewLayout(v, layout) }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     if (moved) {
                         val screenWidth = resources.displayMetrics.widthPixels
-                        layout.x = if (layout.x + size / 2 < screenWidth / 2) 0 else (screenWidth - size).coerceAtLeast(0)
+                        val screenHeight = resources.displayMetrics.heightPixels
+                        layout.x = if (layout.x + size / 2 < screenWidth / 2) 0 else BubbleBounds.clampX(screenWidth - size, screenWidth, size)
+                        layout.y = BubbleBounds.clampY(layout.y, screenHeight, size)
                         prefs.edit().putInt(KEY_X, layout.x).putInt(KEY_Y, layout.y).apply()
                         runCatching { windowManager.updateViewLayout(v, layout) }
                     } else {
@@ -210,6 +221,7 @@ class FloatingAssistantService : Service() {
 
     override fun onDestroy() {
         instance = null
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, false).apply()
         closePopup()
         bubble?.let { runCatching { windowManager.removeView(it) } }
         bubble = null
