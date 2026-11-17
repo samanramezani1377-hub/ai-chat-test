@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -56,7 +57,18 @@ class FloatingAssistantService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, false).apply()
         createChannel()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val params = bubbleParams ?: return
+        val size = params.width
+        params.x = BubbleBounds.clampX(params.x, resources.displayMetrics.widthPixels, size)
+        params.y = BubbleBounds.clampY(params.y, resources.displayMetrics.heightPixels, size)
+        runCatching { windowManager.updateViewLayout(bubble, params) }
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(KEY_X, params.x).putInt(KEY_Y, params.y).apply()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
