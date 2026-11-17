@@ -21,7 +21,7 @@ import com.samanramezani.aichattest.screen.ScreenSessionService
 internal fun ScreenAssistantSettings() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember(context) { context.getSharedPreferences("screen_assistant", Context.MODE_PRIVATE) }
-    var overlayEnabled by remember { mutableStateOf(prefs.getBoolean("overlay_enabled", false)) }
+    var overlayEnabled by remember { mutableStateOf(FloatingAssistantService.isRunning) }
     var captureRunning by remember { mutableStateOf(ScreenSessionService.isRunning) }
     var status by remember { mutableStateOf<String?>(null) }
 
@@ -29,18 +29,19 @@ internal fun ScreenAssistantSettings() {
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == "capture_running") {
                 captureRunning = prefs.getBoolean("capture_running", false)
+            } else if (key == "overlay_enabled") {
+                overlayEnabled = prefs.getBoolean("overlay_enabled", false) && FloatingAssistantService.isRunning
             }
         }
         prefs.registerOnSharedPreferenceChangeListener(listener)
+        overlayEnabled = FloatingAssistantService.isRunning
         onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
     fun enableOverlay() {
         if (!Settings.canDrawOverlays(context)) return
         ContextCompat.startForegroundService(context, Intent(context, FloatingAssistantService::class.java).setAction(FloatingAssistantService.ACTION_ENABLE))
-        prefs.edit().putBoolean("overlay_enabled", true).apply()
-        overlayEnabled = true
-        status = "حباب دینا فعال شد."
+        status = "درخواست فعال‌سازی حباب ارسال شد؛ وضعیت پس از ایجاد موفق پنجره به‌روزرسانی می‌شود."
     }
 
     val overlayPermission = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
