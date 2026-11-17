@@ -74,13 +74,13 @@ class FloatingAssistantService : Service() {
         if (bubble == null) {
             try {
                 showBubble()
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, true).apply()
             } catch (_: Throwable) {
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, false).apply()
                 stopSelf()
                 return START_NOT_STICKY
             }
         }
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, true).apply()
         return START_STICKY
     }
 
