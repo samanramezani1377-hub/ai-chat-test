@@ -1,6 +1,7 @@
 package com.samanramezani.aichattest
 
 import android.view.KeyEvent
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
@@ -38,6 +39,13 @@ class VoiceConversationActivity : ComponentActivity() {
                         container = container,
                         onBack = { finish() },
                         onHistoryChanged = {},
+                        onOpenSettings = {
+                            startActivity(
+                                Intent(this, MainActivity::class.java)
+                                    .putExtra(MainActivity.EXTRA_OPEN_SETTINGS_SECTION, "صدا"),
+                            )
+                            finish()
+                        },
                     )
                 }
             }
