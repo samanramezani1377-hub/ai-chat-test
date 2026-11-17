@@ -2,7 +2,10 @@ package com.samanramezani.aichattest.screen
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.Service
+import android.util.Log
+import android.widget.Toast
+import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.ViewTreeLifecycleOwner
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.PixelFormat
@@ -23,7 +26,7 @@ import androidx.core.app.ServiceCompat
 import kotlin.math.abs
 
 /** User-enabled floating Dina bubble and in-place chat window. Neither tap launches the app. */
-class FloatingAssistantService : Service() {
+class FloatingAssistantService : LifecycleService() {
     companion object {
         const val ACTION_ENABLE = "com.samanramezani.aichattest.screen.FLOATING_ENABLE"
         const val ACTION_DISABLE = "com.samanramezani.aichattest.screen.FLOATING_DISABLE"
@@ -88,7 +91,8 @@ class FloatingAssistantService : Service() {
         if (bubble == null) {
             try {
                 showBubble()
-            } catch (_: Throwable) {
+            } catch (t: Throwable) {
+                Log.e("DinaOverlay", "Unable to create floating bubble", t)
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, false).apply()
                 stopSelf()
                 return START_NOT_STICKY
@@ -173,7 +177,12 @@ class FloatingAssistantService : Service() {
                         prefs.edit().putInt(KEY_X, layout.x).putInt(KEY_Y, layout.y).apply()
                         runCatching { windowManager.updateViewLayout(v, layout) }
                     } else {
-                        if (popup == null) showPopup() else closePopup()
+                        if (popup == null) {
+                            runCatching { showPopup() }.onFailure { error ->
+                                Log.e("DinaOverlay", "Unable to open floating chat popup", error)
+                                Toast.makeText(this@FloatingAssistantService, "پنجره گفت‌وگو باز نشد: ${error.message ?: error.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+                            }
+                        } else closePopup()
                     }
                     true
                 }
@@ -193,6 +202,7 @@ class FloatingAssistantService : Service() {
         val width = minOf((380 * density).toInt(), (screenWidth - 20 * density).toInt()).coerceAtLeast(1)
         val height = minOf((540 * density).toInt(), (screenHeight - 80 * density).toInt()).coerceAtLeast(1)
         val view = ComposeView(this).apply {
+            ViewTreeLifecycleOwner.set(this, this@FloatingAssistantService)
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent { FloatingAssistantPopup(onClose = { closePopup() }) }
         }
