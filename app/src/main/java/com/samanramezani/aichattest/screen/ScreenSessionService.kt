@@ -241,6 +241,8 @@ class ScreenSessionService : Service() {
         isRunning = false
         getSharedPreferences("screen_assistant", MODE_PRIVATE).edit().putBoolean("capture_running", false).apply()
         ScreenFrameStore.clear()
+        // Release the separately loaded native Vision model when screen observation ends.
+        VisionNativeRuntime.unloadAsync()
         displayManager?.let { manager ->
             runCatching { manager.unregisterDisplayListener(displayListener) }
         }
