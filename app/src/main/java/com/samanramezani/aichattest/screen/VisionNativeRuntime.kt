@@ -29,7 +29,7 @@ object VisionNativeRuntime {
     fun unloadAsync() { unloadExecutor.execute { runCatching { unload() } } }
 
     fun unload() = synchronized(lock) {
-        nativeUnload()
+        if (loadedModel != null || loadedProjector != null) nativeUnload()
         loadedModel = null
         loadedProjector = null
     }
