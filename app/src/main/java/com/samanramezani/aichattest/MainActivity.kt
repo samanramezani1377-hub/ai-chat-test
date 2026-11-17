@@ -2,6 +2,7 @@ package com.samanramezani.aichattest
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.content.Intent
 import android.view.KeyEvent
 import com.samanramezani.aichattest.voice.VoiceAudioInputGuard
 import android.view.WindowManager
@@ -32,7 +33,12 @@ class MainActivity : ComponentActivity() {
         }
         val container = (application as? AIChatApplication)?.container ?: AppContainer(this)
         setContent {
-            MainScreen(container, openVoiceInitially = openVoiceFromWake)
+            MainScreen(container)
+        }
+        if (openVoiceFromWake) {
+            val voiceIntent = Intent(this, VoiceConversationActivity::class.java)
+            intent?.extras?.let { voiceIntent.putExtras(it) }
+            startActivity(voiceIntent)
         }
     }
 }
