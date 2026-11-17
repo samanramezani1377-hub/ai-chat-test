@@ -20,7 +20,7 @@ object ScreenFrameStore {
 
     fun latest(maxAgeMs: Long = 4_000L): Frame? {
         val frame = latest ?: return null
-        if (android.os.SystemClock.elapsedRealtime() - frame.capturedAtMs > maxAgeMs) return null
+        if (clock() - frame.capturedAtMs > maxAgeMs) return null
         return frame.copy(jpeg = frame.jpeg.copyOf())
     }
 
