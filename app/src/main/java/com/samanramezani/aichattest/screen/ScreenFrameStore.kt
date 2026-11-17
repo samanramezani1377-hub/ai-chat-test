@@ -15,7 +15,7 @@ object ScreenFrameStore {
 
     fun publish(jpeg: ByteArray, width: Int, height: Int) {
         if (jpeg.isEmpty() || width <= 0 || height <= 0) return
-        latest = Frame(jpeg.copyOf(), android.os.SystemClock.elapsedRealtime(), width, height)
+        latest = Frame(jpeg.copyOf(), clock(), width, height)
     }
 
     fun latest(maxAgeMs: Long = 4_000L): Frame? {
