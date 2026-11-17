@@ -36,7 +36,14 @@
         android:textSize="13sp"
         android:textColor="#18212B"
         android:gravity="top|start"
-        android:maxLines="7"
+        android:textDirection="firstStrong"
+        android:layoutDirection="locale"
+        android:singleLine="false"
+        android:scrollHorizontally="false"
+        android:breakStrategy="highQuality"
+        android:hyphenationFrequency="normal"
+        android:includeFontPadding="false"
+        android:maxLines="8"
         android:ellipsize="end" />
 
     <Button
