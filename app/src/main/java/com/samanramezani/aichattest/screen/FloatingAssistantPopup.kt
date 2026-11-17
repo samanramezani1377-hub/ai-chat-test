@@ -93,7 +93,7 @@ internal fun FloatingAssistantPopup(onClose: () -> Unit) {
                     },
                 ) ?: error("Agent Session در دسترس نیست.")
                 val result = withContext(Dispatchers.Default) {
-                    run { val inferenceSettings = InferenceSettingsAccess.load(context); session.send(text, inferenceSettings, requestedRecentMessages = inferenceSettings.recentMessages) }
+                    run { val inferenceSettings = InferenceSettingsAccess.load(context); session.send(text, inferenceSettings, requestedRecentMessages = maxOf(1, inferenceSettings.recentMessages)) }
                 }
                 messages = messages.toMutableList().also { list ->
                     if (responseIndex in list.indices) list[responseIndex] = list[responseIndex].copy(text = result.generation.text)
