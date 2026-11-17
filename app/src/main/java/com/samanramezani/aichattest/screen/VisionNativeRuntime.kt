@@ -14,13 +14,13 @@ object VisionNativeRuntime {
         }
     private var pendingIdleUnload: ScheduledFuture<*>? = null
     private val idleUnloadSeconds = 60L
+    private var libraryLoaded = false
     @Volatile private var loadedModel: String? = null
     @Volatile private var loadedProjector: String? = null
 
-    init { System.loadLibrary("ai_chat_runtime") }
-
     fun describe(modelPath: String, projectorPath: String, jpeg: ByteArray, question: String): String =
         synchronized(lock) {
+            ensureLibraryLoadedLocked()
             cancelIdleUnloadLocked()
             if (loadedModel != modelPath || loadedProjector != projectorPath) {
                 unloadNativeLocked()
@@ -47,6 +47,13 @@ object VisionNativeRuntime {
 
     fun unload() = synchronized(lock) {
         unloadNativeLocked()
+    }
+
+    private fun ensureLibraryLoadedLocked() {
+        if (!libraryLoaded) {
+            System.loadLibrary("ai_chat_runtime")
+            libraryLoaded = true
+        }
     }
 
     private fun scheduleIdleUnloadLocked() {
