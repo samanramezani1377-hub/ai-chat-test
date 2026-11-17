@@ -30,7 +30,8 @@ internal object AtomicFileReplacement {
             // Fall through to a rollback-safe same-directory rename.
         }
 
-        val backup = File.createTempFile(destination.name + ".", ".backup", parent)
+        val backupPrefix = (destination.name + ".").padEnd(3, '_')
+        val backup = File.createTempFile(backupPrefix, ".backup", parent)
         check(backup.delete()) { "Could not prepare replacement backup." }
         val hadPrevious = destination.exists()
         if (hadPrevious) {
