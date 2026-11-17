@@ -67,7 +67,7 @@ class FloatingAssistantService : Service() {
         val size = params.width
         params.x = BubbleBounds.clampX(params.x, resources.displayMetrics.widthPixels, size)
         params.y = BubbleBounds.clampY(params.y, resources.displayMetrics.heightPixels, size)
-        runCatching { windowManager.updateViewLayout(bubble, params) }
+        bubble?.let { view -> runCatching { windowManager.updateViewLayout(view, params) } }
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(KEY_X, params.x).putInt(KEY_Y, params.y).apply()
     }
 
