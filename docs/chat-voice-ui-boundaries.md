@@ -16,11 +16,11 @@ Both surfaces continue to use the same application-scoped `AppContainer` and the
 - Runtime diagnostics and observability.
 - The screen-awareness context provider where the current provider configuration allows it.
 
-These are shared services, not shared UI state. They must not be duplicated just to separate screens.
+These are shared services, not shared UI state. They must not be duplicated just to separate screens. Both modes use the shared session/runtime foundation, but they build different requests and own different UI state.
 
 ## Voice-only ownership
 
-The voice Activity owns the voice conversation host and its controller lifecycle. STT/TTS model selection, microphone capture, speech segmentation, playback, wake-trigger handoff, and voice transcript UI remain in the voice feature. Disposing the voice Activity disposes the voice host/controller without recreating the text-chat screen.
+The voice Activity owns the voice conversation host and its controller lifecycle. Voice turns explicitly create an AgentSession with `includeAgentTools = false`; the text-chat Agent tool catalog and action protocol are not injected into voice prompts. Voice also supplies its own bounded inference settings (384 new tokens, 12 recent messages, Thinking disabled), rather than inheriting the text-chat settings reader. STT/TTS model selection, microphone capture, speech segmentation, playback, wake-trigger handoff, and voice transcript UI remain in the voice feature. Disposing the voice Activity disposes the voice host/controller without recreating the text-chat screen.
 
 ## Text-chat ownership
 
