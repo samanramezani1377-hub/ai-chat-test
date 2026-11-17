@@ -9,6 +9,7 @@ import android.content.Intent
 import android.widget.RemoteViews
 import com.samanramezani.aichattest.R
 import com.samanramezani.aichattest.widgets.ui.WidgetComposeActivity
+import com.samanramezani.aichattest.widgets.ui.WidgetReplyActivity
 
 internal object HomeWidgetState {
     private const val PREFS = "home_assistant_widgets"
@@ -24,13 +25,17 @@ internal object HomeWidgetState {
             .getString(CHAT_REPLY, "پیامت را از همین ویجت بفرست و پاسخ را همین‌جا بگیر.")
             ?: "پیامت را از همین ویجت بفرست و پاسخ را همین‌جا بگیر."
 
+    fun fullChatReply(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(CHAT_REPLY, "پاسخی برای نمایش وجود ندارد.") ?: "پاسخی برای نمایش وجود ندارد."
+
     fun voiceStatus(context: Context): String =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(VOICE_STATUS, "برای یک نوبت صحبت لمس کن") ?: "برای یک نوبت صحبت لمس کن"
 
     fun updateChat(context: Context, status: String, reply: String? = null) {
         val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(CHAT_STATUS, status)
-        if (reply != null) editor.putString(CHAT_REPLY, reply.take(1800))
+        if (reply != null) editor.putString(CHAT_REPLY, reply.take(20000))
         editor.apply()
         updateChatContent(context)
     }
@@ -46,7 +51,8 @@ internal object HomeWidgetState {
         if (ids.isEmpty()) return
         val partial = RemoteViews(context.packageName, R.layout.widget_chat_assistant).apply {
             setTextViewText(R.id.widget_chat_status, chatStatus(context))
-            setTextViewText(R.id.widget_chat_reply, chatReply(context))
+            setTextViewText(R.id.widget_chat_reply, chatReply(context).withWidgetWrapOpportunities())
+            setOnClickPendingIntent(R.id.widget_chat_reply, replyViewerPendingIntent(context))
         }
         manager.partiallyUpdateAppWidget(ids, partial)
     }
@@ -61,13 +67,26 @@ internal object HomeWidgetState {
         manager.partiallyUpdateAppWidget(ids, partial)
     }
 
+    private fun replyViewerPendingIntent(context: Context): PendingIntent {
+        val intent = Intent(context, WidgetReplyActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        return PendingIntent.getActivity(
+            context, 7304, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun String.withWidgetWrapOpportunities(chunkSize: Int = 26): String =
+        Regex("(\\S{$chunkSize})(?=\\S)").replace(this, "$1\u200B")
+
     fun renderChat(context: Context) {
         val manager = AppWidgetManager.getInstance(context)
         val ids = manager.getAppWidgetIds(ComponentName(context, ChatAssistantWidgetProvider::class.java))
         if (ids.isEmpty()) return
         val views = RemoteViews(context.packageName, R.layout.widget_chat_assistant).apply {
             setTextViewText(R.id.widget_chat_status, chatStatus(context))
-            setTextViewText(R.id.widget_chat_reply, chatReply(context))
+            setTextViewText(R.id.widget_chat_reply, chatReply(context).withWidgetWrapOpportunities())
+            setOnClickPendingIntent(R.id.widget_chat_reply, replyViewerPendingIntent(context))
             val intent = Intent(context, WidgetComposeActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             val pending = PendingIntent.getActivity(
