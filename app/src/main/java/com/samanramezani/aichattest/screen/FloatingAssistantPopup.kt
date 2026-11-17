@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import com.samanramezani.aichattest.AIChatApplication
 import com.samanramezani.aichattest.InferenceSettingsAccess
 import com.woogit.aicore.agent.AgentEvent
@@ -161,6 +162,8 @@ internal fun FloatingAssistantPopup(onClose: () -> Unit) {
                                     message.text.ifBlank { if (sending && !message.isUser) "…" else "" },
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
                                     style = MaterialTheme.typography.bodyMedium,
+                                    softWrap = true,
+                                    overflow = TextOverflow.Clip,
                                     color = if (message.isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
