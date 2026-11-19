@@ -4,7 +4,6 @@ import android.os.Process
 import android.os.SystemClock
 import java.io.File
 import java.util.Locale
-import kotlin.math.max
 
 /**
  * Samples Linux/Android procfs and sysfs while a native inference is running.
@@ -102,10 +101,9 @@ internal class AndroidDevicePerformanceMonitor private constructor() {
         val elapsed = SystemClock.elapsedRealtime()
         val counters = readCpuCounters()
         val frequencies = counters.keys.mapNotNull { core ->
-            readLong("/sys/devices/system/cpu/cpu$core/cpufreq/scaling_cur_freq")
+            val currentKhz = readLong("/sys/devices/system/cpu/cpu$core/cpufreq/scaling_cur_freq")
                 ?: readLong("/sys/devices/system/cpu/cpu$core/cpufreq/cpuinfo_cur_freq")
-                ?: readLong("/sys/devices/system/cpu/cpu$core/cpufreq/scaling_max_freq")?.let { it }
-                ?.let { core to it }
+            currentKhz?.let { core to it }
         }.toMap()
         val processCpu = Process.getElapsedCpuTime()
         synchronized(lock) {
