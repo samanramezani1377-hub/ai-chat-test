@@ -123,7 +123,7 @@ class AgentSessionTest {
     @Test
     fun textChatExtractsAssistantBodyFromChatMlEnvelope() = kotlinx.coroutines.test.runTest {
         val store = TestStore()
-        val raw = "<|im_start|>user\\nسلام<|im_end|>\\n<|im_start|>assistant\\nسلام!<|im_end|>"
+        val raw = "<|im_start|>user\nسلام<|im_end|>\n<|im_start|>assistant\nسلام!<|im_end|>"
         val runtime = TestRuntime(listOf(raw))
         val provider = DefaultContextProvider(store, { "system" }, { "task" }, { "workspace" })
         val events = mutableListOf<AgentEvent>()
@@ -144,7 +144,7 @@ class AgentSessionTest {
     @Test
     fun textChatNeverEchoesUserEnvelopeWhenModelReturnsOnlyChatMlUserMessage() = kotlinx.coroutines.test.runTest {
         val store = TestStore()
-        val raw = "<|im_start|>user\\nسلام"
+        val raw = "<|im_start|>user\nسلام"
         val runtime = TestRuntime(listOf(raw))
         val provider = DefaultContextProvider(store, { "system" }, { "task" }, { "workspace" })
         val events = mutableListOf<AgentEvent>()
@@ -166,7 +166,7 @@ class AgentSessionTest {
     @Test
     fun textChatRemovesChatMlControlTokensButKeepsAssistantText() = kotlinx.coroutines.test.runTest {
         val store = TestStore()
-        val runtime = TestRuntime(listOf("<|im_start|>assistant\\nHello<|im_end|>"))
+        val runtime = TestRuntime(listOf("<|im_start|>assistant\nHello<|im_end|>"))
         val provider = DefaultContextProvider(store, { "system" }, { "task" }, { "workspace" })
         val events = mutableListOf<AgentEvent>()
         val session = AgentSession(
