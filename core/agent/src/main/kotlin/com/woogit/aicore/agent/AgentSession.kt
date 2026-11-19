@@ -334,7 +334,13 @@ class AgentSession(
             streamPublished = legacyStreamPublished
             generated
         }
-        val cleaned = if (textChatStreaming) stripReasoning(result.text) else stripVoiceReasoning(result.text)
+        val cleaned = if (textChatStreaming) {
+            sanitizeTextChatResponse(result.text).ifBlank {
+                "پاسخ قابل‌نمایشی از مدل دریافت نشد. احتمالاً مدل به‌جای پاسخ، قالب داخلی مکالمه را تولید کرده است؛ لطفاً دوباره تلاش کن."
+            }
+        } else {
+            stripVoiceReasoning(result.text)
+        }
         val context = contextProvider.build(Int.MAX_VALUE)
         val candidateContext = context.copy(
             recentMessages = context.recentMessages + ConversationMessage(
@@ -366,7 +372,34 @@ class AgentSession(
         return text.trim()
     }
 
-    private fun stripReasoning(raw: String): String {
+    /**
+     * Removes hidden reasoning and ChatML transport envelopes from text-chat output.
+     * Some local models occasionally echo serialized conversation messages instead of
+     * returning only the assistant body. Never expose user/system/tool envelopes.
+     */
+    private fun sanitizeTextChatResponse(raw: String): String {
+        var text = raw
+        text = removeReasoningBlocks(text)
+
+        if (text.contains("<|im_start|>")) {
+            val assistantBodies = Regex(
+                "(?s)<\\|im_start\\|>assistant(?:\\s+[^\\r\\n]+)?\\s*\\r?\\n(.*?)(?:<\\|im_end\\|>|<\\|fim_suffix\\|>|<\\|ghissue\\|>|(?=<\\|im_start\\|>)|$)"
+            ).findAll(text).map { it.groupValues[1] }.toList()
+            // If the model emitted only a user/system/tool envelope, return no content;
+            // the caller will show a safe diagnostic instead of echoing the prompt.
+            text = assistantBodies.lastOrNull().orEmpty()
+        }
+
+        // Strip remaining known ChatML/control tokens, not ordinary angle-bracket prose.
+        text = text.replace(
+            Regex("<\\|(?:im_start|im_end|fim_suffix|fim_prefix|fim_middle|ghissue|ghreview|ghemu|meta_sep|meta_start|end_of_task|pad)\\|>"),
+            ""
+        )
+        text = text.replace(Regex("<\\|(?:meta_sep|meta_start)\\|>[^\\r\\n]*"), "")
+        return text.trim()
+    }
+
+    private fun removeReasoningBlocks(raw: String): String {
         var text = raw
         while (true) {
             val opening = text.indexOf("<think>")
@@ -381,7 +414,7 @@ class AgentSession(
             }
             text = text.removeRange(opening, closing + "</think>".length)
         }
-        return text.trim()
+        return text
     }
 
     suspend fun resumeApproved(executionId: String, outcome: ActionExecutionOutcome, settings: InferenceSettings, requestedRecentMessages: Int? = null): AgentSessionResult.Reply {
