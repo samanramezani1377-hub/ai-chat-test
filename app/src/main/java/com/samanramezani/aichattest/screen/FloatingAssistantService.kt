@@ -199,7 +199,7 @@ class FloatingAssistantService : LifecycleService() {
         val width = minOf((380 * density).toInt(), (screenWidth - 20 * density).toInt()).coerceAtLeast(1)
         val height = minOf((540 * density).toInt(), (screenHeight - 80 * density).toInt()).coerceAtLeast(1)
         val view = ComposeView(this).apply {
-            setViewTreeLifecycleOwner(this@FloatingAssistantService)
+            this.setViewTreeLifecycleOwner(this@FloatingAssistantService)
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent { FloatingAssistantPopup(onClose = { closePopup() }) }
         }
