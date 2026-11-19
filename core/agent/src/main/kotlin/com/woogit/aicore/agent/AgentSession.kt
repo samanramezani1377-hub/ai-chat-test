@@ -147,7 +147,7 @@ class AgentSession(
     private val maxActionSteps: Int? = null,
     private val conversationId: String? = null,
     /** Enables the text-chat stream filter; voice sessions retain their legacy stream path. */
-    private val textChatStreaming: Boolean = actionPlanCoordinator != null,
+    private val textChatStreaming: Boolean = false,
 ) {
     init { require(maxActionSteps == null || maxActionSteps >= 0) { "maxActionSteps must be non-negative" } }
 
