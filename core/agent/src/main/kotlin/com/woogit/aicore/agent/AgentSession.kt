@@ -146,6 +146,8 @@ class AgentSession(
     /** Optional runtime override. When absent, the supplied InferenceSettings value is used. */
     private val maxActionSteps: Int? = null,
     private val conversationId: String? = null,
+    /** Enables the text-chat stream filter; voice sessions retain their legacy stream path. */
+    private val textChatStreaming: Boolean = actionPlanCoordinator != null,
 ) {
     init { require(maxActionSteps == null || maxActionSteps >= 0) { "maxActionSteps must be non-negative" } }
 
@@ -278,20 +280,61 @@ class AgentSession(
         recentMessages: Int,
         contextMessages: List<ConversationMessage>,
     ): GenerationResult {
-        // Keep text-chat streaming incremental while filtering hidden reasoning and
-        // withholding structured action payloads. Voice creates sessions with tools disabled
-        // and has its own transcript/TTS streaming pipeline; it does not render this UI stream.
-        val responseStreamer = SafeAgentResponseStreamer()
-        val result = orchestrator.generate(settings, recentMessages, { chunk ->
-            responseStreamer.accept(chunk).forEach { safeChunk ->
+        val streamPublished: Boolean
+        val result = if (textChatStreaming) {
+            // Text chat incrementally filters hidden reasoning and withholds structured actions.
+            val responseStreamer = SafeAgentResponseStreamer()
+            val generated = orchestrator.generate(settings, recentMessages, { chunk ->
+                responseStreamer.accept(chunk).forEach { safeChunk ->
+                    eventSink(AgentEvent.Token(safeChunk))
+                }
+            }, contextMessages)
+            responseStreamer.finish().forEach { safeChunk ->
                 eventSink(AgentEvent.Token(safeChunk))
             }
-        }, contextMessages)
-        responseStreamer.finish().forEach { safeChunk ->
-            eventSink(AgentEvent.Token(safeChunk))
+            streamPublished = responseStreamer.hasPublished
+            generated
+        } else {
+            // Preserve the pre-existing voice-session streaming behavior exactly. Voice has
+            // its own partial transcript/TTS path and must not inherit text-chat filtering.
+            val prefix = StringBuilder()
+            var streamDecision: Boolean? = null
+            var legacyStreamPublished = false
+            val generated = orchestrator.generate(settings, recentMessages, { chunk ->
+                if (chunk.isNotEmpty()) {
+                    val hasReasoningMarker = chunk.contains("<think>") || chunk.contains("</think>")
+                    if (streamDecision == null) {
+                        prefix.append(chunk)
+                        val first = prefix.firstOrNull { !it.isWhitespace() }
+                        if (first != null) {
+                            val accumulatedHasReasoning = prefix.contains("<think>") || prefix.contains("</think>")
+                            val structured = first == '{' || first == '<' || first == '`'
+                            val actionPrefixReady = actionPlanCoordinator == null || prefix.length >= 48
+                            if (accumulatedHasReasoning || structured) {
+                                streamDecision = false
+                            } else if (actionPrefixReady) {
+                                streamDecision = true
+                            }
+                            if (streamDecision == true) {
+                                eventSink(AgentEvent.Token(prefix.toString()))
+                                legacyStreamPublished = true
+                                prefix.setLength(0)
+                            }
+                        }
+                    } else if (streamDecision == true) {
+                        if (hasReasoningMarker) {
+                            streamDecision = false
+                        } else {
+                            eventSink(AgentEvent.Token(chunk))
+                            legacyStreamPublished = true
+                        }
+                    }
+                }
+            }, contextMessages)
+            streamPublished = legacyStreamPublished
+            generated
         }
-        val streamPublished = responseStreamer.hasPublished
-        val cleaned = stripReasoning(result.text)
+        val cleaned = if (textChatStreaming) stripReasoning(result.text) else stripVoiceReasoning(result.text)
         val context = contextProvider.build(Int.MAX_VALUE)
         val candidateContext = context.copy(
             recentMessages = context.recentMessages + ConversationMessage(
@@ -309,6 +352,18 @@ class AgentSession(
             eventSink(AgentEvent.Token(cleaned))
         }
         return result.copy(text = cleaned)
+    }
+
+    private fun stripVoiceReasoning(raw: String): String {
+        var text = raw.trim()
+        val end = if (text.startsWith("{") || text.startsWith("```")) -1 else text.indexOf("</think>")
+        if (end >= 0) text = text.substring(end + "</think>".length).trimStart()
+        if (text.startsWith("<think>")) {
+            val closing = text.indexOf("</think>")
+            if (closing >= 0) text = text.substring(closing + "</think>".length).trimStart()
+            else return ""
+        }
+        return text.trim()
     }
 
     private fun stripReasoning(raw: String): String {
