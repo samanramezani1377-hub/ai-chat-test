@@ -91,6 +91,7 @@ class AgentSessionTest {
             orchestrator = AgentOrchestrator(provider, runtime),
             conversationStore = store,
             eventSink = { event -> events += event },
+            textChatStreaming = true,
         )
 
         val reply = session.send("question", InferenceSettings())
