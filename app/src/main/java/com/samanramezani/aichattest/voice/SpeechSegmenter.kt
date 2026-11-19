@@ -61,8 +61,13 @@ internal class SpeechSegmenter(private val softLimit: Int = 120) {
 internal fun matchedSpeechPrefixLength(finalText: String, queuedSegments: List<String>): Int {
     var cursor = 0
     for (segment in queuedSegments) {
+        val segmentStart = cursor
         while (cursor < finalText.length && finalText[cursor].isWhitespace()) cursor++
-        if (segment.isEmpty() || !finalText.startsWith(segment, cursor)) break
+        if (segment.isEmpty() || !finalText.startsWith(segment, cursor)) {
+            // Do not consume separator whitespace for a segment that did not match.
+            cursor = segmentStart
+            break
+        }
         cursor += segment.length
     }
     return cursor
