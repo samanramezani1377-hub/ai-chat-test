@@ -13,13 +13,11 @@ import com.samanramezani.aichattest.voice.VoiceAudioInputGuard
 
 /** Independent Activity and lifecycle for the full-screen voice conversation. */
 class VoiceConversationActivity : ComponentActivity() {
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN &&
-            (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
-        ) {
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
             VoiceAudioInputGuard.suppressAfterVolumeKey()
         }
-        return super.dispatchKeyEvent(event)
+        return super.onKeyDown(keyCode, event)
     }
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
