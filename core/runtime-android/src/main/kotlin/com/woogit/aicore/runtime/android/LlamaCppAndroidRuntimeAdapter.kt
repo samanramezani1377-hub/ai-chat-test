@@ -234,6 +234,8 @@ class LlamaCppAndroidRuntimeAdapter(
                 "requestedMaxTokens=${settings.maxNewTokens} effectiveMaxTokens=$effectiveMaxTokens"
         )
         val startedAt = System.nanoTime()
+        val devicePerformanceMonitor = AndroidDevicePerformanceMonitor.start()
+        RuntimeDiagnosticsStore.recordDevicePerformanceReport(null)
         var firstTokenAt: Long? = null
         val output = StringBuilder()
         val pending = StringBuilder()
@@ -298,7 +300,12 @@ class LlamaCppAndroidRuntimeAdapter(
                 RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_FAILED, t.message)
                 ModelResult.Failure(RuntimeErrorMapper.inferenceFailure(t))
             }
-            } finally { stopRequested.set(false) }
+            } finally {
+                stopRequested.set(false)
+                runCatching { devicePerformanceMonitor.stopAndReport() }
+                    .onSuccess(RuntimeDiagnosticsStore::recordDevicePerformanceReport)
+                    .onFailure { RuntimeDiagnosticsStore.recordDevicePerformanceReport("Device performance sampling failed: ${it.javaClass.simpleName}: ${it.message}") }
+            }
         }
     /**
      * Keep as much recent conversation as possible while reserving the full generation
