@@ -5,7 +5,7 @@ import android.app.NotificationManager
 import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.LifecycleService
-import androidx.lifecycle.ViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeLifecycleOwner
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.PixelFormat
@@ -199,7 +199,7 @@ class FloatingAssistantService : LifecycleService() {
         val width = minOf((380 * density).toInt(), (screenWidth - 20 * density).toInt()).coerceAtLeast(1)
         val height = minOf((540 * density).toInt(), (screenHeight - 80 * density).toInt()).coerceAtLeast(1)
         val view = ComposeView(this).apply {
-            ViewTreeLifecycleOwner.set(this, this@FloatingAssistantService)
+            setViewTreeLifecycleOwner(this@FloatingAssistantService)
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent { FloatingAssistantPopup(onClose = { closePopup() }) }
         }
