@@ -9,6 +9,122 @@ import com.woogit.aicore.domain.InferenceSettings
 import java.util.UUID
 import java.util.concurrent.CancellationException
 
+
+/**
+ * Incrementally removes model reasoning blocks and withholds structured tool output.
+ * Plain assistant prose is forwarded as soon as it can be distinguished from a
+ * partial <think> marker; voice generation does not use this class.
+ */
+internal class SafeAgentResponseStreamer {
+    private enum class Mode { UNKNOWN, PROSE, STRUCTURED }
+
+    private val pending = StringBuilder()
+    private var mode = Mode.UNKNOWN
+    private var insideReasoning = false
+    private var publishedAny = false
+
+    fun accept(chunk: String): List<String> {
+        if (chunk.isNotEmpty()) pending.append(chunk)
+        return drain(final = false)
+    }
+
+    fun finish(): List<String> = drain(final = true)
+
+    val hasPublished: Boolean get() = publishedAny
+
+    private fun drain(final: Boolean): List<String> {
+        val output = mutableListOf<String>()
+        while (pending.isNotEmpty()) {
+            val current = pending.toString()
+            if (insideReasoning) {
+                val closingIndex = current.indexOf(CLOSE_THINK)
+                if (closingIndex >= 0) {
+                    pending.delete(0, closingIndex + CLOSE_THINK.length)
+                    insideReasoning = false
+                    mode = Mode.UNKNOWN
+                    continue
+                }
+                if (final) {
+                    pending.setLength(0)
+                    break
+                }
+                val keep = longestSuffixPrefix(current, CLOSE_THINK)
+                if (pending.length > keep) pending.delete(0, pending.length - keep)
+                break
+            }
+
+            val openingIndex = current.indexOf(OPEN_THINK)
+            if (openingIndex >= 0) {
+                emitPrefix(openingIndex, output)
+                pending.delete(0, openingIndex + OPEN_THINK.length)
+                insideReasoning = true
+                mode = Mode.UNKNOWN
+                continue
+            }
+
+            if (mode == Mode.UNKNOWN) {
+                val firstIndex = current.indexOfFirst { !it.isWhitespace() }
+                if (firstIndex < 0) {
+                    if (final) pending.setLength(0)
+                    break
+                }
+                val candidate = current.substring(firstIndex)
+                if (!final && OPEN_THINK.startsWith(candidate) && candidate.length < OPEN_THINK.length) {
+                    break
+                }
+                val first = candidate.first()
+                mode = if (first == '{' || first == '`' || first == '<') Mode.STRUCTURED else Mode.PROSE
+            }
+
+            if (mode == Mode.STRUCTURED) {
+                pending.setLength(0)
+                break
+            }
+
+            if (final) {
+                emitPrefix(pending.length, output)
+                pending.setLength(0)
+                break
+            }
+
+            val keep = longestSuffixPrefix(current, OPEN_THINK)
+            val emitLength = pending.length - keep
+            if (emitLength <= 0) break
+            emitPrefix(emitLength, output)
+        }
+        return output
+    }
+
+    private fun emitPrefix(length: Int, output: MutableList<String>) {
+        if (length <= 0) return
+        val value = pending.substring(0, length)
+        pending.delete(0, length)
+        if (mode == Mode.UNKNOWN) {
+            if (value.any { !it.isWhitespace() }) {
+                val first = value.first { !it.isWhitespace() }
+                mode = if (first == '{' || first == '`' || first == '<') Mode.STRUCTURED else Mode.PROSE
+            }
+        }
+        if (mode == Mode.PROSE && value.isNotEmpty()) {
+            output += value
+            publishedAny = true
+        }
+    }
+
+    private fun longestSuffixPrefix(value: String, marker: String): Int {
+        val max = minOf(value.length, marker.length - 1)
+        for (length in max downTo 1) {
+            if (value.regionMatches(value.length - length, marker, 0, length)) return length
+        }
+        return 0
+    }
+
+    private companion object {
+        const val OPEN_THINK = "<think>"
+        const val CLOSE_THINK = "</think>"
+    }
+}
+
 sealed interface AgentSessionResult {
     data class Reply(
         val generation: GenerationResult,
@@ -162,44 +278,19 @@ class AgentSession(
         recentMessages: Int,
         contextMessages: List<ConversationMessage>,
     ): GenerationResult {
-        // Stream ordinary prose incrementally, but never expose structured actions or
-        // reasoning markers. With action planning enabled, wait for a short clean prefix:
-        // malformed legacy output can start with prose and then contain </think> + shell.
-        val prefix = StringBuilder()
-        var streamDecision: Boolean? = null
-        var streamPublished = false
+        // Keep text-chat streaming incremental while filtering hidden reasoning and
+        // withholding structured action payloads. Voice creates sessions with tools disabled
+        // and has its own transcript/TTS streaming pipeline; it does not render this UI stream.
+        val responseStreamer = SafeAgentResponseStreamer()
         val result = orchestrator.generate(settings, recentMessages, { chunk ->
-            if (chunk.isNotEmpty()) {
-                val hasReasoningMarker = chunk.contains("<think>") || chunk.contains("</think>")
-                if (streamDecision == null) {
-                    prefix.append(chunk)
-                    val first = prefix.firstOrNull { !it.isWhitespace() }
-                    if (first != null) {
-                        val accumulatedHasReasoning = prefix.contains("<think>") || prefix.contains("</think>")
-                        val structured = first == '{' || first == '<' || first == '`'
-                        val actionPrefixReady = actionPlanCoordinator == null || prefix.length >= 48
-                        if (accumulatedHasReasoning || structured) {
-                            streamDecision = false
-                        } else if (actionPrefixReady) {
-                            streamDecision = true
-                        }
-                        if (streamDecision == true) {
-                            eventSink(AgentEvent.Token(prefix.toString()))
-                            streamPublished = true
-                            prefix.setLength(0)
-                        }
-                    }
-                } else if (streamDecision == true) {
-                    if (hasReasoningMarker) {
-                        // Stop publishing if a malformed internal marker appears mid-stream.
-                        streamDecision = false
-                    } else {
-                        eventSink(AgentEvent.Token(chunk))
-                        streamPublished = true
-                    }
-                }
+            responseStreamer.accept(chunk).forEach { safeChunk ->
+                eventSink(AgentEvent.Token(safeChunk))
             }
         }, contextMessages)
+        responseStreamer.finish().forEach { safeChunk ->
+            eventSink(AgentEvent.Token(safeChunk))
+        }
+        val streamPublished = responseStreamer.hasPublished
         val cleaned = stripReasoning(result.text)
         val context = contextProvider.build(Int.MAX_VALUE)
         val candidateContext = context.copy(
@@ -221,13 +312,19 @@ class AgentSession(
     }
 
     private fun stripReasoning(raw: String): String {
-        var text = raw.trim()
-        val end = if (text.startsWith("{") || text.startsWith("```")) -1 else text.indexOf("</think>")
-        if (end >= 0) text = text.substring(end + "</think>".length).trimStart()
-        if (text.startsWith("<think>")) {
+        var text = raw
+        while (true) {
+            val opening = text.indexOf("<think>")
             val closing = text.indexOf("</think>")
-            if (closing >= 0) text = text.substring(closing + "</think>".length).trimStart()
-            else return ""
+            if (opening < 0) {
+                if (closing >= 0) text = text.substring(closing + "</think>".length)
+                break
+            }
+            if (closing < 0 || closing < opening) {
+                text = text.substring(0, opening)
+                break
+            }
+            text = text.removeRange(opening, closing + "</think>".length)
         }
         return text.trim()
     }
