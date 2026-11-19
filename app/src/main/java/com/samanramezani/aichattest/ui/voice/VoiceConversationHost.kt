@@ -925,7 +925,7 @@ internal class VoiceConversationController(
                     }
                     else -> Unit
                 }
-            }, includeAgentTools = false) ?: error("VOICE-CHAT-002: نشست مدل محلی در دسترس نیست.")
+            }) ?: error("VOICE-CHAT-002: نشست مدل محلی در دسترس نیست.")
             // Voice is latency-sensitive: skip Qwen reasoning, cap response length, and keep
             // a short rolling history so each decode step attends to less accumulated KV state.
             val result = session.send(
