@@ -121,6 +121,68 @@ class AgentSessionTest {
     }
 
     @Test
+    fun textChatExtractsAssistantBodyFromChatMlEnvelope() = kotlinx.coroutines.test.runTest {
+        val store = TestStore()
+        val raw = "<|im_start|>user\\nسلام<|im_end|>\\n<|im_start|>assistant\\nسلام!<|im_end|>"
+        val runtime = TestRuntime(listOf(raw))
+        val provider = DefaultContextProvider(store, { "system" }, { "task" }, { "workspace" })
+        val events = mutableListOf<AgentEvent>()
+        val session = AgentSession(
+            orchestrator = AgentOrchestrator(provider, runtime),
+            conversationStore = store,
+            eventSink = { event -> events += event },
+            textChatStreaming = true,
+        )
+
+        val reply = session.send("سلام", InferenceSettings())
+
+        assertEquals("سلام!", reply.generation.text)
+        assertEquals(listOf("سلام!"), events.filterIsInstance<AgentEvent.Token>().map { it.value })
+        assertEquals("سلام!", store.messages.last().content)
+    }
+
+    @Test
+    fun textChatNeverEchoesUserEnvelopeWhenModelReturnsOnlyChatMlUserMessage() = kotlinx.coroutines.test.runTest {
+        val store = TestStore()
+        val raw = "<|im_start|>user\\nسلام"
+        val runtime = TestRuntime(listOf(raw))
+        val provider = DefaultContextProvider(store, { "system" }, { "task" }, { "workspace" })
+        val events = mutableListOf<AgentEvent>()
+        val session = AgentSession(
+            orchestrator = AgentOrchestrator(provider, runtime),
+            conversationStore = store,
+            eventSink = { event -> events += event },
+            textChatStreaming = true,
+        )
+
+        val reply = session.send("سلام", InferenceSettings())
+
+        assertTrue(!reply.generation.text.contains("<|im_start|>"))
+        assertTrue(!reply.generation.text.contains("user"))
+        assertTrue(!reply.generation.text.contains("سلام"))
+        assertTrue(events.filterIsInstance<AgentEvent.Token>().none { it.value.contains("<|im_start|>") })
+    }
+
+    @Test
+    fun textChatRemovesChatMlControlTokensButKeepsAssistantText() = kotlinx.coroutines.test.runTest {
+        val store = TestStore()
+        val runtime = TestRuntime(listOf("<|im_start|>assistant\\nHello<|im_end|>"))
+        val provider = DefaultContextProvider(store, { "system" }, { "task" }, { "workspace" })
+        val events = mutableListOf<AgentEvent>()
+        val session = AgentSession(
+            orchestrator = AgentOrchestrator(provider, runtime),
+            conversationStore = store,
+            eventSink = { event -> events += event },
+            textChatStreaming = true,
+        )
+
+        val reply = session.send("hello", InferenceSettings())
+
+        assertEquals("Hello", reply.generation.text)
+        assertEquals(listOf("Hello"), events.filterIsInstance<AgentEvent.Token>().map { it.value })
+    }
+
+    @Test
     fun sendUsesSuppliedInferenceSettingsInsteadOfGlobalSnapshot() = kotlinx.coroutines.test.runTest {
         val store = TestStore()
         val runtime = TestRuntime()
