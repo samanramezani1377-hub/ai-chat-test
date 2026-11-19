@@ -26,7 +26,7 @@ internal class SpeechSegmenter(private val softLimit: Int = 120) {
             buffer.append(c)
             when {
                 c == '.' -> dotRun = 1
-                c == '!' || c == '?' || c == '؟' || c == '؛' || c == '۔' || c == '。' || c == '\\n' -> emit(ready)
+                c == '!' || c == '?' || c == '؟' || c == '؛' || c == '۔' || c == '。' || c == '\n' -> emit(ready)
                 c == ' ' && buffer.length >= softLimit -> emit(ready)
             }
         }
