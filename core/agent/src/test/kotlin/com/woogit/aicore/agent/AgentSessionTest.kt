@@ -52,6 +52,55 @@ class AgentSessionTest {
     }
 
     @Test
+    fun textStreamingStartsImmediatelyForShortPlainResponses() {
+        val streamer = SafeAgentResponseStreamer()
+
+        assertEquals(listOf("Hi"), streamer.accept("Hi"))
+        assertEquals(listOf("!"), streamer.accept("!"))
+        assertTrue(streamer.finish().isEmpty())
+    }
+
+    @Test
+    fun textStreamingSkipsReasoningMarkersAcrossChunkBoundaries() {
+        val streamer = SafeAgentResponseStreamer()
+        val output = buildList {
+            listOf("<thi", "nk>private analysis", "</thi", "nk>The answer", " is 42.")
+                .forEach { addAll(streamer.accept(it)) }
+            addAll(streamer.finish())
+        }
+
+        assertEquals("The answer is 42.", output.joinToString(""))
+        assertTrue(output.none { it.contains("think") || it.contains("private analysis") })
+    }
+
+    @Test
+    fun textStreamingWithholdsStructuredActionPayloads() {
+        val streamer = SafeAgentResponseStreamer()
+
+        assertTrue(streamer.accept("""{"version":1,"actionId":"x"}""").isEmpty())
+        assertTrue(streamer.finish().isEmpty())
+    }
+
+    @Test
+    fun textStreamingCanResumeAfterReasoningAndStillAvoidDuplicateFinalText() = kotlinx.coroutines.test.runTest {
+        val store = TestStore()
+        val runtime = TestRuntime(listOf("<think>hidden</think>", "Visible", " answer"))
+        val provider = DefaultContextProvider(store, { "system" }, { "task" }, { "workspace" })
+        val events = mutableListOf<AgentEvent>()
+        val session = AgentSession(
+            orchestrator = AgentOrchestrator(provider, runtime),
+            conversationStore = store,
+            eventSink = { event -> events += event },
+        )
+
+        val reply = session.send("question", InferenceSettings())
+
+        assertEquals("Visible answer", reply.generation.text)
+        assertEquals(listOf("Visible", " answer"), events.filterIsInstance<AgentEvent.Token>().map { it.value })
+        assertEquals("Visible answer", store.messages.last().content)
+    }
+
+    @Test
     fun sendUsesSuppliedInferenceSettingsInsteadOfGlobalSnapshot() = kotlinx.coroutines.test.runTest {
         val store = TestStore()
         val runtime = TestRuntime()
