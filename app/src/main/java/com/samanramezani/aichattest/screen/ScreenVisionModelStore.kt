@@ -16,8 +16,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Keeps the runtime copy private, while retaining the original GGUF files in the
- * same public Downloads hierarchy used by the other downloadable app models.
+ * Imported GGUF files are copied once into private runtime storage. Recommended downloads
+ * also retain a user-visible copy in Downloads; manual imports never create a second public copy.
  */
 object ScreenVisionModelStore {
     data class Paths(val model: File, val projector: File)
@@ -60,9 +60,9 @@ object ScreenVisionModelStore {
             } ?: error("فایل انتخاب‌شده قابل خواندن نیست.")
             require(isGguf(temp)) { "فایل انتخاب‌شده GGUF معتبر یا کامل نیست." }
 
-            // Keep an accessible original in Downloads too. If it is already in our
-            // managed Downloads folder, do not create a second copy.
-            retainUriInDownloads(context, uri, name)
+            // The app needs a private filesystem path for native inference. Do not
+            // also copy a manually imported source into Downloads: that creates a visible
+            // duplicate beside the user's original file.
             replaceAtomically(temp, destination)
 
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -157,37 +157,6 @@ object ScreenVisionModelStore {
             if (file.isFile && file.length() > 0L) return Uri.fromFile(file)
         }
         return null
-    }
-
-    private fun retainUriInDownloads(context: Context, source: Uri, fileName: String) {
-        if (findDownload(context, fileName) != null) return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, DOWNLOAD_RELATIVE_PATH)
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-            val target = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                ?: error("ساخت فایل در پوشه Downloads ناموفق بود.")
-            try {
-                val input = context.contentResolver.openInputStream(source)
-                    ?: error("فایل انتخاب‌شده قابل خواندن نیست.")
-                val output = context.contentResolver.openOutputStream(target, "w")
-                    ?: error("نوشتن فایل در Downloads ناموفق بود.")
-                input.use { src -> output.use { dst -> src.copyTo(dst, 128 * 1024) } }
-                val ready = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
-                context.contentResolver.update(target, ready, null, null)
-            } catch (t: Throwable) {
-                context.contentResolver.delete(target, null, null)
-                throw t
-            }
-        } else {
-            val target = File(legacyDownloadsDirectory(context), fileName)
-            context.contentResolver.openInputStream(source)?.use { input ->
-                FileOutputStream(target).use { output -> input.copyTo(output, 128 * 1024) }
-            } ?: error("فایل انتخاب‌شده قابل خواندن نیست.")
-        }
     }
 
     private fun publishFileToDownloads(context: Context, source: File, fileName: String) {
