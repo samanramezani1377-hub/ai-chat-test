@@ -40,7 +40,7 @@
         android:layoutDirection="locale"
         android:singleLine="false"
         android:scrollHorizontally="false"
-        android:breakStrategy="highQuality"
+        android:breakStrategy="high_quality"
         android:hyphenationFrequency="normal"
         android:includeFontPadding="false"
         android:maxLines="8"
