@@ -34,7 +34,7 @@ class LlamaCppAndroidRuntimeAdapter(
     private val nativeOperationMutex = Mutex()
     @Volatile private var gpuLayersMode = gpuLayers
     @Volatile private var selectedGpuLayers = 0
-    @Volatile private var selectedCpuThreads = 2
+    @Volatile private var selectedCpuThreads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
     @Volatile private var selectedBackend = "OpenCL"
     @Volatile private var loadedContextLength: Int? = null
     @Volatile private var loadedArchitecture: String = "unknown"
@@ -115,7 +115,11 @@ class LlamaCppAndroidRuntimeAdapter(
             val info = NativeLlamaCpp.runtimeInfo()
             selectedBackend = info.substringBefore(';').ifBlank { "OpenCL" }
             selectedGpuLayers = if (selectedBackend.contains("OpenCL", ignoreCase = true)) requestedGpuLayers else 0
-            selectedCpuThreads = 2
+            selectedCpuThreads = info.substringAfter("generationThreads=", "").substringBefore(';').toIntOrNull()
+                ?: Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+            val batchThreads = info.substringAfter("batchThreads=", "").substringBefore(';').toIntOrNull()
+                ?: selectedCpuThreads
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_CPU_THREAD_POLICY generation=$selectedCpuThreads batch=$batchThreads")
             loadedContextLength = NativeLlamaCpp.contextLength().takeIf { it > 0 } ?: requested
             loadedArchitecture = model.metadata.architecture?.lowercase() ?: "unknown"
             loadedModelPath = file.absolutePath
