@@ -102,6 +102,25 @@ class AgentSessionTest {
     }
 
     @Test
+    fun voiceSessionKeepsItsLegacyNonIncrementalReasoningStreamPath() = kotlinx.coroutines.test.runTest {
+        val store = TestStore()
+        val runtime = TestRuntime(listOf("<think>private analysis</think>", "Voice answer"))
+        val provider = DefaultContextProvider(store, { "system" }, { "task" }, { "workspace" })
+        val events = mutableListOf<AgentEvent>()
+        val session = AgentSession(
+            orchestrator = AgentOrchestrator(provider, runtime),
+            conversationStore = store,
+            eventSink = { event -> events += event },
+            textChatStreaming = false,
+        )
+
+        val reply = session.send("voice question", InferenceSettings())
+
+        assertEquals("Voice answer", reply.generation.text)
+        assertEquals(listOf("Voice answer"), events.filterIsInstance<AgentEvent.Token>().map { it.value })
+    }
+
+    @Test
     fun sendUsesSuppliedInferenceSettingsInsteadOfGlobalSnapshot() = kotlinx.coroutines.test.runTest {
         val store = TestStore()
         val runtime = TestRuntime()
