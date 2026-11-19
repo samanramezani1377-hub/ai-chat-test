@@ -1,5 +1,6 @@
 package com.samanramezani.aichattest.screen
 
+import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -42,26 +43,36 @@ internal fun FloatingAssistantPopup(onClose: () -> Unit) {
     val listState = rememberLazyListState()
 
     LaunchedEffect(Unit) {
-        val prefs = context.getSharedPreferences("screen_assistant", android.content.Context.MODE_PRIVATE)
-        val savedId = prefs.getString("floating_chat_conversation_id", null)
-        val record = withContext(Dispatchers.IO) {
-            if (container.providerStore?.load()?.mode != com.samanramezani.aichattest.providers.InferenceProviderMode.CLOUDFLARE) {
-                container.modelManager?.restoreActive()
+        try {
+            val prefs = context.getSharedPreferences("screen_assistant", android.content.Context.MODE_PRIVATE)
+            val savedId = prefs.getString("floating_chat_conversation_id", null)
+            // Opening the bubble must only open the popup. Do not load native inference
+            // models from this overlay lifecycle callback; model restoration happens on send.
+            val record = withContext(Dispatchers.IO) {
+                val existing = savedId?.let { id -> container.conversationHistory.recent(500).firstOrNull { it.id == id } }
+                existing ?: container.conversationHistory.create("گفت‌وگوی شناور دینا")
             }
-            val existing = savedId?.let { id -> container.conversationHistory.recent(500).firstOrNull { it.id == id } }
-            existing ?: container.conversationHistory.create("گفت‌وگوی شناور دینا")
-        }
-        conversationId = record.id
-        if (record.id != savedId) prefs.edit().putString("floating_chat_conversation_id", record.id).apply()
-        messages = withContext(Dispatchers.IO) {
-            container.conversationHistory.messages(record.id).map {
-                FloatingChatMessage(it.role == ConversationMessage.Role.USER, it.content)
+            conversationId = record.id
+            if (record.id != savedId) prefs.edit().putString("floating_chat_conversation_id", record.id).apply()
+            messages = withContext(Dispatchers.IO) {
+                container.conversationHistory.messages(record.id).map {
+                    FloatingChatMessage(it.role == ConversationMessage.Role.USER, it.content)
+                }
             }
-        }
-        status = if (container.modelManager?.activeModel() is com.woogit.aicore.domain.ModelResult.Success || container.isCloudflareConfigured()) {
-            "آماده‌ام؛ می‌توانی درباره صفحه فعلی هم سؤال کنی."
-        } else {
-            "برای پاسخ‌گویی، ابتدا یک مدل را در برنامه فعال کن."
+            val ready = withContext(Dispatchers.IO) {
+                runCatching {
+                    container.modelManager?.activeModel() is com.woogit.aicore.domain.ModelResult.Success ||
+                        container.isCloudflareConfigured()
+                }.getOrDefault(false)
+            }
+            status = if (ready) {
+                "آماده‌ام؛ می‌توانی درباره صفحه فعلی هم سؤال کنی."
+            } else {
+                "پنجره آماده است؛ برای پاسخ‌گویی مدل متنی را در برنامه فعال کن."
+            }
+        } catch (t: Throwable) {
+            Log.e("DinaOverlay", "Unable to initialize floating chat popup", t)
+            status = "آماده‌سازی گفتگو ناموفق بود: ${t.message ?: t.javaClass.simpleName}"
         }
     }
 
@@ -80,6 +91,13 @@ internal fun FloatingAssistantPopup(onClose: () -> Unit) {
         val responseIndex = messages.lastIndex
         scope.launch {
             try {
+                // Restore the active local model only after the user sends a message.
+                // This keeps a bubble tap from triggering native model initialization.
+                withContext(Dispatchers.IO) {
+                    if (container.providerStore?.load()?.mode != com.samanramezani.aichattest.providers.InferenceProviderMode.CLOUDFLARE) {
+                        container.modelManager?.restoreActive()
+                    }
+                }
                 val session = container.createAgentSession(
                     conversationId = id,
                     includeAgentTools = false,
