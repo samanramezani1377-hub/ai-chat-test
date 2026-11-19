@@ -140,3 +140,17 @@ Performance Report باید قابل Export باشد و داده واقعی Snap
 ## تصمیم نهایی
 
 تمام Metricهای بالا باید وجود داشته باشند، اما **Visibility هر Metric کاملاً مستقل و جداگانه قابل تنظیم باشد** و تغییر آن با یک تغییر بسیار کوچک در یک تنظیم مرکزی انجام شود. Measurement از Visibility جدا است و خاموش‌کردن نمایش، Measurement را غیرفعال نمی‌کند.
+
+
+## Android on-device inference sampling
+
+During each local native generation, the Android runtime samples device telemetry at a one-second interval and includes the completed sample in the diagnostics export and diagnostics screen.
+
+Collected values:
+- Per-core CPU utilization from deltas in `/proc/stat`.
+- Per-core current frequency from `scaling_cur_freq` or `cpuinfo_cur_freq`; min/average/max are calculated only from readable current-frequency samples. Maximum-frequency policy values are never substituted for current frequency.
+- Process CPU time from Android's process CPU clock.
+- Readable thermal-zone and battery temperatures from sysfs.
+- System memory totals/availability, swap, process RSS/high-water RSS/thread count, and memory PSI when the kernel exposes them.
+
+Access to procfs/sysfs differs by Android build and vendor. Missing or permission-restricted values are explicitly reported as `Unavailable`. Sampling starts immediately before native generation and ends in its `finally` path, including failed or cancelled generation. This is diagnostic sampling only; it does not change CPU scheduling, governor, thermal policy, or inference settings.

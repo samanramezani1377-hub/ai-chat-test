@@ -21,4 +21,16 @@ class SpeechSegmenterTest {
     @Test fun handlesDotArrivingAsOwnToken() = assertEquals(listOf("یک.", "دو."), run("یک", ".", " دو", "."))
     @Test fun splitsOnNewline() = assertEquals(listOf("الف", "ب"), run("الف\nب"))
     @Test fun breaksVeryLongRunsAtSpaces() = assertTrue(run("کلمه ".repeat(40)).size >= 2)
+
+    @Test fun splitsPersianFullStopIntoSeparateTtsSegments() {
+        assertEquals(listOf("جملهٔ اول۔", "جملهٔ دوم۔", "جملهٔ سوم؟"), run("جملهٔ اول۔ جملهٔ دوم۔ جملهٔ سوم؟"))
+    }
+
+    @Test fun reconcilesChangedFinalTextAfterAlreadyQueuedSentences() {
+        val finalText = "جملهٔ اول۔ جملهٔ دومِ اصلاح‌شده۔ جملهٔ سوم۔"
+        assertEquals(
+            "جملهٔ اول۔".length,
+            matchedSpeechPrefixLength(finalText, listOf("جملهٔ اول۔", "جملهٔ دوم۔"))
+        )
+    }
 }

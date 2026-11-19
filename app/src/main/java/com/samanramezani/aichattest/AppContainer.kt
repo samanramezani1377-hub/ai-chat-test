@@ -3,6 +3,7 @@ package com.samanramezani.aichattest
 import android.content.Context
 import android.os.Build
 import com.samanramezani.aichattest.providers.CloudflareProviderStore
+import com.samanramezani.aichattest.screen.ScreenAwareContextProvider
 import com.samanramezani.aichattest.providers.ProviderRoutingModelRuntime
 import com.woogit.aicore.actions.ActionExecutionService
 import com.woogit.aicore.actions.ActionExecutionState
@@ -204,7 +205,7 @@ class AppContainer(context: Context? = null) {
         // Real-time voice is a direct conversation path, not an agent/action request.
         // Do not inject the action catalog, workspace instructions, or action execution loop
         // into its system prompt; regular text chat keeps the full agent capability by default.
-        val contextProvider = DefaultContextProvider(
+        val baseContextProvider = DefaultContextProvider(
             conversationStore = store,
             systemContext = { if (includeAgentTools) ActionToolPrompt.build(actionRegistry) else null },
             persistentTaskContext = { null },
@@ -214,6 +215,9 @@ class AppContainer(context: Context? = null) {
                 } else null
             },
         )
+        val contextProvider = ScreenAwareContextProvider(baseContextProvider, appContext) {
+            providerStore?.load()?.mode != com.samanramezani.aichattest.providers.InferenceProviderMode.CLOUDFLARE
+        }
         return AgentSession(
             orchestrator = AgentOrchestrator(contextProvider = contextProvider, runtime = modelRuntime),
             conversationStore = store,
@@ -234,6 +238,7 @@ class AppContainer(context: Context? = null) {
             },
             conversationId = conversationId,
             contextProvider = contextProvider,
+            textChatStreaming = includeAgentTools,
         )
     }
 

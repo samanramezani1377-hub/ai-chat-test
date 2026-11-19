@@ -66,6 +66,8 @@ set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_MTMD ON CACHE BOOL "Build libmtmd for local image understanding" FORCE)
+set(MTMD_VIDEO OFF CACHE BOOL "No video helper binaries are needed for screen images" FORCE)
 set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_UI OFF CACHE BOOL "" FORCE)
@@ -169,7 +171,7 @@ if (AI_CHAT_OPENCL_PROFILING)
     include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_opencl_profiling.cmake")
 endif()
 
-add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp)
+add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp vision_runtime_android.cpp)
 
 # native_runtime.cpp intentionally includes llama.cpp/ggml internal headers for
 # strict backend and tensor-residency validation. Keep both internal source
@@ -181,6 +183,7 @@ target_include_directories(ai_chat_runtime PRIVATE
     ${llama_cpp_SOURCE_DIR}/ggml/include
     ${llama_cpp_SOURCE_DIR}/ggml/src
     ${llama_cpp_SOURCE_DIR}/ggml/src/ggml-opencl
+    ${llama_cpp_SOURCE_DIR}/tools/mtmd
     ${opencl_headers_SOURCE_DIR}
 )
 
@@ -196,7 +199,7 @@ target_link_options(ai_chat_runtime PRIVATE
     -Wl,--strip-all
 )
 
-target_link_libraries(ai_chat_runtime PRIVATE llama llama-common ggml-opencl android log OpenCL)
+target_link_libraries(ai_chat_runtime PRIVATE llama llama-common mtmd ggml-opencl android log OpenCL)
 
 target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"

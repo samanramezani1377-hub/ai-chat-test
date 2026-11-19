@@ -26,7 +26,7 @@ internal class SpeechSegmenter(private val softLimit: Int = 120) {
             buffer.append(c)
             when {
                 c == '.' -> dotRun = 1
-                c == '!' || c == '?' || c == '؟' || c == '؛' || c == '\n' -> emit(ready)
+                c == '!' || c == '?' || c == '؟' || c == '؛' || c == '۔' || c == '。' || c == '\n' -> emit(ready)
                 c == ' ' && buffer.length >= softLimit -> emit(ready)
             }
         }
@@ -39,10 +39,36 @@ internal class SpeechSegmenter(private val softLimit: Int = 120) {
         return ready
     }
 
+    /** Discard a streamed partial sentence when reconciling against the final model output. */
+    fun reset() {
+        buffer.setLength(0)
+        dotRun = 0
+    }
+
     private fun emit(out: MutableList<String>) {
         val segment = buffer.toString().trim()
         buffer.setLength(0)
         dotRun = 0
         if (PersianSpeechText.hasSpeakableContent(segment)) out.add(segment)
     }
+}
+
+/**
+ * Returns how much of the authoritative final answer is already represented by queued segments.
+ * Matching is sequential and stops at the first changed segment, so later final text is never
+ * silently discarded when a streaming prefix differs from the final response.
+ */
+internal fun matchedSpeechPrefixLength(finalText: String, queuedSegments: List<String>): Int {
+    var cursor = 0
+    for (segment in queuedSegments) {
+        val segmentStart = cursor
+        while (cursor < finalText.length && finalText[cursor].isWhitespace()) cursor++
+        if (segment.isEmpty() || !finalText.startsWith(segment, cursor)) {
+            // Do not consume separator whitespace for a segment that did not match.
+            cursor = segmentStart
+            break
+        }
+        cursor += segment.length
+    }
+    return cursor
 }

@@ -57,18 +57,18 @@ static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxe
 static void append_native_trace(const char *text);
 static bool init_generation_context();
 static bool init_speculative_runtime();
+static int available_cpu_cores() {
+    // Use every CPU core reported by Android's native runtime. This is the
+    // device's available hardware concurrency, not a fixed 2-4 worker cap.
+    return (int)std::max(1u, std::thread::hardware_concurrency());
+}
+
 static int generation_threads() {
-    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
-    // Decode is memory-bandwidth bound; keep a bounded number of workers and
-    // derive it from the host topology rather than hard-coding a device.
-    return std::clamp((int)cores, 2, 4);
+    return available_cpu_cores();
 }
 
 static int batch_threads() {
-    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
-    // Prompt evaluation benefits from host workers for scheduling/token preparation;
-    // ggml may route unsupported operations to CPU while supported ops use OpenCL.
-    return std::clamp((int)cores - 2, 4, 6);
+    return available_cpu_cores();
 }
 
 static bool init_generation_context() {
@@ -1229,7 +1229,10 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeRuntimeInfo(JNIEnv *env, jclass) {
     const std::string value = std::string(g_gpu && g_gpu_backend_loaded
         ? "OpenCL-GPU"
-        : (g_model && g_context ? "CPU-FALLBACK" : "GPU_UNAVAILABLE")) + "; llama.cpp=" + AI_CHAT_LLAMA_CPP_SHA;
+        : (g_model && g_context ? "CPU-FALLBACK" : "GPU_UNAVAILABLE")) +
+        "; llama.cpp=" + AI_CHAT_LLAMA_CPP_SHA +
+        "; generationThreads=" + std::to_string(generation_threads()) +
+        "; batchThreads=" + std::to_string(batch_threads());
     return env->NewStringUTF(value.c_str());
 }
 

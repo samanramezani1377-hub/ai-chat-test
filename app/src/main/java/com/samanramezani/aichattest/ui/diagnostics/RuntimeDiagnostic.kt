@@ -61,6 +61,7 @@ internal data class RuntimeDiagnostic(
     val openClProfile: OpenClGpuProfile? = null,
     val gpuDevice: com.woogit.aicore.runtime.GpuDeviceProfile? = null,
     val weightResidency: com.woogit.aicore.runtime.GpuWeightResidency? = null,
+    val devicePerformanceReport: String? = null,
 ) {
     val nativePerformance: NativePerformance
         get() = NativePerformance(
@@ -163,6 +164,8 @@ internal fun RuntimeDiagnostic.report(): String = buildString {
     appendLine("Decode Time: ${perf.decodeMs?.let { "$it ms" } ?: "N/A"}")
     appendLine("Decode Generated Tokens: ${perf.generatedTokens ?: "N/A"}")
     appendLine("Decode Tokens/sec: ${perf.decodeTokensPerSec?.let { "%.2f".format(it) } ?: "N/A"}")
+    appendLine()
+    appendLine(devicePerformanceReport ?: "===== DEVICE PERFORMANCE / THERMAL =====\nUnavailable: no completed inference sample")
     appendLine()
     appendLine("===== REAL GPU DEVICE / MEMORY =====")
     appendLine("GPU: ${gpuDevice?.name ?: "N/A"}")

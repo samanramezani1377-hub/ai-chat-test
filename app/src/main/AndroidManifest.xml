@@ -8,6 +8,8 @@
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
@@ -20,6 +22,18 @@
         <uses-native-library
             android:name="libOpenCL.so"
             android:required="false" />
+        <service
+            android:name=".screen.FloatingAssistantService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-enabled draggable on-screen assistant overlay" />
+        </service>
+        <service
+            android:name=".screen.ScreenSessionService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
         <service
             android:name=".ModelRuntimeForegroundService"
             android:exported="false"
@@ -70,6 +84,14 @@
             android:name=".AlwaysOnKoochikService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+        <activity
+            android:name=".VoiceConversationActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".widgets.ui.WidgetReplyActivity"
+            android:exported="false"
+            android:excludeFromRecents="true" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

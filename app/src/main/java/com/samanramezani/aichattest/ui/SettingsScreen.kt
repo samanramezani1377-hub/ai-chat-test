@@ -9,6 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import com.samanramezani.aichattest.InferenceSettingsAccess
 import com.samanramezani.aichattest.providers.CloudflareConfig
 import com.samanramezani.aichattest.providers.CloudflareProvider
 import com.samanramezani.aichattest.providers.CloudflareProviderStore
@@ -40,7 +41,7 @@ private const val KEY_SEED = "seed"
 private const val KEY_STOPS = "stop_sequences"
 private const val KEY_MAX_ACTION_STEPS = "max_action_steps"
 
-private val sections = listOf("مدل", "صدا", "پاسخ", "زمینه", "عامل")
+private val sections = listOf("مدل", "صدا", "پاسخ", "زمینه", "عامل", "حباب و صفحه")
 
 private enum class InferencePreset(val title: String, val description: String, val settings: InferenceSettings) {
     FAST("سریع", "برای گفت‌وگوی روزمره", InferenceSettings(temperature=.7, maxNewTokens=256, topK=32, topP=.9, minP=0.0, repeatPenalty=1.1, contextLength=2048, recentMessages=6, maxActionSteps=2)),
@@ -99,6 +100,7 @@ fun SettingsScreen(
                         "پاسخ" -> InferenceControls()
                         "زمینه" -> ContextControls()
                         "عامل" -> AgentControls()
+                        "حباب و صفحه" -> ScreenAssistantSettings()
                     }
                 }
             }
@@ -383,33 +385,8 @@ private fun CloudflareProviderSettings(onProviderChanged: () -> Unit, sharedStor
     }
 }
 
-private fun loadSettings(context: Context): InferenceSettings {
-    val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    migrateSettings(p)
-    val d = InferenceSettings()
-    val loaded = d.copy(
-        temperature = p.getFloat(KEY_TEMPERATURE, d.temperature.toFloat()).toDouble(),
-        topP = if (p.contains(KEY_TOP_P)) p.getFloat(KEY_TOP_P, (d.topP ?: .9).toFloat()).toDouble() else d.topP,
-        topK = if (p.contains(KEY_TOP_K)) p.getInt(KEY_TOP_K, d.topK ?: 40) else d.topK,
-        minP = if (p.contains(KEY_MIN_P)) p.getFloat(KEY_MIN_P, (d.minP ?: 0.0).toFloat()).toDouble() else d.minP,
-        repeatPenalty = if (p.contains(KEY_REPEAT)) p.getFloat(KEY_REPEAT, (d.repeatPenalty ?: 1.1).toFloat()).toDouble() else d.repeatPenalty,
-        maxNewTokens = p.getInt(KEY_MAX_TOKENS, d.maxNewTokens),
-        contextLength = if (p.contains(KEY_CONTEXT)) p.getInt(KEY_CONTEXT, d.contextLength ?: 4096) else d.contextLength,
-        recentMessages = p.getInt(KEY_RECENT_MESSAGES, d.recentMessages).coerceAtLeast(0),
-        seed = if (p.contains(KEY_SEED)) p.getLong(KEY_SEED, d.seed ?: 0L) else d.seed,
-        stopSequences = p.getString(KEY_STOPS, null)?.split("\u001f")?.filter { it.isNotEmpty() } ?: d.stopSequences,
-        maxActionSteps = p.getInt(KEY_MAX_ACTION_STEPS, d.maxActionSteps).coerceAtLeast(0),
-    )
-    InferenceSettingsStore.current = loaded
-    return loaded
-}
-
-private fun migrateSettings(p: android.content.SharedPreferences) {
-    if (p.getInt(KEY_SCHEMA_VERSION, 0) < 2) {
-        if (!p.contains(KEY_RECENT_MESSAGES)) p.edit().putInt(KEY_RECENT_MESSAGES, 10).apply()
-        p.edit().putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION).apply()
-    }
-}
+private fun loadSettings(context: Context): InferenceSettings =
+    InferenceSettingsAccess.load(context)
 
 private fun saveSettings(context: Context, settings: InferenceSettings) {
     context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()

@@ -34,7 +34,7 @@ class LlamaCppAndroidRuntimeAdapter(
     private val nativeOperationMutex = Mutex()
     @Volatile private var gpuLayersMode = gpuLayers
     @Volatile private var selectedGpuLayers = 0
-    @Volatile private var selectedCpuThreads = 2
+    @Volatile private var selectedCpuThreads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
     @Volatile private var selectedBackend = "OpenCL"
     @Volatile private var loadedContextLength: Int? = null
     @Volatile private var loadedArchitecture: String = "unknown"
@@ -115,7 +115,11 @@ class LlamaCppAndroidRuntimeAdapter(
             val info = NativeLlamaCpp.runtimeInfo()
             selectedBackend = info.substringBefore(';').ifBlank { "OpenCL" }
             selectedGpuLayers = if (selectedBackend.contains("OpenCL", ignoreCase = true)) requestedGpuLayers else 0
-            selectedCpuThreads = 2
+            selectedCpuThreads = info.substringAfter("generationThreads=", "").substringBefore(';').toIntOrNull()
+                ?: Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+            val batchThreads = info.substringAfter("batchThreads=", "").substringBefore(';').toIntOrNull()
+                ?: selectedCpuThreads
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_CPU_THREAD_POLICY generation=$selectedCpuThreads batch=$batchThreads")
             loadedContextLength = NativeLlamaCpp.contextLength().takeIf { it > 0 } ?: requested
             loadedArchitecture = model.metadata.architecture?.lowercase() ?: "unknown"
             loadedModelPath = file.absolutePath
@@ -230,6 +234,8 @@ class LlamaCppAndroidRuntimeAdapter(
                 "requestedMaxTokens=${settings.maxNewTokens} effectiveMaxTokens=$effectiveMaxTokens"
         )
         val startedAt = System.nanoTime()
+        val devicePerformanceMonitor = AndroidDevicePerformanceMonitor.start()
+        RuntimeDiagnosticsStore.recordDevicePerformanceReport(null)
         var firstTokenAt: Long? = null
         val output = StringBuilder()
         val pending = StringBuilder()
@@ -294,7 +300,12 @@ class LlamaCppAndroidRuntimeAdapter(
                 RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_FAILED, t.message)
                 ModelResult.Failure(RuntimeErrorMapper.inferenceFailure(t))
             }
-            } finally { stopRequested.set(false) }
+            } finally {
+                stopRequested.set(false)
+                runCatching { devicePerformanceMonitor.stopAndReport() }
+                    .onSuccess(RuntimeDiagnosticsStore::recordDevicePerformanceReport)
+                    .onFailure { RuntimeDiagnosticsStore.recordDevicePerformanceReport("Device performance sampling failed: ${it.javaClass.simpleName}: ${it.message}") }
+            }
         }
     /**
      * Keep as much recent conversation as possible while reserving the full generation

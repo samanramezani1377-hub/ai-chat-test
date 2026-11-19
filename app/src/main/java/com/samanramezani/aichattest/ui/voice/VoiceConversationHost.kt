@@ -20,6 +20,7 @@ import com.samanramezani.aichattest.voice.LocalMicrophone
 import com.samanramezani.aichattest.voice.VoiceAudioInputGuard
 import com.samanramezani.aichattest.voice.LocalPiperTts
 import com.samanramezani.aichattest.voice.SpeechSegmenter
+import com.samanramezani.aichattest.voice.matchedSpeechPrefixLength
 import com.samanramezani.aichattest.voice.LocalStreamingAsr
 import com.samanramezani.aichattest.voice.LocalAsr
 import com.samanramezani.aichattest.voice.LocalQwen3Asr
@@ -827,6 +828,13 @@ internal class VoiceConversationController(
                                 onDiagnostic("VOICE-TTS-PERF: synthesisMs=$synthesisMs chars=${segment.length}")
                             },
                         )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (t: Throwable) {
+                        // One malformed/unsupported sentence must not discard the rest of the
+                        // answer that is already waiting in the channel.
+                        onDiagnostic("VOICE-TTS-SEGMENT-FAILED: chars=${segment.length} ${t.stackTraceToString()}")
+                        onStatus("VOICE-TTS-SEGMENT-FAILED: یک بخش از پاسخ خوانده نشد؛ ادامهٔ پاسخ پخش می‌شود.")
                     } finally {
                         // Record the actual end even when cancellation interrupts AudioTrack.write().
                         if (segmentPlaybackStarted.get()) lastTtsPlaybackAtMs.set(SystemClock.elapsedRealtime())
@@ -846,10 +854,13 @@ internal class VoiceConversationController(
             queue.trySend("متوجه شدم")
             onLine("دستیار", "متوجه شدم")
         }
-        val segmenter = SpeechSegmenter()
+        var segmenter = SpeechSegmenter()
+        val queuedSpeechSegments = ArrayList<String>()
         fun enqueueCompleteSentences(token: String, flush: Boolean = false) {
             val ready = segmenter.feed(token) + if (flush) segmenter.flush() else emptyList()
-            for (segment in ready) queue.trySend(segment)
+            for (segment in ready) {
+                if (queue.trySend(segment).isSuccess) queuedSpeechSegments += segment
+            }
         }
 
         try {
@@ -899,7 +910,7 @@ internal class VoiceConversationController(
             val modelFailure = AtomicReference<String?>(null)
             val voiceStreamRaw = StringBuilder()
             val voiceStreamSafeFed = StringBuilder()
-            val session = container.createAgentSession(id, eventSink = { event ->
+            val session = container.createAgentSession(id, includeAgentTools = false, eventSink = { event ->
                 when (event) {
                     is AgentEvent.Token -> {
                         // Voice has its own streaming consumer: sanitize the accumulated output,
@@ -925,7 +936,7 @@ internal class VoiceConversationController(
                     }
                     else -> Unit
                 }
-            }, includeAgentTools = false) ?: error("VOICE-CHAT-002: نشست مدل محلی در دسترس نیست.")
+            }) ?: error("VOICE-CHAT-002: نشست مدل محلی در دسترس نیست.")
             // Voice is latency-sensitive: skip Qwen reasoning, cap response length, and keep
             // a short rolling history so each decode step attends to less accumulated KV state.
             val result = session.send(
@@ -941,8 +952,18 @@ internal class VoiceConversationController(
                 val streamedSafe = voiceStreamSafeFed.toString()
                 if (answer.startsWith(streamedSafe)) {
                     enqueueCompleteSentences(answer.substring(streamedSafe.length), flush = true)
-                } else if (streamedSafe.isEmpty() && answer.isNotBlank()) {
-                    enqueueCompleteSentences(answer, flush = true)
+                } else if (answer.isNotBlank()) {
+                    // A streamed prefix can differ from the final response after sanitization.
+                    // Keep every already-queued matching sentence, discard only the unspoken
+                    // partial buffer, then continue from the first changed final sentence.
+                    val matchedPrefix = matchedSpeechPrefixLength(answer, queuedSpeechSegments)
+                    segmenter.reset()
+                    enqueueCompleteSentences(answer.substring(matchedPrefix), flush = true)
+                    onDiagnostic(
+                        "VOICE-TTS-STREAM-RECONCILE: streamedPrefixChars=${streamedSafe.length} " +
+                            "queuedSegments=${queuedSpeechSegments.size} finalChars=${answer.length} " +
+                            "resumeAt=$matchedPrefix"
+                    )
                 } else {
                     enqueueCompleteSentences("", flush = true)
                 }

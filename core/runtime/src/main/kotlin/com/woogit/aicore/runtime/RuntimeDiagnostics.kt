@@ -94,6 +94,7 @@ data class RuntimeDiagnosticsSnapshot(
     val openClProfile: OpenClGpuProfile? = null,
     val gpuDevice: GpuDeviceProfile? = null,
     val weightResidency: GpuWeightResidency? = null,
+    val devicePerformanceReport: String? = null,
 )
 
 object RuntimeDiagnosticsStore {
@@ -117,6 +118,10 @@ object RuntimeDiagnosticsStore {
             trace?.let { "===== NATIVE TRACE =====\n${lastNativeDiagnosticLines(it)}" },
         ).joinToString("\n===== NATIVE DIAGNOSTICS =====\n").let(::lastNativeDiagnosticLines).takeIf { it.isNotBlank() }
     }.getOrNull()
+
+    fun recordDevicePerformanceReport(report: String?) {
+        state.value = state.value.copy(devicePerformanceReport = report)
+    }
 
     fun refreshNativeEvent() {
         state.value = state.value.copy(lastNativeEvent = readNativeDiagnostics(), openClProfile = readOpenClProfile(), gpuDevice = readGpuDevice(), weightResidency = readWeightResidency())
