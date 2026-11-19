@@ -5,7 +5,14 @@ import android.app.NotificationManager
 import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.savedstate.SavedStateRegistry
+import androidx.savedstate.SavedStateRegistryController
+import androidx.savedstate.SavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.PixelFormat
@@ -25,7 +32,11 @@ import androidx.core.app.ServiceCompat
 import kotlin.math.abs
 
 /** User-enabled floating Dina bubble and in-place chat window. Neither tap launches the app. */
-class FloatingAssistantService : LifecycleService() {
+class FloatingAssistantService : LifecycleService(), SavedStateRegistryOwner, ViewModelStoreOwner {
+    private val savedStateController = SavedStateRegistryController.create(this)
+    override val savedStateRegistry: SavedStateRegistry
+        get() = savedStateController.savedStateRegistry
+    override val viewModelStore: ViewModelStore = ViewModelStore()
     companion object {
         const val ACTION_ENABLE = "com.samanramezani.aichattest.screen.FLOATING_ENABLE"
         const val ACTION_DISABLE = "com.samanramezani.aichattest.screen.FLOATING_DISABLE"
@@ -57,7 +68,9 @@ class FloatingAssistantService : LifecycleService() {
     private var moved = false
 
     override fun onCreate() {
+        savedStateController.performAttach()
         super.onCreate()
+        savedStateController.performRestore(null)
         instance = this
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, false).apply()
         createChannel()
@@ -201,6 +214,8 @@ class FloatingAssistantService : LifecycleService() {
         val height = minOf((540 * density).toInt(), (screenHeight - 80 * density).toInt()).coerceAtLeast(1)
         val view = ComposeView(this).apply {
             this.setViewTreeLifecycleOwner(this@FloatingAssistantService)
+            this.setViewTreeSavedStateRegistryOwner(this@FloatingAssistantService)
+            this.setViewTreeViewModelStoreOwner(this@FloatingAssistantService)
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent { FloatingAssistantPopup(onClose = { closePopup() }) }
         }
@@ -248,6 +263,7 @@ class FloatingAssistantService : LifecycleService() {
         bubble?.let { runCatching { windowManager.removeView(it) } }
         bubble = null
         bubbleParams = null
+        viewModelStore.clear()
         super.onDestroy()
     }
 }
