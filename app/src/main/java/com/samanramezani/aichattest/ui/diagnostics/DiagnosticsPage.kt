@@ -50,6 +50,7 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
         openClProfile = runtime.openClProfile,
         gpuDevice = runtime.gpuDevice,
         weightResidency = runtime.weightResidency,
+        devicePerformanceReport = runtime.devicePerformanceReport,
     )
     val report = diagnostic.report()
     val errorReport = diagnostic.errorReport()
@@ -89,6 +90,10 @@ internal fun DiagnosticsPage(error: String?, execution: ExecutionState?) {
             InfoLine("GPU Layers", runtime.runtime.gpuLayers?.toString() ?: "—")
             InfoLine("Threads", runtime.runtime.threads?.toString() ?: "—")
             InfoLine("Context", runtime.runtime.contextLength?.toString() ?: "—")
+        }
+
+        SectionCard("CPU، دما و حافظه دستگاه") {
+            Text(runtime.devicePerformanceReport ?: "پس از اجرای مدل، نمونه‌برداری واقعی دستگاه اینجا نمایش داده می‌شود.", style = MaterialTheme.typography.bodySmall)
         }
 
         SectionCard("دستگاه و حافظه واقعی GPU") {
