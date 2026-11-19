@@ -238,6 +238,7 @@ class AppContainer(context: Context? = null) {
             },
             conversationId = conversationId,
             contextProvider = contextProvider,
+            textChatStreaming = includeAgentTools,
         )
     }
 
