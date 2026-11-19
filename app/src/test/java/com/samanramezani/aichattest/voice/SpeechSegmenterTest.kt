@@ -19,7 +19,7 @@ class SpeechSegmenterTest {
     @Test fun keepsEllipsisTogether() = assertEquals(listOf("خب...", "بله."), run("خب... بله."))
     @Test fun dropsSegmentsWithoutSpeakableContent() = assertEquals(listOf("بله!"), run("بله!", "!", " "))
     @Test fun handlesDotArrivingAsOwnToken() = assertEquals(listOf("یک.", "دو."), run("یک", ".", " دو", "."))
-    @Test fun splitsOnNewline() = assertEquals(listOf("الف", "ب"), run("الف\\nب"))
+    @Test fun splitsOnNewline() = assertEquals(listOf("الف", "ب"), run("الف\nب"))
     @Test fun breaksVeryLongRunsAtSpaces() = assertTrue(run("کلمه ".repeat(40)).size >= 2)
 
     @Test fun splitsPersianFullStopIntoSeparateTtsSegments() {
