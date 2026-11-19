@@ -33,3 +33,11 @@ The floating overlay service is a lifecycle-aware host for its Compose popup. Th
 ## Home-screen chat widget
 
 The compact RemoteViews preview wraps long unbroken tokens and opens a separate scrollable reply reader when tapped. The full answer is retained separately from the bounded preview.
+
+
+## Streaming boundary
+
+- Text-chat sessions explicitly opt into `textChatStreaming` from `AppContainer.createAgentSession(includeAgentTools = true)`.
+- Text chat forwards ordinary answer chunks as soon as the stream can be distinguished from a partial `<think>` marker. Reasoning blocks are filtered incrementally, and structured action payloads are withheld from the chat transcript.
+- Voice sessions explicitly pass `includeAgentTools = false`, which keeps `textChatStreaming` disabled. Their existing `AgentEvent.Token` handling, partial transcript updates, speech segmentation, and TTS playback path remain unchanged.
+- Do not move text-chat stream filtering into the shared runtime callback or the voice controller. Any future stream changes must preserve this explicit mode boundary.
