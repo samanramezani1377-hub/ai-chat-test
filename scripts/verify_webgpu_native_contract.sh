@@ -62,6 +62,9 @@ grep -q 'AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_TILE_V1' "$CMAKE" || fail "Portabl
 grep -q 'AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_DECLS_V1' "$CMAKE" || fail "Portable no-ShaderF16 quantized dequant declarations are missing"
 grep -q 'key.use_subgroup_matrix = context.supports_subgroup_matrix && context.supports_shader_f16' "$CMAKE" || fail "No-ShaderF16 GEMM must avoid the F16 subgroup-matrix shader"
 grep -q 'NO_SHADER_F16' "$CMAKE" || fail "No-ShaderF16 F32 arithmetic define is missing"
+grep -q 'prompt_prefill_gemm_fallback=portable_f32_register_tile' "$CMAKE" || fail "Portable no-ShaderF16 prompt-prefill GEMM must be reported"
+grep -q 'quantized_prefill_gemm_fallback=portable_f32_register_tile' "$CMAKE" || fail "Portable no-ShaderF16 quantized prefill GEMM must be reported"
+! grep -q 'f32_quantized_matvec' "$CMAKE" || fail "No-ShaderF16 quantized matmul must not remain limited to decode-only MatVec"
 
 # The imported AAR library must never be used as a native WebGPU C ABI provider.
 ! grep -q 'webgpu_c_bundled' "$FIND_DAWN" || fail "FindDawn must not link the AndroidX JNI-only library"
