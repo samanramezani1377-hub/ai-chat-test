@@ -19,10 +19,20 @@ struct MulMatParams {
     broadcast3: u32
 };
 
+#ifdef SRC_OVERLAP
+#define SRC0 merged_src
+#define SRC1 merged_src
+@group(0) @binding(0) var<storage, read_write> merged_src: array<f32>;
+#define DST_BINDING 1
+#else
+#define SRC0 src0
+#define SRC1 src1
 @group(0) @binding(0) var<storage, read_write> src0: array<f32>;
 @group(0) @binding(1) var<storage, read_write> src1: array<f32>;
-@group(0) @binding(2) var<storage, read_write> dst: array<f32>;
-@group(0) @binding(3) var<uniform> params: MulMatParams;
+#define DST_BINDING 2
+#endif
+@group(0) @binding(DST_BINDING) var<storage, read_write> dst: array<f32>;
+@group(0) @binding(DST_BINDING + 1) var<uniform> params: MulMatParams;
 
 const WG_SIZE_M = 8u;
 const WG_SIZE_N = 8u;
@@ -81,7 +91,7 @@ fn main(
             let global_k = k_outer + tile_k;
             var value = 0.0f;
             if (global_m < params.m && global_k < params.k) {
-                value = src0[src0_batch_offset + global_m * params.stride_01 + global_k];
+                value = SRC0[src0_batch_offset + global_m * params.stride_01 + global_k];
             }
             tile_a[elem_idx] = value;
         }
@@ -93,7 +103,7 @@ fn main(
             let global_k = k_outer + tile_k;
             var value = 0.0f;
             if (global_n < params.n && global_k < params.k) {
-                value = src1[src1_batch_offset + global_n * params.stride_11 + global_k];
+                value = SRC1[src1_batch_offset + global_n * params.stride_11 + global_k];
             }
             tile_b[elem_idx] = value;
         }
