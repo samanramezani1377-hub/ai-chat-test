@@ -1,15 +1,13 @@
 # AndroidX Jetpack WebGPU publishes the Dawn C ABI and native library as Prefab.
 # GGML's upstream backend uses Dawn's C++ wrapper, which is generated from the exact
 # Dawn revision recorded by AndroidX WebGPU 1.0.0-alpha06.
-find_package(webgpu_c_bundled CONFIG REQUIRED)
+find_package(webgpu CONFIG REQUIRED)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
-if(TARGET webgpu_c_bundled::webgpu_c_bundled)
-    set(_ai_chat_dawn_target webgpu_c_bundled::webgpu_c_bundled)
-elseif(TARGET webgpu_c_bundled)
-    set(_ai_chat_dawn_target webgpu_c_bundled)
+if(TARGET webgpu::webgpu_c_bundled)
+    set(_ai_chat_dawn_target webgpu::webgpu_c_bundled)
 else()
-    message(FATAL_ERROR "AndroidX WebGPU Prefab package did not export webgpu_c_bundled target")
+    message(FATAL_ERROR "AndroidX WebGPU Prefab package did not export webgpu::webgpu_c_bundled target")
 endif()
 
 # AndroidX alpha06's meta/dawn_build_metadata.json pins this exact source revision.
