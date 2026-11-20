@@ -719,13 +719,17 @@ static bool model_uses_recurrent_memory() {
 static void android_fatal_signal_handler(int signal_number, siginfo_t * info, void * raw_context) {
     if (g_native_fatal_fd >= 0) {
         const char signal_prefix[] = "NATIVE_FATAL_SIGNAL=";
+        const char name_prefix[] = "NATIVE_FATAL_SIGNAL_NAME=";
+        const char code_prefix[] = "NATIVE_FATAL_SI_CODE=";
+        const char spec_prefix[] = "NATIVE_FATAL_SPEC_PHASE=";
+        const char runtime_prefix[] = "NATIVE_FATAL_RUNTIME_PHASE=";
         native_write_text(g_native_fatal_fd, signal_prefix, sizeof(signal_prefix) - 1);
+
         char value[24];
         int n = 0;
         int v = signal_number;
-        if (v == 0) {
-            value[n++] = '0';
-        } else {
+        if (v == 0) value[n++] = '0';
+        else {
             char reverse[24];
             int r = 0;
             while (v > 0 && r < (int) sizeof(reverse)) {
@@ -736,6 +740,54 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
         }
         native_write_text(g_native_fatal_fd, value, (size_t) n);
         native_write_text(g_native_fatal_fd, "\n", 1);
+
+        const char * signal_name = native_signal_name(signal_number);
+        native_write_text(g_native_fatal_fd, name_prefix, sizeof(name_prefix) - 1);
+        native_write_text(g_native_fatal_fd, signal_name, std::strlen(signal_name));
+        native_write_text(g_native_fatal_fd, "\n", 1);
+
+        const int signal_code = info ? info->si_code : 0;
+        n = 0;
+        int code_value = signal_code;
+        const bool negative = code_value < 0;
+        unsigned int magnitude = negative
+            ? (unsigned int)(-(int64_t)code_value)
+            : (unsigned int)code_value;
+        char reverse_code[24];
+        int code_len = 0;
+        do {
+            reverse_code[code_len++] = (char)('0' + (magnitude % 10u));
+            magnitude /= 10u;
+        } while (magnitude && code_len < (int)sizeof(reverse_code));
+        if (negative) value[n++] = '-';
+        while (code_len > 0) value[n++] = reverse_code[--code_len];
+        native_write_text(g_native_fatal_fd, code_prefix, sizeof(code_prefix) - 1);
+        native_write_text(g_native_fatal_fd, value, (size_t)n);
+        native_write_text(g_native_fatal_fd, "\n", 1);
+
+        native_write_text(g_native_fatal_fd, spec_prefix, sizeof(spec_prefix) - 1);
+        const volatile char * spec = g_spec_phase ? g_spec_phase : "UNKNOWN";
+        char spec_value[96];
+        size_t spec_len = 0;
+        while (spec_len < sizeof(spec_value) && spec[spec_len]) {
+            spec_value[spec_len] = spec[spec_len];
+            ++spec_len;
+        }
+        native_write_text(g_native_fatal_fd, spec_value, spec_len);
+        native_write_text(g_native_fatal_fd, "\n", 1);
+
+        native_write_text(g_native_fatal_fd, runtime_prefix, sizeof(runtime_prefix) - 1);
+        char runtime_value[128];
+        size_t runtime_len = 0;
+        while (runtime_len + 1 < sizeof(runtime_value)) {
+            const char current = g_native_runtime_phase[runtime_len].load(std::memory_order_relaxed);
+            if (!current) break;
+            runtime_value[runtime_len++] = current;
+        }
+        runtime_value[runtime_len] = '\0';
+        native_write_text(g_native_fatal_fd, runtime_value, runtime_len);
+        native_write_text(g_native_fatal_fd, "\n", 1);
+
         uintptr_t pc = 0;
         uintptr_t lr = 0;
 #if defined(__aarch64__)
@@ -747,7 +799,10 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
 #endif
         native_write_hex(g_native_fatal_fd, "NATIVE_FATAL_PC=", pc);
         native_write_hex(g_native_fatal_fd, "NATIVE_FATAL_LR=", lr);
-        native_write_hex(g_native_fatal_fd, "NATIVE_FATAL_FAULT_ADDR=", info ? (uintptr_t) info->si_addr : 0);
+        // si_addr is not meaningful for SIGABRT; avoid recording a misleading pointer.
+        if (info && signal_number != SIGABRT) {
+            native_write_hex(g_native_fatal_fd, "NATIVE_FATAL_FAULT_ADDR=", (uintptr_t)info->si_addr);
+        }
         fsync(g_native_fatal_fd);
     }
     struct sigaction default_action{};
@@ -757,7 +812,6 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
     raise(signal_number);
     _exit(128 + signal_number);
 }
-
 static void install_native_fatal_handlers() {
     struct sigaction action{};
     sigemptyset(&action.sa_mask);
