@@ -29,7 +29,7 @@ jobs:
   unit-tests:
     name: Unit tests
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -73,6 +73,11 @@ jobs:
         with:
           targets: aarch64-linux-android
 
+      - name: Set up Go for Dawn code generation
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24.x'
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -97,7 +102,7 @@ jobs:
   android-build:
     name: Android debug build
     runs-on: ubuntu-22.04
-    timeout-minutes: 25
+    timeout-minutes: 60
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 2G
@@ -144,6 +149,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
+
+      - name: Set up Go for Dawn code generation
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24.x'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -272,11 +282,6 @@ jobs:
           ! grep -q 'NATIVE_KV_CACHE_HYBRID_DISABLED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
           echo "WebGPU OpenGL ES compatibility policy, CPU fallback, backend assignment, and KV-cache invariants verified"
 
-      - name: Install Dawn C++ header generator dependency
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-jinja2
-
       - name: Assemble debug APK
         run: >-
           gradle
@@ -295,7 +300,7 @@ jobs:
           unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime.so'
           unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime4j_jni.so'
           unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/liblaya_tokenizers.so'
-          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libwebgpu_c_bundled.so'
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libai_chat_runtime.so'
           unzip -p "$apk" lib/arm64-v8a/libonnxruntime4j_jni.so > "$RUNNER_TEMP/libonnxruntime4j_jni.so"
           readelf -d --wide "$RUNNER_TEMP/libonnxruntime4j_jni.so" | grep -F 'libonnxruntime.so'
           unzip -p "$apk" lib/arm64-v8a/libonnxruntime.so > "$RUNNER_TEMP/libonnxruntime.so"
@@ -423,6 +428,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
+
+      - name: Set up Go for Dawn code generation
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24.x'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
