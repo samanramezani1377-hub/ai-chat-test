@@ -358,15 +358,15 @@ object CrashLogStore {
     private fun compactLegacyReport(value: String): String {
         var compact = value
         compact = compact.replace(
-            Regex("(?ms)^===== NATIVE TRACE BEFORE CRASH.*?(?=^={8,}.*CRASH|\\\\z)"),
+            Regex("(?ms)^===== NATIVE TRACE BEFORE CRASH.*?(?=^={8,}.*CRASH|\\z)"),
             "===== NATIVE TRACE =====\\n(ردپای تکراری و طولانی حذف شد؛ خلاصهٔ رویدادهای مهم در گزارش نگه داشته شده است.)\\n"
         )
         compact = compact.replace(
-            Regex("(?ms)^===== NATIVE TRACE TAIL =====.*?(?=^=====|^={8,}.*CRASH|\\\\z)"),
+            Regex("(?ms)^===== NATIVE TRACE TAIL =====.*?(?=^=====|^={8,}.*CRASH|\\z)"),
             "===== NATIVE TRACE =====\\n(ردپای خام حذف شد.)\\n"
         )
         compact = compact.replace(
-            Regex("(?ms)^===== RECENT RUNTIME EVENTS =====.*?(?=^=====|^={8,}.*CRASH|\\\\z)"),
+            Regex("(?ms)^===== RECENT RUNTIME EVENTS =====.*?(?=^=====|^={8,}.*CRASH|\\z)"),
             "===== RUNTIME EVENTS =====\\n(رویدادهای تکراری حذف شدند.)\\n"
         )
         return compact
