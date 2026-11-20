@@ -588,16 +588,19 @@ target_include_directories(ai_chat_runtime PRIVATE
     ${opencl_headers_SOURCE_DIR}
 )
 
-# The runtime is a single arm64 production native library. Strip unused sections
-# and symbols at link time to reduce the installed footprint without changing inference.
+# The runtime is a single arm64 native library. Keep line-table symbols and a
+# stable ELF Build ID so Android tombstones can be symbolized against the exact
+# shipped binary. Section GC still removes unreachable code; do not use --strip-all
+# here because it makes native backend aborts impossible to diagnose by source line.
 target_compile_options(ai_chat_runtime PRIVATE
     -Os
+    -gline-tables-only
     -ffunction-sections
     -fdata-sections
 )
 target_link_options(ai_chat_runtime PRIVATE
     -Wl,--gc-sections
-    -Wl,--strip-all
+    -Wl,--build-id=sha1
 )
 
 if (NOT TARGET ggml-webgpu)
