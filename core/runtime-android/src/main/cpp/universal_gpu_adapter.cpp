@@ -138,6 +138,12 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
     caps.egl_version = egl_string(display, EGL_VERSION);
     caps.egl_vendor = egl_string(display, EGL_VENDOR);
 
+    if (eglBindAPI(EGL_OPENGL_ES_API) != EGL_TRUE) {
+        caps.failure_reason = "egl_bind_opengles_api_failed_" + egl_error_name(eglGetError());
+        eglTerminate(display);
+        return caps;
+    }
+
     EGLint config_attributes[] = {
         EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT_KHR,
