@@ -22,6 +22,8 @@ grep -q 'GIT_SUBMODULES ""' "$FIND_DAWN" || fail "Dawn FetchContent must not clo
 grep -q 'GIT_SUBMODULES_RECURSE FALSE' "$FIND_DAWN" || fail "Dawn FetchContent must not recursively clone optional submodules"
 grep -q 'dawn_source_commit_sha' "$FIND_DAWN" || fail "Dawn must be built from the AAR's recorded source SHA"
 grep -q 'DAWN_ENABLE_OPENGLES ON' "$FIND_DAWN" || fail "Native Dawn must enable OpenGL ES"
+grep -q 'TINT_BUILD_NULL_WRITER ON' "$FIND_DAWN" || fail "Tint null writer is required by Dawn OpenGL ES compute pipeline reflection"
+grep -q 'DAWN_ENABLE_NULL OFF' "$FIND_DAWN" || fail "Dawn's optional Null GPU backend must remain disabled"
 grep -q 'DAWN_ENABLE_VULKAN OFF' "$FIND_DAWN" || fail "Native Dawn must keep Vulkan disabled"
 grep -q 'dawn::webgpu_dawn' "$FIND_DAWN" || fail "FindDawn must expose the real native Dawn C ABI target"
 grep -q 'extractWebGpuDawnMetadata' "$GRADLE" || fail "Gradle must extract Dawn build metadata before CMake configuration"
