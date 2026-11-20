@@ -8,7 +8,9 @@
 - Preserve arm64-v8a and the pinned llama.cpp revision until a deliberate compatibility decision is made.
 - Do not change model quantization, context length, or generation limits as a performance workaround.
 
-## Findings on the current branch
+## Historical baseline (before WebGPU/Dawn integration)
+
+The following notes describe the branch before the later AndroidX WebGPU/Dawn work recorded below. They are retained for investigation history and are not a description of the current branch state.
 
 The active Android runtime is `core/runtime-android`. Its CMake build pins llama.cpp to
 `9871df5911a03a813518bcd623ee2eba91bf32aa`.
@@ -25,7 +27,7 @@ is not the active Gradle CMake source path: the active Android library points at
 `core/runtime-android/src/main/cpp/CMakeLists.txt`. This duplicate is a cleanup candidate,
 but it must not be deleted until all references and historical build workflows are checked.
 
-## WebGPU / Dawn feasibility
+## Historical WebGPU / Dawn feasibility assessment (superseded below)
 
 The pinned llama.cpp revision contains a GGML WebGPU backend whose native build path
 requires `find_package(Dawn REQUIRED)`, C++20, Python shader embedding, and a Dawn
@@ -37,7 +39,9 @@ recipe for this app's integration.
 Therefore WebGPU/Dawn is not currently a safe drop-in backend for this Android runtime.
 Do not turn it on by merely setting `GGML_WEBGPU=ON`.
 
-## Vulkan feasibility
+## Vulkan feasibility (rejected by the current project constraint)
+
+Vulkan is intentionally excluded from the selected implementation. The following feasibility notes are historical only; they do not authorize enabling Vulkan.
 
 The pinned llama.cpp revision contains a GGML Vulkan backend and exports
 `ggml_backend_vk_reg()` in `ggml-vulkan.h`. Its CMake build requires Vulkan headers,
@@ -51,7 +55,7 @@ with a host compiler. Device discovery alone is not proof of working inference:
 the exact target must pass model-load, tensor-residency, Q6_K operation, decode, and
 stability tests on hardware.
 
-## Required implementation design
+## Initial architecture proposal (superseded by the implementation below)
 
 A native-only backend coordinator should:
 1. Discover compiled backends and their actual GGML GPU devices.
@@ -244,8 +248,8 @@ declare `enable f16` unconditionally even when the tensor metadata is F32.
 Therefore the no-ShaderF16 path does not treat all F32 operations as safe.
 It admits only the upstream paths audited as F32-only in this pinned revision:
 `SCALE`, `UNARY` (F32 variant), `SUM`, `SUM_ROWS`, `CUMSUM`, `ARGMAX`,
-`ARGSORT`, `TOP_K`, `DIAG`, `TRI`, and `SOLVE_TRI`. Operations such as
-`SOFT_MAX`, `MUL_MAT`, attention, RoPE, and quantized paths remain on CPU
+`ARGSORT`, `TOP_K`, `SOFT_MAX`, `DIAG`, `TRI`, and `SOLVE_TRI`. Operations such as
+`MUL_MAT`, attention, RoPE, and quantized paths remain on CPU
 until their exact shader variants have explicit no-F16 validation. The
 whitelist is version-anchored and checked by CI.
 
