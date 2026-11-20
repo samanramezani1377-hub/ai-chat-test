@@ -1181,6 +1181,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     append_native_trace("SPECULATIVE_AUTO_DETECTION_DISABLED_DURING_TARGET_LOAD");
     ggml_backend_dev_t webgpu_device = find_webgpu_gpu_device();
     const bool gpu_available = g_webgpu_backend_loaded && webgpu_device != nullptr && gpu_layers > 0;
+    std::string gpu_failure_reason = "gpu_not_requested_or_unavailable";
     if (gpu_layers <= 0) {
         gpu_failure_reason = "gpu_offload_disabled";
     } else if (!ggml_backend_reg_by_name(GGML_WEBGPU_NAME) &&
@@ -1199,7 +1200,6 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     const int requested = ctx_len > 0 ? ctx_len : 4096;
     bool runtime_ready = false;
     bool gpu_attempted = false;
-    std::string gpu_failure_reason = "gpu_not_requested_or_unavailable";
 
     // GPU is an optimization, not a requirement for activating a valid model.
     // Any recoverable WebGPU model-load, residency-validation, or context-init
