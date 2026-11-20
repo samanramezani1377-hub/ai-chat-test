@@ -318,8 +318,8 @@ jobs:
           set -euo pipefail
           echo "Searching all configured GGML build trees for patched WebGPU backends..."
           mapfile -t webgpu_sources < <(find core/runtime-android -type f -name 'ggml-webgpu.cpp' -path '*/ggml/src/ggml-webgpu/*' -print)
-          printf 'Found %s candidate WebGPU source file(s).\n' "\${#webgpu_sources[@]}"
-          if [ "\${#webgpu_sources[@]}" -lt 1 ]; then
+          printf 'Found %s candidate WebGPU source file(s).\n' "${#webgpu_sources[@]}"
+          if [ "${#webgpu_sources[@]}" -lt 1 ]; then
             find core/runtime-android -type f \( -name 'ggml-webgpu.cpp' -o -name 'soft_max.wgsl' \) -print
             echo "::error::No configured GGML WebGPU source file was found."
             exit 1
@@ -350,7 +350,7 @@ jobs:
             fi
           done
 
-          for source_file in "\${webgpu_sources[@]}"; do
+          for source_file in "${webgpu_sources[@]}"; do
             echo "Checking patched source: $source_file"
             for marker in \
               AI_CHAT_GENERIC_FP32_FALLBACK_V1 \
