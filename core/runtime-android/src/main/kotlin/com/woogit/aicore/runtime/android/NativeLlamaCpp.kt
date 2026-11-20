@@ -139,6 +139,9 @@ internal object NativeLlamaCpp {
                 }
             }
         }
+        // Reset before launching the blocking JNI worker. If cancellation wins
+        // the race before nativeGenerate enters, native code must retain the stop.
+        nativeResetStop()
         val worker = launch {
             val result = nativeGenerate(prompt, maxTokens, temperature, topK, topP, minP, cachePrefixTokens, continuationPrefixTokens, listener)
             if (result == 0 || result == 9) close()
@@ -157,6 +160,9 @@ internal object NativeLlamaCpp {
 
     @Synchronized
     fun stop() = nativeStop()
+
+    @Synchronized
+    private fun resetStop() = nativeResetStop()
     fun runtimeInfo(): String = nativeRuntimeInfo()
     fun contextLength(): Int = nativeContextLength()
 
@@ -164,6 +170,7 @@ internal object NativeLlamaCpp {
     @JvmStatic private external fun nativeSetCacheDirectory(path: String): Boolean
     @JvmStatic private external fun nativeInit(enableGpu: Boolean)
     @JvmStatic private external fun nativeInstallFatalHandlers()
+    @JvmStatic private external fun nativeResetStop()
     @JvmStatic private external fun nativeLoad(path: String, contextLength: Int, gpuLayers: Int, draftPath: String?): Int
     @JvmStatic private external fun nativeCountTokens(prompt: String): Int
     @JvmStatic private external fun nativeGenerate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float, cachePrefixTokens: Int, continuationPrefixTokens: Int, listener: TokenListener): Int
