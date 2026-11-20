@@ -164,6 +164,8 @@ native trace, and releases its EGL/GL objects.
 
 If a valid GLES context is created and reports a version below 3.1, the native coordinator rejects the Dawn/OpenGL ES inference attempt with the explicit reason `universal_gles_compute_not_supported`. If EGL probing itself fails, the result remains unknown and Dawn is still allowed to perform its own adapter discovery; a failed independent probe is not treated as proof that no adapter exists.
 
+The probe enumerates OpenGL ES 3.x extensions with `glGetStringi(GL_EXTENSIONS, index)` and `GL_NUM_EXTENSIONS`; it does not use the legacy `glGetString(GL_EXTENSIONS)` query, which is not the valid extension enumeration path for ES 3.x contexts. The extension count and FP16 hint therefore come from the actual indexed driver extension list.
+
 The probe records:
 - EGL display/context creation and EGL version/vendor;
 - GL vendor, renderer, version and shading-language version;
