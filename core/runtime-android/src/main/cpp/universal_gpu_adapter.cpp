@@ -140,7 +140,6 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
 
     if (eglBindAPI(EGL_OPENGL_ES_API) != EGL_TRUE) {
         caps.failure_reason = "egl_bind_opengles_api_failed_" + egl_error_name(eglGetError());
-        eglTerminate(display);
         return caps;
     }
 
@@ -157,7 +156,6 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
     if (eglChooseConfig(display, config_attributes, &config, 1, &config_count) != EGL_TRUE ||
         config_count < 1) {
         caps.failure_reason = "egl_choose_es3_pbuffer_config_failed_" + egl_error_name(eglGetError());
-        eglTerminate(display);
         return caps;
     }
 
@@ -165,7 +163,6 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
     EGLSurface surface = eglCreatePbufferSurface(display, config, pbuffer_attributes);
     if (surface == EGL_NO_SURFACE) {
         caps.failure_reason = "egl_create_pbuffer_failed_" + egl_error_name(eglGetError());
-        eglTerminate(display);
         return caps;
     }
 
@@ -174,7 +171,6 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
     if (context == EGL_NO_CONTEXT) {
         caps.failure_reason = "egl_create_gles3_context_failed_" + egl_error_name(eglGetError());
         eglDestroySurface(display, surface);
-        eglTerminate(display);
         return caps;
     }
 
@@ -182,7 +178,6 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
         caps.failure_reason = "egl_make_current_failed_" + egl_error_name(eglGetError());
         eglDestroyContext(display, context);
         eglDestroySurface(display, surface);
-        eglTerminate(display);
         return caps;
     }
     caps.egl_context_created = true;
@@ -227,7 +222,6 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
     eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     eglDestroyContext(display, context);
     eglDestroySurface(display, surface);
-    eglTerminate(display);
     return caps;
 }
 
