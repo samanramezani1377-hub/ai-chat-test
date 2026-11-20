@@ -207,12 +207,37 @@ if (AI_CHAT_WEBGPU_FP32_WHITELIST_PATCHED EQUAL -1)
     endif()
     string(REPLACE
         "if (uses_f16 || uses_quantized) return false;\n    }"
-        "if (uses_f16 || uses_quantized) return false;\n        const bool f32_safe_op =\n            op->op == GGML_OP_SCALE || op->op == GGML_OP_UNARY ||\n            op->op == GGML_OP_SUM || op->op == GGML_OP_SUM_ROWS ||\n            op->op == GGML_OP_CUMSUM || op->op == GGML_OP_ARGMAX ||\n            op->op == GGML_OP_ARGSORT || op->op == GGML_OP_TOP_K ||\n            op->op == GGML_OP_DIAG || op->op == GGML_OP_TRI ||\n            op->op == GGML_OP_SOLVE_TRI;\n        if (!f32_safe_op) return false;\n    }\n    // AI_CHAT_GENERIC_FP32_OP_WHITELIST_V1"
+        "if (uses_f16 || uses_quantized) return false;\n        const bool f32_safe_op =\n            op->op == GGML_OP_SCALE || op->op == GGML_OP_UNARY ||\n            op->op == GGML_OP_SUM || op->op == GGML_OP_SUM_ROWS ||\n            op->op == GGML_OP_CUMSUM || op->op == GGML_OP_ARGMAX ||\n            op->op == GGML_OP_ARGSORT || op->op == GGML_OP_TOP_K ||\n            op->op == GGML_OP_SOFT_MAX || op->op == GGML_OP_DIAG || op->op == GGML_OP_TRI ||\n            op->op == GGML_OP_SOLVE_TRI;\n        if (!f32_safe_op) return false;\n    }\n    // AI_CHAT_GENERIC_FP32_OP_WHITELIST_V1"
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
 endif()
 string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_GENERIC_FP32_OP_WHITELIST_V1" AI_CHAT_WEBGPU_FP32_WHITELIST_VERIFY)
 if (AI_CHAT_WEBGPU_FP32_WHITELIST_VERIFY EQUAL -1)
     message(FATAL_ERROR "Could not apply the conservative F32-only operation whitelist")
+endif()
+
+# The upstream softmax shader only needs ShaderF16 for an F16 mask. Make that
+# WGSL feature declaration conditional so F32/no-mask softmax can run on
+# adapters without ShaderF16; F16 masks remain rejected by supports_op.
+set(AI_CHAT_WEBGPU_SOFTMAX_SOURCE "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/wgsl-shaders/soft_max.wgsl")
+if (NOT EXISTS "${AI_CHAT_WEBGPU_SOFTMAX_SOURCE}")
+    message(FATAL_ERROR "Pinned GGML WebGPU softmax shader source is missing")
+endif()
+file(READ "${AI_CHAT_WEBGPU_SOFTMAX_SOURCE}" AI_CHAT_WEBGPU_SOFTMAX_TEXT)
+string(FIND "${AI_CHAT_WEBGPU_SOFTMAX_TEXT}" "AI_CHAT_SOFTMAX_FP32_NO_F16_V1" AI_CHAT_WEBGPU_SOFTMAX_PATCHED)
+if (AI_CHAT_WEBGPU_SOFTMAX_PATCHED EQUAL -1)
+    string(FIND "${AI_CHAT_WEBGPU_SOFTMAX_TEXT}" "enable f16;" AI_CHAT_WEBGPU_SOFTMAX_ENABLE_ANCHOR)
+    if (AI_CHAT_WEBGPU_SOFTMAX_ENABLE_ANCHOR EQUAL -1)
+        message(FATAL_ERROR "Could not locate the upstream softmax ShaderF16 declaration")
+    endif()
+    string(REPLACE
+        "enable f16;"
+        "#ifdef MASK_F16\nenable f16;\n#endif\n// AI_CHAT_SOFTMAX_FP32_NO_F16_V1"
+        AI_CHAT_WEBGPU_SOFTMAX_TEXT "${AI_CHAT_WEBGPU_SOFTMAX_TEXT}")
+    file(WRITE "${AI_CHAT_WEBGPU_SOFTMAX_SOURCE}" "${AI_CHAT_WEBGPU_SOFTMAX_TEXT}")
+endif()
+string(FIND "${AI_CHAT_WEBGPU_SOFTMAX_TEXT}" "AI_CHAT_SOFTMAX_FP32_NO_F16_V1" AI_CHAT_WEBGPU_SOFTMAX_VERIFY)
+if (AI_CHAT_WEBGPU_SOFTMAX_VERIFY EQUAL -1)
+    message(FATAL_ERROR "Could not apply the F32-only softmax WGSL patch")
 endif()
 
 file(WRITE "${AI_CHAT_WEBGPU_SOURCE}" "${AI_CHAT_WEBGPU_SOURCE_TEXT}")

@@ -246,3 +246,14 @@ It admits only the upstream paths audited as F32-only in this pinned revision:
 `SOFT_MAX`, `MUL_MAT`, attention, RoPE, and quantized paths remain on CPU
 until their exact shader variants have explicit no-F16 validation. The
 whitelist is version-anchored and checked by CI.
+
+
+### F32 softmax without ShaderF16
+
+The pinned `soft_max.wgsl` shader declared `enable f16` unconditionally even
+though its normal logits/output path is F32 and F16 is only needed when the
+optional attention mask tensor itself is F16. The Android CMake patch now
+guards that declaration with `#ifdef MASK_F16`. The no-ShaderF16 whitelist
+can therefore safely include F32 softmax; F16-mask operations are still
+rejected by the generic tensor-type guard. CI verifies the patched shader
+source before packaging.
