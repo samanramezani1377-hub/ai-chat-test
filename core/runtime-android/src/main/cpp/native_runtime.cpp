@@ -814,10 +814,10 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
         native_write_text(g_native_fatal_fd, phase_prefix, sizeof(phase_prefix) - 1);
         char phase[96];
         size_t phase_len = 0;
-        const volatile char *phase_src = g_spec_phase ? g_spec_phase : "UNKNOWN";
-        while (phase_len + 1 < sizeof(phase) && phase_src[phase_len]) {
-            phase[phase_len] = phase_src[phase_len];
-            ++phase_len;
+        while (phase_len + 1 < sizeof(phase)) {
+            const char current = g_native_spec_phase[phase_len].load(std::memory_order_relaxed);
+            if (!current) break;
+            phase[phase_len++] = current;
         }
         phase[phase_len] = '\0';
         native_write_text(g_native_fatal_fd, phase, phase_len);
