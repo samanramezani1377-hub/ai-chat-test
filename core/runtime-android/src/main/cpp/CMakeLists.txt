@@ -415,13 +415,13 @@ if (NOT AI_CHAT_Q8_SCALE_D_REMAINS EQUAL -1 OR NOT AI_CHAT_Q8_SCALE_S_REMAINS EQ
     message(FATAL_ERROR "No-ShaderF16 quantized mat-vec still contains an FP16 arithmetic/type dependency")
 endif()
 
-string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANT_MATMUL_OP_V4" AI_CHAT_WEBGPU_QUANT_MATVEC_OP_VERIFY)
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANT_MATMUL_OP_V4" AI_CHAT_WEBGPU_QUANT_MATMUL_OP_VERIFY)
 if (AI_CHAT_WEBGPU_QUANT_MATVEC_OP_VERIFY EQUAL -1)
-    message(FATAL_ERROR "No-ShaderF16 quantized MatVec was not integrated into the generic operation guard")
+    message(FATAL_ERROR "No-ShaderF16 quantized MatMul was not integrated into the generic operation guard")
 endif()
 string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_OP_V1" AI_CHAT_WEBGPU_F32_GEMM_OP_VERIFY)
 if (AI_CHAT_WEBGPU_F32_GEMM_OP_VERIFY EQUAL -1)
-    message(FATAL_ERROR "No-ShaderF16 F32 GEMM admission is missing")
+    message(FATAL_ERROR "No-ShaderF16 quantized/F32 GEMM admission is missing")
 endif()
 
 # Add a no-ShaderF16 variant of upstream's register-tile GEMM. Quantized weights
