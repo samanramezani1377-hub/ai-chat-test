@@ -166,7 +166,7 @@ if (AI_CHAT_WEBGPU_CAPABILITIES_LOGGED EQUAL -1)
     set(AI_CHAT_WEBGPU_CAPABILITIES_REPLACEMENT [=[
 ctx->webgpu_global_ctx->capabilities.max_subgroup_size = info.subgroupMaxSize;
     // AI_CHAT_WEBGPU_CAPABILITIES: report actual Dawn features, not GLES hints.
-    GGML_LOG_INFO("AI_CHAT_WEBGPU_CAPABILITIES vendor=%s shaderF16=%d subgroups=%d dotProduct=%d subgroupMatrix=%d maxStorageBufferBindingSize=%llu maxComputeInvocationsPerWorkgroup=%u maxComputeWorkgroupStorageSize=%u\\n",
+    GGML_LOG_INFO("AI_CHAT_WEBGPU_CAPABILITIES vendor=%s shaderF16=%d subgroups=%d dotProduct=%d subgroupMatrix=%d maxStorageBufferBindingSize=%llu maxComputeInvocationsPerWorkgroup=%u maxComputeWorkgroupStorageSize=%u\n",
         ctx->webgpu_global_ctx->vendor.c_str(),
         static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_shader_f16),
         static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_subgroups),
@@ -210,7 +210,7 @@ ctx->webgpu_global_ctx->vendor                    = info.vendor;
     ctx->webgpu_global_ctx->capabilities.supports_shader_f16 =
         ctx->webgpu_global_ctx->adapter.HasFeature(wgpu::FeatureName::ShaderF16);
     if (!ctx->webgpu_global_ctx->capabilities.supports_shader_f16) {
-        GGML_LOG_WARN("AI_CHAT_WEBGPU_FP16_FAST_KERNELS_DISABLED reason=shader_f16_unavailable; quantized_f32_matvec_fallback=enabled; prompt_prefill_gemm_fallback=portable_f32_register_tile; quantized_prefill_gemm_fallback=portable_f32_register_tile\\n");
+        GGML_LOG_WARN("AI_CHAT_WEBGPU_FP16_FAST_KERNELS_DISABLED reason=shader_f16_unavailable; quantized_f32_matvec_fallback=enabled; prompt_prefill_gemm_fallback=portable_f32_register_tile; quantized_prefill_gemm_fallback=portable_f32_register_tile\n");
     }
 ]=])
     string(REPLACE
