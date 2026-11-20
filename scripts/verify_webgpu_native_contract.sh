@@ -52,7 +52,7 @@ grep -q 'AI_CHAT_WEBGPU_NO_SHADER_F16_QUANT_MATVEC_V1' "$CMAKE" || fail "F32-dec
 grep -q 'AI_CHAT_NO_SHADER_F16_COMMON_V1' "$CMAKE" || fail "FP16 storage decoding must have a baseline-F32 shader path"
 grep -q 'AI_CHAT_NO_SHADER_F16_Q8_V1' "$CMAKE" || fail "Q8 activation quantizer must support packed scale storage without ShaderF16"
 grep -q 'AI_CHAT_NO_SHADER_F16_Q8_READ_V1' "$CMAKE" || fail "Quantized mat-vec must decode packed Q8 scales with F32"
-grep -q 'AI_CHAT_NO_SHADER_F16_QUANT_MATVEC_OP_V1' "$CMAKE" || fail "No-ShaderF16 quantized MUL_MAT dispatch is missing"
+grep -q 'AI_CHAT_NO_SHADER_F16_QUANT_MATVEC_OP_V2' "$CMAKE" || fail "No-ShaderF16 quantized MUL_MAT dispatch is missing"
 grep -q 'f32_quantized_matvec' "$CMAKE" || fail "Quantized no-ShaderF16 dispatch must be limited to the validated mat-vec shape"
 grep -q 'pack2x16float(vec2<f32>(d, s))' "$CMAKE" || fail "Q8_1 scale/sum must be packed without WGSL f16 arithmetic"
 grep -q 'unpack2x16float(src1q\[block\].ds)' "$CMAKE" || fail "Q8_1 packed scales must be decoded with baseline F32 operations"
