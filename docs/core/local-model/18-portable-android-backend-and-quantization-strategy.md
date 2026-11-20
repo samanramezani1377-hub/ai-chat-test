@@ -149,3 +149,28 @@ generation is faster. Acceptance still requires a physical-device Q6_K
 decode comparison, actual GPU-residency measurement, and separate prefill
 and decode benchmarks.
 
+
+## No-ShaderF16 quantized prefill GEMM (2026-11-20)
+
+The no-ShaderF16 path now extends beyond decode-time MatVec. The pinned
+upstream register-tile GEMM shader is compiled with NO_SHADER_F16 for adapters
+without ShaderF16. The F32 alias is applied before common_decls.tmpl and
+mul_mat_decls.tmpl are included, so common helper declarations and quantized
+dequantization temporaries do not retain an F16 type dependency.
+
+Quantized weights remain in their packed GGUF representation. Scale values
+stored as FP16 are decoded into F32; temporary workgroup values use F32.
+The shader library disables the F16 subgroup-matrix variant when the adapter
+does not support ShaderF16. F32-input/F32-output plain GEMM uses the same
+portable register-tile path.
+
+This covers only quantized types and shapes supported by the pinned upstream
+register-tile shader and its dispatch table. It does not invent kernels for
+unimplemented quantization formats. F16 tensor operations remain on CPU.
+
+The change still requires a successful native Android build and physical
+device validation. Numerical parity against CPU must be checked across Q4,
+Q5, Q6_K, Q8 and IQ formats. Prompt-prefill and decode throughput, GPU memory
+residency, and fallback behavior must be measured independently. A successful
+source patch or a reported layer count is not sufficient evidence of GPU
+execution.
