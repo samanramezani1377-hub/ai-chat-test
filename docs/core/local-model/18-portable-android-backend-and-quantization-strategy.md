@@ -174,3 +174,26 @@ Q5, Q6_K, Q8 and IQ formats. Prompt-prefill and decode throughput, GPU memory
 residency, and fallback behavior must be measured independently. A successful
 source patch or a reported layer count is not sufficient evidence of GPU
 execution.
+
+
+## No-ShaderF16 quantized prompt-prefill GEMM
+
+The no-ShaderF16 path now includes a portable variant of the pinned upstream
+register-tile matrix multiplication shader, not just the small-batch decode
+MatVec kernel. It accepts F32 activations and F32 outputs with quantized
+weights supported by the upstream WebGPU dequantization templates.
+
+Quantized model weights remain packed in their original representation.
+Dequantization into F32 occurs in the shader's temporary workgroup tiles;
+the implementation does not expand the model file or permanently convert the
+weight tensors to F32. The F16 subgroup-matrix kernel is disabled for these
+adapters, and the regular register-tile kernel receives NO_SHADER_F16.
+Its temporary arithmetic and workgroup storage use F32, with packed IQ scales
+decoded using unpack2x16float().
+
+This extends GPU eligibility to larger prompt-prefill MatMul shapes. It is
+still limited to quantized types actually implemented by the pinned upstream
+shader templates and to F32 activation/output shapes. Unsupported quant types,
+F16-dependent operations, and other unsupported shapes remain eligible for
+the CPU fallback. CI compilation and physical-device numerical/performance
+validation are required before claiming this route works on every vendor.
