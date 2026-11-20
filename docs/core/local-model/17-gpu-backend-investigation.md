@@ -259,6 +259,28 @@ limits. Operations such as `MUL_MAT`, attention, RoPE, and quantized paths
 remain on CPU without `ShaderF16` until their exact shader variants have
 explicit no-F16 validation.
 
+### Quantized kernels when ShaderF16 is available
+
+The pinned upstream WebGPU backend includes quantized `MUL_MAT` support for
+`Q1_0`, `Q4_0`, `Q4_1`, `Q5_0`, `Q5_1`, `Q8_0`, `Q2_K`, `Q3_K`, `Q4_K`,
+`Q5_K`, `Q6_K`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ3_XXS`, `IQ3_S`, `IQ1_S`,
+`IQ1_M`, `IQ4_NL`, `IQ4_XS`, `MXFP4`, and `NVFP4`. This is the pinned backend's
+advertised type coverage, not a promise that every tensor shape or every GPU
+supports every kernel; `supports_op`, shader selection, subgroup features,
+and device limits still gate each graph node. Without WebGPU `ShaderF16`,
+quantized operations remain on CPU. CPU fallback preserves model compatibility
+rather than pretending an unsupported quantized shader is accelerated.
+
+### Dawn capability diagnostics
+
+The native backend emits `AI_CHAT_WEBGPU_CAPABILITIES` from the actual Dawn
+adapter, separately reporting `ShaderF16`, subgroups, packed dot product,
+subgroup-matrix support, and relevant storage/compute limits. The earlier
+`UNIVERSAL_GPU_ADAPTER` record reports EGL/GLES capabilities only. These two
+reports are intentionally distinct: an OpenGL ES FP16 extension hint is not
+proof that Dawn exposes WebGPU `ShaderF16`.
+
+
 
 ### F32 softmax without ShaderF16
 
