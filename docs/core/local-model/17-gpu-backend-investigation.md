@@ -124,3 +124,24 @@ OpenGL ES Compatibility path depends on each device's graphics driver. The build
 and physical-device inference have not been run as part of this change. Q6_K
 operator coverage, adapter creation, tensor residency, and end-to-end generation
 must be validated before calling this production-ready.
+
+
+## Backend integration hardening
+
+The native residency gate and memory report must identify buffers owned by the
+GGML WebGPU backend specifically. A generic GPU/IGPU classification is insufficient
+because legacy OpenCL may also be registered in the process; another GPU backend must
+not accidentally satisfy WebGPU residency validation or be reported as the selected
+WebGPU device.
+
+The CMake source patch independently enforces both adapter settings:
+- `FeatureLevel::Compatibility`
+- `BackendType::OpenGLES`
+
+This avoids a partial-patch case where one setting is already present in the pinned
+source but the other is absent. Vulkan-specific Dawn toggles remain removed and
+`GGML_VULKAN=OFF` remains mandatory.
+
+The AndroidX WebGPU AAR is consumed as a native Dawn dependency through Prefab. The
+GGML WebGPU backend remains the actual inference backend; Kotlin/Java is not placed
+in the token-generation or tensor-compute hot path. No WebView or UI surface is added.
