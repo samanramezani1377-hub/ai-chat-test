@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.io.File
 import kotlin.math.roundToInt
 
-/** Direct llama.cpp Android runtime. Prefer OpenCL; allow CPU execution for unsupported ops/devices. */
+/** Direct llama.cpp Android runtime. Prefer WebGPU; allow CPU execution for unsupported ops/devices. */
 class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 8192,
     gpuLayers: Int = GPU_LAYERS_MAX,
@@ -35,7 +35,7 @@ class LlamaCppAndroidRuntimeAdapter(
     @Volatile private var gpuLayersMode = gpuLayers
     @Volatile private var selectedGpuLayers = 0
     @Volatile private var selectedCpuThreads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-    @Volatile private var selectedBackend = "OpenCL"
+    @Volatile private var selectedBackend = "WebGPU"
     @Volatile private var loadedContextLength: Int? = null
     @Volatile private var loadedArchitecture: String = "unknown"
     @Volatile private var loadedModelPath: String? = null
@@ -50,7 +50,7 @@ class LlamaCppAndroidRuntimeAdapter(
         require(value in 0..GPU_LAYERS_MAX) { "GPU layer preference must be between 0 and $GPU_LAYERS_MAX" }
         gpuLayersMode = value
         RuntimeDiagnosticsStore.recordNativeEvent("OPENCL_GPU_PREFERRED_CPU_FALLBACK_ALLOWED")
-        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "OPENCL GPU preferred; CPU fallback allowed (applies on next activation)")
+        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "WebGPU OpenGL ES Compatibility preferred; CPU fallback allowed (applies on next activation)")
     }
 
     fun gpuLayers(): Int = gpuLayersMode
@@ -81,7 +81,7 @@ class LlamaCppAndroidRuntimeAdapter(
         NativeLlamaCpp.unload()
         stopRequested.set(false)
         selectedGpuLayers = 0
-        selectedBackend = "OpenCL"
+        selectedBackend = "WebGPU"
         loadedContextLength = null
         loadedArchitecture = "unknown"
         loadedModelPath = null
@@ -113,8 +113,8 @@ class LlamaCppAndroidRuntimeAdapter(
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_RETURNED code=$result gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers")
             if (result != 0) return ModelResult.Failure(RuntimeErrorMapper.nativeLoadFailure(result))
             val info = NativeLlamaCpp.runtimeInfo()
-            selectedBackend = info.substringBefore(';').ifBlank { "OpenCL" }
-            selectedGpuLayers = if (selectedBackend.contains("OpenCL", ignoreCase = true)) requestedGpuLayers else 0
+            selectedBackend = info.substringBefore(';').ifBlank { "WebGPU" }
+            selectedGpuLayers = if (selectedBackend.contains("WebGPU", ignoreCase = true)) requestedGpuLayers else 0
             selectedCpuThreads = info.substringAfter("generationThreads=", "").substringBefore(';').toIntOrNull()
                 ?: Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
             val batchThreads = info.substringAfter("batchThreads=", "").substringBefore(';').toIntOrNull()
@@ -133,7 +133,7 @@ class LlamaCppAndroidRuntimeAdapter(
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_EXCEPTION ${t::class.java.name}: ${t.message}")
             NativeLlamaCpp.unload()
             selectedGpuLayers = 0
-            selectedBackend = "OpenCL"
+            selectedBackend = "WebGPU"
             loadedContextLength = null
             loadedArchitecture = "unknown"
             loadedModelPath = null
@@ -153,7 +153,7 @@ class LlamaCppAndroidRuntimeAdapter(
         NativeLlamaCpp.unload()
         stopRequested.set(false)
         selectedGpuLayers = 0
-        selectedBackend = "OpenCL"
+        selectedBackend = "WebGPU"
         loadedContextLength = null
         loadedArchitecture = "unknown"
         loadedModelPath = null

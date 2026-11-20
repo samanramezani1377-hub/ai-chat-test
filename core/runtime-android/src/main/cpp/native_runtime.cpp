@@ -173,7 +173,7 @@ static bool validate_gpu_model_residency() {
             other_bytes += bytes; ++other_tensors;
         }
     }
-    append_native_trace((std::string("OPENCL_MODEL_RESIDENCY gpuBytes=") +
+    append_native_trace((std::string("WEBGPU_MODEL_RESIDENCY gpuBytes=") +
         std::to_string(gpu_bytes) + " gpuTensors=" + std::to_string(gpu_tensors) +
         " cpuBytes=" + std::to_string(cpu_bytes) + " cpuTensors=" +
         std::to_string(cpu_tensors) + " otherBytes=" + std::to_string(other_bytes) +
@@ -183,7 +183,7 @@ static bool validate_gpu_model_residency() {
     // buffers. If not, the caller releases this partial runtime and retries the same
     // model on CPU; this is a fallback policy, not a GPU-only activation requirement.
     const bool has_gpu_weights = gpu_bytes > 0;
-    append_native_trace((std::string("OPENCL_MODEL_RESIDENCY_POLICY mode=") +
+    append_native_trace((std::string("WEBGPU_MODEL_RESIDENCY_POLICY mode=") +
         (has_gpu_weights ? "OPENCL_GPU_RESIDENT" : "OPENCL_REJECTED_NO_GPU_WEIGHTS") +
         " wholeModelCpuFallback=enabled").c_str());
     return has_gpu_weights;
@@ -1107,7 +1107,7 @@ static void append_weight_residency_trace() {
     std::replace(gpu_name_text.begin(), gpu_name_text.end(), ' ', '_');
     std::replace(gpu_description_text.begin(), gpu_description_text.end(), ' ', '_');
 
-    append_native_trace((std::string("NATIVE_OPENCL_DEVICE") +
+    append_native_trace((std::string("NATIVE_GPU_DEVICE") +
         " name=" + gpu_name_text +
         " description=" + gpu_description_text +
         " memoryFreeMiB=" + std::to_string((double) free_bytes / (1024.0 * 1024.0)) +
@@ -1212,12 +1212,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
                 const int trained = llama_model_n_ctx_train(g_model);
                 const int effective = std::max(1, std::min(requested, trained));
                 g_context_length = (uint32_t)effective;
-                checkpoint((std::string("OPENCL_CONTEXT_INIT_STARTED effective_ctx=") +
+                checkpoint((std::string("WEBGPU_CONTEXT_INIT_STARTED effective_ctx=") +
                     std::to_string(effective)).c_str());
                 runtime_ready = init_generation_context();
                 checkpoint(runtime_ready ? "WEBGPU_CONTEXT_INIT_RETURNED_SUCCESS" : "WEBGPU_CONTEXT_INIT_RETURNED_FAILED");
                 if (runtime_ready) {
                     g_gpu = true;
+                    gpu_failure_reason = "none";
                     checkpoint((std::string("MODEL_READY execution=WEBGPU_OPENGL_ES_COMPATIBILITY ctx=") +
                         std::to_string(effective)).c_str());
                 } else {
@@ -1274,6 +1275,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     } else {
         append_native_trace("CPU_FALLBACK_NOT_NEEDED");
     }
+    append_native_trace((std::string("NATIVE_EXECUTION_PROFILE mode=WEBGPU_OPENGL_ES_COMPATIBILITY gpuBackendRegistered=") +
+        (ggml_backend_reg_by_name(GGML_WEBGPU_NAME) || ggml_backend_reg_by_name("WEBGPU") ? "1" : "0") +
+        " webgpuDeviceAvailable=" + (webgpu_device ? "1" : "0") +
+        " selectedBackend=" + (g_gpu ? "WEBGPU" : "CPU") +
+        " fallbackReason=" + gpu_failure_reason +
+        " cpuFallbackAllowed=1").c_str());
     append_native_trace((std::string("TARGET_RUNTIME_READY_BEFORE_SPECULATIVE execution=") + (g_gpu ? "WEBGPU_GPU" : "CPU_FALLBACK")).c_str());
     if (g_spec_requested) {
         append_native_trace("SPECULATIVE_ATTACH_AFTER_TARGET_READY");

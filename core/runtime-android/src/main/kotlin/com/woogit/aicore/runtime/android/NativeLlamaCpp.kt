@@ -26,14 +26,14 @@ internal object NativeLlamaCpp {
         Log.i(TAG, "ACTIVATION_NATIVE_LIBRARY_LOAD_RETURNED")
     }
 
-    /** Prefer OpenCL where supported; native llama.cpp may place unsupported work on CPU. */
+    /** Prefer WebGPU OpenGL ES Compatibility where supported; native llama.cpp may place unsupported work on CPU. */
     private fun ensureNativeInitialized() {
         synchronized(this) {
-            Log.i(TAG, "ACTIVATION_NATIVE_INIT_REQUESTED backend=OpenCL previously_initialized=$nativeInitialized")
+            Log.i(TAG, "ACTIVATION_NATIVE_INIT_REQUESTED backend=WebGPU-OpenGLES previously_initialized=$nativeInitialized")
             nativeInit(true)
             nativeInstallFatalHandlers()
             nativeInitialized = true
-            Log.i(TAG, "ACTIVATION_NATIVE_INIT_RETURNED backend=OpenCL")
+            Log.i(TAG, "ACTIVATION_NATIVE_INIT_RETURNED backend=WebGPU-OpenGLES")
         }
     }
 
@@ -106,7 +106,7 @@ internal object NativeLlamaCpp {
                 appendLine("file_size_mib=${if (file.isFile) file.length() / 1048576.0 else -1.0}")
                 appendLine("requested_context=$contextLength")
                 appendLine("gpu_layers=$gpuLayers")
-                appendLine("backend_mode=OpenCL_GPU_PREFERRED_CPU_FALLBACK_ALLOWED")
+                appendLine("backend_mode=WEBGPU_OPENGL_ES_COMPATIBILITY_CPU_FALLBACK_ALLOWED")
                 appendLine("device_mem_total_bytes=${memoryInfo.totalMem}")
                 appendLine("device_mem_available_bytes=${memoryInfo.availMem}")
                 appendLine("device_mem_available_mib=${memoryInfo.availMem / 1048576.0}")
