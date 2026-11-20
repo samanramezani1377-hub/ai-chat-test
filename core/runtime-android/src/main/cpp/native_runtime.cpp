@@ -55,6 +55,8 @@ static bool g_backend_initialized = false;
 static bool g_gpu_backend_loaded = false;
 static bool g_webgpu_backend_loaded = false;
 static uint32_t g_context_length = 0;
+static bool g_universal_gles_version_known = false;
+static bool g_universal_gles_compute_supported = false;
 
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
 static void append_native_trace(const char *text);
@@ -946,6 +948,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         // GGML remains responsible for actual GPU execution and kernel support.
         const auto universal_gpu_caps = ai_chat::gpu::probe_universal_gpu_adapter();
         append_native_trace(universal_gpu_caps.diagnostic_line().c_str());
+        g_universal_gles_version_known =
+            universal_gpu_caps.egl_context_created && universal_gpu_caps.gles_major > 0;
+        g_universal_gles_compute_supported = universal_gpu_caps.gles_compute_supported;
         append_native_trace((std::string("UNIVERSAL_GPU_ADAPTER_STATUS compute=") +
             (universal_gpu_caps.gles_compute_supported ? "supported" : "unavailable") +
             " eglContext=" + (universal_gpu_caps.egl_context_created ? "created" : "not_created") +
@@ -1206,10 +1211,13 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     // happens only after the target runtime is fully ready.
     append_native_trace("SPECULATIVE_AUTO_DETECTION_DISABLED_DURING_TARGET_LOAD");
     ggml_backend_dev_t webgpu_device = find_webgpu_gpu_device();
-    const bool gpu_available = g_webgpu_backend_loaded && webgpu_device != nullptr && gpu_layers > 0;
+    const bool universal_gles_rejects_compute = g_universal_gles_version_known && !g_universal_gles_compute_supported;
+    const bool gpu_available = g_webgpu_backend_loaded && webgpu_device != nullptr && gpu_layers > 0 && !universal_gles_rejects_compute;
     std::string gpu_failure_reason = "gpu_not_requested_or_unavailable";
     if (gpu_layers <= 0) {
         gpu_failure_reason = "gpu_offload_disabled";
+    } else if (universal_gles_rejects_compute) {
+        gpu_failure_reason = "universal_gles_compute_not_supported";
     } else if (!ggml_backend_reg_by_name(GGML_WEBGPU_NAME) &&
                !ggml_backend_reg_by_name("WEBGPU")) {
         gpu_failure_reason = "webgpu_backend_not_registered";
@@ -1221,6 +1229,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     append_native_trace((std::string("NATIVE_EXECUTION_POLICY mode=WEBGPU_OPENGL_ES_COMPATIBILITY gpuRequested=") +
         (gpu_layers > 0 ? "1" : "0") +
         " webgpuAvailable=" + (gpu_available ? "1" : "0") +
+        " glesComputeAvailable=" + (g_universal_gles_compute_supported ? "1" : "0") +
+        " glesCapabilityKnown=" + (g_universal_gles_version_known ? "1" : "0") +
         " openclFallback=disabled wholeModelCpuFallback=enabled unsupportedOpPolicy=ggml_scheduler").c_str());
 
     const int requested = ctx_len > 0 ? ctx_len : 4096;
