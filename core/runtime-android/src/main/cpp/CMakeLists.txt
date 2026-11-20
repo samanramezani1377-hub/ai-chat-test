@@ -199,7 +199,7 @@ endif()
 # example softmax and matrix-vector paths). On no-ShaderF16 adapters, do not
 # merely allow every F32 tensor: admit only operations whose selected upstream
 # WGSL path is verified F32-only. This whitelist can expand only with shader tests.
-string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_GENERIC_FP32_OP_WHITELIST_V1" AI_CHAT_WEBGPU_FP32_WHITELIST_PATCHED)
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2" AI_CHAT_WEBGPU_FP32_WHITELIST_PATCHED)
 if (AI_CHAT_WEBGPU_FP32_WHITELIST_PATCHED EQUAL -1)
     string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "if (uses_f16 || uses_quantized) return false;\n    }" AI_CHAT_WEBGPU_FP32_WHITELIST_ANCHOR)
     if (AI_CHAT_WEBGPU_FP32_WHITELIST_ANCHOR EQUAL -1)
@@ -207,10 +207,10 @@ if (AI_CHAT_WEBGPU_FP32_WHITELIST_PATCHED EQUAL -1)
     endif()
     string(REPLACE
         "if (uses_f16 || uses_quantized) return false;\n    }"
-        "if (uses_f16 || uses_quantized) return false;\n        const bool f32_safe_op =\n            op->op == GGML_OP_SCALE || op->op == GGML_OP_UNARY ||\n            op->op == GGML_OP_SUM || op->op == GGML_OP_SUM_ROWS ||\n            op->op == GGML_OP_CUMSUM || op->op == GGML_OP_ARGMAX ||\n            op->op == GGML_OP_ARGSORT || op->op == GGML_OP_TOP_K ||\n            op->op == GGML_OP_SOFT_MAX || op->op == GGML_OP_DIAG || op->op == GGML_OP_TRI ||\n            op->op == GGML_OP_SOLVE_TRI;\n        if (!f32_safe_op) return false;\n    }\n    // AI_CHAT_GENERIC_FP32_OP_WHITELIST_V1"
+        "if (uses_f16 || uses_quantized) return false;\n        const bool f32_i32_safe_op =\n            op->op == GGML_OP_ADD_ID || op->op == GGML_OP_CONCAT || op->op == GGML_OP_SET ||\n            op->op == GGML_OP_RMS_NORM || op->op == GGML_OP_NORM || op->op == GGML_OP_L2_NORM ||\n            op->op == GGML_OP_SCALE || op->op == GGML_OP_UNARY || op->op == GGML_OP_CLAMP ||\n            op->op == GGML_OP_FILL || op->op == GGML_OP_LOG || op->op == GGML_OP_SQR ||\n            op->op == GGML_OP_SQRT || op->op == GGML_OP_SIN || op->op == GGML_OP_COS ||\n            op->op == GGML_OP_SUM || op->op == GGML_OP_SUM_ROWS || op->op == GGML_OP_CUMSUM ||\n            op->op == GGML_OP_ARGMAX || op->op == GGML_OP_ARGSORT || op->op == GGML_OP_TOP_K ||\n            op->op == GGML_OP_SOFT_MAX || op->op == GGML_OP_DIAG || op->op == GGML_OP_TRI ||\n            op->op == GGML_OP_SOLVE_TRI || op->op == GGML_OP_PAD || op->op == GGML_OP_UPSCALE ||\n            op->op == GGML_OP_SSM_CONV || op->op == GGML_OP_SSM_SCAN || op->op == GGML_OP_GATED_DELTA_NET;\n        if (!f32_i32_safe_op) return false;\n    }\n    // AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2"
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
 endif()
-string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_GENERIC_FP32_OP_WHITELIST_V1" AI_CHAT_WEBGPU_FP32_WHITELIST_VERIFY)
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2" AI_CHAT_WEBGPU_FP32_WHITELIST_VERIFY)
 if (AI_CHAT_WEBGPU_FP32_WHITELIST_VERIFY EQUAL -1)
     message(FATAL_ERROR "Could not apply the conservative F32-only operation whitelist")
 endif()
