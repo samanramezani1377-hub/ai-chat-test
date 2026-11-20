@@ -18,6 +18,8 @@ fail() {
 # Keep only its exact Dawn source SHA metadata and build Dawn natively for GGML.
 grep -q 'AI_CHAT_DAWN_METADATA_FILE' "$CMAKE" || fail "CMake must require the pinned Dawn metadata"
 grep -q 'DAWN_FETCH_DEPENDENCIES ON' "$FIND_DAWN" || fail "FindDawn must fetch Dawn's pinned dependencies"
+grep -q 'GIT_SUBMODULES ""' "$FIND_DAWN" || fail "Dawn FetchContent must not clone optional Git submodules"
+grep -q 'GIT_SUBMODULES_RECURSE FALSE' "$FIND_DAWN" || fail "Dawn FetchContent must not recursively clone optional submodules"
 grep -q 'dawn_source_commit_sha' "$FIND_DAWN" || fail "Dawn must be built from the AAR's recorded source SHA"
 grep -q 'DAWN_ENABLE_OPENGLES ON' "$FIND_DAWN" || fail "Native Dawn must enable OpenGL ES"
 grep -q 'DAWN_ENABLE_VULKAN OFF' "$FIND_DAWN" || fail "Native Dawn must keep Vulkan disabled"
