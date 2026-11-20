@@ -311,19 +311,44 @@ jobs:
           --parallel
 
       - name: Verify conservative WebGPU FP32 fallback patch
+        shell: bash
         run: |
           set -euo pipefail
-          source_file="$(find core/runtime-android -path '*/.cxx/*' -path '*/llama_cpp-src/ggml/src/ggml-webgpu/ggml-webgpu.cpp' -print -quit)"
-          test -n "$source_file"
-          grep -q 'AI_CHAT_GENERIC_FP32_FALLBACK_V1' "$source_file"
-          grep -q 'supports_shader_f16' "$source_file"
-          grep -q 'ggml_is_quantized' "$source_file"
-          grep -q 'AI_CHAT_GENERIC_FP32_OP_WHITELIST_V1' "$source_file"
-          grep -q 'GGML_OP_SUM_ROWS' "$source_file"
+          echo "Searching the configured GGML source tree for the patched WebGPU backend..."
+          mapfile -t webgpu_sources < <(find core/runtime-android -type f -name 'ggml-webgpu.cpp' -path '*/ggml/src/ggml-webgpu/*' -print)
+          printf 'Found %s candidate WebGPU source file(s).\n' "${#webgpu_sources[@]}"
+          if [ "${#webgpu_sources[@]}" -ne 1 ]; then
+            find core/runtime-android -type f \( -name 'ggml-webgpu.cpp' -o -name 'soft_max.wgsl' \) -print
+            echo "::error::Expected exactly one configured GGML WebGPU source file."
+            exit 1
+          fi
+          source_file="${webgpu_sources[0]}"
+          echo "Checking patched source: $source_file"
+          for marker in \
+            AI_CHAT_GENERIC_FP32_FALLBACK_V1 \
+            supports_shader_f16 \
+            ggml_is_quantized \
+            AI_CHAT_GENERIC_FP32_OP_WHITELIST_V1 \
+            GGML_OP_SUM_ROWS; do
+            if ! grep -q "$marker" "$source_file"; then
+              echo "::error::Missing expected WebGPU source marker: $marker"
+              grep -n -E 'AI_CHAT_GENERIC_FP32|supports_shader_f16|ggml_is_quantized|GGML_OP_SUM_ROWS' "$source_file" || true
+              exit 1
+            fi
+          done
           softmax_file="$(dirname "$source_file")/wgsl-shaders/soft_max.wgsl"
-          test -f "$softmax_file"
-          grep -q 'AI_CHAT_SOFTMAX_FP32_NO_F16_V1' "$softmax_file"
-          grep -q '#ifdef MASK_F16' "$softmax_file"
+          if [ ! -f "$softmax_file" ]; then
+            echo "::error::Expected patched softmax shader not found: $softmax_file"
+            find "$(dirname "$source_file")" -maxdepth 3 -name 'soft_max.wgsl' -print
+            exit 1
+          fi
+          for marker in AI_CHAT_SOFTMAX_FP32_NO_F16_V1 '#ifdef MASK_F16'; do
+            if ! grep -Fq "$marker" "$softmax_file"; then
+              echo "::error::Missing expected softmax shader marker: $marker"
+              grep -n -E 'enable f16|MASK_F16|AI_CHAT_SOFTMAX' "$softmax_file" || true
+              exit 1
+            fi
+          done
           echo "Verified: ShaderF16 is optional and unsupported F16/quantized operations are conservatively left for GGML CPU scheduling."
 
       - name: Verify sherpa ONNX Runtime native linkage
