@@ -331,6 +331,7 @@ jobs:
             AI_CHAT_WEBGPU_CAPABILITIES \
             supports_shader_f16 \
             ggml_is_quantized \
+            GGML_MAX_SRC \
             AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2 \
             GGML_OP_SUM_ROWS; do
             if ! grep -q "$marker" "$source_file"; then
