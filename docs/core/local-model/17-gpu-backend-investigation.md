@@ -145,3 +145,59 @@ source but the other is absent. Vulkan-specific Dawn toggles remain removed and
 The AndroidX WebGPU AAR is consumed as a native Dawn dependency through Prefab. The
 GGML WebGPU backend remains the actual inference backend; Kotlin/Java is not placed
 in the token-generation or tensor-compute hot path. No WebView or UI surface is added.
+
+## Universal native GPU adapter foundation (2026-11-20)
+
+This section supersedes earlier statements in this investigation that described
+Vulkan as the preferred next implementation. Vulkan remains explicitly disabled
+and is not part of the selected architecture.
+
+### Runtime-only implementation
+
+The active native target now compiles
+`core/runtime-android/src/main/cpp/universal_gpu_adapter.cpp` and links the
+Android NDK `EGL` and `GLESv3` system libraries. During native backend
+initialization, `probe_universal_gpu_adapter()` creates a temporary 1x1 EGL
+pbuffer and an OpenGL ES 3 context, reads the real driver identity and compute
+limits, writes a structured `UNIVERSAL_GPU_ADAPTER` record to the existing
+native trace, and releases its EGL/GL objects.
+
+The probe records:
+- EGL display/context creation and EGL version/vendor;
+- GL vendor, renderer, version and shading-language version;
+- OpenGL ES compute availability (3.1+);
+- compute workgroup count/size, invocation and shared-memory limits;
+- shader-storage-block size;
+- a separately labelled FP16 shader-extension hint.
+
+The probe runs inside the native runtime. It adds no Activity, View, Compose
+screen, setting, control, or UI-to-runtime API change. The existing UI continues
+to call the same runtime adapter and JNI entry points.
+
+### Execution boundary and current limitation
+
+This is the vendor-neutral discovery/capability layer, not a new independent
+GGML compute backend. Actual inference remains on the existing GGML WebGPU
+backend through Dawn's OpenGL ES implementation. Dawn/GGML remains responsible
+for adapter/device creation, kernel compilation, operation support and tensor
+residency. OpenCL remains a separately registered legacy/diagnostic backend;
+it is not silently selected as a substitute for WebGPU. CPU fallback remains
+the correctness recovery path.
+
+The GLES FP16 extension hint is not equivalent to WebGPU's
+`ShaderF16` feature and must never be used to bypass GGML's current feature
+requirements. In particular, this change does not claim that a GPU without
+WebGPU ShaderF16 can run the existing GGML shader set. A generic FP32 WGSL
+kernel family and per-operation capability dispatch are still required before
+that device class can be admitted for inference.
+
+### Validation status
+
+CI now checks that the native adapter source is compiled and linked against
+EGL/GLESv3, that the runtime calls the probe, and that the expected capability
+fields are present. The Android native build and unit tests must pass before
+merging. Physical-device validation is still required to verify EGL pbuffer
+creation on different Android vendor drivers and to compare the adapter report
+with Dawn's actual WebGPU adapter/device report.
+
+No UI source file is part of this change. No Vulkan dependency is introduced.
