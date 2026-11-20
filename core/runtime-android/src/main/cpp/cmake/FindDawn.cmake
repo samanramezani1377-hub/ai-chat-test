@@ -58,6 +58,13 @@ FetchContent_Declare(ai_chat_dawn
     GIT_REPOSITORY https://dawn.googlesource.com/dawn.git
     GIT_TAG "${AI_CHAT_DAWN_SOURCE_COMMIT}"
     GIT_SHALLOW FALSE
+    # Dawn's repository contains optional Git submodules for test suites,
+    # alternate backends and tooling. They are not part of this Android
+    # OpenGL ES build; recursively cloning them pulls inaccessible/private
+    # Chromium test repositories and wastes most of the CI job before compile.
+    # DAWN_FETCH_DEPENDENCIES below still fetches Dawn's declared build deps.
+    GIT_SUBMODULES ""
+    GIT_SUBMODULES_RECURSE FALSE
 )
 FetchContent_MakeAvailable(ai_chat_dawn)
 
