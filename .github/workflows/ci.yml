@@ -330,11 +330,35 @@ jobs:
             AI_CHAT_GENERIC_FP32_FALLBACK_V1 \
             supports_shader_f16 \
             ggml_is_quantized \
-            AI_CHAT_GENERIC_FP32_OP_WHITELIST_V1 \
+            AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2 \
             GGML_OP_SUM_ROWS; do
             if ! grep -q "$marker" "$source_file"; then
               echo "::error::Missing expected WebGPU source marker: $marker"
               grep -n -E 'AI_CHAT_GENERIC_FP32|supports_shader_f16|ggml_is_quantized|GGML_OP_SUM_ROWS' "$source_file" || true
+              exit 1
+            fi
+          done
+          for marker in \
+            GGML_OP_ADD_ID \
+            GGML_OP_CONCAT \
+            GGML_OP_SET \
+            GGML_OP_RMS_NORM \
+            GGML_OP_NORM \
+            GGML_OP_L2_NORM \
+            GGML_OP_CLAMP \
+            GGML_OP_FILL \
+            GGML_OP_LOG \
+            GGML_OP_SQR \
+            GGML_OP_SQRT \
+            GGML_OP_SIN \
+            GGML_OP_COS \
+            GGML_OP_PAD \
+            GGML_OP_UPSCALE \
+            GGML_OP_SSM_CONV \
+            GGML_OP_SSM_SCAN \
+            GGML_OP_GATED_DELTA_NET;
+            if ! grep -q "$marker" core/runtime-android/src/main/cpp/CMakeLists.txt; then
+              echo "::error::Missing audited no-ShaderF16 operation in CMake whitelist: $marker"
               exit 1
             fi
           done
