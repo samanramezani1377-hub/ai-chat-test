@@ -212,7 +212,7 @@ if (AI_CHAT_WEBGPU_FP32_PATCHED EQUAL -1)
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
     string(REPLACE
         "    ggml_tensor * src2 = op->src[2];"
-        "    ggml_tensor * src2 = op->src[2];\n\n    // AI_CHAT_GENERIC_FP32_FALLBACK_V1: conservative dispatch when ShaderF16 is absent.\n    if (!ctx->webgpu_global_ctx->capabilities.supports_shader_f16) {\n        bool uses_f16 = op->type == GGML_TYPE_F16;\n        bool uses_quantized = ggml_is_quantized(op->type);\n        // Inspect every possible source, not only src0-src2. Recurrent/attention\n        // operations may carry additional tensors in src3-src6.\n        for (int src_index = 0; src_index < GGML_MAX_SRC; ++src_index) {\n            const ggml_tensor * source = op->src[src_index];\n            if (source == nullptr) continue;\n            uses_f16 = uses_f16 || source->type == GGML_TYPE_F16;\n            uses_quantized = uses_quantized || ggml_is_quantized(source->type);\n        }\n        if (uses_f16 || uses_quantized) return false;\n    }"
+        "    ggml_tensor * src2 = op->src[2];\n\n    // AI_CHAT_GENERIC_FP32_FALLBACK_V1: conservative dispatch when ShaderF16 is absent.\n    if (!ctx->webgpu_global_ctx->capabilities.supports_shader_f16) {\n        // Decode-time quantized MatVec uses the F32 accumulator shader. Keep this\n        // predicate identical to the whitelist below so unsupported quantized GEMM\n        // shapes cannot be admitted accidentally.\n        const bool f32_quantized_matvec = op->op == GGML_OP_MUL_MAT &&\n            op->type == GGML_TYPE_F32 && op->ne[1] <= 4 &&\n            op->src[0] != nullptr && ggml_is_quantized(op->src[0]->type) &&\n            op->src[1] != nullptr && op->src[1]->type == GGML_TYPE_F32;\n        bool uses_f16 = op->type == GGML_TYPE_F16;\n        bool uses_quantized = ggml_is_quantized(op->type);\n        // Inspect every possible source, not only src0-src2. Recurrent/attention\n        // operations may carry additional tensors in src3-src6.\n        for (int src_index = 0; src_index < GGML_MAX_SRC; ++src_index) {\n            const ggml_tensor * source = op->src[src_index];\n            if (source == nullptr) continue;\n            uses_f16 = uses_f16 || source->type == GGML_TYPE_F16;\n            uses_quantized = uses_quantized || ggml_is_quantized(source->type);\n        }\n        if (uses_f16 || (uses_quantized && !f32_quantized_matvec)) return false;\n    }"
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
     string(REPLACE
         "if (adapter != nullptr && adapter.HasFeature(wgpu::FeatureName::ShaderF16)"
@@ -419,17 +419,13 @@ endif()
 # On no-ShaderF16 adapters, only the verified quantized F32 mat-vec shape is
 # admitted. Larger prompt-prefill GEMMs remain on CPU until a separate F32
 # tiled-matmul shader is validated; never route them through the f16 fast path.
-string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANT_MATVEC_OP_V1" AI_CHAT_WEBGPU_QUANT_MATVEC_OP_PATCHED)
+    string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANT_MATVEC_OP_V2" AI_CHAT_WEBGPU_QUANT_MATVEC_OP_PATCHED)
 if (AI_CHAT_WEBGPU_QUANT_MATVEC_OP_PATCHED EQUAL -1)
-    ai_chat_replace_once(AI_CHAT_WEBGPU_SOURCE_TEXT
-        "if (uses_f16 || uses_quantized) return false;\n    }"
-        "const bool f32_quantized_matvec = op->op == GGML_OP_MUL_MAT && op->type == GGML_TYPE_F32 && op->ne[1] <= 4 && op->src[0] != nullptr && ggml_is_quantized(op->src[0]->type) && op->src[1] != nullptr && op->src[1]->type == GGML_TYPE_F32;\n        if (uses_f16 || (uses_quantized && !f32_quantized_matvec)) return false;\n    }"
-        "no-ShaderF16 quantized mat-vec admission")
     ai_chat_replace_once(AI_CHAT_WEBGPU_SOURCE_TEXT
         "if (!f32_i32_safe_op) return false;"
         "if (!f32_i32_safe_op && !f32_quantized_matvec) return false;"
         "no-ShaderF16 quantized mat-vec whitelist")
-    string(APPEND AI_CHAT_WEBGPU_SOURCE_TEXT "\n// AI_CHAT_NO_SHADER_F16_QUANT_MATVEC_OP_V1\n")
+    string(APPEND AI_CHAT_WEBGPU_SOURCE_TEXT "\n// AI_CHAT_NO_SHADER_F16_QUANT_MATVEC_OP_V2\n")
 endif()
 
 file(WRITE "${AI_CHAT_WEBGPU_SOURCE}" "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
