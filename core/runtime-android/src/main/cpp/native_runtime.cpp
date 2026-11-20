@@ -66,6 +66,7 @@ static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxe
 static void append_native_trace(const char *text);
 static void checkpoint(const char *event);
 static bool init_generation_context(bool use_webgpu_backend);
+static ggml_backend_dev_t find_webgpu_gpu_device();
 static bool init_speculative_runtime();
 static int available_cpu_cores() {
     // Use every CPU core reported by Android's native runtime. This is the
