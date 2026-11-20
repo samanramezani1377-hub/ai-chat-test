@@ -274,7 +274,8 @@ object CrashLogStore {
         return buildString {
             appendLine("تشخیص فنی:")
             appendLine(signalMeaning)
-            appendLine("مرحله ثبت‌شده: ${if (phase == "UNKNOWN") "نامشخص" else phase}")
+            appendLine("نشانگر فاز speculative: ${if (phase == "UNKNOWN") "نامشخص" else phase}")
+            appendLine("آخرین رویداد Native: ${if (runtimePhase == "UNKNOWN") "نامشخص" else runtimePhase}")
             appendLine("آخرین checkpoint: ${checkpoint ?: "ثبت نشده"}")
             appendLine(clue)
             appendLine("محدودیت تشخیص: سیگنال و PC/LR به‌تنهایی علت کامل را مشخص نمی‌کنند. برای تعیین خط دقیق Native به tombstone/backtrace و Build ID همان APK نیاز است. این گزارش شواهد خام را نگه می‌دارد و از تبدیل حدس به علت قطعی خودداری می‌کند.")
