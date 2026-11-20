@@ -103,7 +103,14 @@ static bool init_generation_context(bool use_webgpu_backend) {
         " flashAttention=DISABLED reason=android_fused_flash_attention_stability").c_str());
     cp.type_k = GGML_TYPE_F16;
     cp.type_v = GGML_TYPE_F16;
-    cp.offload_kqv = true;
+    // Keep KV-cache and attention K/Q/V work on the CPU for WebGPU contexts.
+    // This avoids allocating a second large, device-owned cache during graph
+    // reservation while retaining GPU-resident model layers and GPU matmul.
+    // CPU contexts keep llama.cpp's normal KQV offload policy.
+    cp.offload_kqv = !use_webgpu_backend;
+    append_native_trace((std::string("NATIVE_KQV_OFFLOAD_POLICY backend=") +
+        (use_webgpu_backend ? "WEBGPU enabled=0 reason=portable_device_memory_reservation" :
+                              "CPU enabled=1 reason=upstream_default")).c_str());
     cp.n_seq_max = 1;
     const int runtime_threads = generation_threads();
     const int runtime_batch_threads = batch_threads();
@@ -1287,6 +1294,10 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jclass, jstring jpath, jint ctx_len, jint gpu_layers, jstring jdraftpath) {
+    // Model/context mutation must never overlap tokenization or generation.
+    // nativeStop intentionally remains lock-free so it can interrupt a decode.
+    std::lock_guard<std::mutex> runtime_lock(g_native_runtime_mutex);
+    checkpoint("NATIVE_LOAD_LOCK_ACQUIRED");
     checkpoint("NATIVE_LOAD_STARTED");
     append_native_trace((std::string("ACTIVATION_NATIVE_LOAD_STARTED ctx_len=") + std::to_string((int)ctx_len) + " gpu_layers=" + std::to_string((int)gpu_layers)).c_str());
     preserve_android_system_prefix_cache_for_active_model();
@@ -1446,9 +1457,17 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
 extern "C" JNIEXPORT void JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeStop(JNIEnv *, jclass) { g_stop.store(true); }
 extern "C" JNIEXPORT void JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeUnload(JNIEnv *, jclass) { g_stop.store(true); preserve_android_system_prefix_cache_for_active_model(); free_all(); }
+Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeUnload(JNIEnv *, jclass) {
+    g_stop.store(true, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> runtime_lock(g_native_runtime_mutex);
+    checkpoint("NATIVE_UNLOAD_LOCK_ACQUIRED");
+    preserve_android_system_prefix_cache_for_active_model();
+    free_all();
+    checkpoint("NATIVE_UNLOAD_COMPLETED");
+}
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeRuntimeInfo(JNIEnv *env, jclass) {
+    std::lock_guard<std::mutex> runtime_lock(g_native_runtime_mutex);
     const std::string value = std::string(g_gpu && g_webgpu_backend_loaded
         ? "WebGPU-OpenGLES-GPU"
         : (g_model && g_context ? "CPU-FALLBACK" : "GPU_UNAVAILABLE")) +
@@ -1460,6 +1479,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeRuntimeInfo(JNIEnv *
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeContextLength(JNIEnv *, jclass) {
+    std::lock_guard<std::mutex> runtime_lock(g_native_runtime_mutex);
     if (g_context) {
         return (jint) llama_n_ctx(g_context);
     }
