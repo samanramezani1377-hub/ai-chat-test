@@ -204,7 +204,7 @@ if (AI_CHAT_WEBGPU_FP32_PATCHED EQUAL -1)
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
     string(REPLACE
         "ctx->webgpu_global_ctx->vendor                    = info.vendor;"
-        "ctx->webgpu_global_ctx->vendor                    = info.vendor;\n    ctx->webgpu_global_ctx->capabilities.supports_shader_f16 =\n        ctx->webgpu_global_ctx->adapter.HasFeature(wgpu::FeatureName::ShaderF16);\n    if (!ctx->webgpu_global_ctx->capabilities.supports_shader_f16) {\n        GGML_LOG_WARN(\"AI_CHAT_WEBGPU_FP16_FAST_KERNELS_DISABLED reason=shader_f16_unavailable; quantized_f32_matvec_fallback=enabled; prompt_prefill_gemm_cpu_fallback=enabled\n\");\n    }"
+        "ctx->webgpu_global_ctx->vendor                    = info.vendor;\n    ctx->webgpu_global_ctx->capabilities.supports_shader_f16 =\n        ctx->webgpu_global_ctx->adapter.HasFeature(wgpu::FeatureName::ShaderF16);\n    if (!ctx->webgpu_global_ctx->capabilities.supports_shader_f16) {\n        GGML_LOG_WARN(\"AI_CHAT_WEBGPU_FP16_FAST_KERNELS_DISABLED reason=shader_f16_unavailable; quantized_f32_matvec_fallback=enabled; prompt_prefill_gemm_fallback=portable_f32_register_tile;quantized_prefill_gemm_fallback=portable_f32_register_tile\n\");\n    }"
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
     string(REPLACE
         "std::vector<wgpu::FeatureName> required_features       = { wgpu::FeatureName::ShaderF16 };"
