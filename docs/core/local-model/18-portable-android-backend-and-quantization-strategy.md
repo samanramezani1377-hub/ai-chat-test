@@ -110,3 +110,42 @@ A change is ready only when:
 - The upstream quantization list is not a complete support matrix for every GGML op.
 - GPU residency alone does not prove that the critical graph nodes ran on GPU or that end-to-end latency improved.
 - Moving sampling fully onto GPU, reducing per-token logits readback, and tuning command submission remain measurement-driven follow-up work.
+
+
+## No-ShaderF16 quantized decode path (2026-11-20)
+
+The Android CMake integration now provides a baseline-F32 variant of the pinned
+GGML WebGPU quantized MatVec path. FP16 values remain stored in their original
+compact 16-bit representation, but shaders read them through
+\`unpack2x16float()\` and perform scale handling in F32. Q8_1 activation
+scale/sum pairs preserve their four-byte layout through
+\`pack2x16float()\` / \`unpack2x16float()\`.
+
+On adapters without WebGPU ShaderF16, the backend may now admit quantized
+\`MUL_MAT\` only for the exact decode/MatVec shape:
+
+- output type: F32;
+- activation/right-hand input: F32;
+- weight/left-hand input: a quantized GGML type supported by the pinned
+  upstream MatVec shader;
+- output batch dimension: at most four.
+
+The existing upstream quantized dispatch covers the listed Q and IQ formats,
+including Q6_K, subject to its own type dispatch and adapter limits. The
+optional Q8 activation-quantization path additionally requires the
+\`packed_4x8_integer_dot_product\` WebGPU feature; without it, the direct
+quantized MatVec accumulator is selected.
+
+This does **not** yet accelerate larger prompt-prefill GEMMs without
+ShaderF16. Those shapes use the tiled matrix shader family, which still
+contains F16 workgroup storage and remains excluded by the conservative
+no-ShaderF16 operation gate. F16 tensor operations and other unsupported
+shapes continue to use CPU scheduling/fallback.
+
+The change removes a WebGPU ShaderF16 dependency from the quantized decode
+MatVec path; it does not prove that a particular Android driver compiles the
+WGSL, that its numerical output matches the CPU reference, or that end-to-end
+generation is faster. Acceptance still requires a physical-device Q6_K
+decode comparison, actual GPU-residency measurement, and separate prefill
+and decode benchmarks.
+
