@@ -268,3 +268,9 @@ context before destroying the temporary context. This prevents a probe invoked
 from a thread with an existing graphics context from silently unbinding the
 application's rendering context. CI checks the capture and restore code paths;
 physical-device testing is still needed for vendor EGL implementations.
+
+
+The EGL restoration also preserves the calling thread's previously bound EGL
+client API before attempting to restore its context. This matters when the
+application context was created under a different EGL client API from the
+temporary OpenGL ES probe.
