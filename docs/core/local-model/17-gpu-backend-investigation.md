@@ -246,12 +246,18 @@ fetched pinned source and that the Android APK build completes.
 A further safety constraint is applied because some upstream WGSL modules
 declare `enable f16` unconditionally even when the tensor metadata is F32.
 Therefore the no-ShaderF16 path does not treat all F32 operations as safe.
-It admits only the upstream paths audited as F32-only in this pinned revision:
-`SCALE`, `UNARY` (F32 variant), `SUM`, `SUM_ROWS`, `CUMSUM`, `ARGMAX`,
-`ARGSORT`, `TOP_K`, `SOFT_MAX`, `DIAG`, `TRI`, and `SOLVE_TRI`. Operations such as
-`MUL_MAT`, attention, RoPE, and quantized paths remain on CPU
-until their exact shader variants have explicit no-F16 validation. The
-whitelist is version-anchored and checked by CI.
+It admits only the upstream paths audited as F32/I32-safe in this pinned revision:
+`ADD_ID`, `CONCAT`, `SET`, `RMS_NORM`, `NORM`, `L2_NORM`, `SCALE`, `UNARY`
+(F32 variant), `CLAMP`, `FILL`, `LOG`, `SQR`, `SQRT`, `SIN`, `COS`, `SUM`,
+`SUM_ROWS`, `CUMSUM`, `ARGMAX`, `ARGSORT`, `TOP_K`, `SOFT_MAX` (F32 mask/no
+F16 mask), `DIAG`, `TRI`, `SOLVE_TRI`, `PAD`, `UPSCALE` (F32 variant),
+`SSM_CONV`, `SSM_SCAN`, and `GATED_DELTA_NET`. This expanded list is encoded
+as `AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2`; CI verifies every admitted op name
+in the version-anchored CMake patch. Each operation still has to pass the
+upstream `supports_op` checks for its exact tensor types, shape, and device
+limits. Operations such as `MUL_MAT`, attention, RoPE, and quantized paths
+remain on CPU without `ShaderF16` until their exact shader variants have
+explicit no-F16 validation.
 
 
 ### F32 softmax without ShaderF16
