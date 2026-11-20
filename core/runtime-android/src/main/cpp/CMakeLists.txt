@@ -237,39 +237,16 @@ if (AI_CHAT_WEBGPU_FP32_WHITELIST_PATCHED EQUAL -1)
     endif()
     string(REPLACE
         "if (uses_f16 || uses_quantized) return false;\n    }"
-        "const bool f32_quantized_matmul = op->op == GGML_OP_MUL_MAT && op->type == GGML_TYPE_F32 && op->src[0] != nullptr && ggml_is_quantized(op->src[0]->type) && op->src[1] != nullptr && op->src[1]->type == GGML_TYPE_F32;\n        const bool f32_plain_matmul = op->op == GGML_OP_MUL_MAT && op->type == GGML_TYPE_F32 && op->src[0] != nullptr && (op->src[0]->type == GGML_TYPE_F32 || op->src[0]->type == GGML_TYPE_BF16) && op->src[1] != nullptr && op->src[1]->type == GGML_TYPE_F32;\n        if (uses_f16 || (uses_quantized && !f32_quantized_matmul)) return false;\n        const bool f32_i32_safe_op =\n            // llama_model::select_buft() probes a plain F32 ADD to choose each layer buffer.\n            // Without this entry, no-ShaderF16 adapters reject the GPU buffer even for\n            // otherwise supported F32 tensors, forcing layer placement back to CPU.\n            op->op == GGML_OP_ADD || op->op == GGML_OP_ADD_ID || op->op == GGML_OP_CONCAT || op->op == GGML_OP_SET ||\n            op->op == GGML_OP_RMS_NORM || op->op == GGML_OP_NORM || op->op == GGML_OP_L2_NORM ||\n            op->op == GGML_OP_SCALE || op->op == GGML_OP_UNARY || op->op == GGML_OP_CLAMP ||\n            op->op == GGML_OP_FILL || op->op == GGML_OP_LOG || op->op == GGML_OP_SQR ||\n            op->op == GGML_OP_SQRT || op->op == GGML_OP_SIN || op->op == GGML_OP_COS ||\n            op->op == GGML_OP_SUM || op->op == GGML_OP_SUM_ROWS || op->op == GGML_OP_CUMSUM ||\n            op->op == GGML_OP_ARGMAX || op->op == GGML_OP_ARGSORT || op->op == GGML_OP_TOP_K ||\n            op->op == GGML_OP_SOFT_MAX || op->op == GGML_OP_DIAG || op->op == GGML_OP_TRI ||\n            op->op == GGML_OP_SOLVE_TRI || op->op == GGML_OP_PAD || op->op == GGML_OP_UPSCALE ||\n            op->op == GGML_OP_SSM_CONV || op->op == GGML_OP_SSM_SCAN || op->op == GGML_OP_GATED_DELTA_NET;\n        if (!f32_i32_safe_op && !f32_quantized_matmul && !f32_plain_matmul) return false;\n    }\n    // AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2\n    // AI_CHAT_NO_SHADER_F16_QUANT_MATMUL_OP_V4\n    // AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_OP_V1
+        "const bool f32_quantized_matmul = op->op == GGML_OP_MUL_MAT && op->type == GGML_TYPE_F32 && op->src[0] != nullptr && ggml_is_quantized(op->src[0]->type) && op->src[1] != nullptr && op->src[1]->type == GGML_TYPE_F32;\n        const bool f32_plain_matmul = op->op == GGML_OP_MUL_MAT && op->type == GGML_TYPE_F32 && op->src[0] != nullptr && (op->src[0]->type == GGML_TYPE_F32 || op->src[0]->type == GGML_TYPE_BF16) && op->src[1] != nullptr && op->src[1]->type == GGML_TYPE_F32;\n        if (uses_f16 || (uses_quantized && !f32_quantized_matmul)) return false;\n        const bool f32_i32_safe_op =\n            // llama_model::select_buft() probes a plain F32 ADD to choose each layer buffer.\n            // Without this entry, no-ShaderF16 adapters reject the GPU buffer even for\n            // otherwise supported F32 tensors, forcing layer placement back to CPU.\n            op->op == GGML_OP_ADD || op->op == GGML_OP_ADD_ID || op->op == GGML_OP_CONCAT || op->op == GGML_OP_SET ||\n            op->op == GGML_OP_RMS_NORM || op->op == GGML_OP_NORM || op->op == GGML_OP_L2_NORM ||\n            op->op == GGML_OP_SCALE || op->op == GGML_OP_UNARY || op->op == GGML_OP_CLAMP ||\n            op->op == GGML_OP_FILL || op->op == GGML_OP_LOG || op->op == GGML_OP_SQR ||\n            op->op == GGML_OP_SQRT || op->op == GGML_OP_SIN || op->op == GGML_OP_COS ||\n            op->op == GGML_OP_SUM || op->op == GGML_OP_SUM_ROWS || op->op == GGML_OP_CUMSUM ||\n            op->op == GGML_OP_ARGMAX || op->op == GGML_OP_ARGSORT || op->op == GGML_OP_TOP_K ||\n            op->op == GGML_OP_DIAG || op->op == GGML_OP_TRI ||\n            op->op == GGML_OP_SOLVE_TRI || op->op == GGML_OP_PAD || op->op == GGML_OP_UPSCALE ||\n            op->op == GGML_OP_SSM_CONV || op->op == GGML_OP_SSM_SCAN || op->op == GGML_OP_GATED_DELTA_NET;\n        if (!f32_i32_safe_op && !f32_quantized_matmul && !f32_plain_matmul) return false;\n    }\n    // AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2\n    // AI_CHAT_NO_SHADER_F16_QUANT_MATMUL_OP_V4\n    // AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_OP_V1
 endif()
 string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2" AI_CHAT_WEBGPU_FP32_WHITELIST_VERIFY)
 if (AI_CHAT_WEBGPU_FP32_WHITELIST_VERIFY EQUAL -1)
     message(FATAL_ERROR "Could not apply the conservative F32-only operation whitelist")
 endif()
 
-# The upstream softmax shader only needs ShaderF16 for an F16 mask. Make that
-# WGSL feature declaration conditional so F32/no-mask softmax can run on
-# adapters without ShaderF16; F16 masks remain rejected by supports_op.
-set(AI_CHAT_WEBGPU_SOFTMAX_SOURCE "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/wgsl-shaders/soft_max.wgsl")
-if (NOT EXISTS "${AI_CHAT_WEBGPU_SOFTMAX_SOURCE}")
-    message(FATAL_ERROR "Pinned GGML WebGPU softmax shader source is missing")
-endif()
-file(READ "${AI_CHAT_WEBGPU_SOFTMAX_SOURCE}" AI_CHAT_WEBGPU_SOFTMAX_TEXT)
-string(FIND "${AI_CHAT_WEBGPU_SOFTMAX_TEXT}" "AI_CHAT_SOFTMAX_FP32_NO_F16_V1" AI_CHAT_WEBGPU_SOFTMAX_PATCHED)
-if (AI_CHAT_WEBGPU_SOFTMAX_PATCHED EQUAL -1)
-    string(FIND "${AI_CHAT_WEBGPU_SOFTMAX_TEXT}" "enable f16;" AI_CHAT_WEBGPU_SOFTMAX_ENABLE_ANCHOR)
-    if (AI_CHAT_WEBGPU_SOFTMAX_ENABLE_ANCHOR EQUAL -1)
-        message(FATAL_ERROR "Could not locate the upstream softmax ShaderF16 declaration")
-    endif()
-    string(REPLACE
-        "enable f16;"
-        "#ifdef MASK_F16\nenable f16;\n#endif\n// AI_CHAT_SOFTMAX_FP32_NO_F16_V1"
-        AI_CHAT_WEBGPU_SOFTMAX_TEXT "${AI_CHAT_WEBGPU_SOFTMAX_TEXT}")
-    file(WRITE "${AI_CHAT_WEBGPU_SOFTMAX_SOURCE}" "${AI_CHAT_WEBGPU_SOFTMAX_TEXT}")
-endif()
-string(FIND "${AI_CHAT_WEBGPU_SOFTMAX_TEXT}" "AI_CHAT_SOFTMAX_FP32_NO_F16_V1" AI_CHAT_WEBGPU_SOFTMAX_VERIFY)
-if (AI_CHAT_WEBGPU_SOFTMAX_VERIFY EQUAL -1)
-    message(FATAL_ERROR "Could not apply the F32-only softmax WGSL patch")
-endif()
-
-
+# Keep SOFT_MAX on CPU for no-ShaderF16 adapters. The upstream shader's
+# unconditional enable-f16 declaration is not safely patched by this CMake
+# configuration; do not admit it in the F32/I32 whitelist.
 # AI_CHAT_WEBGPU_NO_SHADER_F16_QUANT_MATVEC_V1
 # The upstream quantized mat-vec shaders store FP16 scale pairs, but FP16
 # arithmetic is not required to consume them. Keep the exact 16-bit storage
