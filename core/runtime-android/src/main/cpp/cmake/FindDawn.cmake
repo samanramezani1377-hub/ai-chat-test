@@ -53,6 +53,10 @@ set(TINT_BUILD_SPV_READER OFF CACHE BOOL "" FORCE)
 set(TINT_BUILD_SPV_WRITER OFF CACHE BOOL "" FORCE)
 set(TINT_BUILD_GLSL_WRITER ON CACHE BOOL "" FORCE)
 set(TINT_BUILD_WGSL_READER ON CACHE BOOL "" FORCE)
+# Dawn OpenGL ES compute-pipeline validation uses Tint's null writer to
+# reflect workgroup metadata. This is a Tint compiler component, not Dawn's
+# optional Null GPU backend; keep the backend itself disabled.
+set(TINT_BUILD_NULL_WRITER ON CACHE BOOL "Build Tint null writer required by Dawn OpenGL ES" FORCE)
 
 FetchContent_Declare(ai_chat_dawn
     GIT_REPOSITORY https://dawn.googlesource.com/dawn.git
