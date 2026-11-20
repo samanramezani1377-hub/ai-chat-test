@@ -257,7 +257,7 @@ in the version-anchored CMake patch. Each operation still has to pass the
 upstream `supports_op` checks for its exact tensor types, shape, and device
 limits. Operations such as `MUL_MAT`, attention, RoPE, and quantized paths
 remain on CPU without `ShaderF16` until their exact shader variants have
-explicit no-F16 validation.
+explicit no-F16 validation. The no-ShaderF16 safety guard scans all `GGML_MAX_SRC` input slots, not just the first three, so recurrent operations with additional source tensors cannot accidentally pass an F16 or quantized input through the F32/I32 whitelist.
 
 ### Quantized kernels when ShaderF16 is available
 
