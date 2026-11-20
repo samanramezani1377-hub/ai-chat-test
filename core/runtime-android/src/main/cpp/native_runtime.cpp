@@ -83,20 +83,18 @@ static bool init_generation_context(bool use_webgpu_backend) {
     cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
     cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 128);
     cp.n_rs_seq = 0;
-    // Enable the backend's optimized flash-attention path only for a model
-    // loaded with WebGPU. Keep it disabled for CPU fallback on Android. The pinned llama.cpp revision can fail during
-    // repeated hybrid/recurrent prompt batches on the CPU FLASH_ATTN_EXT path
-    // (ggml_backend_sched_graph_compute_async -> GGML_STATUS_FAILED); this leaves
-    // generation with zero tokens after spending tens of seconds in prefill.
-    // Disabling the fused kernel changes the execution path, not model weights,
-    // quantization, sampling, or answer quality.
-    const bool use_webgpu_attention = use_webgpu_backend && g_webgpu_backend_loaded;
-    cp.flash_attn_type = use_webgpu_attention
-        ? LLAMA_FLASH_ATTN_TYPE_AUTO
-        : LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    // Keep fused FLASH_ATTN_EXT disabled on Android for both execution modes.
+    // The last device run aborted while reserving a graph containing FLASH_ATTN_EXT
+    // on the Dawn/OpenGLES path. The pinned llama.cpp revision has also shown
+    // scheduler failures with this fused path on Android CPU for hybrid/recurrent
+    // prompt batches. Let GGML schedule the regular attention operations instead;
+    // this does not change model weights, quantization, sampling, or answer quality.
+    // It only avoids selecting the fused kernel whose Android backend path is not
+    // reliable across the supported devices and model architectures.
+    cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
     append_native_trace((std::string("NATIVE_ATTENTION_POLICY backend=") +
-        (use_webgpu_attention ? "WEBGPU_AUTO" : "CPU_FLASH_ATTN_DISABLED") +
-        " reason=" + (use_webgpu_attention ? "webgpu_model_execution" : "android_cpu_fallback_stability")).c_str());
+        (use_webgpu_backend ? "WEBGPU" : "CPU") +
+        " flashAttention=DISABLED reason=android_fused_flash_attention_stability").c_str());
     cp.type_k = GGML_TYPE_F16;
     cp.type_v = GGML_TYPE_F16;
     cp.offload_kqv = true;
