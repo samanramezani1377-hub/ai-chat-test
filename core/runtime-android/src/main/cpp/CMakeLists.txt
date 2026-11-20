@@ -163,9 +163,19 @@ if (AI_CHAT_WEBGPU_CAPABILITIES_LOGGED EQUAL -1)
         message(FATAL_ERROR "Could not locate Dawn WebGPU capability diagnostic anchor")
     endif()
     string(REPLACE
-        "${AI_CHAT_WEBGPU_CAPABILITIES_ANCHOR}"
-        "${AI_CHAT_WEBGPU_CAPABILITIES_ANCHOR}\\n    // AI_CHAT_WEBGPU_CAPABILITIES: report actual Dawn features, not GLES hints.\\n    GGML_LOG_INFO(\\\"AI_CHAT_WEBGPU_CAPABILITIES vendor=%s shaderF16=%d subgroups=%d dotProduct=%d subgroupMatrix=%d maxStorageBufferBindingSize=%llu maxComputeInvocationsPerWorkgroup=%u maxComputeWorkgroupStorageSize=%u\\\\n\\\",\\n        ctx->webgpu_global_ctx->vendor.c_str(),\\n        static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_shader_f16),\\n        static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_subgroups),\\n        static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_dot_product),\\n        static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_subgroup_matrix),\\n        static_cast<unsigned long long>(ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize),\\n        ctx->webgpu_global_ctx->capabilities.limits.maxComputeInvocationsPerWorkgroup,\\n        ctx->webgpu_global_ctx->capabilities.limits.maxComputeWorkgroupStorageSize);"
-        AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
+        "\${AI_CHAT_WEBGPU_CAPABILITIES_ANCHOR}"
+        "\${AI_CHAT_WEBGPU_CAPABILITIES_ANCHOR}
+    // AI_CHAT_WEBGPU_CAPABILITIES: report actual Dawn features, not GLES hints.
+    GGML_LOG_INFO(\"AI_CHAT_WEBGPU_CAPABILITIES vendor=%s shaderF16=%d subgroups=%d dotProduct=%d subgroupMatrix=%d maxStorageBufferBindingSize=%llu maxComputeInvocationsPerWorkgroup=%u maxComputeWorkgroupStorageSize=%u\\n\",
+        ctx->webgpu_global_ctx->vendor.c_str(),
+        static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_shader_f16),
+        static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_subgroups),
+        static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_dot_product),
+        static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_subgroup_matrix),
+        static_cast<unsigned long long>(ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize),
+        ctx->webgpu_global_ctx->capabilities.limits.maxComputeInvocationsPerWorkgroup,
+        ctx->webgpu_global_ctx->capabilities.limits.maxComputeWorkgroupStorageSize);"
+        AI_CHAT_WEBGPU_SOURCE_TEXT "\${AI_CHAT_WEBGPU_SOURCE_TEXT}")
 endif()
 string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_WEBGPU_CAPABILITIES" AI_CHAT_WEBGPU_CAPABILITIES_VERIFY)
 if (AI_CHAT_WEBGPU_CAPABILITIES_VERIFY EQUAL -1)
