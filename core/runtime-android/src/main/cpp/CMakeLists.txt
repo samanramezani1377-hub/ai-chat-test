@@ -167,7 +167,7 @@ if (AI_CHAT_WEBGPU_CAPABILITIES_LOGGED EQUAL -1)
         "${AI_CHAT_WEBGPU_CAPABILITIES_ANCHOR}"
         "${AI_CHAT_WEBGPU_CAPABILITIES_ANCHOR}
     // AI_CHAT_WEBGPU_CAPABILITIES: report actual Dawn features, not GLES hints.
-    GGML_LOG_INFO(\"AI_CHAT_WEBGPU_CAPABILITIES vendor=%s shaderF16=%d subgroups=%d dotProduct=%d subgroupMatrix=%d maxStorageBufferBindingSize=%llu maxComputeInvocationsPerWorkgroup=%u maxComputeWorkgroupStorageSize=%u\\n\",
+    GGML_LOG_INFO(\"AI_CHAT_WEBGPU_CAPABILITIES vendor=%s shaderF16=%d subgroups=%d dotProduct=%d subgroupMatrix=%d maxStorageBufferBindingSize=%llu maxComputeInvocationsPerWorkgroup=%u maxComputeWorkgroupStorageSize=%u\n\",
         ctx->webgpu_global_ctx->vendor.c_str(),
         static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_shader_f16),
         static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_subgroups),
@@ -204,7 +204,7 @@ if (AI_CHAT_WEBGPU_FP32_PATCHED EQUAL -1)
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
     string(REPLACE
         "ctx->webgpu_global_ctx->vendor                    = info.vendor;"
-        "ctx->webgpu_global_ctx->vendor                    = info.vendor;\n    ctx->webgpu_global_ctx->capabilities.supports_shader_f16 =\n        ctx->webgpu_global_ctx->adapter.HasFeature(wgpu::FeatureName::ShaderF16);\n    if (!ctx->webgpu_global_ctx->capabilities.supports_shader_f16) {\n        GGML_LOG_WARN(\"AI_CHAT_WEBGPU_FP16_FAST_KERNELS_DISABLED reason=shader_f16_unavailable; quantized_f32_matvec_fallback=enabled; prompt_prefill_gemm_cpu_fallback=enabled\\n\");\n    }"
+        "ctx->webgpu_global_ctx->vendor                    = info.vendor;\n    ctx->webgpu_global_ctx->capabilities.supports_shader_f16 =\n        ctx->webgpu_global_ctx->adapter.HasFeature(wgpu::FeatureName::ShaderF16);\n    if (!ctx->webgpu_global_ctx->capabilities.supports_shader_f16) {\n        GGML_LOG_WARN(\"AI_CHAT_WEBGPU_FP16_FAST_KERNELS_DISABLED reason=shader_f16_unavailable; quantized_f32_matvec_fallback=enabled; prompt_prefill_gemm_cpu_fallback=enabled\n\");\n    }"
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
     string(REPLACE
         "std::vector<wgpu::FeatureName> required_features       = { wgpu::FeatureName::ShaderF16 };"
@@ -439,7 +439,7 @@ string(FIND "${AI_CHAT_WEBGPU_PORTABLE_F32_SHADER_TEXT}" "AI_CHAT_NO_SHADER_F16_
 if (NOT AI_CHAT_WEBGPU_PORTABLE_F32_ENABLE_F16 EQUAL -1 OR AI_CHAT_WEBGPU_PORTABLE_F32_MARKER EQUAL -1)
     message(FATAL_ERROR "Portable F32 GEMM shader must be explicitly F32-only and versioned")
 endif()
-set(AI_CHAT_WEBGPU_PORTABLE_F32_CPP_SHADER "static constexpr const char * ai_chat_ai_chat_wgsl_mul_mat_f32_no_shader_f16 = R\"AI_CHAT_F32_WGSL(${AI_CHAT_WEBGPU_PORTABLE_F32_SHADER_TEXT})AI_CHAT_F32_WGSL\";\n")
+set(AI_CHAT_WEBGPU_PORTABLE_F32_CPP_SHADER "static constexpr const char * ai_chat_wgsl_mul_mat_f32_no_shader_f16 = R\"AI_CHAT_F32_WGSL(${AI_CHAT_WEBGPU_PORTABLE_F32_SHADER_TEXT})AI_CHAT_F32_WGSL\";\n")
 
 string(FIND "${AI_CHAT_WEBGPU_SHADER_LIB_TEXT}" "AI_CHAT_NO_SHADER_F16_F32_GEMM_PIPELINE_V1" AI_CHAT_WEBGPU_F32_GEMM_PIPELINE_PATCHED)
 if (AI_CHAT_WEBGPU_F32_GEMM_PIPELINE_PATCHED EQUAL -1)
@@ -449,13 +449,13 @@ if (AI_CHAT_WEBGPU_F32_GEMM_PIPELINE_PATCHED EQUAL -1)
         "embedded portable F32 GEMM shader")
     ai_chat_replace_once(AI_CHAT_WEBGPU_SHADER_LIB_TEXT
         "bool        supports_subgroups       = false;"
-        "bool        supports_shader_f16      = true;\\n    bool        supports_subgroups       = false;"
+        "bool        supports_shader_f16      = true;\n    bool        supports_subgroups       = false;"
         "shader library ShaderF16 capability field")
     ai_chat_replace_once(AI_CHAT_WEBGPU_SHADER_LIB_TEXT
         "webgpu_pipeline get_mul_mat_fast_pipeline(const ggml_webgpu_shader_lib_context & context, bool src_overlap) {"
-        "webgpu_pipeline get_mul_mat_fast_pipeline(const ggml_webgpu_shader_lib_context & context, bool src_overlap) {\\n        if (!context.supports_shader_f16 && context.src0->type == GGML_TYPE_F32 && context.src1->type == GGML_TYPE_F32 && context.dst->type == GGML_TYPE_F32) {\\n            ggml_webgpu_mul_mat_pipeline_key portable_key = {};\\n            portable_key.src0_type = context.src0->type;\\n            portable_key.src1_type = context.src1->type;\\n            portable_key.vectorized = 0;\\n            portable_key.use_subgroup_matrix = 0;\\n            portable_key.src_overlap = false;\\n            auto cached = mul_mat_fast_pipelines.find(portable_key);\\n            if (cached != mul_mat_fast_pipelines.end()) return cached->second;\\n            std::vector<std::string> portable_defines;\\n            auto portable_processed = preprocessor.preprocess(ai_chat_wgsl_mul_mat_f32_no_shader_f16, portable_defines);\\n            auto portable_decisions = std::make_shared<ggml_webgpu_mul_mat_shader_decisions>();\\n            portable_decisions->tile_k = 16;\\n            portable_decisions->tile_m = 1;\\n            portable_decisions->tile_n = 1;\\n            portable_decisions->wg_size_m = 8;\\n            portable_decisions->wg_size_n = 8;\\n            portable_decisions->wg_size = 64;\\n            portable_decisions->use_subgroup_matrix = 0;\\n            portable_decisions->mul_mat_wg_size = 64;\\n            webgpu_pipeline portable_pipeline = ggml_webgpu_create_pipeline(device, portable_processed, \\"mul_mat_f32_no_shader_f16\\");\\n            portable_pipeline.context = portable_decisions;\\n            mul_mat_fast_pipelines[portable_key] = portable_pipeline;\\n            return mul_mat_fast_pipelines[portable_key];\\n        }"
+        "webgpu_pipeline get_mul_mat_fast_pipeline(const ggml_webgpu_shader_lib_context & context, bool src_overlap) {\n        if (!context.supports_shader_f16 && context.src0->type == GGML_TYPE_F32 && context.src1->type == GGML_TYPE_F32 && context.dst->type == GGML_TYPE_F32) {\n            ggml_webgpu_mul_mat_pipeline_key portable_key = {};\n            portable_key.src0_type = context.src0->type;\n            portable_key.src1_type = context.src1->type;\n            portable_key.vectorized = 0;\n            portable_key.use_subgroup_matrix = 0;\n            portable_key.src_overlap = false;\n            auto cached = mul_mat_fast_pipelines.find(portable_key);\n            if (cached != mul_mat_fast_pipelines.end()) return cached->second;\n            std::vector<std::string> portable_defines;\n            auto portable_processed = preprocessor.preprocess(ai_chat_wgsl_mul_mat_f32_no_shader_f16, portable_defines);\n            auto portable_decisions = std::make_shared<ggml_webgpu_mul_mat_shader_decisions>();\n            portable_decisions->tile_k = 16;\n            portable_decisions->tile_m = 1;\n            portable_decisions->tile_n = 1;\n            portable_decisions->wg_size_m = 8;\n            portable_decisions->wg_size_n = 8;\n            portable_decisions->wg_size = 64;\n            portable_decisions->use_subgroup_matrix = 0;\n            portable_decisions->mul_mat_wg_size = 64;\n            webgpu_pipeline portable_pipeline = ggml_webgpu_create_pipeline(device, portable_processed, \\"mul_mat_f32_no_shader_f16\\");\n            portable_pipeline.context = portable_decisions;\n            mul_mat_fast_pipelines[portable_key] = portable_pipeline;\n            return mul_mat_fast_pipelines[portable_key];\n        }"
         "F32 no-ShaderF16 GEMM pipeline selection")
-    string(APPEND AI_CHAT_WEBGPU_SHADER_LIB_TEXT "\\n// AI_CHAT_NO_SHADER_F16_F32_GEMM_PIPELINE_V1\\n")
+    string(APPEND AI_CHAT_WEBGPU_SHADER_LIB_TEXT "\n// AI_CHAT_NO_SHADER_F16_F32_GEMM_PIPELINE_V1\n")
     file(WRITE "${AI_CHAT_WEBGPU_SHADER_LIB_SOURCE}" "${AI_CHAT_WEBGPU_SHADER_LIB_TEXT}")
 endif()
 
@@ -463,13 +463,13 @@ string(FIND "${AI_CHAT_WEBGPU_CPP_TEXT}" "AI_CHAT_NO_SHADER_F16_F32_GEMM_CONTEXT
 if (AI_CHAT_WEBGPU_F32_GEMM_CONTEXT_PATCHED EQUAL -1)
     ai_chat_replace_once(AI_CHAT_WEBGPU_CPP_TEXT
         "shader_lib_ctx.src0                     = src0;"
-        "shader_lib_ctx.src0                     = src0;\\n    shader_lib_ctx.supports_shader_f16 = ctx->global_ctx->capabilities.supports_shader_f16;"
+        "shader_lib_ctx.src0                     = src0;\n    shader_lib_ctx.supports_shader_f16 = ctx->global_ctx->capabilities.supports_shader_f16;"
         "mul-mat ShaderF16 capability propagation")
     ai_chat_replace_once(AI_CHAT_WEBGPU_CPP_TEXT
         "const bool src_overlap = ggml_webgpu_tensor_binding_overlap(ctx->global_ctx, src0, src1) && !use_mmvq;"
-        "const bool no_shader_f16_plain_f32_gemm = !ctx->global_ctx->capabilities.supports_shader_f16 && !use_mat_vec && src0->type == GGML_TYPE_F32 && src1->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32;\\n    const bool src_overlap = ggml_webgpu_tensor_binding_overlap(ctx->global_ctx, src0, src1) && !use_mmvq && !no_shader_f16_plain_f32_gemm;"
+        "const bool no_shader_f16_plain_f32_gemm = !ctx->global_ctx->capabilities.supports_shader_f16 && !use_mat_vec && src0->type == GGML_TYPE_F32 && src1->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32;\n    const bool src_overlap = ggml_webgpu_tensor_binding_overlap(ctx->global_ctx, src0, src1) && !use_mmvq && !no_shader_f16_plain_f32_gemm;"
         "portable F32 GEMM binding policy")
-    string(APPEND AI_CHAT_WEBGPU_CPP_TEXT "\\n// AI_CHAT_NO_SHADER_F16_F32_GEMM_CONTEXT_V1\\n")
+    string(APPEND AI_CHAT_WEBGPU_CPP_TEXT "\n// AI_CHAT_NO_SHADER_F16_F32_GEMM_CONTEXT_V1\n")
     file(WRITE "${AI_CHAT_WEBGPU_CPP_SOURCE}" "${AI_CHAT_WEBGPU_CPP_TEXT}")
 endif()
 
