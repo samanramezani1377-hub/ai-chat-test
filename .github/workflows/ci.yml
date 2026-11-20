@@ -102,7 +102,7 @@ jobs:
   android-build:
     name: Android debug build
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 2G
@@ -384,8 +384,9 @@ jobs:
           retention-days: 7
   android-lint:
     name: Android lint
+    needs: android-build
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -439,25 +440,29 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
-      - name: Cache exact native build state
+      - name: Restore native build state from the completed APK job
         uses: actions/cache@v4
         with:
           path: |
             core/runtime-android/.cxx
             core/runtime-android/src/.cxx
+            rs-laya-tokenizers/target
           key: >-
-            native-lint-${{ runner.os }}-
+            native-${{ runner.os }}-
             ${{ hashFiles(
               'gradle.properties',
               'settings.gradle.kts',
               'build.gradle.kts',
+              'app/build.gradle.kts',
               'gradle/libs.versions.toml',
+              'rs-laya-tokenizers/Cargo.toml',
+              'rs-laya-tokenizers/src/**',
               'core/runtime-android/build.gradle.kts',
               'core/runtime-android/src/main/cpp/**',
               'core/runtime-android/src/main/cpp/cmake/**'
             ) }}
           restore-keys: |
-            native-lint-${{ runner.os }}-
+            native-${{ runner.os }}-
 
       - name: Run Android lint
         run: >-
