@@ -395,6 +395,21 @@ if (AI_CHAT_WEBGPU_MMV_ACC_PATCHED EQUAL -1)
     file(WRITE "${AI_CHAT_WEBGPU_MMV_ACC}" "${AI_CHAT_WEBGPU_MMV_ACC_TEXT}")
 endif()
 
+# Verify the patched runtime shader sources cannot accidentally request ShaderF16.
+foreach(AI_CHAT_NO_F16_SHADER IN ITEMS "\${AI_CHAT_WEBGPU_MMV}" "\${AI_CHAT_WEBGPU_Q8}")
+    file(READ "\${AI_CHAT_NO_F16_SHADER}" AI_CHAT_NO_F16_SHADER_TEXT)
+    string(FIND "\${AI_CHAT_NO_F16_SHADER_TEXT}" "enable f16;" AI_CHAT_NO_F16_ENABLE_REMAINS)
+    if (NOT AI_CHAT_NO_F16_ENABLE_REMAINS EQUAL -1)
+        message(FATAL_ERROR "No-ShaderF16 quantized mat-vec shader still declares enable f16: \${AI_CHAT_NO_F16_SHADER}")
+    endif()
+endforeach()
+string(FIND "\${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}" "src1q[block].d" AI_CHAT_Q8_SCALE_D_REMAINS)
+string(FIND "\${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}" "src1q[block].s" AI_CHAT_Q8_SCALE_S_REMAINS)
+string(FIND "\${AI_CHAT_WEBGPU_MMV_ACC_TEXT}" "vec2<f16>" AI_CHAT_MMV_ACC_F16_REMAINS)
+if (NOT AI_CHAT_Q8_SCALE_D_REMAINS EQUAL -1 OR NOT AI_CHAT_Q8_SCALE_S_REMAINS EQUAL -1 OR NOT AI_CHAT_MMV_ACC_F16_REMAINS EQUAL -1)
+    message(FATAL_ERROR "No-ShaderF16 quantized mat-vec still contains an FP16 arithmetic/type dependency")
+endif()
+
 # On no-ShaderF16 adapters, only the verified quantized F32 mat-vec shape is
 # admitted. Larger prompt-prefill GEMMs remain on CPU until a separate F32
 # tiled-matmul shader is validated; never route them through the f16 fast path.
