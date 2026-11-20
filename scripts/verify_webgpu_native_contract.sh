@@ -46,7 +46,13 @@ grep -q 'cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED' "$ROOT/core/runtim
 # Non-ShaderF16 adapters use the conservative F32/I32 path. llama.cpp probes
 # plain F32 ADD when selecting a layer buffer, so this op must remain admitted.
 grep -q 'op->op == GGML_OP_ADD || op->op == GGML_OP_ADD_ID' "$CMAKE" || fail "No-ShaderF16 WebGPU buffer selection must admit the F32 ADD probe"
-grep -q 'AI_CHAT_WEBGPU_QUANTIZED_KERNELS_DISABLED reason=shader_f16_unavailable' "$CMAKE" || fail "No-ShaderF16 quantized-kernel fallback must be explicit in diagnostics"
+grep -q 'AI_CHAT_WEBGPU_FP16_FAST_KERNELS_DISABLED reason=shader_f16_unavailable' "$CMAKE" || fail "No-ShaderF16 fast-kernel fallback must be explicit in diagnostics"
+grep -q 'AI_CHAT_WEBGPU_NO_SHADER_F16_QUANT_MATVEC_V1' "$CMAKE" || fail "F32-decoded quantized mat-vec shader patch is missing"
+grep -q 'AI_CHAT_NO_SHADER_F16_COMMON_V1' "$CMAKE" || fail "FP16 storage decoding must have a baseline-F32 shader path"
+grep -q 'AI_CHAT_NO_SHADER_F16_Q8_V1' "$CMAKE" || fail "Q8 activation quantizer must support packed scale storage without ShaderF16"
+grep -q 'AI_CHAT_NO_SHADER_F16_Q8_READ_V1' "$CMAKE" || fail "Quantized mat-vec must decode packed Q8 scales with F32"
+grep -q 'AI_CHAT_NO_SHADER_F16_QUANT_MATVEC_OP_V1' "$CMAKE" || fail "No-ShaderF16 quantized MUL_MAT dispatch is missing"
+grep -q 'f32_quantized_matvec' "$CMAKE" || fail "Quantized no-ShaderF16 dispatch must be limited to the validated mat-vec shape"
 
 # The imported AAR library must never be used as a native WebGPU C ABI provider.
 ! grep -q 'webgpu_c_bundled' "$FIND_DAWN" || fail "FindDawn must not link the AndroidX JNI-only library"
