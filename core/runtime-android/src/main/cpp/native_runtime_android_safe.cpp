@@ -843,6 +843,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInstallFatalHandlers
     install_native_fatal_handlers();
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeResetStop(
+        JNIEnv *, jclass) {
+    g_stop.store(false, std::memory_order_release);
+}
+
 
 static bool emit_complete_utf8(JNIEnv * env, jobject listener, jmethodID on_token, std::string & pending) {
     std::u16string utf16;
@@ -981,7 +987,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     if (!prompt) { checkpoint("NATIVE_GENERATE_PROMPT_UTF8_FAILED"); return 3; }
     const std::string prompt_text(prompt);
     env->ReleaseStringUTFChars(jprompt, prompt);
-    g_stop.store(false, std::memory_order_relaxed);
+    // Stop is reset by the Kotlin flow before its worker is launched. Do not
+    // clear it here: cancellation can arrive after launch but before JNI entry.
+    if (g_stop.load(std::memory_order_relaxed)) {
+        checkpoint("NATIVE_GENERATE_CANCELLED_BEFORE_PREFILL");
+        return 9;
+    }
 
     if (!g_model || !g_context) {
         checkpoint("NATIVE_GENERATE_CONTEXT_UNAVAILABLE");
