@@ -179,42 +179,80 @@ object CrashLogStore {
         if (signalIndex < 0) return
         val fatalTail = trace.substring(signalIndex).lineSequence()
             .takeWhile { it.startsWith("NATIVE_FATAL_") || it.isBlank() }
-            .joinToString("\n")
-            .take(12_000)
+            .joinToString("\n").take(4_000)
         val fingerprint = sha256(fatalTail)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (prefs.getString(KEY_NATIVE_FINGERPRINT, null) == fingerprint) return
-
-        val signalName = Regex("""NATIVE_FATAL_SIGNAL_NAME=([^\s]+)""").find(fatalTail)?.groupValues?.get(1) ?: "UNKNOWN"
-        val phase = Regex("""NATIVE_FATAL_SPEC_PHASE=([^\s]+)""").find(fatalTail)?.groupValues?.get(1) ?: "UNKNOWN"
-        val runtimePhase = Regex("""NATIVE_FATAL_RUNTIME_PHASE=([^\s]+)""").find(fatalTail)?.groupValues?.get(1) ?: "UNKNOWN"
-        val recentTrace = trace.lineSequence().toList().takeLast(120).joinToString("\n")
-        val lastCheckpoint = recentTrace.lineSequence().filter {
-            it.contains("MODEL_READY") || it.contains("CONTEXT_INIT") || it.contains("MODEL_LOAD") ||
-                it.contains("NATIVE_LOAD") || it.contains("GENERATION") || it.contains("sched_reserve") ||
-                it.contains("graph_reserve")
-        }.lastOrNull()
+        fun fatalValue(key: String): String = Regex("^${Regex.escape(key)}=(.*)$", RegexOption.MULTILINE)
+            .find(fatalTail)?.groupValues?.get(1)?.trim().orEmpty().ifBlank { "UNKNOWN" }
+        val signalName = fatalValue("NATIVE_FATAL_SIGNAL_NAME")
+        val signalNumber = fatalValue("NATIVE_FATAL_SIGNAL")
+        val phase = fatalValue("NATIVE_FATAL_SPEC_PHASE")
+        val runtimePhase = fatalValue("NATIVE_FATAL_RUNTIME_PHASE")
+        val recentLines = trace.lineSequence().toList().takeLast(500)
+        val lastCheckpoint = recentLines.lastOrNull { line ->
+            line.contains("graph_reserve") || line.contains("sched_reserve") ||
+                line.contains("llama_graph_n_input_tensors") || line.contains("CONTEXT_INIT") ||
+                line.contains("WEBGPU_CONTEXT_INIT") || line.contains("MODEL_LOAD")
+        }
+        val platformExit = prefs.getString(KEY_PENDING_PLATFORM_EXIT, null)
+        val platformTrace = prefs.getString(KEY_PENDING_PLATFORM_TRACE, null).orEmpty()
         val report = buildString {
-            appendLine("AI Chat Test — Native Crash Report")
-            appendLine("Detected on app restart: ${DateFormat.getDateTimeInstance().format(Date())}")
-            appendLine("Crash type: Native fatal signal")
-            appendLine("Signal: $signalName (${Regex("""NATIVE_FATAL_SIGNAL=([^\s]+)""").find(fatalTail)?.groupValues?.get(1) ?: "N/A"})")
-            appendLine("Speculative phase marker: $phase")
-            appendLine("Last native runtime event: $runtimePhase")
-            appendLine("Last relevant checkpoint: ${lastCheckpoint ?: "N/A"}")
+            appendLine("AI Chat Test — Native Crash")
+            appendLine("Detected: ${DateFormat.getDateTimeInstance().format(Date())}")
+            appendLine("Signal: $signalName ($signalNumber)")
+            appendLine("Signal code: ${fatalValue("NATIVE_FATAL_SI_CODE")}")
+            appendLine("Speculative phase: $phase")
+            appendLine("Last native phase: $runtimePhase")
+            appendLine("Last graph checkpoint: ${lastCheckpoint ?: "N/A"}")
+            appendLine("PC: ${fatalValue("NATIVE_FATAL_PC")}")
+            appendLine("LR: ${fatalValue("NATIVE_FATAL_LR")}")
+            val faultAddress = fatalValue("NATIVE_FATAL_FAULT_ADDR")
+            if (faultAddress != "UNKNOWN") appendLine("Fault address: $faultAddress")
+            if (platformExit != null) appendLine("Android exit: $platformExit")
             appendLine()
-            appendLine(explainNativeFailure(signalName, phase, runtimePhase, lastCheckpoint, recentTrace))
+            appendLine(explainNativeFailure(signalName, phase, runtimePhase, lastCheckpoint, trace))
             appendLine()
             appendLine(deviceInfo(context))
             appendLine(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("runtime_context", "Runtime context: unavailable"))
+            appendLine("===== IMPORTANT NATIVE RESULTS =====")
+            appendLine(summarizeNativeTrace(trace).ifBlank { "رویداد تشخیصی تکمیلی ثبت نشده است." })
+            appendLine("===== ANDROID TOMBSTONE / BACKTRACE =====")
+            appendLine(platformTrace.ifBlank { "Android در این اجرا backtrace قابل‌دسترسی ارائه نکرد. برای تعیین خط Native، tombstone و Build ID کتابخانه‌های همین APK لازم است." })
             appendLine("===== FATAL SIGNAL RECORD =====")
             appendLine(fatalTail)
-            appendLine("===== NATIVE TRACE BEFORE CRASH (last 350 lines) =====")
-            appendLine(trace.lineSequence().toList().takeLast(350).joinToString("\n"))
         }
         appendReport(context, report)
-        prefs.edit().putString(KEY_NATIVE_FINGERPRINT, fingerprint).commit()
+        prefs.edit().putString(KEY_NATIVE_FINGERPRINT, fingerprint)
+            .remove(KEY_PENDING_PLATFORM_EXIT).remove(KEY_PENDING_PLATFORM_TRACE).commit()
         mutableReport.value = readReport(context)
+    }
+
+    private fun summarizeNativeTrace(trace: String): String {
+        val lines = trace.lineSequence().toList()
+        val markers = listOf("WEBGPU_MODEL_LOAD_RETURNED_SUCCESS", "NATIVE_BACKEND_DEVICE ", "NATIVE_GPU_DEVICE ",
+            "NATIVE_WEIGHT_RESIDENCY ", "WEBGPU_MODEL_RESIDENCY ", "WEBGPU_MODEL_RESIDENCY_POLICY ",
+            "NATIVE_ATTENTION_POLICY ", "NATIVE_CONTEXT_THREADS ", "NATIVE_GRAPH_REUSE_POLICY ",
+            "WEBGPU_CONTEXT_INIT_STARTED", "WEBGPU_MODEL_RESIDENCY_VALIDATED")
+        val successful = lines.filter { line -> markers.any(line::contains) }.takeLast(12)
+        val failures = lines.filter { line -> line.contains("FAILED", true) || line.contains("FATAL", true) ||
+            line.contains("ERROR", true) || line.contains("GGML_STATUS_FAILED", true) ||
+            line.contains("out of memory", true) || line.contains("assert", true) }.takeLast(12)
+        return (successful + failures).distinct().takeLast(20).joinToString("\n")
+    }
+
+    private fun extractTombstoneEvidence(trace: String): String {
+        if (trace.isBlank()) return ""
+        val lines = trace.lineSequence().toList()
+        val relevant = lines.filter { line -> line.contains("signal ", true) || line.contains("Abort message:", true) ||
+            line.contains("backtrace:", true) || Regex("^\\s*#\\d+").containsMatchIn(line) ||
+            line.contains("BuildId", true) || line.contains("Build ID", true) ||
+            line.contains("libai_chat_runtime", true) || line.contains("libggml", true) ||
+            line.contains("libllama", true) || line.contains("libc.so", true) ||
+            line.contains("Cause:", true) || line.contains("pid:", true) || line.contains("tid:", true) }
+        val selected = if (relevant.isNotEmpty()) relevant.takeLast(100).joinToString("\n")
+            else lines.takeLast(100).joinToString("\n")
+        return selected.takeLast(18_000)
     }
 
     private fun explainJavaFailure(error: Throwable): String {
@@ -254,7 +292,7 @@ object CrashLogStore {
             appendLine("آخرین رویداد Native: ${if (runtimePhase == "UNKNOWN") "نامشخص" else runtimePhase}")
             appendLine("آخرین checkpoint: ${checkpoint ?: "ثبت نشده"}")
             appendLine(clue)
-            appendLine("محدودیت تشخیص: سیگنال و PC/LR به‌تنهایی علت کامل را مشخص نمی‌کنند. برای تعیین خط دقیق Native به tombstone/backtrace و Build ID همان APK نیاز است. این گزارش شواهد خام را نگه می‌دارد و از تبدیل حدس به علت قطعی خودداری می‌کند.")
+            appendLine("محدودیت: برای تعیین علت قطعی باید backtrace و Build ID همین APK با نمادهای همان نسخه تطبیق داده شوند.")
         }
     }
 
@@ -284,7 +322,7 @@ object CrashLogStore {
         val file = File(context.filesDir, FILE_NAME)
         file.parentFile?.mkdirs()
         val old = if (file.isFile) file.readText() else ""
-        val updated = (old + "\n\n================ NEW CRASH ================\n" + report).takeLast(MAX_REPORT_CHARS)
+        val updated = (old + "\n\n================ CRASH ================\n" + report).takeLast(MAX_REPORT_CHARS)
         file.writeText(updated)
     }
 
