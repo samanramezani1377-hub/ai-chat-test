@@ -289,6 +289,9 @@ jobs:
           grep -q 'glesCapabilityKnown=' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'UNIVERSAL_GPU_ADAPTER' core/runtime-android/src/main/cpp/universal_gpu_adapter.cpp
           grep -q 'GL_MAX_SHADER_STORAGE_BLOCK_SIZE' core/runtime-android/src/main/cpp/universal_gpu_adapter.cpp
+          grep -q 'eglGetCurrentContext' core/runtime-android/src/main/cpp/universal_gpu_adapter.cpp
+          grep -q 'eglGetCurrentSurface' core/runtime-android/src/main/cpp/universal_gpu_adapter.cpp
+          grep -q 'egl_restore_previous_context_failed' core/runtime-android/src/main/cpp/universal_gpu_adapter.cpp
           grep -q 'gles_compute_supported' core/runtime-android/src/main/cpp/universal_gpu_adapter.h
           grep -q 'AI_CHAT_GPU_ADAPTER_OPENGL_ES=1' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_GENERIC_FP32_FALLBACK_V1' core/runtime-android/src/main/cpp/CMakeLists.txt

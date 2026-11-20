@@ -257,3 +257,14 @@ guards that declaration with `#ifdef MASK_F16`. The no-ShaderF16 whitelist
 can therefore safely include F32 softmax; F16-mask operations are still
 rejected by the generic tensor-type guard. CI verifies the patched shader
 source before packaging.
+
+
+### EGL thread-state preservation
+
+The capability probe now snapshots the calling thread's current EGL display,
+draw/read surfaces, and context before binding its temporary pbuffer context.
+After collecting capabilities it restores the previous application-owned
+context before destroying the temporary context. This prevents a probe invoked
+from a thread with an existing graphics context from silently unbinding the
+application's rendering context. CI checks the capture and restore code paths;
+physical-device testing is still needed for vendor EGL implementations.
