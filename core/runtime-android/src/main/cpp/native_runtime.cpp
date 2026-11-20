@@ -16,6 +16,7 @@
 #include <dlfcn.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <ucontext.h>
 #include "llama.h"
 #include "gguf.h"
@@ -50,7 +51,7 @@ static std::string g_native_marker_file;
 static std::string g_native_trace_file;
 static int g_native_fatal_fd = -1;
 // Fixed-size last-event snapshot, readable from the fatal signal handler.
-static std::atomic<char> g_native_runtime_phase[128]{};
+static std::atomic<char> g_native_runtime_phase[192]{};
 static_assert(std::atomic<char>::is_always_lock_free, "Fatal signal phase snapshot requires lock-free atomics");
 static std::mutex g_native_marker_mutex;
 static std::mutex g_backend_init_mutex;
@@ -111,7 +112,7 @@ static bool init_generation_context(bool use_webgpu_backend) {
         std::to_string(cp.n_threads) + " batch=" +
         std::to_string(cp.n_threads_batch) + " nBatch=" +
         std::to_string(cp.n_batch) + " nUbatch=" +
-        std::to_string(cp.n_ubatch) + " flashAttn=auto").c_str());
+        std::to_string(cp.n_ubatch) + " flashAttn=DISABLED").c_str());
 #if defined(AI_CHAT_GGML_OPENMP_ENABLED)
     append_native_trace("NATIVE_OPENMP_POLICY enabled=1 linkage=static");
 #else
@@ -145,6 +146,21 @@ static bool init_generation_context(bool use_webgpu_backend) {
         append_native_trace("NATIVE_GRAPH_REUSE_POLICY hybridOrRecurrent=1 disabled=1 reason=android_recurrent_prefill_stability");
     } else {
         append_native_trace("NATIVE_GRAPH_REUSE_POLICY hybridOrRecurrent=0 disabled=0");
+    }
+    if (use_webgpu_backend) {
+        size_t free_bytes = 0, total_bytes = 0;
+        ggml_backend_dev_t device = find_webgpu_gpu_device();
+        if (device) ggml_backend_dev_memory(device, &free_bytes, &total_bytes);
+        append_native_trace((std::string("WEBGPU_CONTEXT_RESERVATION_PREFLIGHT ctx=") +
+            std::to_string(cp.n_ctx) + " batch=" + std::to_string(cp.n_batch) +
+            " ubatch=" + std::to_string(cp.n_ubatch) +
+            " seqMax=" + std::to_string(cp.n_seq_max) +
+            " kvTypeK=" + std::to_string((int)cp.type_k) +
+            " kvTypeV=" + std::to_string((int)cp.type_v) +
+            " offloadKQV=" + (cp.offload_kqv ? "1" : "0") +
+            " gpuFreeBytes=" + std::to_string(free_bytes) +
+            " gpuTotalBytes=" + std::to_string(total_bytes) +
+            " gpuMemoryKnown=" + ((free_bytes > 0 && total_bytes > 0) ? "1" : "0")).c_str());
     }
     checkpoint(use_webgpu_backend
         ? "WEBGPU_CONTEXT_GRAPH_RESERVATION_BEGIN"
@@ -784,13 +800,15 @@ static void native_write_hex(int fd, const char *label, uintptr_t value) {
 }
 
 static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void *raw_context) {
-    if (g_native_fatal_fd >= 0) {
+    const long thread_id = syscall(SYS_gettid);
+    if (g_native_fatal_fd >= 0) { 
         const char prefix[] = "NATIVE_FATAL_SIGNAL=";
         const char name_prefix[] = "NATIVE_FATAL_SIGNAL_NAME=";
         const char code_prefix[] = "NATIVE_FATAL_SI_CODE=";
         const char pc_prefix[] = "NATIVE_FATAL_PC=";
         const char lr_prefix[] = "NATIVE_FATAL_LR=";
         const char addr_prefix[] = "NATIVE_FATAL_FAULT_ADDR=";
+        const char thread_prefix[] = "NATIVE_FATAL_THREAD_ID=";
         char value[24];
         int n = 0;
         int v = signal_number;
@@ -807,6 +825,10 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
         native_write_text(g_native_fatal_fd, name, std::strlen(name)); native_write_text(g_native_fatal_fd, "\n", 1);
         n = snprintf(value, sizeof(value), "%d", info ? info->si_code : 0);
         native_write_text(g_native_fatal_fd, code_prefix, sizeof(code_prefix)-1);
+        if (n > 0) native_write_text(g_native_fatal_fd, value, (size_t)n);
+        native_write_text(g_native_fatal_fd, "\n", 1);
+        n = snprintf(value, sizeof(value), "%ld", thread_id);
+        native_write_text(g_native_fatal_fd, thread_prefix, sizeof(thread_prefix) - 1);
         if (n > 0) native_write_text(g_native_fatal_fd, value, (size_t)n);
         native_write_text(g_native_fatal_fd, "\n", 1);
         uintptr_t pc = 0, lr = 0;
@@ -831,7 +853,7 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
         native_write_text(g_native_fatal_fd, "\n", 1);
         const char runtime_phase_prefix[] = "NATIVE_FATAL_RUNTIME_PHASE=";
         native_write_text(g_native_fatal_fd, runtime_phase_prefix, sizeof(runtime_phase_prefix) - 1);
-        char runtime_phase[128];
+        char runtime_phase[192];
         size_t runtime_phase_len = 0;
         while (runtime_phase_len + 1 < sizeof(runtime_phase)) {
             const char current = g_native_runtime_phase[runtime_phase_len].load(std::memory_order_relaxed);
@@ -848,6 +870,16 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
             native_write_hex(g_native_fatal_fd, addr_prefix, (uintptr_t)info->si_addr);
         }
         fsync(g_native_fatal_fd);
+    }
+    // Preserve the platform's default fatal-signal handling after writing our
+    // compact phase snapshot. Android debuggerd can then emit a normal tombstone
+    // with the complete native backtrace and Build IDs instead of losing it here.
+    struct sigaction default_action{};
+    sigemptyset(&default_action.sa_mask);
+    default_action.sa_handler = SIG_DFL;
+    if (sigaction(signal_number, &default_action, nullptr) == 0 &&
+        syscall(SYS_tgkill, getpid(), thread_id, signal_number) == 0) {
+        return; // pending signal is delivered with SIG_DFL when this handler returns
     }
     _exit(128 + signal_number);
 }
