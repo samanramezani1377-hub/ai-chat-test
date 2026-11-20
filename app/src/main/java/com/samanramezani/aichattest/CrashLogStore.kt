@@ -211,7 +211,12 @@ object CrashLogStore {
 
         val signalName = Regex("""NATIVE_FATAL_SIGNAL_NAME=([^\s]+)""").find(fatalTail)?.groupValues?.get(1) ?: "UNKNOWN"
         val phase = Regex("""NATIVE_FATAL_SPEC_PHASE=([^\s]+)""").find(fatalTail)?.groupValues?.get(1) ?: "UNKNOWN"
-        val lastCheckpoint = trace.lineSequence().filter { it.contains("NATIVE_CHECKPOINT") || it.contains("MODEL_READY") || it.contains("CONTEXT_INIT") || it.contains("MODEL_LOAD") }.lastOrNull()
+        val recentTrace = trace.lineSequence().toList().takeLast(120).joinToString("\\n")
+        val lastCheckpoint = recentTrace.lineSequence().filter {
+            it.contains("MODEL_READY") || it.contains("CONTEXT_INIT") || it.contains("MODEL_LOAD") ||
+                it.contains("NATIVE_LOAD") || it.contains("GENERATION") || it.contains("sched_reserve") ||
+                it.contains("graph_reserve")
+        }.lastOrNull()
         val report = buildString {
             appendLine("AI Chat Test — Native Crash Report")
             appendLine("Detected on app restart: ${DateFormat.getDateTimeInstance().format(Date())}")
@@ -220,7 +225,7 @@ object CrashLogStore {
             appendLine("Native phase marker: $phase")
             appendLine("Last relevant checkpoint: ${lastCheckpoint ?: "N/A"}")
             appendLine()
-            appendLine(explainNativeFailure(signalName, phase, lastCheckpoint, trace))
+            appendLine(explainNativeFailure(signalName, phase, lastCheckpoint, recentTrace))
             appendLine()
             appendLine(deviceInfo(context))
             appendLine(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("runtime_context", "Runtime context: unavailable"))
