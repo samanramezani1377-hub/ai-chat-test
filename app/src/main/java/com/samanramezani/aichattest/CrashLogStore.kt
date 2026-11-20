@@ -185,8 +185,16 @@ object CrashLogStore {
         if (prefs.getString(KEY_NATIVE_FINGERPRINT, null) == fingerprint) return
         fun fatalValue(key: String): String = Regex("^${Regex.escape(key)}=(.*)$", RegexOption.MULTILINE)
             .find(fatalTail)?.groupValues?.get(1)?.trim().orEmpty().ifBlank { "UNKNOWN" }
-        val signalName = fatalValue("NATIVE_FATAL_SIGNAL_NAME")
         val signalNumber = fatalValue("NATIVE_FATAL_SIGNAL")
+        val recordedSignalName = fatalValue("NATIVE_FATAL_SIGNAL_NAME")
+        val signalName = if (recordedSignalName != "UNKNOWN") recordedSignalName else when (signalNumber) {
+            "6" -> "SIGABRT"
+            "11" -> "SIGSEGV"
+            "7" -> "SIGBUS"
+            "4" -> "SIGILL"
+            "8" -> "SIGFPE"
+            else -> "UNKNOWN"
+        }
         val phase = fatalValue("NATIVE_FATAL_SPEC_PHASE")
         val runtimePhase = fatalValue("NATIVE_FATAL_RUNTIME_PHASE")
         val recentLines = trace.lineSequence().toList().takeLast(500)
@@ -338,8 +346,31 @@ object CrashLogStore {
         file.writeText(updated)
     }
 
-    private fun readReport(context: Context): String? =
-        runCatching { File(context.filesDir, FILE_NAME).takeIf { it.isFile }?.readText()?.takeIf { it.isNotBlank() } }.getOrNull()
+    private fun readReport(context: Context): String? = runCatching {
+        val file = File(context.filesDir, FILE_NAME)
+        if (!file.isFile) return@runCatching null
+        val original = file.readText()
+        val compact = compactLegacyReport(original).takeLast(MAX_REPORT_CHARS)
+        if (compact != original) file.writeText(compact)
+        compact.takeIf { it.isNotBlank() }
+    }.getOrNull()
+
+    private fun compactLegacyReport(value: String): String {
+        var compact = value
+        compact = compact.replace(
+            Regex("(?ms)^===== NATIVE TRACE BEFORE CRASH.*?(?=^={8,}.*CRASH|\\\\z)"),
+            "===== NATIVE TRACE =====\\n(ردپای تکراری و طولانی حذف شد؛ خلاصهٔ رویدادهای مهم در گزارش نگه داشته شده است.)\\n"
+        )
+        compact = compact.replace(
+            Regex("(?ms)^===== NATIVE TRACE TAIL =====.*?(?=^=====|^={8,}.*CRASH|\\\\z)"),
+            "===== NATIVE TRACE =====\\n(ردپای خام حذف شد.)\\n"
+        )
+        compact = compact.replace(
+            Regex("(?ms)^===== RECENT RUNTIME EVENTS =====.*?(?=^=====|^={8,}.*CRASH|\\\\z)"),
+            "===== RUNTIME EVENTS =====\\n(رویدادهای تکراری حذف شدند.)\\n"
+        )
+        return compact
+    }
 
     private fun sha256(value: String): String =
         MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(Locale.US, it) }
