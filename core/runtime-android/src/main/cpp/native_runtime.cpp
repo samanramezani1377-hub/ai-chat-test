@@ -154,6 +154,8 @@ static bool init_generation_context(bool use_webgpu_backend) {
     return true;
 }
 
+static bool is_webgpu_backend_device(ggml_backend_dev_t dev);
+
 static bool validate_gpu_model_residency() {
     if (!g_model) return false;
     size_t gpu_bytes = 0, cpu_bytes = 0, other_bytes = 0;

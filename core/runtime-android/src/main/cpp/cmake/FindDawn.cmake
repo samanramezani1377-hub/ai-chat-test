@@ -51,7 +51,7 @@ execute_process(
         --template-dir "${ai_chat_dawn_headers_SOURCE_DIR}/generator/templates"
         --output-dir "${_ai_chat_dawn_generated}"
         --dawn-json "${ai_chat_dawn_headers_SOURCE_DIR}/src/dawn/dawn.json"
-        --targets cpp_headers
+        --targets dawn_headers,cpp_headers
     RESULT_VARIABLE _ai_chat_dawn_generator_result
     OUTPUT_VARIABLE _ai_chat_dawn_generator_stdout
     ERROR_VARIABLE _ai_chat_dawn_generator_stderr

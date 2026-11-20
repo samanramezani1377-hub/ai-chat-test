@@ -20,6 +20,7 @@ grep -q 'AI_CHAT_WEBGPU_LIBRARY' "$FIND_DAWN" || fail "FindDawn must import the 
 grep -q 'webgpu_c_bundled' "$FIND_DAWN" || fail "FindDawn must expose the imported webgpu_c_bundled target"
 grep -q 'AI_CHAT_DAWN_METADATA_FILE' "$FIND_DAWN" || fail "FindDawn must use metadata from the same AndroidX AAR"
 grep -q 'dawn_source_commit_sha' "$FIND_DAWN" || fail "Dawn headers must be generated from the AAR's recorded source SHA"
+grep -q -- '--targets dawn_headers,cpp_headers' "$FIND_DAWN" || fail "FindDawn must generate both Dawn C and C++ headers"
 ! grep -q 'find_package(webgpu CONFIG REQUIRED)' "$FIND_DAWN" || fail "FindDawn must not require a Prefab package the AndroidX AAR does not export"
 grep -q 'extractWebGpuNativeLibrary' "$GRADLE" || fail "Gradle must extract the AndroidX WebGPU AAR before CMake configuration"
 grep -q 'libwebgpu_c_bundled.so' "$GRADLE" || fail "Gradle extraction must select libwebgpu_c_bundled.so"

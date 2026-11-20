@@ -13,7 +13,7 @@ val webgpuNativeOutput = layout.buildDirectory.dir("generated/webgpu-native")
 val webgpuNativeLibrary = webgpuNativeOutput.map { it.file("jni/arm64-v8a/libwebgpu_c_bundled.so") }
 val webgpuDawnMetadata = webgpuNativeOutput.map { it.file("assets/dawn_build_metadata.json") }
 val extractWebGpuNativeLibrary = tasks.register<Copy>("extractWebGpuNativeLibrary") {
-    from({ zipTree(webgpuNativeAar.singleFile) }) {
+    from(zipTree(webgpuNativeAar.singleFile)) {
         include("jni/arm64-v8a/libwebgpu_c_bundled.so", "assets/dawn_build_metadata.json")
         includeEmptyDirs = false
     }
