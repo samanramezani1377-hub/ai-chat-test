@@ -785,6 +785,24 @@ static void native_write_text(int fd, const char *text, size_t len) {
     }
 }
 
+static void native_write_decimal(int fd, const char *label, long value) {
+    size_t label_len = 0;
+    while (label[label_len]) ++label_len;
+    native_write_text(fd, label, label_len);
+    unsigned long magnitude = value < 0
+        ? (unsigned long)(-(value + 1)) + 1ul
+        : (unsigned long)value;
+    char digits[24];
+    size_t count = 0;
+    do {
+        digits[count++] = (char)('0' + (magnitude % 10ul));
+        magnitude /= 10ul;
+    } while (magnitude && count < sizeof(digits));
+    if (value < 0) native_write_text(fd, "-", 1);
+    while (count) native_write_text(fd, &digits[--count], 1);
+    native_write_text(fd, "\n", 1);
+}
+
 static void native_write_hex(int fd, const char *label, uintptr_t value) {
     static constexpr char digits[] = "0123456789abcdef";
     char buffer[128];
@@ -823,15 +841,12 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
         native_write_text(g_native_fatal_fd, value, (size_t)n); native_write_text(g_native_fatal_fd, "\n", 1);
         const char *name = native_signal_name(signal_number);
         native_write_text(g_native_fatal_fd, name_prefix, sizeof(name_prefix)-1);
-        native_write_text(g_native_fatal_fd, name, std::strlen(name)); native_write_text(g_native_fatal_fd, "\n", 1);
-        n = snprintf(value, sizeof(value), "%d", info ? info->si_code : 0);
-        native_write_text(g_native_fatal_fd, code_prefix, sizeof(code_prefix)-1);
-        if (n > 0) native_write_text(g_native_fatal_fd, value, (size_t)n);
+        size_t name_len = 0;
+        while (name[name_len]) ++name_len;
+        native_write_text(g_native_fatal_fd, name, name_len);
         native_write_text(g_native_fatal_fd, "\n", 1);
-        n = snprintf(value, sizeof(value), "%ld", thread_id);
-        native_write_text(g_native_fatal_fd, thread_prefix, sizeof(thread_prefix) - 1);
-        if (n > 0) native_write_text(g_native_fatal_fd, value, (size_t)n);
-        native_write_text(g_native_fatal_fd, "\n", 1);
+        native_write_decimal(g_native_fatal_fd, code_prefix, info ? info->si_code : 0);
+        native_write_decimal(g_native_fatal_fd, thread_prefix, thread_id);
         uintptr_t pc = 0, lr = 0;
 #if defined(__aarch64__)
         if (raw_context) {
