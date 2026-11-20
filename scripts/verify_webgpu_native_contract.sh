@@ -47,6 +47,7 @@ grep -q 'cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED' "$ROOT/core/runtim
 # plain F32 ADD when selecting a layer buffer, so this op must remain admitted.
 grep -q 'op->op == GGML_OP_ADD || op->op == GGML_OP_ADD_ID' "$CMAKE" || fail "No-ShaderF16 WebGPU buffer selection must admit the F32 ADD probe"
 grep -q 'AI_CHAT_WEBGPU_FP16_FAST_KERNELS_DISABLED reason=shader_f16_unavailable' "$CMAKE" || fail "No-ShaderF16 fast-kernel fallback must be explicit in diagnostics"
+grep -q 'quantized_f32_matvec_fallback=enabled' "$CMAKE" || fail "No-ShaderF16 quantized mat-vec fallback must be reported as enabled"
 grep -q 'AI_CHAT_WEBGPU_NO_SHADER_F16_QUANT_MATVEC_V1' "$CMAKE" || fail "F32-decoded quantized mat-vec shader patch is missing"
 grep -q 'AI_CHAT_NO_SHADER_F16_COMMON_V1' "$CMAKE" || fail "FP16 storage decoding must have a baseline-F32 shader path"
 grep -q 'AI_CHAT_NO_SHADER_F16_Q8_V1' "$CMAKE" || fail "Q8 activation quantizer must support packed scale storage without ShaderF16"
