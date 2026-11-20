@@ -1043,9 +1043,9 @@ static void append_weight_residency_trace() {
         const ggml_backend_dev_t dev = ggml_backend_buft_get_device(buft);
         const auto dev_type = dev ? ggml_backend_dev_type(dev) : GGML_BACKEND_DEVICE_TYPE_CPU;
 
-        // OpenCL buffers on Android may be host-accessible because the device is
-        // unified memory. Classify by backend device first; otherwise a real GPU
-        // buffer is incorrectly reported as "Host Tensor Memory".
+        // WebGPU buffers may be host-visible on unified-memory devices. Classify
+        // by the owning backend device before the host-buffer flag so real GPU
+        // residency is not incorrectly reported as host memory.
         if (is_webgpu_backend_device(dev)) {
             gpu_bytes += bytes; gpu_tensors++; gpu_buffers.insert(buffer);
         } else if (is_host) {
@@ -1068,8 +1068,8 @@ static void append_weight_residency_trace() {
         }
     }
 
-    // If the registry classification is unusual, use the device actually
-    // attached to a model tensor as the authoritative runtime device.
+    // If registry ordering is unusual, use the WebGPU device attached to a
+    // model tensor as the authoritative runtime device.
     if (!gpu_dev) {
         for (const auto & entry : g_model->tensors_by_name) {
             const ggml_tensor * tensor = entry.second;
