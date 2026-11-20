@@ -182,7 +182,18 @@ object CrashLogStore {
             .joinToString("\n").take(4_000)
         val fingerprint = sha256(fatalTail)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (prefs.getString(KEY_NATIVE_FINGERPRINT, null) == fingerprint) return
+        if (prefs.getString(KEY_NATIVE_FINGERPRINT, null) == fingerprint) {
+            val pendingTrace = prefs.getString(KEY_PENDING_PLATFORM_TRACE, null).orEmpty()
+            if (pendingTrace.isNotBlank()) {
+                val existing = readReport(context).orEmpty()
+                if (!existing.contains("===== ANDROID TOMBSTONE / BACKTRACE =====")) {
+                    appendReport(context, existing + "\n\n===== ANDROID TOMBSTONE / BACKTRACE =====\n" + pendingTrace)
+                }
+                prefs.edit().remove(KEY_PENDING_PLATFORM_EXIT).remove(KEY_PENDING_PLATFORM_TRACE).commit()
+                mutableReport.value = readReport(context)
+            }
+            return
+        }
         fun fatalValue(key: String): String = Regex("^${Regex.escape(key)}=(.*)$", RegexOption.MULTILINE)
             .find(fatalTail)?.groupValues?.get(1)?.trim().orEmpty().ifBlank { "UNKNOWN" }
         val signalNumber = fatalValue("NATIVE_FATAL_SIGNAL")
@@ -242,7 +253,7 @@ object CrashLogStore {
             "NATIVE_WEIGHT_RESIDENCY ", "WEBGPU_MODEL_RESIDENCY ", "WEBGPU_MODEL_RESIDENCY_POLICY ",
             "NATIVE_ATTENTION_POLICY ", "NATIVE_CONTEXT_THREADS ", "NATIVE_GRAPH_REUSE_POLICY ",
             "WEBGPU_CONTEXT_INIT_STARTED", "WEBGPU_MODEL_RESIDENCY_VALIDATED")
-        val successful = lines.filter { line -> markers.any(line::contains) }.takeLast(12)
+        val successful = lines.filter { line -> markers.any { marker -> line.contains(marker) } }.takeLast(12)
         val failures = lines.filter { line -> line.contains("FAILED", true) || line.contains("FATAL", true) ||
             line.contains("ERROR", true) || line.contains("GGML_STATUS_FAILED", true) ||
             line.contains("out of memory", true) || line.contains("assert", true) }.takeLast(12)
@@ -357,6 +368,7 @@ object CrashLogStore {
 
     private fun compactLegacyReport(value: String): String {
         var compact = value
+        compact = compact.replace("Signal: UNKNOWN (6)", "Signal: SIGABRT (6)")
         compact = compact.replace(
             Regex("(?ms)^===== NATIVE TRACE BEFORE CRASH.*?(?=^={8,}.*CRASH|\\z)"),
             "===== NATIVE TRACE =====\\n(ردپای تکراری و طولانی حذف شد؛ خلاصهٔ رویدادهای مهم در گزارش نگه داشته شده است.)\\n"
