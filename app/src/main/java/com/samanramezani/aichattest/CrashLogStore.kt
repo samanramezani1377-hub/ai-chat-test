@@ -211,6 +211,7 @@ object CrashLogStore {
 
         val signalName = Regex("""NATIVE_FATAL_SIGNAL_NAME=([^\s]+)""").find(fatalTail)?.groupValues?.get(1) ?: "UNKNOWN"
         val phase = Regex("""NATIVE_FATAL_SPEC_PHASE=([^\s]+)""").find(fatalTail)?.groupValues?.get(1) ?: "UNKNOWN"
+        val runtimePhase = Regex("""NATIVE_FATAL_RUNTIME_PHASE=([^\s]+)""").find(fatalTail)?.groupValues?.get(1) ?: "UNKNOWN"
         val recentTrace = trace.lineSequence().toList().takeLast(120).joinToString("\n")
         val lastCheckpoint = recentTrace.lineSequence().filter {
             it.contains("MODEL_READY") || it.contains("CONTEXT_INIT") || it.contains("MODEL_LOAD") ||
@@ -222,10 +223,11 @@ object CrashLogStore {
             appendLine("Detected on app restart: ${DateFormat.getDateTimeInstance().format(Date())}")
             appendLine("Crash type: Native fatal signal")
             appendLine("Signal: $signalName (${Regex("""NATIVE_FATAL_SIGNAL=([^\s]+)""").find(fatalTail)?.groupValues?.get(1) ?: "N/A"})")
-            appendLine("Native phase marker: $phase")
+            appendLine("Speculative phase marker: $phase")
+            appendLine("Last native runtime event: $runtimePhase")
             appendLine("Last relevant checkpoint: ${lastCheckpoint ?: "N/A"}")
             appendLine()
-            appendLine(explainNativeFailure(signalName, phase, lastCheckpoint, recentTrace))
+            appendLine(explainNativeFailure(signalName, phase, runtimePhase, lastCheckpoint, recentTrace))
             appendLine()
             appendLine(deviceInfo(context))
             appendLine(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("runtime_context", "Runtime context: unavailable"))
@@ -249,7 +251,7 @@ object CrashLogStore {
         }
     }
 
-    private fun explainNativeFailure(signal: String, phase: String, checkpoint: String?, trace: String): String {
+    private fun explainNativeFailure(signal: String, phase: String, runtimePhase: String, checkpoint: String?, trace: String): String {
         val signalMeaning = when (signal) {
             "SIGABRT" -> "پردازش Native با abort متوقف شده است؛ معمولاً assert داخلی، خطای غیرقابل‌بازیابی کتابخانه یا فراخوانی صریح abort می‌تواند آن را ایجاد کند."
             "SIGSEGV" -> "دسترسی نامعتبر به حافظه رخ داده است (segmentation fault)."
@@ -259,6 +261,10 @@ object CrashLogStore {
             else -> "سیگنال Fatal در لایه Native ثبت شده، اما نوع آن در گزارش قابل تشخیص نیست."
         }
         val clue = when {
+            runtimePhase.contains("sched_reserve", ignoreCase = true) || runtimePhase.contains("graph_reserve", ignoreCase = true) ->
+                "آخرین رویداد Native ثبت‌شده مربوط به رزرو Scheduler/ساخت گراف است: $runtimePhase. این محل توقف را مشخص می‌کند، نه علت ریشه‌ای قطعی را."
+            runtimePhase.contains("FLASH_ATTN_EXT", ignoreCase = true) ->
+                "آخرین رویداد Native ثبت‌شده به FLASH_ATTN_EXT اشاره می‌کند: $runtimePhase. این قرینهٔ مستقیم مرحلهٔ توقف است، اما به‌تنهایی علت ریشه‌ای را اثبات نمی‌کند."
             trace.contains("FLASH_ATTN_EXT") -> "آخرین گراف ثبت‌شده شامل FLASH_ATTN_EXT بوده است. این فقط قرینه‌ای از مرحله اجرای گراف است و به‌تنهایی اثبات نمی‌کند همان عملیات علت Crash بوده است."
             trace.contains("sched_reserve") || trace.contains("graph_reserve") -> "ردپا وارد مرحله رزرو Scheduler/ساخت گراف شده است. این موضوع محل تقریبی توقف را نشان می‌دهد، نه علت ریشه‌ای قطعی را."
             trace.contains("WEBGPU_MODEL_LOAD") || trace.contains("MODEL_LOAD_STARTED_WEBGPU") -> "ردپا در مسیر بارگذاری مدل با اولویت WebGPU قرار داشته است."
