@@ -57,7 +57,7 @@ static uint32_t g_context_length = 0;
 
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
 static void append_native_trace(const char *text);
-static bool init_generation_context();
+static bool init_generation_context(bool use_webgpu_backend);
 static bool init_speculative_runtime();
 static int available_cpu_cores() {
     // Use every CPU core reported by Android's native runtime. This is the
@@ -73,7 +73,7 @@ static int batch_threads() {
     return available_cpu_cores();
 }
 
-static bool init_generation_context() {
+static bool init_generation_context(bool use_webgpu_backend) {
     if (!g_model || g_context_length == 0) return false;
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx = g_context_length;
@@ -87,7 +87,7 @@ static bool init_generation_context() {
     // generation with zero tokens after spending tens of seconds in prefill.
     // Disabling the fused kernel changes the execution path, not model weights,
     // quantization, sampling, or answer quality.
-    const bool use_webgpu_attention = g_gpu && g_webgpu_backend_loaded;
+    const bool use_webgpu_attention = use_webgpu_backend && g_webgpu_backend_loaded;
     cp.flash_attn_type = use_webgpu_attention
         ? LLAMA_FLASH_ATTN_TYPE_AUTO
         : LLAMA_FLASH_ATTN_TYPE_DISABLED;
@@ -158,13 +158,20 @@ static bool validate_gpu_model_residency() {
     if (!g_model) return false;
     size_t gpu_bytes = 0, cpu_bytes = 0, other_bytes = 0;
     size_t gpu_tensors = 0, cpu_tensors = 0, other_tensors = 0;
+    size_t total_weight_bytes = 0;
     for (const auto & entry : g_model->tensors_by_name) {
         const ggml_tensor * tensor = entry.second;
-        if (!tensor || !tensor->buffer) continue;
+        if (!tensor) continue;
+        const size_t bytes = ggml_nbytes(tensor);
+        total_weight_bytes += bytes;
+        if (!tensor->buffer) {
+            ++other_tensors;
+            other_bytes += bytes;
+            continue;
+        }
         const ggml_backend_buffer_type_t buft = ggml_backend_buffer_get_type(tensor->buffer);
         const ggml_backend_dev_t dev = ggml_backend_buft_get_device(buft);
         const auto type = dev ? ggml_backend_dev_type(dev) : GGML_BACKEND_DEVICE_TYPE_CPU;
-        const size_t bytes = ggml_nbytes(tensor);
         if (is_webgpu_backend_device(dev)) {
             gpu_bytes += bytes; ++gpu_tensors;
         } else if (type == GGML_BACKEND_DEVICE_TYPE_CPU) {
@@ -173,20 +180,27 @@ static bool validate_gpu_model_residency() {
             other_bytes += bytes; ++other_tensors;
         }
     }
+    const double gpu_percent = total_weight_bytes > 0
+        ? (100.0 * static_cast<double>(gpu_bytes) / static_cast<double>(total_weight_bytes))
+        : 0.0;
     append_native_trace((std::string("WEBGPU_MODEL_RESIDENCY gpuBytes=") +
         std::to_string(gpu_bytes) + " gpuTensors=" + std::to_string(gpu_tensors) +
         " cpuBytes=" + std::to_string(cpu_bytes) + " cpuTensors=" +
         std::to_string(cpu_tensors) + " otherBytes=" + std::to_string(other_bytes) +
-        " otherTensors=" + std::to_string(other_tensors)).c_str());
+        " otherTensors=" + std::to_string(other_tensors) +
+        " totalWeightBytes=" + std::to_string(total_weight_bytes) +
+        " gpuWeightPercent=" + std::to_string(gpu_percent)).c_str());
 
-    // Accept GPU activation only when model weights are backed by buffers owned
-    // by the WebGPU backend. A different registered GPU backend must never make
-    // this validation pass accidentally.
-    const bool has_gpu_weights = gpu_bytes > 0;
+    // Do not equate a single GPU-owned tensor with whole-model residency.
+    // Report the actual byte share so different architectures and quantizations
+    // can be compared without a Q4/Q6/Q8-specific assumption.
+    const char * residency_mode = gpu_bytes == 0 ? "WEBGPU_REJECTED_NO_GPU_WEIGHTS"
+        : (gpu_percent >= 99.0 ? "WEBGPU_FULL_WEIGHT_RESIDENCY"
+                              : "WEBGPU_MIXED_WEIGHT_RESIDENCY");
     append_native_trace((std::string("WEBGPU_MODEL_RESIDENCY_POLICY mode=") +
-        (has_gpu_weights ? "WEBGPU_GPU_RESIDENT" : "WEBGPU_REJECTED_NO_GPU_WEIGHTS") +
+        residency_mode + " gpuWeightPercent=" + std::to_string(gpu_percent) +
         " wholeModelCpuFallback=enabled").c_str());
-    return has_gpu_weights;
+    return gpu_bytes > 0;
 }
 
 
@@ -1275,7 +1289,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         g_context_length = (uint32_t)effective;
         checkpoint((std::string("CPU_CONTEXT_INIT_STARTED effective_ctx=") +
             std::to_string(effective)).c_str());
-        runtime_ready = init_generation_context();
+        runtime_ready = init_generation_context(false);
         checkpoint(runtime_ready ? "CPU_CONTEXT_INIT_RETURNED_SUCCESS" : "CPU_CONTEXT_INIT_RETURNED_FAILED");
         if (!runtime_ready) {
             append_native_trace("CPU_FALLBACK_FAILED reason=context_init_failed");
