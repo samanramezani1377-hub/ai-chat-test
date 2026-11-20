@@ -277,34 +277,34 @@ endif()
 # returns vec2<f32>. This enables the existing integer-packed Q4/Q5/Q6/Q8
 # dequantization kernels on adapters without the optional ShaderF16 feature.
 function(ai_chat_replace_once var_name old_text new_text description)
-    string(FIND "\${\${var_name}}" "\${old_text}" _patch_pos)
+    string(FIND "${${var_name}}" "${old_text}" _patch_pos)
     if (_patch_pos EQUAL -1)
-        message(FATAL_ERROR "Could not apply no-ShaderF16 WebGPU patch: \${description}")
+        message(FATAL_ERROR "Could not apply no-ShaderF16 WebGPU patch: ${description}")
     endif()
-    string(REPLACE "\${old_text}" "\${new_text}" _patch_result "\${\${var_name}}")
-    set(\${var_name} "\${_patch_result}" PARENT_SCOPE)
+    string(REPLACE "${old_text}" "${new_text}" _patch_result "${${var_name}}")
+    set(${var_name} "${_patch_result}" PARENT_SCOPE)
 endfunction()
 
-set(AI_CHAT_WEBGPU_SHADER_DIR "\${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/wgsl-shaders")
-set(AI_CHAT_WEBGPU_COMMON_DECLS "\${AI_CHAT_WEBGPU_SHADER_DIR}/common_decls.tmpl")
-set(AI_CHAT_WEBGPU_MMV "\${AI_CHAT_WEBGPU_SHADER_DIR}/mul_mat_vec.wgsl")
-set(AI_CHAT_WEBGPU_MMV_ACC "\${AI_CHAT_WEBGPU_SHADER_DIR}/mul_mat_vec_acc.tmpl")
-set(AI_CHAT_WEBGPU_MMV_Q_ACC "\${AI_CHAT_WEBGPU_SHADER_DIR}/mul_mat_vec_q_acc.tmpl")
-set(AI_CHAT_WEBGPU_Q8 "\${AI_CHAT_WEBGPU_SHADER_DIR}/quantize_q8.wgsl")
+set(AI_CHAT_WEBGPU_SHADER_DIR "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/wgsl-shaders")
+set(AI_CHAT_WEBGPU_COMMON_DECLS "${AI_CHAT_WEBGPU_SHADER_DIR}/common_decls.tmpl")
+set(AI_CHAT_WEBGPU_MMV "${AI_CHAT_WEBGPU_SHADER_DIR}/mul_mat_vec.wgsl")
+set(AI_CHAT_WEBGPU_MMV_ACC "${AI_CHAT_WEBGPU_SHADER_DIR}/mul_mat_vec_acc.tmpl")
+set(AI_CHAT_WEBGPU_MMV_Q_ACC "${AI_CHAT_WEBGPU_SHADER_DIR}/mul_mat_vec_q_acc.tmpl")
+set(AI_CHAT_WEBGPU_Q8 "${AI_CHAT_WEBGPU_SHADER_DIR}/quantize_q8.wgsl")
 
 foreach(AI_CHAT_SHADER_FILE IN ITEMS
-    "\${AI_CHAT_WEBGPU_COMMON_DECLS}"
-    "\${AI_CHAT_WEBGPU_MMV}"
-    "\${AI_CHAT_WEBGPU_MMV_ACC}"
-    "\${AI_CHAT_WEBGPU_MMV_Q_ACC}"
-    "\${AI_CHAT_WEBGPU_Q8}")
-    if (NOT EXISTS "\${AI_CHAT_SHADER_FILE}")
-        message(FATAL_ERROR "Required pinned WebGPU quantized mat-vec shader is missing: \${AI_CHAT_SHADER_FILE}")
+    "${AI_CHAT_WEBGPU_COMMON_DECLS}"
+    "${AI_CHAT_WEBGPU_MMV}"
+    "${AI_CHAT_WEBGPU_MMV_ACC}"
+    "${AI_CHAT_WEBGPU_MMV_Q_ACC}"
+    "${AI_CHAT_WEBGPU_Q8}")
+    if (NOT EXISTS "${AI_CHAT_SHADER_FILE}")
+        message(FATAL_ERROR "Required pinned WebGPU quantized mat-vec shader is missing: ${AI_CHAT_SHADER_FILE}")
     endif()
 endforeach()
 
-file(READ "\${AI_CHAT_WEBGPU_COMMON_DECLS}" AI_CHAT_WEBGPU_COMMON_TEXT)
-string(FIND "\${AI_CHAT_WEBGPU_COMMON_TEXT}" "AI_CHAT_NO_SHADER_F16_COMMON_V1" AI_CHAT_WEBGPU_COMMON_PATCHED)
+file(READ "${AI_CHAT_WEBGPU_COMMON_DECLS}" AI_CHAT_WEBGPU_COMMON_TEXT)
+string(FIND "${AI_CHAT_WEBGPU_COMMON_TEXT}" "AI_CHAT_NO_SHADER_F16_COMMON_V1" AI_CHAT_WEBGPU_COMMON_PATCHED)
 if (AI_CHAT_WEBGPU_COMMON_PATCHED EQUAL -1)
     ai_chat_replace_once(AI_CHAT_WEBGPU_COMMON_TEXT
         "fn f16_from_u16(bits: u32) -> f16 {\n    let packed = unpack2x16float(bits);\n    return f16(packed[0]);\n}"
@@ -343,19 +343,19 @@ if (AI_CHAT_WEBGPU_COMMON_PATCHED EQUAL -1)
         "struct q5_K {\n#ifdef NO_SHADER_F16\n    dm: u32,\n#else\n    d: f16,\n    dmin: f16,\n#endif"
         "Q5_K packed scale layout")
     string(APPEND AI_CHAT_WEBGPU_COMMON_TEXT "\n// AI_CHAT_NO_SHADER_F16_COMMON_V1\n")
-    file(WRITE "\${AI_CHAT_WEBGPU_COMMON_DECLS}" "\${AI_CHAT_WEBGPU_COMMON_TEXT}")
+    file(WRITE "${AI_CHAT_WEBGPU_COMMON_DECLS}" "${AI_CHAT_WEBGPU_COMMON_TEXT}")
 endif()
 
-file(READ "\${AI_CHAT_WEBGPU_MMV}" AI_CHAT_WEBGPU_MMV_TEXT)
-string(FIND "\${AI_CHAT_WEBGPU_MMV_TEXT}" "AI_CHAT_NO_SHADER_F16_MMV_V1" AI_CHAT_WEBGPU_MMV_PATCHED)
+file(READ "${AI_CHAT_WEBGPU_MMV}" AI_CHAT_WEBGPU_MMV_TEXT)
+string(FIND "${AI_CHAT_WEBGPU_MMV_TEXT}" "AI_CHAT_NO_SHADER_F16_MMV_V1" AI_CHAT_WEBGPU_MMV_PATCHED)
 if (AI_CHAT_WEBGPU_MMV_PATCHED EQUAL -1)
     ai_chat_replace_once(AI_CHAT_WEBGPU_MMV_TEXT "enable f16;" "#define NO_SHADER_F16\n// FP16 scales are decoded to F32; no ShaderF16 feature is needed." "mat-vec f16 feature declaration")
     string(APPEND AI_CHAT_WEBGPU_MMV_TEXT "\n// AI_CHAT_NO_SHADER_F16_MMV_V1\n")
-    file(WRITE "\${AI_CHAT_WEBGPU_MMV}" "\${AI_CHAT_WEBGPU_MMV_TEXT}")
+    file(WRITE "${AI_CHAT_WEBGPU_MMV}" "${AI_CHAT_WEBGPU_MMV_TEXT}")
 endif()
 
-file(READ "\${AI_CHAT_WEBGPU_Q8}" AI_CHAT_WEBGPU_Q8_TEXT)
-string(FIND "\${AI_CHAT_WEBGPU_Q8_TEXT}" "AI_CHAT_NO_SHADER_F16_Q8_V1" AI_CHAT_WEBGPU_Q8_PATCHED)
+file(READ "${AI_CHAT_WEBGPU_Q8}" AI_CHAT_WEBGPU_Q8_TEXT)
+string(FIND "${AI_CHAT_WEBGPU_Q8_TEXT}" "AI_CHAT_NO_SHADER_F16_Q8_V1" AI_CHAT_WEBGPU_Q8_PATCHED)
 if (AI_CHAT_WEBGPU_Q8_PATCHED EQUAL -1)
     ai_chat_replace_once(AI_CHAT_WEBGPU_Q8_TEXT "enable f16;" "#define NO_SHADER_F16\n// Quantized activations retain the same packed 16-bit scale layout." "Q8 quantizer f16 feature declaration")
     ai_chat_replace_once(AI_CHAT_WEBGPU_Q8_TEXT "src1q[src1q_idx].d = f16(d);" "src1q[src1q_idx].ds = pack2x16float(vec2<f32>(d, 0.0));" "Q8 quantizer scale write")
@@ -363,42 +363,42 @@ if (AI_CHAT_WEBGPU_Q8_PATCHED EQUAL -1)
     ai_chat_replace_once(AI_CHAT_WEBGPU_Q8_TEXT "src1q[src1q_idx].s = s;" "src1q[src1q_idx].ds = pack2x16float(vec2<f32>(d, s));" "Q8 quantizer packed scale/sum write")
     ai_chat_replace_once(AI_CHAT_WEBGPU_Q8_TEXT "src1q[src1q_idx].s = f16(s);" "src1q[src1q_idx].ds = pack2x16float(vec2<f32>(d, s));" "Q8 quantizer workgroup packed scale/sum write")
     string(APPEND AI_CHAT_WEBGPU_Q8_TEXT "\n// AI_CHAT_NO_SHADER_F16_Q8_V1\n")
-    file(WRITE "\${AI_CHAT_WEBGPU_Q8}" "\${AI_CHAT_WEBGPU_Q8_TEXT}")
+    file(WRITE "${AI_CHAT_WEBGPU_Q8}" "${AI_CHAT_WEBGPU_Q8_TEXT}")
 endif()
 
-file(READ "\${AI_CHAT_WEBGPU_MMV_Q_ACC}" AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT)
-string(FIND "\${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}" "AI_CHAT_NO_SHADER_F16_Q8_READ_V1" AI_CHAT_WEBGPU_MMV_Q_ACC_PATCHED)
+file(READ "${AI_CHAT_WEBGPU_MMV_Q_ACC}" AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT)
+string(FIND "${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}" "AI_CHAT_NO_SHADER_F16_Q8_READ_V1" AI_CHAT_WEBGPU_MMV_Q_ACC_PATCHED)
 if (AI_CHAT_WEBGPU_MMV_Q_ACC_PATCHED EQUAL -1)
-    string(REPLACE "f32(src1q[block].d)" "unpack2x16float(src1q[block].ds)[0]" AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT "\${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}")
-    string(REPLACE "f32(src1q[block].s)" "unpack2x16float(src1q[block].ds)[1]" AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT "\${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}")
-    string(REPLACE "B_DS_TYPE(src1q[block].d)" "B_DS_TYPE(unpack2x16float(src1q[block].ds)[0])" AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT "\${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}")
-    string(REPLACE "B_DS_TYPE(src1q[q8_block_idx].d)" "B_DS_TYPE(unpack2x16float(src1q[q8_block_idx].ds)[0])" AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT "\${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}")
-    string(REPLACE "f32(src1q[q8_block_idx].d)" "unpack2x16float(src1q[q8_block_idx].ds)[0]" AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT "\${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}")
-    string(REPLACE "f32(src1q[q8_block_idx].s)" "unpack2x16float(src1q[q8_block_idx].ds)[1]" AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT "\${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}")
-    string(FIND "\${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}" "src1q[block].d" AI_CHAT_WEBGPU_Q8_D_REMAINS)
-    string(FIND "\${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}" "src1q[q8_block_idx].d" AI_CHAT_WEBGPU_Q8_D_INDEX_REMAINS)
+    string(REPLACE "f32(src1q[block].d)" "unpack2x16float(src1q[block].ds)[0]" AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT "${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}")
+    string(REPLACE "f32(src1q[block].s)" "unpack2x16float(src1q[block].ds)[1]" AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT "${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}")
+    string(REPLACE "B_DS_TYPE(src1q[block].d)" "B_DS_TYPE(unpack2x16float(src1q[block].ds)[0])" AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT "${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}")
+    string(REPLACE "B_DS_TYPE(src1q[q8_block_idx].d)" "B_DS_TYPE(unpack2x16float(src1q[q8_block_idx].ds)[0])" AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT "${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}")
+    string(REPLACE "f32(src1q[q8_block_idx].d)" "unpack2x16float(src1q[q8_block_idx].ds)[0]" AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT "${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}")
+    string(REPLACE "f32(src1q[q8_block_idx].s)" "unpack2x16float(src1q[q8_block_idx].ds)[1]" AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT "${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}")
+    string(FIND "${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}" "src1q[block].d" AI_CHAT_WEBGPU_Q8_D_REMAINS)
+    string(FIND "${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}" "src1q[q8_block_idx].d" AI_CHAT_WEBGPU_Q8_D_INDEX_REMAINS)
     if (NOT AI_CHAT_WEBGPU_Q8_D_REMAINS EQUAL -1 OR NOT AI_CHAT_WEBGPU_Q8_D_INDEX_REMAINS EQUAL -1)
         message(FATAL_ERROR "Could not convert all Q8_1 scale reads to packed F32 decoding")
     endif()
     string(APPEND AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT "\n// AI_CHAT_NO_SHADER_F16_Q8_READ_V1\n")
-    file(WRITE "\${AI_CHAT_WEBGPU_MMV_Q_ACC}" "\${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}")
+    file(WRITE "${AI_CHAT_WEBGPU_MMV_Q_ACC}" "${AI_CHAT_WEBGPU_MMV_Q_ACC_TEXT}")
 endif()
 
-file(READ "\${AI_CHAT_WEBGPU_MMV_ACC}" AI_CHAT_WEBGPU_MMV_ACC_TEXT)
-string(FIND "\${AI_CHAT_WEBGPU_MMV_ACC_TEXT}" "AI_CHAT_NO_SHADER_F16_MMV_ACC_V1" AI_CHAT_WEBGPU_MMV_ACC_PATCHED)
+file(READ "${AI_CHAT_WEBGPU_MMV_ACC}" AI_CHAT_WEBGPU_MMV_ACC_TEXT)
+string(FIND "${AI_CHAT_WEBGPU_MMV_ACC_TEXT}" "AI_CHAT_NO_SHADER_F16_MMV_ACC_V1" AI_CHAT_WEBGPU_MMV_ACC_PATCHED)
 if (AI_CHAT_WEBGPU_MMV_ACC_PATCHED EQUAL -1)
     ai_chat_replace_once(AI_CHAT_WEBGPU_MMV_ACC_TEXT
         "f32(bitcast<vec2<f16>>(d_bits)[0])"
         "unpack2x16float(d_bits)[0]"
         "packed FP16 scalar decode in quantized mat-vec accumulator")
     string(APPEND AI_CHAT_WEBGPU_MMV_ACC_TEXT "\n// AI_CHAT_NO_SHADER_F16_MMV_ACC_V1\n")
-    file(WRITE "\${AI_CHAT_WEBGPU_MMV_ACC}" "\${AI_CHAT_WEBGPU_MMV_ACC_TEXT}")
+    file(WRITE "${AI_CHAT_WEBGPU_MMV_ACC}" "${AI_CHAT_WEBGPU_MMV_ACC_TEXT}")
 endif()
 
 # On no-ShaderF16 adapters, only the verified quantized F32 mat-vec shape is
 # admitted. Larger prompt-prefill GEMMs remain on CPU until a separate F32
 # tiled-matmul shader is validated; never route them through the f16 fast path.
-string(FIND "\${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANT_MATVEC_OP_V1" AI_CHAT_WEBGPU_QUANT_MATVEC_OP_PATCHED)
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANT_MATVEC_OP_V1" AI_CHAT_WEBGPU_QUANT_MATVEC_OP_PATCHED)
 if (AI_CHAT_WEBGPU_QUANT_MATVEC_OP_PATCHED EQUAL -1)
     ai_chat_replace_once(AI_CHAT_WEBGPU_SOURCE_TEXT
         "if (uses_f16 || uses_quantized) return false;\n    }"
