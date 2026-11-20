@@ -291,6 +291,9 @@ jobs:
           grep -q 'GL_MAX_SHADER_STORAGE_BLOCK_SIZE' core/runtime-android/src/main/cpp/universal_gpu_adapter.cpp
           grep -q 'gles_compute_supported' core/runtime-android/src/main/cpp/universal_gpu_adapter.h
           grep -q 'AI_CHAT_GPU_ADAPTER_OPENGL_ES=1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_GENERIC_FP32_FALLBACK_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'supports_shader_f16' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'ggml_is_quantized' core/runtime-android/src/main/cpp/CMakeLists.txt
           echo "WebGPU OpenGL ES compatibility policy, CPU fallback, backend assignment, and KV-cache invariants verified"
 
       - name: Assemble debug APK
@@ -301,6 +304,16 @@ jobs:
           --stacktrace
           --console=plain
           --parallel
+
+      - name: Verify conservative WebGPU FP32 fallback patch
+        run: |
+          set -euo pipefail
+          source_file="$(find core/runtime-android -path '*/.cxx/*' -path '*/llama_cpp-src/ggml/src/ggml-webgpu/ggml-webgpu.cpp' -print -quit)"
+          test -n "$source_file"
+          grep -q 'AI_CHAT_GENERIC_FP32_FALLBACK_V1' "$source_file"
+          grep -q 'supports_shader_f16' "$source_file"
+          grep -q 'ggml_is_quantized' "$source_file"
+          echo "Verified: ShaderF16 is optional and unsupported F16/quantized operations are conservatively left for GGML CPU scheduling."
 
       - name: Verify sherpa ONNX Runtime native linkage
         run: |

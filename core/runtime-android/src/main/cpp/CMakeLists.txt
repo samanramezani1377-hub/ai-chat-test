@@ -148,6 +148,53 @@ string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "vulkan_enable_f16_on_nvidia" AI_CHA
 if (NOT AI_CHAT_WEBGPU_VULKAN_TOGGLE_REMAINS EQUAL -1)
     message(FATAL_ERROR "Vulkan-specific Dawn toggles remain in the forced OpenGL ES WebGPU path")
 endif()
+# AI_CHAT_GENERIC_FP32_FALLBACK_V1
+# Make ShaderF16 optional. Devices without it may still execute the strictly
+# F32/I32-safe subset; F16 and quantized kernels remain on CPU until a verified
+# non-F16 implementation is available. Never spoof a feature or compile an
+# unsupported WGSL shader and hope that the driver accepts it.
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_GENERIC_FP32_FALLBACK_V1" AI_CHAT_WEBGPU_FP32_PATCHED)
+if (AI_CHAT_WEBGPU_FP32_PATCHED EQUAL -1)
+    string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "bool         supports_subgroups       = false;" AI_CHAT_WEBGPU_FP32_CAPS_ANCHOR)
+    string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "ctx->webgpu_global_ctx->vendor                    = info.vendor;" AI_CHAT_WEBGPU_FP32_VENDOR_ANCHOR)
+    string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "std::vector<wgpu::FeatureName> required_features       = { wgpu::FeatureName::ShaderF16 };" AI_CHAT_WEBGPU_FP32_FEATURE_ANCHOR)
+    string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "ggml_tensor * src2 = op->src[2];" AI_CHAT_WEBGPU_FP32_SUPPORT_ANCHOR)
+    string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "if (adapter != nullptr && adapter.HasFeature(wgpu::FeatureName::ShaderF16)" AI_CHAT_WEBGPU_FP32_REG_ANCHOR)
+    if (AI_CHAT_WEBGPU_FP32_CAPS_ANCHOR EQUAL -1 OR
+        AI_CHAT_WEBGPU_FP32_VENDOR_ANCHOR EQUAL -1 OR
+        AI_CHAT_WEBGPU_FP32_FEATURE_ANCHOR EQUAL -1 OR
+        AI_CHAT_WEBGPU_FP32_SUPPORT_ANCHOR EQUAL -1 OR
+        AI_CHAT_WEBGPU_FP32_REG_ANCHOR EQUAL -1)
+        message(FATAL_ERROR "Pinned GGML WebGPU source no longer matches the optional ShaderF16 patch anchors")
+    endif()
+
+    string(REPLACE
+        "bool         supports_subgroups       = false;"
+        "bool         supports_shader_f16      = false;\n    bool         supports_subgroups       = false;"
+        AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
+    string(REPLACE
+        "ctx->webgpu_global_ctx->vendor                    = info.vendor;"
+        "ctx->webgpu_global_ctx->vendor                    = info.vendor;\n    ctx->webgpu_global_ctx->capabilities.supports_shader_f16 =\n        ctx->webgpu_global_ctx->adapter.HasFeature(wgpu::FeatureName::ShaderF16);"
+        AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
+    string(REPLACE
+        "std::vector<wgpu::FeatureName> required_features       = { wgpu::FeatureName::ShaderF16 };"
+        "std::vector<wgpu::FeatureName> required_features;\n    if (ctx->webgpu_global_ctx->capabilities.supports_shader_f16) {\n        required_features.push_back(wgpu::FeatureName::ShaderF16);\n    }"
+        AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
+    string(REPLACE
+        "    ggml_tensor * src2 = op->src[2];"
+        "    ggml_tensor * src2 = op->src[2];\n\n    // AI_CHAT_GENERIC_FP32_FALLBACK_V1: conservative dispatch when ShaderF16 is absent.\n    if (!ctx->webgpu_global_ctx->capabilities.supports_shader_f16) {\n        const bool uses_f16 = op->type == GGML_TYPE_F16 ||\n            (src0 != nullptr && src0->type == GGML_TYPE_F16) ||\n            (src1 != nullptr && src1->type == GGML_TYPE_F16) ||\n            (src2 != nullptr && src2->type == GGML_TYPE_F16);\n        const bool uses_quantized =\n            (src0 != nullptr && ggml_is_quantized(src0->type)) ||\n            (src1 != nullptr && ggml_is_quantized(src1->type)) ||\n            (src2 != nullptr && ggml_is_quantized(src2->type));\n        if (uses_f16 || uses_quantized) return false;\n    }"
+        AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
+    string(REPLACE
+        "if (adapter != nullptr && adapter.HasFeature(wgpu::FeatureName::ShaderF16)"
+        "if (adapter != nullptr"
+        AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
+endif()
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_GENERIC_FP32_FALLBACK_V1" AI_CHAT_WEBGPU_FP32_PATCH_VERIFY)
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "supports_shader_f16" AI_CHAT_WEBGPU_FP32_CAPABILITY_VERIFY)
+if (AI_CHAT_WEBGPU_FP32_PATCH_VERIFY EQUAL -1 OR AI_CHAT_WEBGPU_FP32_CAPABILITY_VERIFY EQUAL -1)
+    message(FATAL_ERROR "Could not apply the conservative optional ShaderF16 / FP32 fallback patch")
+endif()
+
 file(WRITE "${AI_CHAT_WEBGPU_SOURCE}" "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
 
 # Do not silently ship a build where OpenMP was requested but FindOpenMP could

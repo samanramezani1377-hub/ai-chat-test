@@ -203,3 +203,33 @@ creation on different Android vendor drivers and to compare the adapter report
 with Dawn's actual WebGPU adapter/device report.
 
 No UI source file is part of this change. No Vulkan dependency is introduced.
+
+
+## Conservative WebGPU path for devices without ShaderF16 (2026-11-20)
+
+The pinned upstream GGML WebGPU backend originally rejected the entire adapter
+unless it exposed `ShaderF16`. That is unnecessarily strict for operations whose
+inputs and outputs are strictly F32/I32, but simply removing the feature check
+would be unsafe because several existing shader paths use F16 arithmetic,
+including quantized matrix kernels.
+
+The Android CMake integration now applies a narrowly scoped, version-anchored
+patch to the pinned GGML source:
+
+- `ShaderF16` is requested only when the selected WebGPU adapter reports it.
+- The WebGPU backend can register without `ShaderF16` as long as native
+  `ImplicitDeviceSynchronization` is still available.
+- When `ShaderF16` is absent, the GGML `supports_op` callback rejects every
+  operation whose input/output tensors are F16 or quantized. GGML's scheduler
+  can then keep those operations on CPU while placing eligible F32/I32
+  operations on WebGPU.
+- The backend does not advertise unsupported quantized kernels and does not
+  pretend a GLES FP16 extension is equivalent to WebGPU `ShaderF16`.
+- CMake fails closed if the pinned source no longer matches the expected patch
+  anchors, rather than silently applying a partial patch.
+
+This is a conservative partial-offload path, not a claim that Q4/Q5/Q6_K
+matrix multiplication is accelerated without ShaderF16. It does not yet add a
+new native GLES backend or custom FP32 WGSL kernels. Existing upstream GGML
+WebGPU F32 kernels are reused. CI checks both that the patch is applied to the
+fetched pinned source and that the Android APK build completes.
