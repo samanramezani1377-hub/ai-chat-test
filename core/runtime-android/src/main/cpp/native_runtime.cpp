@@ -725,6 +725,14 @@ static void append_native_trace(const char *text) {
     g_native_runtime_phase[phase_len].store('\0', std::memory_order_relaxed);
     if (g_native_trace_file.empty()) return;
     std::lock_guard<std::mutex> lock(g_native_marker_mutex);
+    // Keep the persistent diagnostic trace bounded. The newest 1 MiB is enough
+    // for crash triage and avoids unbounded app-private log growth over time.
+    struct stat trace_stat{};
+    if (stat(g_native_trace_file.c_str(), &trace_stat) == 0 &&
+        trace_stat.st_size > 1024 * 1024) {
+        std::ofstream reset(g_native_trace_file, std::ios::trunc);
+        reset.close();
+    }
     std::ofstream out(g_native_trace_file, std::ios::app);
     if (out.is_open()) {
         out << text;
