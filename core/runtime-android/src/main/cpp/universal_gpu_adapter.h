@@ -41,7 +41,9 @@ struct UniversalGpuCapabilities {
 };
 
 // Creates a temporary 1x1 EGL pbuffer + OpenGL ES context, reads real driver
-// capabilities, then releases every EGL/GL object before returning.
+// capabilities, then releases the temporary surface/context. The shared EGL
+// display is intentionally not terminated because Android UI/other libraries
+// may use the process-wide display independently.
 UniversalGpuCapabilities probe_universal_gpu_adapter();
 
 } // namespace ai_chat::gpu
