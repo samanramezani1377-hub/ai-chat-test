@@ -332,13 +332,19 @@ jobs:
             ggml_is_quantized \
             GGML_MAX_SRC \
             AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2 \
-            GGML_OP_SUM_ROWS \
-            AI_CHAT_SOFTMAX_FP32_NO_F16_V1; do
+            GGML_OP_SUM_ROWS; do
             if ! grep -q "$marker" "$cmake_file"; then
               echo "::error::Missing CMake-enforced WebGPU patch marker: $marker"
               exit 1
             fi
           done
+
+          # SOFT_MAX is intentionally excluded from the no-ShaderF16 GPU whitelist:
+          # its upstream WGSL path still requires ShaderF16, so it must remain on CPU.
+          if grep -Eq 'op->op == GGML_OP_SOFT_MAX' "$cmake_file"; then
+            echo "::error::SOFT_MAX must not be admitted to the no-ShaderF16 WebGPU whitelist"
+            exit 1
+          fi
 
           for marker in \
             GGML_OP_ADD_ID \
