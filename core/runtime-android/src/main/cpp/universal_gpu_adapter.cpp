@@ -137,6 +137,25 @@ std::string gl_string(GLenum name) {
     return value ? reinterpret_cast<const char *>(value) : "";
 }
 
+// OpenGL ES 3.x requires indexed extension enumeration. GL_EXTENSIONS passed
+// to glGetString is not a valid extension-query path on ES 3.0+ contexts.
+std::string gl_extensions(int &count) {
+    count = 0;
+    GLint reported_count = 0;
+    glGetIntegerv(GL_NUM_EXTENSIONS, &reported_count);
+    if (glGetError() != GL_NO_ERROR || reported_count < 0) return {};
+
+    std::string extensions;
+    for (GLint i = 0; i < reported_count; ++i) {
+        const GLubyte *value = glGetStringi(GL_EXTENSIONS, static_cast<GLuint>(i));
+        if (!value) continue;
+        if (!extensions.empty()) extensions.push_back(' ');
+        extensions.append(reinterpret_cast<const char *>(value));
+        ++count;
+    }
+    return extensions;
+}
+
 bool has_extension(const std::string &extensions, const char *name) {
     if (extensions.empty() || !name || !*name) return false;
     const std::string needle(name);
@@ -287,13 +306,7 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
     caps.gles_major = major;
     caps.gles_minor = minor;
 
-    const std::string extensions = gl_string(GL_EXTENSIONS);
-    size_t extension_pos = 0;
-    while ((extension_pos = extensions.find(' ', extension_pos)) != std::string::npos) {
-        ++caps.extension_count;
-        ++extension_pos;
-    }
-    if (!extensions.empty()) ++caps.extension_count;
+    const std::string extensions = gl_extensions(caps.extension_count);
 
     caps.gles_compute_supported = major > 3 || (major == 3 && minor >= 1);
     caps.gles_fp16_shader_hint =
