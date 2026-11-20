@@ -149,11 +149,11 @@ if (NOT AI_CHAT_WEBGPU_VULKAN_TOGGLE_REMAINS EQUAL -1)
     message(FATAL_ERROR "Vulkan-specific Dawn toggles remain in the forced OpenGL ES WebGPU path")
 endif()
 # AI_CHAT_GENERIC_FP32_FALLBACK_V1
-# Make ShaderF16 optional. Devices without it may execute the strictly
-# F32/I32-safe subset plus the separately verified quantized F32 mat-vec path.
-# F16 operations and larger quantized prompt-prefill GEMMs remain on CPU until
-# dedicated non-F16 kernels are implemented and validated. Never spoof a feature
-# or compile an unsupported WGSL shader and hope that the driver accepts it.
+# Make ShaderF16 optional. Devices without it may execute the audited
+# F32/I32 subset, quantized F32 MatVec, and the portable F32 register-tile
+# GEMM variant for F32/BF16 or supported quantized weights with F32 activations.
+# F16 tensor operations and unsupported shapes remain on CPU. Never spoof a
+# feature or compile an unsupported WGSL shader and hope that the driver accepts it.
 # Emit Dawn's actual WebGPU feature/limit snapshot separately from the GLES probe.
 # The two reports must not be conflated: GLES extensions do not imply WebGPU features.
 string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_WEBGPU_CAPABILITIES" AI_CHAT_WEBGPU_CAPABILITIES_LOGGED)
