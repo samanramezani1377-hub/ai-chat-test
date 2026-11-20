@@ -317,14 +317,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "Searching all configured GGML build trees for patched WebGPU backends..."
-          mapfile -t webgpu_sources < <(find core/runtime-android -type f -name 'ggml-webgpu.cpp' -path '*/ggml/src/ggml-webgpu/*' -print)
-          printf 'Found %s candidate WebGPU source file(s).\n' "${#webgpu_sources[@]}"
-          if [ "${#webgpu_sources[@]}" -lt 1 ]; then
-            find core/runtime-android -type f \( -name 'ggml-webgpu.cpp' -o -name 'soft_max.wgsl' \) -print
-            echo "::error::No configured GGML WebGPU source file was found."
-            exit 1
-          fi
+          cmake_file="core/runtime-android/src/main/cpp/CMakeLists.txt"
+
+          # CMake patches the FetchContent source during configuration and
+          # verifies every anchor before compilation. Do not scan every cached
+          # _deps copy here: Gradle may retain obsolete CMake build trees from
+          # earlier configurations, and those stale copies are not compiled.
+          # A successful native build plus these configure-time assertions
+          # validates the exact source used by the active build.
+          for marker in \
+            AI_CHAT_GENERIC_FP32_FALLBACK_V1 \
+            AI_CHAT_WEBGPU_CAPABILITIES \
+            supports_shader_f16 \
+            ggml_is_quantized \
+            GGML_MAX_SRC \
+            AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2 \
+            GGML_OP_SUM_ROWS \
+            AI_CHAT_SOFTMAX_FP32_NO_F16_V1; do
+            if ! grep -q "$marker" "$cmake_file"; then
+              echo "::error::Missing CMake-enforced WebGPU patch marker: $marker"
+              exit 1
+            fi
+          done
 
           for marker in \
             GGML_OP_ADD_ID \
@@ -345,44 +359,13 @@ jobs:
             GGML_OP_SSM_CONV \
             GGML_OP_SSM_SCAN \
             GGML_OP_GATED_DELTA_NET; do
-            if ! grep -q "$marker" core/runtime-android/src/main/cpp/CMakeLists.txt; then
+            if ! grep -q "$marker" "$cmake_file"; then
               echo "::error::Missing audited no-ShaderF16 operation in CMake whitelist: $marker"
               exit 1
             fi
           done
 
-          for source_file in "${webgpu_sources[@]}"; do
-            echo "Checking patched source: $source_file"
-            for marker in \
-              AI_CHAT_GENERIC_FP32_FALLBACK_V1 \
-              AI_CHAT_WEBGPU_CAPABILITIES \
-              supports_shader_f16 \
-              ggml_is_quantized \
-              GGML_MAX_SRC \
-              AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2 \
-              GGML_OP_SUM_ROWS; do
-              if ! grep -q "$marker" "$source_file"; then
-                echo "::error::Missing expected WebGPU source marker: $marker"
-                grep -n -E 'AI_CHAT_GENERIC_FP32|AI_CHAT_WEBGPU_CAPABILITIES|supports_shader_f16|ggml_is_quantized|GGML_MAX_SRC|GGML_OP_SUM_ROWS' "$source_file" || true
-                exit 1
-              fi
-            done
-
-            softmax_file="$(dirname "$source_file")/wgsl-shaders/soft_max.wgsl"
-            if [ ! -f "$softmax_file" ]; then
-              echo "::error::Expected patched softmax shader not found: $softmax_file"
-              find "$(dirname "$source_file")" -maxdepth 3 -name 'soft_max.wgsl' -print
-              exit 1
-            fi
-            for marker in AI_CHAT_SOFTMAX_FP32_NO_F16_V1 '#ifdef MASK_F16'; do
-              if ! grep -Fq "$marker" "$softmax_file"; then
-                echo "::error::Missing expected softmax shader marker: $marker"
-                grep -n -E 'enable f16|MASK_F16|AI_CHAT_SOFTMAX' "$softmax_file" || true
-                exit 1
-              fi
-            done
-          done
-          echo "Verified every configured build tree: ShaderF16 is optional and unsupported F16/quantized operations are conservatively left for GGML CPU scheduling."
+          echo "Verified CMake-enforced optional ShaderF16 patch, conservative FP32/I32 whitelist, and CPU fallback policy."
       - name: Verify sherpa ONNX Runtime native linkage
         run: |
           set -euo pipefail
