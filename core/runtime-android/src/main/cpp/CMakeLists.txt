@@ -108,16 +108,28 @@ if (NOT EXISTS "${AI_CHAT_WEBGPU_SOURCE}")
     message(FATAL_ERROR "Pinned llama.cpp revision does not contain the GGML WebGPU backend")
 endif()
 file(READ "${AI_CHAT_WEBGPU_SOURCE}" AI_CHAT_WEBGPU_SOURCE_TEXT)
-string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "options.featureLevel = wgpu::FeatureLevel::Compatibility" AI_CHAT_WEBGPU_COMPAT_ALREADY_SET)
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "wgpu::RequestAdapterOptions options = {};" AI_CHAT_WEBGPU_OPTIONS_POS)
+if (AI_CHAT_WEBGPU_OPTIONS_POS EQUAL -1)
+    message(FATAL_ERROR "Could not locate GGML WebGPU adapter options in pinned source")
+endif()
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "options.featureLevel = wgpu::FeatureLevel::Compatibility;" AI_CHAT_WEBGPU_COMPAT_ALREADY_SET)
 if (AI_CHAT_WEBGPU_COMPAT_ALREADY_SET EQUAL -1)
-    string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "wgpu::RequestAdapterOptions options = {};" AI_CHAT_WEBGPU_OPTIONS_POS)
-    if (AI_CHAT_WEBGPU_OPTIONS_POS EQUAL -1)
-        message(FATAL_ERROR "Could not locate GGML WebGPU adapter options in pinned source")
-    endif()
     string(REPLACE
         "wgpu::RequestAdapterOptions options = {};"
-        "wgpu::RequestAdapterOptions options = {};\n    options.featureLevel = wgpu::FeatureLevel::Compatibility;\n    options.backendType = wgpu::BackendType::OpenGLES;"
+        "wgpu::RequestAdapterOptions options = {};\n    options.featureLevel = wgpu::FeatureLevel::Compatibility;"
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
+endif()
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "options.backendType = wgpu::BackendType::OpenGLES;" AI_CHAT_WEBGPU_GLES_ALREADY_SET)
+if (AI_CHAT_WEBGPU_GLES_ALREADY_SET EQUAL -1)
+    string(REPLACE
+        "options.featureLevel = wgpu::FeatureLevel::Compatibility;"
+        "options.featureLevel = wgpu::FeatureLevel::Compatibility;\n    options.backendType = wgpu::BackendType::OpenGLES;"
+        AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
+endif()
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "options.featureLevel = wgpu::FeatureLevel::Compatibility;" AI_CHAT_WEBGPU_COMPAT_VERIFY)
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "options.backendType = wgpu::BackendType::OpenGLES;" AI_CHAT_WEBGPU_GLES_VERIFY)
+if (AI_CHAT_WEBGPU_COMPAT_VERIFY EQUAL -1 OR AI_CHAT_WEBGPU_GLES_VERIFY EQUAL -1)
+    message(FATAL_ERROR "Could not enforce both WebGPU Compatibility and OpenGL ES adapter selection")
 endif()
 # Remove Vulkan-only Dawn toggles from the Android OpenGL ES request.
 string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "const char * const          adapterEnabledToggles[]" AI_CHAT_WEBGPU_VULKAN_TOGGLE_POS)
