@@ -51,6 +51,7 @@ static std::string g_native_trace_file;
 static int g_native_fatal_fd = -1;
 // Fixed-size last-event snapshot, readable from the fatal signal handler.
 static std::atomic<char> g_native_runtime_phase[128]{};
+static_assert(std::atomic<char>::is_always_lock_free, "Fatal signal phase snapshot requires lock-free atomics");
 static std::mutex g_native_marker_mutex;
 static std::mutex g_backend_init_mutex;
 static bool g_backend_initialized = false;
