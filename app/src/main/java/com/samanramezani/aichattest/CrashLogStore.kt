@@ -187,7 +187,8 @@ object CrashLogStore {
             if (pendingTrace.isNotBlank()) {
                 val existing = readReport(context).orEmpty()
                 if (!existing.contains("===== ANDROID TOMBSTONE / BACKTRACE =====")) {
-                    appendReport(context, existing + "\n\n===== ANDROID TOMBSTONE / BACKTRACE =====\n" + pendingTrace)
+                    val file = File(context.filesDir, FILE_NAME)
+                    file.writeText((existing + "\n\n===== ANDROID TOMBSTONE / BACKTRACE =====\n" + pendingTrace).takeLast(MAX_REPORT_CHARS))
                 }
                 prefs.edit().remove(KEY_PENDING_PLATFORM_EXIT).remove(KEY_PENDING_PLATFORM_TRACE).commit()
                 mutableReport.value = readReport(context)
