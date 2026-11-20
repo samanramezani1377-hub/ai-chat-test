@@ -52,11 +52,16 @@ grep -q 'AI_CHAT_WEBGPU_NO_SHADER_F16_QUANT_MATVEC_V1' "$CMAKE" || fail "F32-dec
 grep -q 'AI_CHAT_NO_SHADER_F16_COMMON_V1' "$CMAKE" || fail "FP16 storage decoding must have a baseline-F32 shader path"
 grep -q 'AI_CHAT_NO_SHADER_F16_Q8_V1' "$CMAKE" || fail "Q8 activation quantizer must support packed scale storage without ShaderF16"
 grep -q 'AI_CHAT_NO_SHADER_F16_Q8_READ_V1' "$CMAKE" || fail "Quantized mat-vec must decode packed Q8 scales with F32"
-grep -q 'AI_CHAT_NO_SHADER_F16_QUANT_MATVEC_OP_V2' "$CMAKE" || fail "No-ShaderF16 quantized MUL_MAT dispatch is missing"
-grep -q 'f32_quantized_matvec' "$CMAKE" || fail "Quantized no-ShaderF16 dispatch must be limited to the validated mat-vec shape"
+grep -q 'AI_CHAT_NO_SHADER_F16_QUANT_MATMUL_OP_V4' "$CMAKE" || fail "No-ShaderF16 quantized MUL_MAT dispatch is missing"
+grep -q 'f32_quantized_matmul' "$CMAKE" || fail "Quantized no-ShaderF16 F32-input GEMM must use the portable register-tile shader"
 grep -q 'pack2x16float(vec2<f32>(d, s))' "$CMAKE" || fail "Q8_1 scale/sum must be packed without WGSL f16 arithmetic"
 grep -q 'unpack2x16float(src1q\[block\].ds)' "$CMAKE" || fail "Q8_1 packed scales must be decoded with baseline F32 operations"
 grep -q 'AI_CHAT_NO_SHADER_F16_MMV_ACC_V1' "$CMAKE" || fail "Quantized mat-vec accumulator still depends on the WGSL f16 type"
+grep -q 'AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_PIPELINE_V1' "$CMAKE" || fail "Portable no-ShaderF16 register-tile GEMM pipeline is missing"
+grep -q 'AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_TILE_V1' "$CMAKE" || fail "Portable no-ShaderF16 register-tile WGSL variant is missing"
+grep -q 'AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_DECLS_V1' "$CMAKE" || fail "Portable no-ShaderF16 quantized dequant declarations are missing"
+grep -q 'key.use_subgroup_matrix = context.supports_subgroup_matrix && context.supports_shader_f16' "$CMAKE" || fail "No-ShaderF16 GEMM must avoid the F16 subgroup-matrix shader"
+grep -q 'NO_SHADER_F16' "$CMAKE" || fail "No-ShaderF16 F32 arithmetic define is missing"
 
 # The imported AAR library must never be used as a native WebGPU C ABI provider.
 ! grep -q 'webgpu_c_bundled' "$FIND_DAWN" || fail "FindDawn must not link the AndroidX JNI-only library"
