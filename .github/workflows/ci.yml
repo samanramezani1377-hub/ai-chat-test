@@ -22,7 +22,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GRADLE_VERSION: '8.11.1'
+  GRADLE_VERSION: '8.13'
   JAVA_VERSION: '17'
 
 jobs:
