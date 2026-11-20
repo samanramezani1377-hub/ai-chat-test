@@ -84,7 +84,9 @@ internal fun MainScreen(container: AppContainer, initialSettingsSection: String?
     fun refreshModels() { scope.launch(Dispatchers.Default) { val listed = manager?.models(); val drafts = manager?.draftModels(); val active = manager?.activeModel(); val draft = (active as? ModelResult.Success)?.value?.let { manager?.draftForModel(it.id) }; withContext(Dispatchers.Main) { models = (listed as? ModelResult.Success)?.value ?: emptyList(); draftModels = (drafts as? ModelResult.Success)?.value ?: emptyList(); activeModel = (active as? ModelResult.Success)?.value; activeDraft = (draft as? ModelResult.Success)?.value; if (!generating && !approvalBusy && !importBusy && !activationBusy) runtimeStatus = if (activeModel != null || container.isCloudflareConfigured()) "آماده" else "خارج از دسترس" } } }
     fun refreshHistory() { scope.launch(Dispatchers.Default) { val records = history.recent(recentLimit); val allText = records.associate { record -> record.id to history.messages(record.id).joinToString(" ") { it.content } }; val previews = records.associate { record -> record.id to history.messages(record.id).lastOrNull()?.content.orEmpty().take(180) }; withContext(Dispatchers.Main) { conversations = records; conversationSearchIndex = allText; conversationPreviews = previews } } }
     LaunchedEffect(activeModel, runtimeStatus, generating) {
-        CrashLogStore.recordRuntimeContext(context, activeModel?.displayName, runtimeStatus, generating)
+        withContext(Dispatchers.IO) {
+            CrashLogStore.recordRuntimeContext(context, activeModel?.displayName, runtimeStatus, generating)
+        }
     }
     LaunchedEffect(Unit) {
         val startup = withContext(Dispatchers.Default) {
