@@ -46,6 +46,7 @@ grep -q 'cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED' "$ROOT/core/runtim
 # Non-ShaderF16 adapters use the conservative F32/I32 path. llama.cpp probes
 # plain F32 ADD when selecting a layer buffer, so this op must remain admitted.
 grep -q 'op->op == GGML_OP_ADD || op->op == GGML_OP_ADD_ID' "$CMAKE" || fail "No-ShaderF16 WebGPU buffer selection must admit the F32 ADD probe"
+grep -q 'AI_CHAT_WEBGPU_QUANTIZED_KERNELS_DISABLED reason=shader_f16_unavailable' "$CMAKE" || fail "No-ShaderF16 quantized-kernel fallback must be explicit in diagnostics"
 
 # The imported AAR library must never be used as a native WebGPU C ABI provider.
 ! grep -q 'webgpu_c_bundled' "$FIND_DAWN" || fail "FindDawn must not link the AndroidX JNI-only library"
