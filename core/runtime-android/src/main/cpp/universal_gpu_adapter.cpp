@@ -228,6 +228,8 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
     caps.egl_version = egl_string(display, EGL_VERSION);
     caps.egl_vendor = egl_string(display, EGL_VENDOR);
 
+    // Capture the caller's EGL context and client API before switching to GLES.
+    EglCurrentContext current_context;
     EglApiBinding api_binding;
     if (!api_binding.bind_opengles()) {
         caps.failure_reason = "egl_bind_opengles_api_failed_" + egl_error_name(eglGetError());
@@ -265,7 +267,6 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
         return caps;
     }
 
-    EglCurrentContext current_context;
     if (!current_context.bind(display, surface, context)) {
         caps.failure_reason = "egl_make_current_failed_" + egl_error_name(eglGetError());
         eglDestroyContext(display, context);
