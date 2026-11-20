@@ -207,7 +207,7 @@ jobs:
           restore-keys: |
             ccache-${{ runner.os }}-ndk27-arm64-
 
-      - name: Verify OpenCL-first runtime invariants
+      - name: Verify WebGPU OpenGL ES compatibility runtime invariants
         run: |
           set -euo pipefail
           ! grep -R "GGML_OPENCL_ADRENO_XMEM_GEMM.*1" -n core/runtime-android/src/main/cpp
@@ -219,6 +219,9 @@ jobs:
           # Match a real setenv call, not unsetenv (which contains setenv as a substring).
           ! grep -Eq '(^|[^[:alnum:]_])setenv\("GGML_OPENCL_Q6K_GEMV_TILED"' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'GGML_OPENCL_USE_ADRENO_KERNELS OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'GGML_WEBGPU ON' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'FeatureLevel::Compatibility' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'BackendType::OpenGLES' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'GGML_CPU_KLEIDIAI ON' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'GGML_OPENMP ON' core/runtime-android/src/main/cpp/CMakeLists.txt
           # The generic CPU backend must stay on a portable ARMv8-A baseline.
@@ -236,12 +239,14 @@ jobs:
           grep -q 'NATIVE_OPENMP_POLICY enabled=1 linkage=static' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'NATIVE_KLEIDIAI_POLICY enabled=1 cpuRuntimeDispatch=1' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'NATIVE_CPU_ARCH_POLICY baseline=' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'NATIVE_EXECUTION_POLICY mode=OPENCL_GPU_PREFERRED' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'NATIVE_EXECUTION_POLICY mode=WEBGPU_OPENGL_ES_COMPATIBILITY' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'WEBGPU_STATIC_REGISTRATION' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'WEBGPU_MODEL_RESIDENCY_VALIDATED' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'wholeModelCpuFallback=enabled' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'OPENCL_ATTEMPT_FAILED reason=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'WEBGPU_ATTEMPT_FAILED reason=' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'CPU_FALLBACK_STARTED gpuAttempted=' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'CPU_FALLBACK_FAILED reason=' core/runtime-android/src/main/cpp/native_runtime.cpp
-          grep -q 'OPENCL_MODEL_RESIDENCY_POLICY mode=' core/runtime-android/src/main/cpp/native_runtime.cpp
+          grep -q 'WEBGPU_MODEL_RESIDENCY_POLICY mode=' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'NATIVE_EXECUTION_PROFILE mode=' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
           grep -q 'AI_CHAT_BACKEND_ASSIGNMENT_TRACE_V3' core/runtime-android/src/main/cpp/cmake/patch_backend_assignment_trace.cmake
           grep -q 'AI_CHAT_BACKEND_SPLIT_TIMING' core/runtime-android/src/main/cpp/cmake/patch_backend_assignment_trace.cmake
@@ -262,7 +267,12 @@ jobs:
           grep -q 'resident_hybrid_exact_prefix' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
           grep -q 'prompt_tokens.size() > g_cached_prompt_tokens.size()' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
           ! grep -q 'NATIVE_KV_CACHE_HYBRID_DISABLED' core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp
-          echo "OpenCL-first fallback policy, backend assignment, profiling, and KV-cache invariants verified"
+          echo "WebGPU OpenGL ES compatibility policy, CPU fallback, backend assignment, and KV-cache invariants verified"
+
+      - name: Install Dawn C++ header generator dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-jinja2
 
       - name: Assemble debug APK
         run: >-
@@ -282,6 +292,7 @@ jobs:
           unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime.so'
           unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libonnxruntime4j_jni.so'
           unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/liblaya_tokenizers.so'
+          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libwebgpu_c_bundled.so'
           unzip -p "$apk" lib/arm64-v8a/libonnxruntime4j_jni.so > "$RUNNER_TEMP/libonnxruntime4j_jni.so"
           readelf -d --wide "$RUNNER_TEMP/libonnxruntime4j_jni.so" | grep -F 'libonnxruntime.so'
           unzip -p "$apk" lib/arm64-v8a/libonnxruntime.so > "$RUNNER_TEMP/libonnxruntime.so"

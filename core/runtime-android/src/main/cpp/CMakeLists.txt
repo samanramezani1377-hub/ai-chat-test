@@ -127,6 +127,10 @@ if (NOT AI_CHAT_WEBGPU_VULKAN_TOGGLE_POS EQUAL -1)
         ""
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
 endif()
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "vulkan_enable_f16_on_nvidia" AI_CHAT_WEBGPU_VULKAN_TOGGLE_REMAINS)
+if (NOT AI_CHAT_WEBGPU_VULKAN_TOGGLE_REMAINS EQUAL -1)
+    message(FATAL_ERROR "Vulkan-specific Dawn toggles remain in the forced OpenGL ES WebGPU path")
+endif()
 file(WRITE "${AI_CHAT_WEBGPU_SOURCE}" "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
 
 # Do not silently ship a build where OpenMP was requested but FindOpenMP could
