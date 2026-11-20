@@ -47,7 +47,7 @@ internal fun CrashLogPage() {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("ثبت و بررسی توقف غیرعادی برنامه", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "خطاهای Java/Kotlin و سیگنال‌های Fatal در کد Native پس از راه‌اندازی مجدد برنامه اینجا ذخیره می‌شوند. گزارش شامل مشخصات دستگاه، مدل و Runtime، مرحله آخر اجرا، توضیح فنی، Stack Trace و ردپای خام Native است.",
+                        "خطاهای Java/Kotlin و کرش‌های Native پس از راه‌اندازی مجدد اینجا ثبت می‌شوند. گزارش فقط اطلاعات مهم، نتایج موفق کلیدی، مرحلهٔ توقف و backtrace سیستم (در صورت دسترسی) را نگه می‌دارد؛ لاگ‌های تکراری و جزئیات غیرضروری حذف می‌شوند.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
