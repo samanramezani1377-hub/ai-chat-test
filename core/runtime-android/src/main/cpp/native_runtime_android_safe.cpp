@@ -177,6 +177,7 @@ static void clear_android_generation_cache() {
 
 #include <signal.h>
 #include <unistd.h>
+#include <atomic>
 #include <vector>
 #include <string>
 #include <chrono>
@@ -192,8 +193,17 @@ static std::string g_target_model_path;
 static double g_spec_accept_ema=1.0;
 static common_speculative_init_result_ptr g_spec_init;
 static common_speculative * g_spec = nullptr;
-static volatile const char * g_spec_phase = "IDLE";
-static void set_spec_phase(const char * phase) { g_spec_phase = phase ? phase : "UNKNOWN"; }
+static std::atomic<char> g_native_spec_phase[96]{};
+static_assert(std::atomic<char>::is_always_lock_free, "Fatal signal speculative phase snapshot requires lock-free atomics");
+static void set_spec_phase(const char * phase) {
+    const char * value = phase ? phase : "UNKNOWN";
+    size_t i = 0;
+    while (i + 1 < 96 && value[i]) {
+        g_native_spec_phase[i].store(value[i], std::memory_order_relaxed);
+        ++i;
+    }
+    g_native_spec_phase[i].store(0, std::memory_order_relaxed);
+}
 static void append_native_trace(const char *text);
 static void append_weight_residency_trace();
 
@@ -743,7 +753,9 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
 
         const char * signal_name = native_signal_name(signal_number);
         native_write_text(g_native_fatal_fd, name_prefix, sizeof(name_prefix) - 1);
-        native_write_text(g_native_fatal_fd, signal_name, std::strlen(signal_name));
+        size_t signal_name_len = 0;
+        while (signal_name[signal_name_len]) ++signal_name_len;
+        native_write_text(g_native_fatal_fd, signal_name, signal_name_len);
         native_write_text(g_native_fatal_fd, "\n", 1);
 
         const int signal_code = info ? info->si_code : 0;
@@ -766,12 +778,12 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
         native_write_text(g_native_fatal_fd, "\n", 1);
 
         native_write_text(g_native_fatal_fd, spec_prefix, sizeof(spec_prefix) - 1);
-        const volatile char * spec = g_spec_phase ? g_spec_phase : "UNKNOWN";
         char spec_value[96];
         size_t spec_len = 0;
-        while (spec_len < sizeof(spec_value) && spec[spec_len]) {
-            spec_value[spec_len] = spec[spec_len];
-            ++spec_len;
+        while (spec_len + 1 < sizeof(spec_value)) {
+            const char current = g_native_spec_phase[spec_len].load(std::memory_order_relaxed);
+            if (!current) break;
+            spec_value[spec_len++] = current;
         }
         native_write_text(g_native_fatal_fd, spec_value, spec_len);
         native_write_text(g_native_fatal_fd, "\n", 1);
@@ -813,6 +825,7 @@ static void android_fatal_signal_handler(int signal_number, siginfo_t * info, vo
     _exit(128 + signal_number);
 }
 static void install_native_fatal_handlers() {
+    set_spec_phase("IDLE");
     struct sigaction action{};
     sigemptyset(&action.sa_mask);
     action.sa_sigaction = android_fatal_signal_handler;
