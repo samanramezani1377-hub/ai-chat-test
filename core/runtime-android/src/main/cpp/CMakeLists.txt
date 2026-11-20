@@ -203,7 +203,7 @@ if (AI_CHAT_WEBGPU_FP32_PATCHED EQUAL -1)
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
     string(REPLACE
         "ctx->webgpu_global_ctx->vendor                    = info.vendor;"
-        "ctx->webgpu_global_ctx->vendor                    = info.vendor;\n    ctx->webgpu_global_ctx->capabilities.supports_shader_f16 =\n        ctx->webgpu_global_ctx->adapter.HasFeature(wgpu::FeatureName::ShaderF16);"
+        "ctx->webgpu_global_ctx->vendor                    = info.vendor;\n    ctx->webgpu_global_ctx->capabilities.supports_shader_f16 =\n        ctx->webgpu_global_ctx->adapter.HasFeature(wgpu::FeatureName::ShaderF16);\n    if (!ctx->webgpu_global_ctx->capabilities.supports_shader_f16) {\n        GGML_LOG_WARN(\"AI_CHAT_WEBGPU_QUANTIZED_KERNELS_DISABLED reason=shader_f16_unavailable; upstream matmul WGSL uses f16 workgroup storage\\n\");\n    }"
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
     string(REPLACE
         "std::vector<wgpu::FeatureName> required_features       = { wgpu::FeatureName::ShaderF16 };"
