@@ -186,7 +186,7 @@ object CrashLogStore {
             }
             val nativeTrace = readNativeTrace(context)
             val fatalIndex = nativeTrace.lastIndexOf("NATIVE_FATAL_SIGNAL=")
-            if (exit.reason == ApplicationExitInfo.REASON_CRASH_NATIVE && fatalIndex >= 0) {
+            if (exit.reason in setOf(ApplicationExitInfo.REASON_CRASH_NATIVE, ApplicationExitInfo.REASON_SIGNALED) && fatalIndex >= 0) {
                 val fatalLines = nativeTrace.substring(fatalIndex).lineSequence()
                     .takeWhile { it.startsWith("NATIVE_FATAL_") || it.isBlank() }
                     .joinToString("\n")
