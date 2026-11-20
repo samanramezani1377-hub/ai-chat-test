@@ -837,7 +837,9 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
         native_write_text(g_native_fatal_fd, "\n", 1);
         native_write_hex(g_native_fatal_fd, pc_prefix, pc);
         native_write_hex(g_native_fatal_fd, lr_prefix, lr);
-        native_write_hex(g_native_fatal_fd, addr_prefix, info ? (uintptr_t)info->si_addr : 0);
+        if (info && signal_number != SIGABRT) {
+            native_write_hex(g_native_fatal_fd, addr_prefix, (uintptr_t)info->si_addr);
+        }
         fsync(g_native_fatal_fd);
     }
     _exit(128 + signal_number);
@@ -926,6 +928,7 @@ static std::string gguf_preflight(const char *path) {
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jclass, jboolean enable_gpu) {
+    set_spec_phase("NATIVE_INIT");
     LOGI("ACTIVATION_NATIVE_INIT_STARTED gpu=%d", enable_gpu ? 1 : 0);
     if (!g_native_marker_file.empty()) {
         append_native_trace(enable_gpu ? "===== NATIVE INIT GPU REQUESTED =====" : "===== NATIVE INIT CPU ONLY =====");
