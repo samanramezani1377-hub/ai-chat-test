@@ -10,11 +10,10 @@ val webgpuNativeAar = configurations.create("webgpuNativeAar") {
     isTransitive = false
 }
 val webgpuNativeOutput = layout.buildDirectory.dir("generated/webgpu-native")
-val webgpuNativeLibrary = webgpuNativeOutput.map { it.file("jni/arm64-v8a/libwebgpu_c_bundled.so") }
-val webgpuDawnMetadata = webgpuNativeOutput.map { it.file("assets/dawn_build_metadata.json") }
-val extractWebGpuNativeLibrary = tasks.register<Copy>("extractWebGpuNativeLibrary") {
+ val webgpuDawnMetadata = webgpuNativeOutput.map { it.file("assets/dawn_build_metadata.json") }
+val extractWebGpuDawnMetadata = tasks.register<Copy>("extractWebGpuDawnMetadata") {
     from(zipTree(webgpuNativeAar.singleFile)) {
-        include("jni/arm64-v8a/libwebgpu_c_bundled.so", "assets/dawn_build_metadata.json")
+        include("assets/dawn_build_metadata.json")
         includeEmptyDirs = false
     }
     into(webgpuNativeOutput)
@@ -59,8 +58,7 @@ android {
                     "-DOpenMP_CXX_FLAGS=-fopenmp -static-openmp",
                     "-DGGML_LLAMAFILE=OFF",
                     "-DGGML_OPENCL=ON",
-                    "-DAI_CHAT_WEBGPU_LIBRARY=${webgpuNativeLibrary.get().asFile.absolutePath}",
-                    "-DAI_CHAT_DAWN_METADATA_FILE=${webgpuDawnMetadata.get().asFile.absolutePath}",
+                     "-DAI_CHAT_DAWN_METADATA_FILE=${webgpuDawnMetadata.get().asFile.absolutePath}",
                     "-DGGML_VULKAN=OFF",
                     "-DCMAKE_BUILD_TYPE=Release",
                 )
@@ -115,10 +113,9 @@ dependencies {
     implementation(project(":core:domain"))
     implementation(project(":core:runtime"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    // AndroidX packages Dawn's .so and matching build metadata in the AAR's jniLibs/assets.
-    // It does not publish a Prefab CMake package; the native build extracts and imports the AAR .so.
-    // No WebView or UI surface is created.
-    implementation("androidx.webgpu:webgpu:$androidXWebGpuVersion")
+    // Use AndroidX only as the source of the exact Dawn revision metadata. The native
+    // GGML backend links a separately built Dawn C ABI library; the AAR's JNI-only .so
+    // is intentionally not packaged or linked into this runtime.
     add(webgpuNativeAar.name, "androidx.webgpu:webgpu:$androidXWebGpuVersion@aar")
     testImplementation(kotlin("test"))
     testImplementation(kotlin("test-junit5"))
@@ -130,6 +127,6 @@ tasks.withType<Test>().configureEach {
 
 tasks.configureEach {
     if (name.startsWith("configureCMake")) {
-        dependsOn(extractWebGpuNativeLibrary)
+        dependsOn(extractWebGpuDawnMetadata)
     }
 }
