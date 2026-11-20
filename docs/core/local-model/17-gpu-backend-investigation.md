@@ -95,3 +95,32 @@ No runtime, test, workflow, or native source is deleted solely because its filen
 looks old or experimental. A deletion requires proof that it is unreferenced by Gradle,
 CMake, CI, scripts, runtime loading, and current product paths. The top-level duplicate
 runtime source is a candidate for this audit, not yet approved for deletion.
+
+
+## AndroidX Jetpack WebGPU integration (new-kor)
+
+The Android runtime now declares the official `androidx.webgpu:webgpu:1.0.0-alpha06`
+artifact and consumes its Dawn native implementation through Android Gradle Prefab.
+The existing GGML WebGPU backend is compiled and statically linked into
+`ai_chat_runtime`; no WebView, browser surface, Activity, Compose element, or UI
+control is created for inference.
+
+The pinned GGML WebGPU adapter request is forced to
+`FeatureLevel::Compatibility` and `BackendType::OpenGLES`. Vulkan-specific Dawn
+toggles are removed from this request. The native runtime registers WebGPU, selects
+its GPU/IGPU device for model offload, checks actual model tensor residency, and
+retains the existing same-model CPU retry if adapter discovery, model loading,
+residency validation, or context creation fails.
+
+OpenCL remains compiled as legacy diagnostic infrastructure but is not selected as
+an inference fallback in this WebGPU path. CPU is the fallback. Vulkan remains
+disabled in the Android CMake configuration.
+
+### Implementation qualification
+
+This change wires the source-level backend integration; it is not a verified
+device-support or performance claim. AndroidX WebGPU is still Alpha and the
+OpenGL ES Compatibility path depends on each device's graphics driver. The build
+and physical-device inference have not been run as part of this change. Q6_K
+operator coverage, adapter creation, tensor residency, and end-to-end generation
+must be validated before calling this production-ready.

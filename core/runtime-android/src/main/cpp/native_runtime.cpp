@@ -23,6 +23,7 @@
 #include "ggml-backend.h"
 #include "ggml-backend-impl.h"
 #include "ggml-opencl.h"
+#include "ggml-webgpu.h"
 #include <CL/cl.h>
 #include <set>
 #include "android_opencl_dispatch.h"
@@ -51,6 +52,7 @@ static std::mutex g_native_marker_mutex;
 static std::mutex g_backend_init_mutex;
 static bool g_backend_initialized = false;
 static bool g_gpu_backend_loaded = false;
+static bool g_webgpu_backend_loaded = false;
 static uint32_t g_context_length = 0;
 
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
@@ -85,13 +87,13 @@ static bool init_generation_context() {
     // generation with zero tokens after spending tens of seconds in prefill.
     // Disabling the fused kernel changes the execution path, not model weights,
     // quantization, sampling, or answer quality.
-    const bool use_opencl_attention = g_gpu && g_gpu_backend_loaded;
-    cp.flash_attn_type = use_opencl_attention
+    const bool use_webgpu_attention = g_gpu && g_webgpu_backend_loaded;
+    cp.flash_attn_type = use_webgpu_attention
         ? LLAMA_FLASH_ATTN_TYPE_AUTO
         : LLAMA_FLASH_ATTN_TYPE_DISABLED;
     append_native_trace((std::string("NATIVE_ATTENTION_POLICY backend=") +
-        (use_opencl_attention ? "OPENCL_AUTO" : "CPU_FLASH_ATTN_DISABLED") +
-        " reason=" + (use_opencl_attention ? "gpu_backend_available" : "android_cpu_fallback_stability")).c_str());
+        (use_webgpu_attention ? "WEBGPU_AUTO" : "CPU_FLASH_ATTN_DISABLED") +
+        " reason=" + (use_webgpu_attention ? "webgpu_backend_available" : "android_cpu_fallback_stability")).c_str());
     cp.type_k = GGML_TYPE_F16;
     cp.type_v = GGML_TYPE_F16;
     cp.offload_kqv = true;
@@ -607,6 +609,46 @@ static void probe_android_opencl_driver() {
     append_native_trace("OPENCL_DRIVER_PROBE_COMPLETED");
 }
 
+static ggml_backend_dev_t find_webgpu_gpu_device() {
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        if (!dev) continue;
+        const auto type = ggml_backend_dev_type(dev);
+        if (type != GGML_BACKEND_DEVICE_TYPE_GPU && type != GGML_BACKEND_DEVICE_TYPE_IGPU) continue;
+        ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
+        const char * reg_name = reg ? ggml_backend_reg_name(reg) : nullptr;
+        if (reg_name && (std::string(reg_name) == GGML_WEBGPU_NAME || std::string(reg_name) == "WEBGPU")) return dev;
+    }
+    return nullptr;
+}
+
+static bool register_static_webgpu_backend() {
+    if (ggml_backend_reg_by_name(GGML_WEBGPU_NAME) != nullptr ||
+        ggml_backend_reg_by_name("WEBGPU") != nullptr) {
+        append_native_trace("WEBGPU_STATIC_REGISTRATION_ALREADY_PRESENT");
+        return true;
+    }
+    const size_t before = ggml_backend_reg_count();
+    ggml_backend_register(ggml_backend_webgpu_reg());
+    const size_t after = ggml_backend_reg_count();
+    const bool registered = ggml_backend_reg_by_name(GGML_WEBGPU_NAME) != nullptr ||
+        ggml_backend_reg_by_name("WEBGPU") != nullptr;
+    append_native_trace((std::string("WEBGPU_STATIC_REGISTRATION before=") +
+        std::to_string(before) + " after=" + std::to_string(after) +
+        " registered=" + (registered ? "1" : "0")).c_str());
+    return registered;
+}
+
+static bool has_webgpu_gpu_device() {
+    ggml_backend_dev_t dev = find_webgpu_gpu_device();
+    if (!dev) return false;
+    const char * name = ggml_backend_dev_name(dev);
+    const char * desc = ggml_backend_dev_description(dev);
+    append_native_trace((std::string("WEBGPU_GPU_DEVICE_FOUND name=") +
+        (name ? name : "unknown") + " description=" + (desc ? desc : "unknown")).c_str());
+    return true;
+}
+
 static bool register_static_opencl_backend() {
     // GGML_BACKEND_DL is disabled on Android. Explicitly register the statically
     // linked OpenCL backend so runtime discovery never depends on APK filesystem
@@ -932,6 +974,15 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         append_native_trace((std::string("OPENCL_BACKEND_DEVICE_STATE loaded=") +
             (g_gpu_backend_loaded ? "1" : "0") +
             " deviceCount=" + std::to_string(ggml_backend_dev_count())).c_str());
+        const bool webgpu_registered = register_static_webgpu_backend();
+        if (webgpu_registered) {
+            ggml_backend_load_all();
+            g_webgpu_backend_loaded = has_webgpu_gpu_device();
+        }
+        append_native_trace((std::string("WEBGPU_BACKEND_DEVICE_STATE registered=") +
+            (webgpu_registered ? "1" : "0") + " loaded=" +
+            (g_webgpu_backend_loaded ? "1" : "0") +
+            " adapterProfile=compatibility backend=opengles vulkan=disabled").c_str());
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_STARTED");
         llama_backend_init();
         append_native_trace("ACTIVATION_LLAMA_BACKEND_INIT_RETURNED");
@@ -954,6 +1005,15 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
             append_native_trace((std::string("OPENCL_BACKEND_RETRY_RESULT loaded=") +
                 (g_gpu_backend_loaded ? "1" : "0") +
                 " deviceCount=" + std::to_string(ggml_backend_dev_count())).c_str());
+        }
+        if (!g_webgpu_backend_loaded) {
+            const bool webgpu_registered = register_static_webgpu_backend();
+            if (webgpu_registered) {
+                ggml_backend_load_all();
+                g_webgpu_backend_loaded = has_webgpu_gpu_device();
+            }
+            append_native_trace((std::string("WEBGPU_BACKEND_RETRY_RESULT loaded=") +
+                (g_webgpu_backend_loaded ? "1" : "0")).c_str());
         }
     }
 }
@@ -1114,11 +1174,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     // allocate a second context during activation. Draft/speculative setup
     // happens only after the target runtime is fully ready.
     append_native_trace("SPECULATIVE_AUTO_DETECTION_DISABLED_DURING_TARGET_LOAD");
-    const bool gpu_available = g_gpu_backend_loaded && has_opencl_gpu_device() && gpu_layers > 0;
-    append_native_trace((std::string("NATIVE_EXECUTION_POLICY mode=OPENCL_GPU_PREFERRED gpuRequested=") +
+    ggml_backend_dev_t webgpu_device = find_webgpu_gpu_device();
+    const bool gpu_available = g_webgpu_backend_loaded && webgpu_device != nullptr && gpu_layers > 0;
+    append_native_trace((std::string("NATIVE_EXECUTION_POLICY mode=WEBGPU_OPENGL_ES_COMPATIBILITY gpuRequested=") +
         (gpu_layers > 0 ? "1" : "0") +
-        " openclAvailable=" + (gpu_available ? "1" : "0") +
-        " wholeModelCpuFallback=enabled unsupportedOpPolicy=ggml_scheduler").c_str());
+        " webgpuAvailable=" + (gpu_available ? "1" : "0") +
+        " openclFallback=disabled wholeModelCpuFallback=enabled unsupportedOpPolicy=ggml_scheduler").c_str());
 
     const int requested = ctx_len > 0 ? ctx_len : 4096;
     bool runtime_ready = false;
@@ -1135,45 +1196,47 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         gpu_params.n_gpu_layers = 999;
         gpu_params.load_mode = LLAMA_LOAD_MODE_NONE;
         gpu_params.check_tensors = false;
-        append_native_trace("MODEL_LOAD_STARTED_OPENCL_PREFERRED");
+        ggml_backend_dev_t preferred_webgpu_devices[] = { webgpu_device, nullptr };
+        gpu_params.devices = preferred_webgpu_devices;
+        append_native_trace("MODEL_LOAD_STARTED_WEBGPU_PREFERRED");
         append_native_trace((std::string("MODEL_LOAD_PARAMS requestedGpuLayers=") +
             std::to_string((int)gpu_layers) + " effectiveGpuLayers=999 load_mode=" +
             llama_load_mode_name(gpu_params.load_mode) + " no_host=1").c_str());
         g_model = load_model_android(stable_model_path.c_str(), gpu_params, true);
-        checkpoint(g_model ? "OPENCL_MODEL_LOAD_RETURNED_SUCCESS" : "OPENCL_MODEL_LOAD_RETURNED_FAILED");
+        checkpoint(g_model ? "WEBGPU_MODEL_LOAD_RETURNED_SUCCESS" : "WEBGPU_MODEL_LOAD_RETURNED_FAILED");
 
         if (g_model) {
             append_weight_residency_trace();
             if (validate_gpu_model_residency()) {
-                append_native_trace("OPENCL_MODEL_RESIDENCY_VALIDATED");
+                append_native_trace("WEBGPU_MODEL_RESIDENCY_VALIDATED");
                 const int trained = llama_model_n_ctx_train(g_model);
                 const int effective = std::max(1, std::min(requested, trained));
                 g_context_length = (uint32_t)effective;
                 checkpoint((std::string("OPENCL_CONTEXT_INIT_STARTED effective_ctx=") +
                     std::to_string(effective)).c_str());
                 runtime_ready = init_generation_context();
-                checkpoint(runtime_ready ? "OPENCL_CONTEXT_INIT_RETURNED_SUCCESS" : "OPENCL_CONTEXT_INIT_RETURNED_FAILED");
+                checkpoint(runtime_ready ? "WEBGPU_CONTEXT_INIT_RETURNED_SUCCESS" : "WEBGPU_CONTEXT_INIT_RETURNED_FAILED");
                 if (runtime_ready) {
                     g_gpu = true;
-                    checkpoint((std::string("MODEL_READY execution=OPENCL_PREFERRED ctx=") +
+                    checkpoint((std::string("MODEL_READY execution=WEBGPU_OPENGL_ES_COMPATIBILITY ctx=") +
                         std::to_string(effective)).c_str());
                 } else {
-                    gpu_failure_reason = "opencl_context_init_failed";
+                    gpu_failure_reason = "webgpu_context_init_failed";
                 }
             } else {
-                gpu_failure_reason = "opencl_model_has_no_gpu_weight_buffers";
+                gpu_failure_reason = "webgpu_model_has_no_gpu_weight_buffers";
             }
         } else {
-            gpu_failure_reason = "opencl_model_load_failed";
+            gpu_failure_reason = "webgpu_model_load_failed";
         }
 
         if (!runtime_ready) {
-            append_native_trace((std::string("OPENCL_ATTEMPT_FAILED reason=") + gpu_failure_reason +
+            append_native_trace((std::string("WEBGPU_ATTEMPT_FAILED reason=") + gpu_failure_reason +
                 " action=release_partial_state_and_retry_cpu").c_str());
             free_all();
         }
     } else {
-        append_native_trace("OPENCL_ATTEMPT_SKIPPED reason=gpu_not_requested_or_device_unavailable");
+        append_native_trace("WEBGPU_ATTEMPT_SKIPPED reason=gpu_not_requested_or_compatibility_adapter_unavailable");
     }
 
     if (!runtime_ready) {
@@ -1211,7 +1274,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     } else {
         append_native_trace("CPU_FALLBACK_NOT_NEEDED");
     }
-    append_native_trace((std::string("TARGET_RUNTIME_READY_BEFORE_SPECULATIVE execution=") + (g_gpu ? "OPENCL_GPU" : "CPU_FALLBACK")).c_str());
+    append_native_trace((std::string("TARGET_RUNTIME_READY_BEFORE_SPECULATIVE execution=") + (g_gpu ? "WEBGPU_GPU" : "CPU_FALLBACK")).c_str());
     if (g_spec_requested) {
         append_native_trace("SPECULATIVE_ATTACH_AFTER_TARGET_READY");
         const bool spec_ready = init_speculative_runtime();
@@ -1227,8 +1290,8 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeUnload(JNIEnv *, jclass) { g_stop.store(true); preserve_android_system_prefix_cache_for_active_model(); free_all(); }
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeRuntimeInfo(JNIEnv *env, jclass) {
-    const std::string value = std::string(g_gpu && g_gpu_backend_loaded
-        ? "OpenCL-GPU"
+    const std::string value = std::string(g_gpu && g_webgpu_backend_loaded
+        ? "WebGPU-OpenGLES-GPU"
         : (g_model && g_context ? "CPU-FALLBACK" : "GPU_UNAVAILABLE")) +
         "; llama.cpp=" + AI_CHAT_LLAMA_CPP_SHA +
         "; generationThreads=" + std::to_string(generation_threads()) +

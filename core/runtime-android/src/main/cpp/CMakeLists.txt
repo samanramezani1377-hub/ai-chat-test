@@ -39,7 +39,9 @@ FetchContent_MakeAvailable(opencl_icd_loader)
 
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
-set(GGML_OPENCL ON CACHE BOOL "Use OpenCL GPU backend" FORCE)
+set(GGML_OPENCL ON CACHE BOOL "Keep legacy OpenCL backend available for diagnostics" FORCE)
+# Android inference uses the upstream GGML WebGPU backend linked to AndroidX Dawn.
+set(GGML_WEBGPU ON CACHE BOOL "Enable GGML WebGPU backend through AndroidX Dawn" FORCE)
 # Android runtime links the OpenCL backend statically when available. Dynamic backend
 # loading is unreliable on Android because ggml_backend_load_all() cannot discover
 # MODULE libraries from the APK's native library namespace.
@@ -99,6 +101,33 @@ endif()
 set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(llama_cpp)
+
+# Force the pinned upstream WebGPU adapter to the no-Vulkan OpenGL ES compatibility path.
+set(AI_CHAT_WEBGPU_SOURCE "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/ggml-webgpu.cpp")
+if (NOT EXISTS "${AI_CHAT_WEBGPU_SOURCE}")
+    message(FATAL_ERROR "Pinned llama.cpp revision does not contain the GGML WebGPU backend")
+endif()
+file(READ "${AI_CHAT_WEBGPU_SOURCE}" AI_CHAT_WEBGPU_SOURCE_TEXT)
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "options.featureLevel = wgpu::FeatureLevel::Compatibility" AI_CHAT_WEBGPU_COMPAT_ALREADY_SET)
+if (AI_CHAT_WEBGPU_COMPAT_ALREADY_SET EQUAL -1)
+    string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "wgpu::RequestAdapterOptions options = {};" AI_CHAT_WEBGPU_OPTIONS_POS)
+    if (AI_CHAT_WEBGPU_OPTIONS_POS EQUAL -1)
+        message(FATAL_ERROR "Could not locate GGML WebGPU adapter options in pinned source")
+    endif()
+    string(REPLACE
+        "wgpu::RequestAdapterOptions options = {};"
+        "wgpu::RequestAdapterOptions options = {};\n    options.featureLevel = wgpu::FeatureLevel::Compatibility;\n    options.backendType = wgpu::BackendType::OpenGLES;"
+        AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
+endif()
+# Remove Vulkan-only Dawn toggles from the Android OpenGL ES request.
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "const char * const          adapterEnabledToggles[]" AI_CHAT_WEBGPU_VULKAN_TOGGLE_POS)
+if (NOT AI_CHAT_WEBGPU_VULKAN_TOGGLE_POS EQUAL -1)
+    string(REPLACE
+        "#ifndef __EMSCRIPTEN__\n    // TODO: track need for these toggles: https://issues.chromium.org/issues/42251215\n    const char * const          adapterEnabledToggles[] = { \"vulkan_enable_f16_on_nvidia\", \"use_vulkan_memory_model\" };\n    wgpu::DawnTogglesDescriptor adapterTogglesDesc;\n    adapterTogglesDesc.enabledToggles     = adapterEnabledToggles;\n    adapterTogglesDesc.enabledToggleCount = 2;\n    options.nextInChain                   = &adapterTogglesDesc;\n#endif"
+        ""
+        AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
+endif()
+file(WRITE "${AI_CHAT_WEBGPU_SOURCE}" "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
 
 # Do not silently ship a build where OpenMP was requested but FindOpenMP could
 # not enable it. This also catches NDK/runtime-linking regressions during CI.
@@ -183,6 +212,7 @@ target_include_directories(ai_chat_runtime PRIVATE
     ${llama_cpp_SOURCE_DIR}/ggml/include
     ${llama_cpp_SOURCE_DIR}/ggml/src
     ${llama_cpp_SOURCE_DIR}/ggml/src/ggml-opencl
+    ${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu
     ${llama_cpp_SOURCE_DIR}/tools/mtmd
     ${opencl_headers_SOURCE_DIR}
 )
@@ -199,11 +229,15 @@ target_link_options(ai_chat_runtime PRIVATE
     -Wl,--strip-all
 )
 
-target_link_libraries(ai_chat_runtime PRIVATE llama llama-common mtmd ggml-opencl android log OpenCL)
+if (NOT TARGET ggml-webgpu)
+    message(FATAL_ERROR "GGML_WEBGPU=ON was requested, but ggml-webgpu target was not created")
+endif()
+target_link_libraries(ai_chat_runtime PRIVATE llama llama-common mtmd ggml-opencl ggml-webgpu android log OpenCL)
 
 target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"
     AI_CHAT_GPU_BACKEND_OPENCL=1
+    AI_CHAT_GPU_BACKEND_WEBGPU=1
     AI_CHAT_GPU_BACKEND_VULKAN=0
     AI_CHAT_GGML_OPENMP_ENABLED=1
     AI_CHAT_GGML_CPU_KLEIDIAI_ENABLED=1

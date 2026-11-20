@@ -8,6 +8,10 @@ android {
     compileSdk = 36
     ndkVersion = "27.2.12479018"
 
+    buildFeatures {
+        prefab = true
+    }
+
     defaultConfig {
         minSdk = 29
         consumerProguardFiles("consumer-rules.pro")
@@ -92,6 +96,9 @@ dependencies {
     implementation(project(":core:domain"))
     implementation(project(":core:runtime"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // Official AndroidX WebGPU AAR supplies Dawn's native runtime and Prefab headers.
+    // The inference engine uses it natively; no WebView or UI surface is created.
+    implementation("androidx.webgpu:webgpu:1.0.0-alpha06")
     testImplementation(kotlin("test"))
     testImplementation(kotlin("test-junit5"))
 }
