@@ -412,3 +412,48 @@ The CMake patch validates that the F32 alias appears before the common shader
 declarations, and the native contract test checks that the no-F16 register-tile
 variant, the quantized GEMM admission, and the packed IQ scale conversions
 remain present.
+
+
+## Portable no-ShaderF16 quantized prompt-prefill GEMM (2026-11-20)
+
+The decode-only quantized MatVec restriction has now been widened. On adapters
+without WebGPU ShaderF16, F32-output GGML_OP_MUL_MAT may use the upstream
+register-tile GEMM when its activation input is F32 and its weight input is a
+quantized type handled by the pinned upstream dequantization templates.
+
+The portable variant keeps quantized model weights in their original packed
+GGUF representation. Only the shader's temporary dequantized values,
+workgroup/shared-memory tiles, and accumulation inputs are promoted to F32.
+The implementation:
+
+- propagates the adapter's actual supports_shader_f16 capability into the
+  GGML WebGPU shader-library context;
+- disables the F16 subgroup-matrix route when ShaderF16 is unavailable;
+- selects the regular upstream register-tile shader with NO_SHADER_F16;
+- conditionally removes enable f16 and aliases arithmetic f16 tokens to
+  F32 after the packed tensor declarations have been parsed;
+- decodes the two packed IQ scale values through unpack2x16float() in the
+  no-ShaderF16 variant;
+- retains the existing specialized quantized MatVec path for decode-sized
+  batches and uses register-tile GEMM for larger batches/prompt prefill.
+
+The operation gate now permits only F32-output MatMul with F32 activations and
+a quantized weight type, in addition to the already-whitelisted safe F32/I32
+operations. Unsupported types and F16-dependent operations remain rejected
+from this no-ShaderF16 GPU route.
+
+### CI failure found and corrected
+
+Run 44801631943 passed unit tests and the early static WebGPU/OpenGL ES
+contract checks, but failed during CMake configuration. The failure was caused
+by two sequential CMake source patches competing for the same old guard text:
+the first patch had already rewritten the guard before the second patch tried
+to locate it. The generic guard is now inserted unchanged first; the later
+whitelist patch applies the narrowly-scoped quantized MatMul exception exactly
+once. The native contract script now checks the new MatMul marker and the
+portable F32 tile/dequant/pipeline markers.
+
+The new shader route is source-integrated and guarded by CI checks, but it is
+not accepted as device-validated until the Android build succeeds, the WGSL
+compiles on a physical adapter, quantized outputs match the CPU reference, and
+prefill/decode performance and GPU residency are measured separately.
