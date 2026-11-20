@@ -50,7 +50,7 @@ static std::string g_native_marker_file;
 static std::string g_native_trace_file;
 static int g_native_fatal_fd = -1;
 // Fixed-size last-event snapshot, readable from the fatal signal handler.
-static volatile char g_native_runtime_phase[128] = "NATIVE_INIT";
+static std::atomic<char> g_native_runtime_phase[128]{};
 static std::mutex g_native_marker_mutex;
 static std::mutex g_backend_init_mutex;
 static bool g_backend_initialized = false;
@@ -718,10 +718,10 @@ static void append_native_trace(const char *text) {
     size_t phase_len = 0;
     while (phase_len + 1 < sizeof(g_native_runtime_phase) &&
            text[phase_len] && text[phase_len] != '\n' && text[phase_len] != '\r') {
-        g_native_runtime_phase[phase_len] = text[phase_len];
+        g_native_runtime_phase[phase_len].store(text[phase_len], std::memory_order_relaxed);
         ++phase_len;
     }
-    g_native_runtime_phase[phase_len] = '\0';
+    g_native_runtime_phase[phase_len].store('\0', std::memory_order_relaxed);
     if (g_native_trace_file.empty()) return;
     std::lock_guard<std::mutex> lock(g_native_marker_mutex);
     std::ofstream out(g_native_trace_file, std::ios::app);
@@ -817,9 +817,10 @@ static void native_fatal_signal_handler(int signal_number, siginfo_t *info, void
         native_write_text(g_native_fatal_fd, runtime_phase_prefix, sizeof(runtime_phase_prefix) - 1);
         char runtime_phase[128];
         size_t runtime_phase_len = 0;
-        while (runtime_phase_len + 1 < sizeof(runtime_phase) &&
-               g_native_runtime_phase[runtime_phase_len]) {
-            runtime_phase[runtime_phase_len] = g_native_runtime_phase[runtime_phase_len];
+        while (runtime_phase_len + 1 < sizeof(runtime_phase)) {
+            const char current = g_native_runtime_phase[runtime_phase_len].load(std::memory_order_relaxed);
+            if (!current) break;
+            runtime_phase[runtime_phase_len] = current;
             ++runtime_phase_len;
         }
         runtime_phase[runtime_phase_len] = '\0';
