@@ -153,6 +153,25 @@ endif()
 # F32/I32-safe subset; F16 and quantized kernels remain on CPU until a verified
 # non-F16 implementation is available. Never spoof a feature or compile an
 # unsupported WGSL shader and hope that the driver accepts it.
+# Emit Dawn's actual WebGPU feature/limit snapshot separately from the GLES probe.
+# The two reports must not be conflated: GLES extensions do not imply WebGPU features.
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_WEBGPU_CAPABILITIES" AI_CHAT_WEBGPU_CAPABILITIES_LOGGED)
+if (AI_CHAT_WEBGPU_CAPABILITIES_LOGGED EQUAL -1)
+    set(AI_CHAT_WEBGPU_CAPABILITIES_ANCHOR "ctx->webgpu_global_ctx->capabilities.max_subgroup_size = info.subgroupMaxSize;")
+    string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "${AI_CHAT_WEBGPU_CAPABILITIES_ANCHOR}" AI_CHAT_WEBGPU_CAPABILITIES_POS)
+    if (AI_CHAT_WEBGPU_CAPABILITIES_POS EQUAL -1)
+        message(FATAL_ERROR "Could not locate Dawn WebGPU capability diagnostic anchor")
+    endif()
+    string(REPLACE
+        "${AI_CHAT_WEBGPU_CAPABILITIES_ANCHOR}"
+        "${AI_CHAT_WEBGPU_CAPABILITIES_ANCHOR}\\n    // AI_CHAT_WEBGPU_CAPABILITIES: report actual Dawn features, not GLES hints.\\n    GGML_LOG_INFO(\\\"AI_CHAT_WEBGPU_CAPABILITIES vendor=%s shaderF16=%d subgroups=%d dotProduct=%d subgroupMatrix=%d maxStorageBufferBindingSize=%llu maxComputeInvocationsPerWorkgroup=%u maxComputeWorkgroupStorageSize=%u\\\\n\\\",\\n        ctx->webgpu_global_ctx->vendor.c_str(),\\n        static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_shader_f16),\\n        static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_subgroups),\\n        static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_dot_product),\\n        static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_subgroup_matrix),\\n        static_cast<unsigned long long>(ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize),\\n        ctx->webgpu_global_ctx->capabilities.limits.maxComputeInvocationsPerWorkgroup,\\n        ctx->webgpu_global_ctx->capabilities.limits.maxComputeWorkgroupStorageSize);"
+        AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
+endif()
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_WEBGPU_CAPABILITIES" AI_CHAT_WEBGPU_CAPABILITIES_VERIFY)
+if (AI_CHAT_WEBGPU_CAPABILITIES_VERIFY EQUAL -1)
+    message(FATAL_ERROR "Could not add the Dawn WebGPU capability diagnostic")
+endif()
+
 string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_GENERIC_FP32_FALLBACK_V1" AI_CHAT_WEBGPU_FP32_PATCHED)
 if (AI_CHAT_WEBGPU_FP32_PATCHED EQUAL -1)
     string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "bool         supports_subgroups       = false;" AI_CHAT_WEBGPU_FP32_CAPS_ANCHOR)
