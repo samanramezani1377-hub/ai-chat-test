@@ -328,6 +328,7 @@ jobs:
           echo "Checking patched source: $source_file"
           for marker in \
             AI_CHAT_GENERIC_FP32_FALLBACK_V1 \
+            AI_CHAT_WEBGPU_CAPABILITIES \
             supports_shader_f16 \
             ggml_is_quantized \
             AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2 \
