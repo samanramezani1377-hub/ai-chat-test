@@ -211,7 +211,7 @@ object CrashLogStore {
 
         val signalName = Regex("""NATIVE_FATAL_SIGNAL_NAME=([^\s]+)""").find(fatalTail)?.groupValues?.get(1) ?: "UNKNOWN"
         val phase = Regex("""NATIVE_FATAL_SPEC_PHASE=([^\s]+)""").find(fatalTail)?.groupValues?.get(1) ?: "UNKNOWN"
-        val recentTrace = trace.lineSequence().toList().takeLast(120).joinToString("\\n")
+        val recentTrace = trace.lineSequence().toList().takeLast(120).joinToString("\n")
         val lastCheckpoint = recentTrace.lineSequence().filter {
             it.contains("MODEL_READY") || it.contains("CONTEXT_INIT") || it.contains("MODEL_LOAD") ||
                 it.contains("NATIVE_LOAD") || it.contains("GENERATION") || it.contains("sched_reserve") ||
