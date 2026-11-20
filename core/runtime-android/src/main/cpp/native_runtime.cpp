@@ -1325,7 +1325,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
                     gpu_failure_reason = "webgpu_context_init_failed";
                 }
             } else {
-                gpu_failure_reason = "webgpu_model_has_no_gpu_weight_buffers";
+                gpu_failure_reason = "webgpu_weight_residency_below_useful_threshold";
             }
         } else {
             gpu_failure_reason = "webgpu_model_load_failed";
