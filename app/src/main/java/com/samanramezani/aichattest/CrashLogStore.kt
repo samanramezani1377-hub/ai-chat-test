@@ -29,8 +29,10 @@ object CrashLogStore {
     private const val PREFS = "crash_log_store"
     private const val KEY_NATIVE_FINGERPRINT = "last_native_fingerprint"
     private const val KEY_PLATFORM_EXIT_TIMESTAMP = "last_platform_exit_timestamp"
+    private const val KEY_PENDING_PLATFORM_EXIT = "pending_platform_exit"
+    private const val KEY_PENDING_PLATFORM_TRACE = "pending_platform_trace"
     private const val FILE_NAME = "crash-log.txt"
-    private const val MAX_REPORT_CHARS = 480_000
+    private const val MAX_REPORT_CHARS = 120_000
     private val installed = AtomicBoolean(false)
     private val mutableReport = MutableStateFlow<String?>(null)
     val report: StateFlow<String?> = mutableReport.asStateFlow()
@@ -53,36 +55,24 @@ object CrashLogStore {
         runCatching {
             val snapshot = RuntimeDiagnosticsStore.snapshot.value
             val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            prefs.edit()
-                .putString("runtime_context", buildString {
-                    appendLine("===== LAST RUNTIME CONTEXT =====")
-                    appendLine("Captured: ${DateFormat.getDateTimeInstance().format(Date())}")
-                    appendLine("Model: ${modelName ?: snapshot.model?.displayName ?: "N/A"}")
-                    appendLine("Quantization: ${snapshot.model?.quantization ?: "N/A"}")
-                    appendLine("Runtime: ${snapshot.runtime.name} ${snapshot.runtime.version}")
-                    appendLine("Backend: ${snapshot.runtime.backend ?: "N/A"}")
-                    appendLine("Threads: ${snapshot.runtime.threads ?: "N/A"}")
-                    appendLine("GPU Layers: ${snapshot.runtime.gpuLayers ?: "N/A"}")
-                    appendLine("Context: ${snapshot.runtime.contextLength ?: "N/A"}")
-                    appendLine("App runtime status: $runtimeStatus")
-                    appendLine("Inference running: $inferenceRunning")
-                    appendLine("Last native event: ${snapshot.lastNativeEvent ?: "N/A"}")
-                    appendLine("GPU device: ${snapshot.gpuDevice?.name ?: "N/A"}")
-                    appendLine("GPU residency MiB: ${snapshot.weightResidency?.gpuTensorMiB ?: "N/A"}")
-                    appendLine("Host tensor MiB: ${snapshot.weightResidency?.hostTensorMiB ?: "N/A"}")
-                    appendLine("Temperature: ${snapshot.settings?.temperature ?: "N/A"}")
-                    appendLine("Top-P: ${snapshot.settings?.topP ?: "N/A"}")
-                    appendLine("Top-K: ${snapshot.settings?.topK ?: "N/A"}")
-                    appendLine("Min-P: ${snapshot.settings?.minP ?: "N/A"}")
-                    appendLine("Repeat penalty: ${snapshot.settings?.repeatPenalty ?: "N/A"}")
-                    appendLine("Max new tokens: ${snapshot.settings?.maxNewTokens ?: "N/A"}")
-                    appendLine("Context setting: ${snapshot.settings?.contextLength ?: "N/A"}")
-                    appendLine("===== RECENT RUNTIME EVENTS =====")
-                    snapshot.trace.takeLast(30).forEach { event ->
-                        appendLine("${event.timestampMs} | ${event.type} | ${event.message ?: ""}")
-                    }
-                })
-                .commit()
+            prefs.edit().putString("runtime_context", buildString {
+                appendLine("===== LAST RUNTIME CONTEXT =====")
+                appendLine("Captured: ${DateFormat.getDateTimeInstance().format(Date())}")
+                appendLine("Model: ${modelName ?: snapshot.model?.displayName ?: "N/A"}")
+                appendLine("Quantization: ${snapshot.model?.quantization ?: "N/A"}")
+                appendLine("Runtime: ${snapshot.runtime.name} ${snapshot.runtime.version}")
+                appendLine("Backend: ${snapshot.runtime.backend ?: "N/A"}")
+                appendLine("Threads: ${snapshot.runtime.threads ?: "N/A"}")
+                appendLine("GPU Layers: ${snapshot.runtime.gpuLayers ?: "N/A"}")
+                appendLine("Context: ${snapshot.runtime.contextLength ?: "N/A"}")
+                appendLine("App status: $runtimeStatus")
+                appendLine("Inference running: $inferenceRunning")
+                appendLine("Last native event: ${snapshot.lastNativeEvent ?: "N/A"}")
+                appendLine("GPU device: ${snapshot.gpuDevice?.name ?: "N/A"}")
+                appendLine("GPU weight residency MiB: ${snapshot.weightResidency?.gpuTensorMiB ?: "N/A"}")
+                appendLine("Host tensor memory MiB: ${snapshot.weightResidency?.hostTensorMiB ?: "N/A"}")
+                appendLine("Context setting: ${snapshot.settings?.contextLength ?: "N/A"}")
+            }).commit()
         }
     }
 
@@ -116,8 +106,6 @@ object CrashLogStore {
             appendLine(runtimeContext)
             appendLine("===== JAVA STACK TRACE =====")
             appendLine(stack)
-            appendLine("===== NATIVE TRACE TAIL =====")
-            appendLine(readNativeTrace(context).takeLast(120_000).ifBlank { "No native trace available." })
         }
         appendReport(context, report)
         mutableReport.value = readReport(context)
