@@ -233,3 +233,16 @@ matrix multiplication is accelerated without ShaderF16. It does not yet add a
 new native GLES backend or custom FP32 WGSL kernels. Existing upstream GGML
 WebGPU F32 kernels are reused. CI checks both that the patch is applied to the
 fetched pinned source and that the Android APK build completes.
+
+
+### No-ShaderF16 operation whitelist
+
+A further safety constraint is applied because some upstream WGSL modules
+declare `enable f16` unconditionally even when the tensor metadata is F32.
+Therefore the no-ShaderF16 path does not treat all F32 operations as safe.
+It admits only the upstream paths audited as F32-only in this pinned revision:
+`SCALE`, `UNARY` (F32 variant), `SUM`, `SUM_ROWS`, `CUMSUM`, `ARGMAX`,
+`ARGSORT`, `TOP_K`, `DIAG`, `TRI`, and `SOLVE_TRI`. Operations such as
+`SOFT_MAX`, `MUL_MAT`, attention, RoPE, and quantized paths remain on CPU
+until their exact shader variants have explicit no-F16 validation. The
+whitelist is version-anchored and checked by CI.

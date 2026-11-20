@@ -195,6 +195,26 @@ if (AI_CHAT_WEBGPU_FP32_PATCH_VERIFY EQUAL -1 OR AI_CHAT_WEBGPU_FP32_CAPABILITY_
     message(FATAL_ERROR "Could not apply the conservative optional ShaderF16 / FP32 fallback patch")
 endif()
 
+# The existing shader library contains unconditional enable-f16 modules (for
+# example softmax and matrix-vector paths). On no-ShaderF16 adapters, do not
+# merely allow every F32 tensor: admit only operations whose selected upstream
+# WGSL path is verified F32-only. This whitelist can expand only with shader tests.
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_GENERIC_FP32_OP_WHITELIST_V1" AI_CHAT_WEBGPU_FP32_WHITELIST_PATCHED)
+if (AI_CHAT_WEBGPU_FP32_WHITELIST_PATCHED EQUAL -1)
+    string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "if (uses_f16 || uses_quantized) return false;\n    }" AI_CHAT_WEBGPU_FP32_WHITELIST_ANCHOR)
+    if (AI_CHAT_WEBGPU_FP32_WHITELIST_ANCHOR EQUAL -1)
+        message(FATAL_ERROR "Could not locate the optional ShaderF16 operation-dispatch guard")
+    endif()
+    string(REPLACE
+        "if (uses_f16 || uses_quantized) return false;\n    }"
+        "if (uses_f16 || uses_quantized) return false;\n        const bool f32_safe_op =\n            op->op == GGML_OP_SCALE || op->op == GGML_OP_UNARY ||\n            op->op == GGML_OP_SUM || op->op == GGML_OP_SUM_ROWS ||\n            op->op == GGML_OP_CUMSUM || op->op == GGML_OP_ARGMAX ||\n            op->op == GGML_OP_ARGSORT || op->op == GGML_OP_TOP_K ||\n            op->op == GGML_OP_DIAG || op->op == GGML_OP_TRI ||\n            op->op == GGML_OP_SOLVE_TRI;\n        if (!f32_safe_op) return false;\n    }\n    // AI_CHAT_GENERIC_FP32_OP_WHITELIST_V1"
+        AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
+endif()
+string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_GENERIC_FP32_OP_WHITELIST_V1" AI_CHAT_WEBGPU_FP32_WHITELIST_VERIFY)
+if (AI_CHAT_WEBGPU_FP32_WHITELIST_VERIFY EQUAL -1)
+    message(FATAL_ERROR "Could not apply the conservative F32-only operation whitelist")
+endif()
+
 file(WRITE "${AI_CHAT_WEBGPU_SOURCE}" "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
 
 # Do not silently ship a build where OpenMP was requested but FindOpenMP could

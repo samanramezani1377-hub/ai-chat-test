@@ -313,6 +313,8 @@ jobs:
           grep -q 'AI_CHAT_GENERIC_FP32_FALLBACK_V1' "$source_file"
           grep -q 'supports_shader_f16' "$source_file"
           grep -q 'ggml_is_quantized' "$source_file"
+          grep -q 'AI_CHAT_GENERIC_FP32_OP_WHITELIST_V1' "$source_file"
+          grep -q 'GGML_OP_SUM_ROWS' "$source_file"
           echo "Verified: ShaderF16 is optional and unsupported F16/quantized operations are conservatively left for GGML CPU scheduling."
 
       - name: Verify sherpa ONNX Runtime native linkage
