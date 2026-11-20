@@ -308,3 +308,63 @@ The EGL restoration also preserves the calling thread's previously bound EGL
 client API before attempting to restore its context. This matters when the
 application context was created under a different EGL client API from the
 temporary OpenGL ES probe.
+
+
+## Quantized decode MatVec without ShaderF16 (2026-11-20)
+
+This section supersedes the earlier statements above that all quantized operations
+must remain on CPU whenever Dawn does not expose \`ShaderF16\`. The previous
+restriction was safe but unnecessarily broad for the decode-time matrix-vector
+path.
+
+The pinned GGML WebGPU MatVec implementation already reads quantized weight
+blocks as packed integer words and decodes their scales before accumulating in
+F32. The remaining ShaderF16 dependency was primarily in the representation of
+FP16 scale values and the temporary Q8_1 activation scale/sum pair, not a need
+for FP16 arithmetic. The Android CMake integration now patches the pinned
+shader sources to:
+
+- Decode stored 16-bit scale values with baseline WGSL
+  \`unpack2x16float()\`, returning F32 values without requiring the optional
+  ShaderF16 feature.
+- Keep the Q8_1 scale/sum storage exactly four bytes by packing the two
+  16-bit values into one \`u32\` with \`pack2x16float()\`; the MatVec shader
+  unpacks them to F32.
+- Remove the unconditional \`enable f16;\` declaration from the quantized
+  MatVec and Q8 activation-quantization shaders.
+- Replace the remaining explicit \`vec2<f16>\` decode in the MatVec accumulator
+  with baseline F32 unpacking.
+- Admit no-ShaderF16 quantized \`MUL_MAT\` only when the destination is F32,
+  the activation input is F32, the weight input is quantized, and the output
+  batch dimension is at most four. This matches the upstream MatVec dispatch
+  boundary and prevents the F16 tiled-GEMM path from being selected.
+
+This allows the existing upstream quantized MatVec implementations—including
+the Q6_K path—to be considered for WebGPU decode without converting the model
+weights to F32 or expanding their stored representation. Q8 activation
+quantization remains available when the adapter separately exposes the
+required packed 4x8 integer dot-product feature; otherwise the existing direct
+quantized MatVec path is used.
+
+### Explicit limits
+
+- This is a quantized **MatVec/decode** path for output batch sizes up to four.
+- Larger prompt-prefill matrix multiplications still use the conservative CPU
+  route on adapters without ShaderF16. The upstream tiled GEMM shaders still
+  use F16 workgroup storage and are not admitted by this patch.
+- F16 tensor operations and other quantized operations not covered by this
+  exact MatVec shape remain subject to the existing no-ShaderF16 rejection.
+- The change is source-level and build-contract validated; it is not yet proof
+  of successful shader compilation, correct numerical output, or faster
+  inference on a physical Android GPU.
+
+CMake now fails if the pinned shader source anchors change, if the patched
+MatVec/Q8 shaders still declare \`enable f16;\`, or if the Q8_1 scale reads
+retain the old F16 struct-field access. The native contract script also checks
+that the no-ShaderF16 quantized MatVec admission and packed scale conversions
+remain present.
+
+The next acceptance gate is an actual Android run that reports meaningful
+WebGPU tensor residency and confirms Q6_K decode output against the CPU
+reference. Prompt prefill and cross-vendor performance must be measured
+separately; neither is inferred from model weight residency.
