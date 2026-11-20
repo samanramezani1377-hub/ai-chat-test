@@ -165,13 +165,14 @@ jobs:
           test -n "${ANDROID_HOME:-}"
           test -d "$ANDROID_HOME/platforms/android-36"
 
-      - name: Cache native CMake state
+      # Do not cache Gradle externalNativeBuild (.cxx) trees. CMake mutates the
+      # FetchContent llama.cpp source in-place for this branch; restoring stale
+      # .cxx trees can resurrect an unpatched second source tree and produce a
+      # mixed native build. Rust artifacts are independent and remain cacheable.
+      - name: Cache Rust tokenizer build state
         uses: actions/cache@v4
         with:
-          path: |
-            core/runtime-android/.cxx
-            core/runtime-android/src/.cxx
-            rs-laya-tokenizers/target
+          path: rs-laya-tokenizers/target
           key: >-
             native-${{ runner.os }}-
             ${{ hashFiles(
@@ -531,13 +532,10 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
-      - name: Restore native build state from the completed APK job
+      - name: Restore Rust tokenizer build state
         uses: actions/cache@v4
         with:
-          path: |
-            core/runtime-android/.cxx
-            core/runtime-android/src/.cxx
-            rs-laya-tokenizers/target
+          path: rs-laya-tokenizers/target
           key: >-
             native-${{ runner.os }}-
             ${{ hashFiles(
