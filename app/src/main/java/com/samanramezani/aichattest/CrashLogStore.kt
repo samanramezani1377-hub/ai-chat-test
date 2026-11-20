@@ -119,15 +119,10 @@ object CrashLogStore {
             val lastHandled = prefs.getLong(KEY_PLATFORM_EXIT_TIMESTAMP, 0L)
             val exit = manager.getHistoricalProcessExitReasons(context.packageName, 0, 12)
                 .filter { it.timestamp > lastHandled }
-                .filter { it.reason in setOf(
-                    ApplicationExitInfo.REASON_CRASH,
-                    ApplicationExitInfo.REASON_CRASH_NATIVE,
-                    ApplicationExitInfo.REASON_ANR,
-                    ApplicationExitInfo.REASON_LOW_MEMORY,
-                    ApplicationExitInfo.REASON_SIGNALED,
-                    ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE,
-                    ApplicationExitInfo.REASON_INITIALIZATION_FAILURE,
-                ) }
+                .filter { it.reason in setOf(ApplicationExitInfo.REASON_CRASH, ApplicationExitInfo.REASON_CRASH_NATIVE,
+                    ApplicationExitInfo.REASON_ANR, ApplicationExitInfo.REASON_LOW_MEMORY,
+                    ApplicationExitInfo.REASON_SIGNALED, ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE,
+                    ApplicationExitInfo.REASON_INITIALIZATION_FAILURE) }
                 .maxByOrNull { it.timestamp } ?: return
             val reason = when (exit.reason) {
                 ApplicationExitInfo.REASON_CRASH -> "Java/Kotlin process crash"
@@ -139,46 +134,39 @@ object CrashLogStore {
                 ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "Process initialization failure"
                 else -> "Abnormal process exit"
             }
-            val platformTrace = runCatching {
-                exit.traceInputStream?.bufferedReader()?.use { it.readText().takeLast(220_000) }
-            }.getOrNull().orEmpty()
-            val existing = readReport(context).orEmpty()
-            val alreadyCapturedJava = exit.reason == ApplicationExitInfo.REASON_CRASH &&
-                existing.contains("Java Crash Report")
+            val platformTrace = runCatching { exit.traceInputStream?.bufferedReader()?.use { it.readText().takeLast(220_000) } }.getOrNull().orEmpty()
+            val nativeTrace = readNativeTrace(context)
+            val hasNativeFatal = nativeTrace.lastIndexOf("NATIVE_FATAL_SIGNAL=") >= 0
+            val isNativeExit = exit.reason == ApplicationExitInfo.REASON_CRASH_NATIVE || exit.reason == ApplicationExitInfo.REASON_SIGNALED
+            if (isNativeExit && hasNativeFatal) {
+                prefs.edit()
+                    .putString(KEY_PENDING_PLATFORM_EXIT, "$reason | code=${exit.reason} | status=${exit.status} | process=${exit.processName}")
+                    .putString(KEY_PENDING_PLATFORM_TRACE, extractTombstoneEvidence(platformTrace))
+                    .putLong(KEY_PLATFORM_EXIT_TIMESTAMP, exit.timestamp)
+                    .commit()
+                return@runCatching
+            }
+            val alreadyCapturedJava = exit.reason == ApplicationExitInfo.REASON_CRASH && readReport(context).orEmpty().contains("Java Crash Report")
             if (!alreadyCapturedJava) {
                 val report = buildString {
-                    appendLine("AI Chat Test — Android Process Exit Report")
-                    appendLine("Exit timestamp: ${DateFormat.getDateTimeInstance().format(Date(exit.timestamp))}")
-                    appendLine("Process: ${exit.processName}")
+                    appendLine("AI Chat Test — Android Process Exit")
+                    appendLine("Time: ${DateFormat.getDateTimeInstance().format(Date(exit.timestamp))}")
                     appendLine("Reason: $reason (code=${exit.reason})")
                     appendLine("Status: ${exit.status}")
-                    appendLine("Importance: ${exit.importance}")
                     appendLine("Description: ${exit.description ?: "N/A"}")
                     appendLine()
                     appendLine(when (exit.reason) {
-                        ApplicationExitInfo.REASON_ANR -> "تشخیص: سیستم ثبت کرده که برنامه در مهلت پاسخ‌گویی متوقف مانده است. Trace زیر برای یافتن Thread مسدودشده و Stack آن اهمیت دارد."
-                        ApplicationExitInfo.REASON_LOW_MEMORY -> "تشخیص: سیستم پردازش را به دلیل فشار حافظه متوقف کرده است. این یک علت سیستمی ثبت‌شده است؛ برای تعیین تخصیص حافظه مشکل‌ساز، گزارش حافظه و لاگ پیش از خروج لازم است."
-                        ApplicationExitInfo.REASON_CRASH_NATIVE -> "تشخیص: Android خروج غیرعادی در لایه Native را ثبت کرده است. اگر traceInputStream موجود باشد، tombstone و backtrace واقعی در ادامه آمده است."
-                        ApplicationExitInfo.REASON_CRASH -> "تشخیص: Android خروج ناشی از Crash در پردازش را ثبت کرده است. جزئیات استثنا و Stack Trace در گزارش Java Crash قبلی قرار دارد، اگر ثبت شده باشد."
-                        else -> "تشخیص: Android خروج غیرعادی پردازش را ثبت کرده است. کد reason و توضیحات سیستم شواهد قطعی در دسترس هستند."
+                        ApplicationExitInfo.REASON_ANR -> "Android ثبت کرده برنامه پاسخ‌گو نبوده است."
+                        ApplicationExitInfo.REASON_LOW_MEMORY -> "Android ثبت کرده پردازش به علت فشار حافظه خاتمه یافته است."
+                        else -> "Android خروج غیرعادی پردازش را ثبت کرده است."
                     })
                     appendLine()
                     appendLine(deviceInfo(context))
                     appendLine(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("runtime_context", "Runtime context: unavailable"))
-                    appendLine("===== ANDROID EXIT TRACE / TOMBSTONE =====")
-                    appendLine(platformTrace.ifBlank { "Android did not provide a traceInputStream for this exit." })
-                    appendLine("===== NATIVE TRACE TAIL =====")
-                    appendLine(readNativeTrace(context).takeLast(100_000).ifBlank { "No native trace available." })
+                    appendLine("===== ANDROID TRACE / TOMBSTONE =====")
+                    appendLine(extractTombstoneEvidence(platformTrace).ifBlank { "Android برای این خروج traceInputStream ارائه نکرد." })
                 }
                 appendReport(context, report)
-            }
-            val nativeTrace = readNativeTrace(context)
-            val fatalIndex = nativeTrace.lastIndexOf("NATIVE_FATAL_SIGNAL=")
-            if (exit.reason in setOf(ApplicationExitInfo.REASON_CRASH_NATIVE, ApplicationExitInfo.REASON_SIGNALED) && fatalIndex >= 0) {
-                val fatalLines = nativeTrace.substring(fatalIndex).lineSequence()
-                    .takeWhile { it.startsWith("NATIVE_FATAL_") || it.isBlank() }
-                    .joinToString("\n")
-                prefs.edit().putString(KEY_NATIVE_FINGERPRINT, sha256(fatalLines)).commit()
             }
             prefs.edit().putLong(KEY_PLATFORM_EXIT_TIMESTAMP, exit.timestamp).commit()
             mutableReport.value = readReport(context)
