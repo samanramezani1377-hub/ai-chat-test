@@ -237,8 +237,7 @@ if (AI_CHAT_WEBGPU_FP32_WHITELIST_PATCHED EQUAL -1)
     endif()
     string(REPLACE
         "if (uses_f16 || uses_quantized) return false;\n    }"
-        "if (uses_f16 || uses_quantized) return false;\n        const bool f32_i32_safe_op =\n            // llama_model::select_buft() probes a plain F32 ADD to choose each layer buffer.\n            // Without this entry, no-ShaderF16 adapters reject the GPU buffer even for\n            // otherwise supported F32 tensors, forcing layer placement back to CPU.\n            op->op == GGML_OP_ADD || op->op == GGML_OP_ADD_ID || op->op == GGML_OP_CONCAT || op->op == GGML_OP_SET ||\n            op->op == GGML_OP_RMS_NORM || op->op == GGML_OP_NORM || op->op == GGML_OP_L2_NORM ||\n            op->op == GGML_OP_SCALE || op->op == GGML_OP_UNARY || op->op == GGML_OP_CLAMP ||\n            op->op == GGML_OP_FILL || op->op == GGML_OP_LOG || op->op == GGML_OP_SQR ||\n            op->op == GGML_OP_SQRT || op->op == GGML_OP_SIN || op->op == GGML_OP_COS ||\n            op->op == GGML_OP_SUM || op->op == GGML_OP_SUM_ROWS || op->op == GGML_OP_CUMSUM ||\n            op->op == GGML_OP_ARGMAX || op->op == GGML_OP_ARGSORT || op->op == GGML_OP_TOP_K ||\n            op->op == GGML_OP_SOFT_MAX || op->op == GGML_OP_DIAG || op->op == GGML_OP_TRI ||\n            op->op == GGML_OP_SOLVE_TRI || op->op == GGML_OP_PAD || op->op == GGML_OP_UPSCALE ||\n            op->op == GGML_OP_SSM_CONV || op->op == GGML_OP_SSM_SCAN || op->op == GGML_OP_GATED_DELTA_NET;\n        if (!f32_i32_safe_op) return false;\n    }\n    // AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2"
-        AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
+        "const bool f32_quantized_matvec = op->op == GGML_OP_MUL_MAT && op->type == GGML_TYPE_F32 && op->ne[1] <= 4 && op->src[0] != nullptr && ggml_is_quantized(op->src[0]->type) && op->src[1] != nullptr && op->src[1]->type == GGML_TYPE_F32;\n        const bool f32_plain_matmul = op->op == GGML_OP_MUL_MAT && op->type == GGML_TYPE_F32 && op->src[0] != nullptr && op->src[0]->type == GGML_TYPE_F32 && op->src[1] != nullptr && op->src[1]->type == GGML_TYPE_F32;\n        if (uses_f16 || (uses_quantized && !f32_quantized_matvec)) return false;\n        const bool f32_i32_safe_op =\n            // llama_model::select_buft() probes a plain F32 ADD to choose each layer buffer.\n            // Without this entry, no-ShaderF16 adapters reject the GPU buffer even for\n            // otherwise supported F32 tensors, forcing layer placement back to CPU.\n            op->op == GGML_OP_ADD || op->op == GGML_OP_ADD_ID || op->op == GGML_OP_CONCAT || op->op == GGML_OP_SET ||\n            op->op == GGML_OP_RMS_NORM || op->op == GGML_OP_NORM || op->op == GGML_OP_L2_NORM ||\n            op->op == GGML_OP_SCALE || op->op == GGML_OP_UNARY || op->op == GGML_OP_CLAMP ||\n            op->op == GGML_OP_FILL || op->op == GGML_OP_LOG || op->op == GGML_OP_SQR ||\n            op->op == GGML_OP_SQRT || op->op == GGML_OP_SIN || op->op == GGML_OP_COS ||\n            op->op == GGML_OP_SUM || op->op == GGML_OP_SUM_ROWS || op->op == GGML_OP_CUMSUM ||\n            op->op == GGML_OP_ARGMAX || op->op == GGML_OP_ARGSORT || op->op == GGML_OP_TOP_K ||\n            op->op == GGML_OP_SOFT_MAX || op->op == GGML_OP_DIAG || op->op == GGML_OP_TRI ||\n            op->op == GGML_OP_SOLVE_TRI || op->op == GGML_OP_PAD || op->op == GGML_OP_UPSCALE ||\n            op->op == GGML_OP_SSM_CONV || op->op == GGML_OP_SSM_SCAN || op->op == GGML_OP_GATED_DELTA_NET;\n        if (!f32_i32_safe_op && !f32_quantized_matvec && !f32_plain_matmul) return false;\n    }\n    // AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2\n    // AI_CHAT_NO_SHADER_F16_QUANT_MATVEC_OP_V3\n    // AI_CHAT_NO_SHADER_F16_F32_GEMM_OP_V1
 endif()
 string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2" AI_CHAT_WEBGPU_FP32_WHITELIST_VERIFY)
 if (AI_CHAT_WEBGPU_FP32_WHITELIST_VERIFY EQUAL -1)
@@ -416,16 +415,47 @@ if (NOT AI_CHAT_Q8_SCALE_D_REMAINS EQUAL -1 OR NOT AI_CHAT_Q8_SCALE_S_REMAINS EQ
     message(FATAL_ERROR "No-ShaderF16 quantized mat-vec still contains an FP16 arithmetic/type dependency")
 endif()
 
-# On no-ShaderF16 adapters, only the verified quantized F32 mat-vec shape is
-# admitted. Larger prompt-prefill GEMMs remain on CPU until a separate F32
-# tiled-matmul shader is validated; never route them through the f16 fast path.
-    string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANT_MATVEC_OP_V2" AI_CHAT_WEBGPU_QUANT_MATVEC_OP_PATCHED)
-if (AI_CHAT_WEBGPU_QUANT_MATVEC_OP_PATCHED EQUAL -1)
-    ai_chat_replace_once(AI_CHAT_WEBGPU_SOURCE_TEXT
-        "if (!f32_i32_safe_op) return false;"
-        "if (!f32_i32_safe_op && !f32_quantized_matvec) return false;"
-        "no-ShaderF16 quantized mat-vec whitelist")
-    string(APPEND AI_CHAT_WEBGPU_SOURCE_TEXT "\n// AI_CHAT_NO_SHADER_F16_QUANT_MATVEC_OP_V2\n")
+string(FIND "\${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANT_MATVEC_OP_V3" AI_CHAT_WEBGPU_QUANT_MATVEC_OP_VERIFY)
+if (AI_CHAT_WEBGPU_QUANT_MATVEC_OP_VERIFY EQUAL -1)
+    message(FATAL_ERROR "No-ShaderF16 quantized MatVec was not integrated into the generic operation guard")
+endif()
+string(FIND "\${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_NO_SHADER_F16_F32_GEMM_OP_V1" AI_CHAT_WEBGPU_F32_GEMM_OP_VERIFY)
+if (AI_CHAT_WEBGPU_F32_GEMM_OP_VERIFY EQUAL -1)
+    message(FATAL_ERROR "No-ShaderF16 F32 GEMM admission is missing")
+endif()
+
+# Add a portable F32-only tiled GEMM for no-ShaderF16 adapters.
+set(AI_CHAT_WEBGPU_SHADER_LIB_SOURCE "\${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/ggml-webgpu-shader-lib.hpp")
+set(AI_CHAT_WEBGPU_CPP_SOURCE "\${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/ggml-webgpu.cpp")
+file(READ "\${AI_CHAT_WEBGPU_SHADER_LIB_SOURCE}" AI_CHAT_WEBGPU_SHADER_LIB_TEXT)
+file(READ "\${AI_CHAT_WEBGPU_CPP_SOURCE}" AI_CHAT_WEBGPU_CPP_TEXT)
+
+string(FIND "\${AI_CHAT_WEBGPU_SHADER_LIB_TEXT}" "AI_CHAT_NO_SHADER_F16_F32_GEMM_PIPELINE_V1" AI_CHAT_WEBGPU_F32_GEMM_PIPELINE_PATCHED)
+if (AI_CHAT_WEBGPU_F32_GEMM_PIPELINE_PATCHED EQUAL -1)
+    ai_chat_replace_once(AI_CHAT_WEBGPU_SHADER_LIB_TEXT
+        "bool        supports_subgroups       = false;"
+        "bool        supports_shader_f16      = true;\\n    bool        supports_subgroups       = false;"
+        "shader library ShaderF16 capability field")
+    ai_chat_replace_once(AI_CHAT_WEBGPU_SHADER_LIB_TEXT
+        "webgpu_pipeline get_mul_mat_fast_pipeline(const ggml_webgpu_shader_lib_context & context, bool src_overlap) {"
+        "webgpu_pipeline get_mul_mat_fast_pipeline(const ggml_webgpu_shader_lib_context & context, bool src_overlap) {\\n        if (!context.supports_shader_f16 && context.src0->type == GGML_TYPE_F32 && context.src1->type == GGML_TYPE_F32 && context.dst->type == GGML_TYPE_F32) {\\n            ggml_webgpu_mul_mat_pipeline_key portable_key = {};\\n            portable_key.src0_type = context.src0->type;\\n            portable_key.src1_type = context.src1->type;\\n            portable_key.vectorized = 0;\\n            portable_key.use_subgroup_matrix = 0;\\n            portable_key.src_overlap = false;\\n            auto cached = mul_mat_fast_pipelines.find(portable_key);\\n            if (cached != mul_mat_fast_pipelines.end()) return cached->second;\\n            std::vector<std::string> portable_defines;\\n            auto portable_processed = preprocessor.preprocess(wgsl_mul_mat_f32_no_shader_f16, portable_defines);\\n            auto portable_decisions = std::make_shared<ggml_webgpu_mul_mat_shader_decisions>();\\n            portable_decisions->tile_k = 16;\\n            portable_decisions->tile_m = 1;\\n            portable_decisions->tile_n = 1;\\n            portable_decisions->wg_size_m = 8;\\n            portable_decisions->wg_size_n = 8;\\n            portable_decisions->wg_size = 64;\\n            portable_decisions->use_subgroup_matrix = 0;\\n            portable_decisions->mul_mat_wg_size = 64;\\n            webgpu_pipeline portable_pipeline = ggml_webgpu_create_pipeline(device, portable_processed, \\"mul_mat_f32_no_shader_f16\\");\\n            portable_pipeline.context = portable_decisions;\\n            mul_mat_fast_pipelines[portable_key] = portable_pipeline;\\n            return mul_mat_fast_pipelines[portable_key];\\n        }"
+        "F32 no-ShaderF16 GEMM pipeline selection")
+    string(APPEND AI_CHAT_WEBGPU_SHADER_LIB_TEXT "\\n// AI_CHAT_NO_SHADER_F16_F32_GEMM_PIPELINE_V1\\n")
+    file(WRITE "\${AI_CHAT_WEBGPU_SHADER_LIB_SOURCE}" "\${AI_CHAT_WEBGPU_SHADER_LIB_TEXT}")
+endif()
+
+string(FIND "\${AI_CHAT_WEBGPU_CPP_TEXT}" "AI_CHAT_NO_SHADER_F16_F32_GEMM_CONTEXT_V1" AI_CHAT_WEBGPU_F32_GEMM_CONTEXT_PATCHED)
+if (AI_CHAT_WEBGPU_F32_GEMM_CONTEXT_PATCHED EQUAL -1)
+    ai_chat_replace_once(AI_CHAT_WEBGPU_CPP_TEXT
+        "shader_lib_ctx.src0                     = src0;"
+        "shader_lib_ctx.src0                     = src0;\\n    shader_lib_ctx.supports_shader_f16 = ctx->global_ctx->capabilities.supports_shader_f16;"
+        "mul-mat ShaderF16 capability propagation")
+    ai_chat_replace_once(AI_CHAT_WEBGPU_CPP_TEXT
+        "const bool src_overlap = ggml_webgpu_tensor_binding_overlap(ctx->global_ctx, src0, src1) && !use_mmvq;"
+        "const bool no_shader_f16_plain_f32_gemm = !ctx->global_ctx->capabilities.supports_shader_f16 && !use_mat_vec && src0->type == GGML_TYPE_F32 && src1->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32;\\n    const bool src_overlap = ggml_webgpu_tensor_binding_overlap(ctx->global_ctx, src0, src1) && !use_mmvq && !no_shader_f16_plain_f32_gemm;"
+        "portable F32 GEMM binding policy")
+    string(APPEND AI_CHAT_WEBGPU_CPP_TEXT "\\n// AI_CHAT_NO_SHADER_F16_F32_GEMM_CONTEXT_V1\\n")
+    file(WRITE "\${AI_CHAT_WEBGPU_CPP_SOURCE}" "\${AI_CHAT_WEBGPU_CPP_TEXT}")
 endif()
 
 file(WRITE "${AI_CHAT_WEBGPU_SOURCE}" "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
