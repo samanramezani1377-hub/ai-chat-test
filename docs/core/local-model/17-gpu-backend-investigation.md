@@ -368,3 +368,47 @@ The next acceptance gate is an actual Android run that reports meaningful
 WebGPU tensor residency and confirms Q6_K decode output against the CPU
 reference. Prompt prefill and cross-vendor performance must be measured
 separately; neither is inferred from model weight residency.
+
+## No-ShaderF16 quantized prompt-prefill GEMM (2026-11-20)
+
+The earlier decode-only limitation is superseded by a portable variant of the
+pinned upstream register-tile GEMM. For adapters that do not expose Dawn's
+ShaderF16 feature, the shader library now selects the same register-tile
+kernel family with NO_SHADER_F16 enabled and disables the F16 subgroup-matrix
+variant.
+
+The no-F16 variant aliases the shader's temporary f16 arithmetic/storage
+type to f32 before including both common_decls.tmpl and
+mul_mat_decls.tmpl. This is important: putting the alias after
+common_decls.tmpl leaves F16 declarations in the WGSL module and is not a
+valid no-ShaderF16 shader. The two packed IQ scale reads that previously used
+bitcast<vec2<f16>> are explicitly decoded with unpack2x16float() in the
+no-F16 branch. Quantized model weights remain in their original packed GGUF
+formats; only workgroup temporaries and dequantized values use F32.
+
+The operation gate now admits F32-output MUL_MAT with F32 activations and
+quantized weights to the no-F16 register-tile path, rather than limiting it to
+decode-time MatVec. Plain F32 x F32 GEMM uses the same F32 register-tile path.
+Subgroup-matrix dispatch remains disabled without ShaderF16.
+
+### Scope and remaining acceptance tests
+
+- This enables the upstream register-tile family for the quantized formats
+  implemented by the pinned revision's mul_mat_decls.tmpl and dispatch table.
+  It does not add new quantization formats that upstream does not implement.
+- Quantized weight blocks remain packed; no full-model F32 expansion is used.
+- F16 tensor operations and unsupported op/type combinations remain rejected
+  by the no-ShaderF16 gate.
+- F32 shared-memory arithmetic uses more workgroup storage than the F16 path.
+  Devices that exceed their workgroup-storage or binding limits must reject the
+  operation and fall back safely; the backend must not claim GPU execution.
+- The source patch is not proof of shader compilation, numerical equivalence,
+  GPU residency, or performance. CI must compile the Android native target;
+  device acceptance must compare outputs against CPU for Q4/Q5/Q6_K/Q8 and IQ
+  families, then benchmark prefill and decode independently on multiple GPU
+  vendors.
+
+The CMake patch validates that the F32 alias appears before the common shader
+declarations, and the native contract test checks that the no-F16 register-tile
+variant, the quantized GEMM admission, and the packed IQ scale conversions
+remain present.
