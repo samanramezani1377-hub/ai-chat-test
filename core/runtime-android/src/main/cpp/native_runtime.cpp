@@ -1242,7 +1242,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
                 g_context_length = (uint32_t)effective;
                 checkpoint((std::string("WEBGPU_CONTEXT_INIT_STARTED effective_ctx=") +
                     std::to_string(effective)).c_str());
-                runtime_ready = init_generation_context();
+                runtime_ready = init_generation_context(true);
                 checkpoint(runtime_ready ? "WEBGPU_CONTEXT_INIT_RETURNED_SUCCESS" : "WEBGPU_CONTEXT_INIT_RETURNED_FAILED");
                 if (runtime_ready) {
                     g_gpu = true;
