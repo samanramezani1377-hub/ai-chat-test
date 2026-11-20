@@ -1,6 +1,6 @@
 # Build the native Dawn implementation from the exact source revision
-# recorded by the AndroidX WebGPU AAR. The AAR's libwebgpu_c_bundled.so is
-# JNI-oriented and does not export the WebGPU C ABI consumed by ggml-webgpu.
+# recorded by the AndroidX WebGPU AAR. The AAR's bundled JNI library does not
+# export the WebGPU C ABI consumed by ggml-webgpu.
 if (NOT DEFINED AI_CHAT_DAWN_METADATA_FILE OR NOT EXISTS "${AI_CHAT_DAWN_METADATA_FILE}")
     message(FATAL_ERROR
         "AI_CHAT_DAWN_METADATA_FILE is missing. Extract assets/dawn_build_metadata.json "
