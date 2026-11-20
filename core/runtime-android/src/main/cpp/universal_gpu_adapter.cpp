@@ -13,6 +13,25 @@
 namespace ai_chat::gpu {
 namespace {
 
+class EglApiBinding {
+public:
+    EglApiBinding() : previous_api_(eglQueryAPI()) {}
+    EglApiBinding(const EglApiBinding &) = delete;
+    EglApiBinding & operator=(const EglApiBinding &) = delete;
+    ~EglApiBinding() {
+        if (bound_) eglBindAPI(previous_api_);
+    }
+    bool bind_opengles() {
+        if (eglBindAPI(EGL_OPENGL_ES_API) != EGL_TRUE) return false;
+        bound_ = true;
+        return true;
+    }
+
+private:
+    EGLenum previous_api_;
+    bool bound_ = false;
+};
+
 std::string egl_error_name(EGLint error) {
     switch (error) {
         case EGL_SUCCESS: return "EGL_SUCCESS";
@@ -138,7 +157,8 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
     caps.egl_version = egl_string(display, EGL_VERSION);
     caps.egl_vendor = egl_string(display, EGL_VENDOR);
 
-    if (eglBindAPI(EGL_OPENGL_ES_API) != EGL_TRUE) {
+    EglApiBinding api_binding;
+    if (!api_binding.bind_opengles()) {
         caps.failure_reason = "egl_bind_opengles_api_failed_" + egl_error_name(eglGetError());
         return caps;
     }
