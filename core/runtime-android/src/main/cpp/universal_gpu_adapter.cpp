@@ -16,7 +16,8 @@ namespace {
 class EglCurrentContext {
 public:
     EglCurrentContext()
-        : previous_display_(eglGetCurrentDisplay()),
+        : previous_api_(eglQueryAPI()),
+          previous_display_(eglGetCurrentDisplay()),
           previous_draw_(eglGetCurrentSurface(EGL_DRAW)),
           previous_read_(eglGetCurrentSurface(EGL_READ)),
           previous_context_(eglGetCurrentContext()) {}
@@ -36,9 +37,24 @@ public:
         if (!changed_) return true;
         EGLBoolean result = EGL_FALSE;
         if (previous_context_ != EGL_NO_CONTEXT && previous_display_ != EGL_NO_DISPLAY) {
+            // eglMakeCurrent validates the context against the thread's bound
+            // client API. Restore that API before rebinding an application
+            // context that may have been created for desktop OpenGL.
+            if (eglBindAPI(previous_api_) != EGL_TRUE) {
+                last_restore_error_ = eglGetError();
+                eglMakeCurrent(active_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+                changed_ = false;
+                return false;
+            }
             result = eglMakeCurrent(previous_display_, previous_draw_, previous_read_, previous_context_);
         } else {
+            // Unbind the temporary GLES context while GLES is still the bound API.
             result = eglMakeCurrent(active_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            if (result == EGL_TRUE && eglBindAPI(previous_api_) != EGL_TRUE) {
+                last_restore_error_ = eglGetError();
+                changed_ = false;
+                return false;
+            }
         }
         const EGLint restore_error = result == EGL_TRUE ? EGL_SUCCESS : eglGetError();
         if (result != EGL_TRUE) {
@@ -54,6 +70,7 @@ public:
     EGLint last_restore_error() const { return last_restore_error_; }
 
 private:
+    EGLenum previous_api_ = EGL_OPENGL_ES_API;
     EGLDisplay previous_display_ = EGL_NO_DISPLAY;
     EGLSurface previous_draw_ = EGL_NO_SURFACE;
     EGLSurface previous_read_ = EGL_NO_SURFACE;
