@@ -110,3 +110,5 @@ fn main(
         dst[dst_batch_offset + output_col_base * params.m + output_row_base] = acc;
     }
 }
+
+// AI_CHAT_NO_SHADER_F16_F32_GEMM_SHADER_V1
