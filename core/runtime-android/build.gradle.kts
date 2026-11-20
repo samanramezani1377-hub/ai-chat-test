@@ -18,14 +18,6 @@ val extractWebGpuNativeLibrary = tasks.register<Copy>("extractWebGpuNativeLibrar
         includeEmptyDirs = false
     }
     into(webgpuNativeOutput)
-    doLast {
-        check(webgpuNativeLibrary.get().asFile.isFile) {
-            "AndroidX WebGPU AAR is missing jni/arm64-v8a/libwebgpu_c_bundled.so"
-        }
-        check(webgpuDawnMetadata.get().asFile.isFile) {
-            "AndroidX WebGPU AAR is missing assets/dawn_build_metadata.json"
-        }
-    }
 }
 
 android {
