@@ -165,7 +165,7 @@ static bool validate_gpu_model_residency() {
         const ggml_backend_dev_t dev = ggml_backend_buft_get_device(buft);
         const auto type = dev ? ggml_backend_dev_type(dev) : GGML_BACKEND_DEVICE_TYPE_CPU;
         const size_t bytes = ggml_nbytes(tensor);
-        if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+        if (is_webgpu_backend_device(dev)) {
             gpu_bytes += bytes; ++gpu_tensors;
         } else if (type == GGML_BACKEND_DEVICE_TYPE_CPU) {
             cpu_bytes += bytes; ++cpu_tensors;
@@ -179,12 +179,12 @@ static bool validate_gpu_model_residency() {
         std::to_string(cpu_tensors) + " otherBytes=" + std::to_string(other_bytes) +
         " otherTensors=" + std::to_string(other_tensors)).c_str());
 
-    // Accept the OpenCL attempt only when the loaded model has actual GPU weight
-    // buffers. If not, the caller releases this partial runtime and retries the same
-    // model on CPU; this is a fallback policy, not a GPU-only activation requirement.
+    // Accept GPU activation only when model weights are backed by buffers owned
+    // by the WebGPU backend. A different registered GPU backend must never make
+    // this validation pass accidentally.
     const bool has_gpu_weights = gpu_bytes > 0;
     append_native_trace((std::string("WEBGPU_MODEL_RESIDENCY_POLICY mode=") +
-        (has_gpu_weights ? "OPENCL_GPU_RESIDENT" : "OPENCL_REJECTED_NO_GPU_WEIGHTS") +
+        (has_gpu_weights ? "WEBGPU_GPU_RESIDENT" : "WEBGPU_REJECTED_NO_GPU_WEIGHTS") +
         " wholeModelCpuFallback=enabled").c_str());
     return has_gpu_weights;
 }
@@ -622,6 +622,13 @@ static ggml_backend_dev_t find_webgpu_gpu_device() {
     return nullptr;
 }
 
+static bool is_webgpu_backend_device(ggml_backend_dev_t dev) {
+    if (!dev) return false;
+    ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
+    const char * name = reg ? ggml_backend_reg_name(reg) : nullptr;
+    return name && (std::string(name) == GGML_WEBGPU_NAME || std::string(name) == "WEBGPU");
+}
+
 static bool register_static_webgpu_backend() {
     if (ggml_backend_reg_by_name(GGML_WEBGPU_NAME) != nullptr ||
         ggml_backend_reg_by_name("WEBGPU") != nullptr) {
@@ -1039,7 +1046,7 @@ static void append_weight_residency_trace() {
         // OpenCL buffers on Android may be host-accessible because the device is
         // unified memory. Classify by backend device first; otherwise a real GPU
         // buffer is incorrectly reported as "Host Tensor Memory".
-        if (dev_type == GGML_BACKEND_DEVICE_TYPE_GPU || dev_type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+        if (is_webgpu_backend_device(dev)) {
             gpu_bytes += bytes; gpu_tensors++; gpu_buffers.insert(buffer);
         } else if (is_host) {
             host_bytes += bytes; host_tensors++; host_buffers.insert(buffer);
@@ -1050,13 +1057,12 @@ static void append_weight_residency_trace() {
         }
     }
 
-    // Prefer the actual non-CPU device registered by the OpenCL backend.
+    // Report memory from the selected WebGPU device only. OpenCL may also be
+    // registered for legacy diagnostics, but it is not an inference fallback.
     ggml_backend_dev_t gpu_dev = nullptr;
     for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
         ggml_backend_dev_t candidate = ggml_backend_dev_get(i);
-        if (!candidate) continue;
-        const auto type = ggml_backend_dev_type(candidate);
-        if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+        if (is_webgpu_backend_device(candidate)) {
             gpu_dev = candidate;
             break;
         }
@@ -1071,8 +1077,7 @@ static void append_weight_residency_trace() {
             ggml_backend_dev_t candidate = ggml_backend_buft_get_device(
                     ggml_backend_buffer_get_type(tensor->buffer));
             if (!candidate) continue;
-            const auto type = ggml_backend_dev_type(candidate);
-            if (type != GGML_BACKEND_DEVICE_TYPE_CPU && type != GGML_BACKEND_DEVICE_TYPE_ACCEL) {
+            if (is_webgpu_backend_device(candidate)) {
                 gpu_dev = candidate;
                 break;
             }
@@ -1134,16 +1139,16 @@ static void append_weight_residency_trace() {
 }
 
 static llama_model *load_model_android(const char *path, llama_model_params mp, bool gpu) {
-    // Keep the OpenCL path on bounded reads: some Android OpenCL drivers fail when
-    // mmap-backed host pointers are imported into GPU buffers. CPU fallback can use
-    // llama.cpp's automatic load-mode selection independently of the GPU path.
+    // Keep the WebGPU model-load path on bounded reads. GPU-owned WebGPU buffers
+    // must be allocated by the backend rather than imported from mmap host pointers.
+    // CPU fallback uses llama.cpp's automatic load-mode selection independently.
     mp.load_mode = gpu ? LLAMA_LOAD_MODE_NONE : LLAMA_LOAD_MODE_AUTO;
     mp.check_tensors = false;
     mp.no_host = gpu;
 
-    // Prefer OpenCL when requested; if it fails, the caller retries with n_gpu_layers=0.
-    // CPU loading is a supported recovery path, not an activation error.
-    checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_OPENCL_PREFERRED" : "ANDROID_MODEL_LOAD_POLICY_CPU_FALLBACK");
+    // Prefer WebGPU when requested; on any load/residency/context failure the caller
+    // releases partial state and retries the same model on CPU.
+    checkpoint(gpu ? "ANDROID_MODEL_LOAD_POLICY_WEBGPU_PREFERRED" : "ANDROID_MODEL_LOAD_POLICY_CPU_FALLBACK");
     checkpoint((std::string("ANDROID_MODEL_LOAD_PARAMS load_mode=") + llama_load_mode_name(mp.load_mode) +
         " check_tensors=" + (mp.check_tensors ? "1" : "0") +
         " no_host=" + (mp.no_host ? "1" : "0")).c_str());
@@ -1176,6 +1181,16 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     append_native_trace("SPECULATIVE_AUTO_DETECTION_DISABLED_DURING_TARGET_LOAD");
     ggml_backend_dev_t webgpu_device = find_webgpu_gpu_device();
     const bool gpu_available = g_webgpu_backend_loaded && webgpu_device != nullptr && gpu_layers > 0;
+    if (gpu_layers <= 0) {
+        gpu_failure_reason = "gpu_offload_disabled";
+    } else if (!ggml_backend_reg_by_name(GGML_WEBGPU_NAME) &&
+               !ggml_backend_reg_by_name("WEBGPU")) {
+        gpu_failure_reason = "webgpu_backend_not_registered";
+    } else if (!g_webgpu_backend_loaded) {
+        gpu_failure_reason = "webgpu_compatibility_adapter_unavailable";
+    } else if (!webgpu_device) {
+        gpu_failure_reason = "webgpu_no_gpu_device";
+    }
     append_native_trace((std::string("NATIVE_EXECUTION_POLICY mode=WEBGPU_OPENGL_ES_COMPATIBILITY gpuRequested=") +
         (gpu_layers > 0 ? "1" : "0") +
         " webgpuAvailable=" + (gpu_available ? "1" : "0") +
@@ -1186,10 +1201,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     bool gpu_attempted = false;
     std::string gpu_failure_reason = "gpu_not_requested_or_unavailable";
 
-    // Prefer OpenCL when a usable GPU device is present, but GPU is an optimization,
-    // not a requirement for activating a valid model. Any recoverable GPU model-load,
-    // residency-validation, or context-init failure releases partial state and retries
-    // the same model with the CPU backend.
+    // GPU is an optimization, not a requirement for activating a valid model.
+    // Any recoverable WebGPU model-load, residency-validation, or context-init
+    // failure releases partial state and retries the same model with the CPU backend.
     if (gpu_available) {
         gpu_attempted = true;
         llama_model_params gpu_params = llama_model_default_params();
