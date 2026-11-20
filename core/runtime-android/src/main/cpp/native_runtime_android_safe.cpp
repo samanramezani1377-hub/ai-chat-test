@@ -1479,9 +1479,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
     const auto profile_prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(prefill_finished_at - generation_started_at).count();
     append_decode_profile_trace(generation_ms, profile_prefill_ms);
     append_native_trace((std::string("NATIVE_EXECUTION_PROFILE mode=") +
-        (g_gpu && g_gpu_backend_loaded ? "OPENCL_GPU_PREFERRED_MIXED_CPU_OPS" : "CPU_FALLBACK") +
-        " gpuBackendRegistered=" + (g_gpu_backend_loaded ? "1" : "0") +
-        " fallbackPolicy=ggml_scheduler" +
+        (g_gpu && g_webgpu_backend_loaded ? "WEBGPU_GPU_PREFERRED_MIXED_CPU_OPS" : "CPU_FALLBACK") +
+        " gpuBackendRegistered=" + (g_webgpu_backend_loaded ? "1" : "0") +
+        " selectedBackend=" + (g_gpu && g_webgpu_backend_loaded ? "WEBGPU" : "CPU") +
+        " fallbackPolicy=ggml_scheduler cpuFallbackAllowed=1" +
         " decodeSteps=" + std::to_string(g_decode_profile.token_steps) +
         " decodeWallMs=" + std::to_string(g_decode_profile.decode_ms) +
         " cpuLogitsSyncMs=" + std::to_string(g_decode_profile.logits_sync_ms) +
@@ -1489,7 +1490,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGenerate(
         " cpuCallbackMs=" + std::to_string(g_decode_profile.callback_ms) +
         " cpuMeasuredSubtotalMs=" + std::to_string(g_decode_profile.logits_sync_ms +
             g_decode_profile.sampling_ms + g_decode_profile.callback_ms) +
-        " gpuKernelTiming=cl_profiling.csv").c_str());
+        " gpuKernelTiming=not_instrumented").c_str());
     if (prefill_recorded && result == 0) {
         // Publish only the tokens that are actually resident in the live
         // context. For hybrid models, retain the full recurrent+attention state

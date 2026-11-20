@@ -49,7 +49,7 @@ class LlamaCppAndroidRuntimeAdapter(
     fun setGpuLayers(value: Int) {
         require(value in 0..GPU_LAYERS_MAX) { "GPU layer preference must be between 0 and $GPU_LAYERS_MAX" }
         gpuLayersMode = value
-        RuntimeDiagnosticsStore.recordNativeEvent("OPENCL_GPU_PREFERRED_CPU_FALLBACK_ALLOWED")
+        RuntimeDiagnosticsStore.recordNativeEvent("WEBGPU_GPU_PREFERRED_CPU_FALLBACK_ALLOWED")
         RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "WebGPU OpenGL ES Compatibility preferred; CPU fallback allowed (applies on next activation)")
     }
 

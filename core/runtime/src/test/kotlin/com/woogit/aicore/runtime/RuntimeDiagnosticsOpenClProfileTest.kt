@@ -3,10 +3,31 @@ package com.woogit.aicore.runtime
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class RuntimeDiagnosticsOpenClProfileTest {
+    @Test
+    fun `only associates legacy OpenCL profile with an active OpenCL backend`() {
+        assertTrue(
+            RuntimeDiagnosticsStore.shouldReadOpenClProfile(
+                "NATIVE_EXECUTION_PROFILE mode=OPENCL_GPU selectedBackend=OPENCL"
+            )
+        )
+        assertFalse(
+            RuntimeDiagnosticsStore.shouldReadOpenClProfile(
+                "NATIVE_EXECUTION_PROFILE mode=WEBGPU_OPENGL_ES_COMPATIBILITY selectedBackend=WEBGPU"
+            )
+        )
+        assertFalse(
+            RuntimeDiagnosticsStore.shouldReadOpenClProfile(
+                "NATIVE_EXECUTION_PROFILE mode=CPU_FALLBACK selectedBackend=CPU"
+            )
+        )
+        assertFalse(RuntimeDiagnosticsStore.shouldReadOpenClProfile(null))
+    }
+
     @Test
     fun `writes real-shaped profiling file and reads non-N-A profile data`() {
         val dir = Files.createTempDirectory("ai-chat-opencl-profile-test-").toFile()

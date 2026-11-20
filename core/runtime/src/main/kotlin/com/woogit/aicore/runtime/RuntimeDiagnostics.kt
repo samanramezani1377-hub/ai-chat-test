@@ -168,8 +168,30 @@ object RuntimeDiagnosticsStore {
     private fun nativeField(line: String, key: String): String? =
         Regex("""\b${Regex.escape(key)}=([^\s]+)""").find(line)?.groupValues?.get(1)
 
+    private fun activeExecutionBackend(): String? {
+        val profile = nativeLine("NATIVE_EXECUTION_PROFILE") ?: return null
+        nativeField(profile, "selectedBackend")?.uppercase(Locale.US)?.let { return it }
+        return when {
+            profile.contains("WEBGPU", ignoreCase = true) -> "WEBGPU"
+            profile.contains("OPENCL", ignoreCase = true) -> "OPENCL"
+            profile.contains("CPU_FALLBACK", ignoreCase = true) -> "CPU"
+            else -> null
+        }
+    }
+
+    internal fun shouldReadOpenClProfile(executionProfile: String?): Boolean {
+        if (executionProfile.isNullOrBlank()) return false
+        val selected = nativeField(executionProfile, "selectedBackend")?.uppercase(Locale.US)
+        return selected == "OPENCL" ||
+            (selected == null && executionProfile.contains("mode=OPENCL", ignoreCase = true))
+    }
+
     private fun readGpuDevice(): GpuDeviceProfile? = runCatching {
-        val line = nativeLine("NATIVE_GPU_DEVICE") ?: nativeLine("NATIVE_OPENCL_DEVICE") ?: return@runCatching null
+        val line = when (activeExecutionBackend()) {
+            "WEBGPU" -> nativeLine("NATIVE_GPU_DEVICE")
+            "OPENCL" -> nativeLine("NATIVE_OPENCL_DEVICE")
+            else -> null
+        } ?: return@runCatching null
         GpuDeviceProfile(
             name = nativeField(line, "name")?.replace('_', ' ') ?: "unknown",
             description = nativeField(line, "description")?.replace('_', ' ') ?: "unknown",
@@ -194,6 +216,9 @@ object RuntimeDiagnosticsStore {
     }.getOrNull()
 
     private fun readOpenClProfile(): OpenClGpuProfile? = runCatching {
+        // The legacy CSV is meaningful only when OpenCL is the selected inference backend.
+        // Never attach it to a WebGPU or CPU run merely because an old file still exists.
+        if (!shouldReadOpenClProfile(nativeLine("NATIVE_EXECUTION_PROFILE"))) return@runCatching null
         val root = System.getenv("TMPDIR")?.takeIf { it.isNotBlank() }
             ?: System.getProperty("java.io.tmpdir")?.takeIf { it.isNotBlank() }
             ?: return@runCatching null

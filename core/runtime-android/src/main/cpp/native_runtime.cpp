@@ -1277,6 +1277,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         cpu_params.check_tensors = false;
         g_model = load_model_android(stable_model_path.c_str(), cpu_params, false);
         checkpoint(g_model ? "CPU_MODEL_LOAD_RETURNED_SUCCESS" : "CPU_MODEL_LOAD_RETURNED_FAILED");
+        // Refresh residency after a failed WebGPU attempt so diagnostics cannot
+        // retain partial GPU buffers from the discarded model instance.
+        if (g_model) append_weight_residency_trace();
         if (!g_model) {
             append_native_trace("CPU_FALLBACK_FAILED reason=model_load_failed");
             env->ReleaseStringUTFChars(jpath, path);

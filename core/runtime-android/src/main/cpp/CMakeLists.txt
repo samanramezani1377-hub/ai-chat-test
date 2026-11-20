@@ -42,6 +42,12 @@ list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 set(GGML_OPENCL ON CACHE BOOL "Keep legacy OpenCL backend available for diagnostics" FORCE)
 # Android inference uses the upstream GGML WebGPU backend linked to AndroidX Dawn.
 set(GGML_WEBGPU ON CACHE BOOL "Enable GGML WebGPU backend through AndroidX Dawn" FORCE)
+if (NOT DEFINED AI_CHAT_WEBGPU_LIBRARY OR NOT EXISTS "${AI_CHAT_WEBGPU_LIBRARY}")
+    message(FATAL_ERROR "AndroidX WebGPU AAR native library was not extracted before CMake configuration")
+endif()
+if (NOT DEFINED AI_CHAT_DAWN_METADATA_FILE OR NOT EXISTS "${AI_CHAT_DAWN_METADATA_FILE}")
+    message(FATAL_ERROR "AndroidX WebGPU Dawn build metadata was not extracted before CMake configuration")
+endif()
 # Android runtime links the OpenCL backend statically when available. Dynamic backend
 # loading is unreliable on Android because ggml_backend_load_all() cannot discover
 # MODULE libraries from the APK's native library namespace.
