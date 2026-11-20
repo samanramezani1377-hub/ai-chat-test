@@ -211,6 +211,7 @@ if (AI_CHAT_WEBGPU_FP32_PATCHED EQUAL -1)
         "std::vector<wgpu::FeatureName> required_features;\n    if (ctx->webgpu_global_ctx->capabilities.supports_shader_f16) {\n        required_features.push_back(wgpu::FeatureName::ShaderF16);\n    }"
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
     string(REPLACE
+        "    ggml_tensor * src2 = op->src[2];"
         "    ggml_tensor * src2 = op->src[2];\n\n    // AI_CHAT_GENERIC_FP32_FALLBACK_V1: conservative dispatch when ShaderF16 is absent.\n    if (!ctx->webgpu_global_ctx->capabilities.supports_shader_f16) {\n        bool uses_f16 = op->type == GGML_TYPE_F16;\n        bool uses_quantized = ggml_is_quantized(op->type);\n        // Inspect every possible source, not only src0-src2. Recurrent/attention\n        // operations may carry additional tensors in src3-src6.\n        for (int src_index = 0; src_index < GGML_MAX_SRC; ++src_index) {\n            const ggml_tensor * source = op->src[src_index];\n            if (source == nullptr) continue;\n            uses_f16 = uses_f16 || source->type == GGML_TYPE_F16;\n            uses_quantized = uses_quantized || ggml_is_quantized(source->type);\n        }\n        if (uses_f16 || uses_quantized) return false;\n    }"
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
     string(REPLACE
@@ -425,18 +426,18 @@ endif()
 
 # Add a no-ShaderF16 variant of upstream's register-tile GEMM. Quantized weights
 # remain packed; only temporary decode/shared-memory arithmetic becomes F32.
-set(AI_CHAT_WEBGPU_SHADER_LIB_SOURCE "\${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/ggml-webgpu-shader-lib.hpp")
-set(AI_CHAT_WEBGPU_CPP_SOURCE "\${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/ggml-webgpu.cpp")
-set(AI_CHAT_WEBGPU_MATMUL_TILE "\${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/wgsl-shaders/mul_mat_reg_tile.wgsl")
-set(AI_CHAT_WEBGPU_MATMUL_DECLS "\${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/wgsl-shaders/mul_mat_decls.tmpl")
-foreach(AI_CHAT_MATMUL_SOURCE IN ITEMS "\${AI_CHAT_WEBGPU_SHADER_LIB_SOURCE}" "\${AI_CHAT_WEBGPU_CPP_SOURCE}" "\${AI_CHAT_WEBGPU_MATMUL_TILE}" "\${AI_CHAT_WEBGPU_MATMUL_DECLS}")
-    if (NOT EXISTS "\${AI_CHAT_MATMUL_SOURCE}")
-        message(FATAL_ERROR "Pinned GGML no-ShaderF16 matmul source is missing: \${AI_CHAT_MATMUL_SOURCE}")
+set(AI_CHAT_WEBGPU_SHADER_LIB_SOURCE "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/ggml-webgpu-shader-lib.hpp")
+set(AI_CHAT_WEBGPU_CPP_SOURCE "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/ggml-webgpu.cpp")
+set(AI_CHAT_WEBGPU_MATMUL_TILE "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/wgsl-shaders/mul_mat_reg_tile.wgsl")
+set(AI_CHAT_WEBGPU_MATMUL_DECLS "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/wgsl-shaders/mul_mat_decls.tmpl")
+foreach(AI_CHAT_MATMUL_SOURCE IN ITEMS "${AI_CHAT_WEBGPU_SHADER_LIB_SOURCE}" "${AI_CHAT_WEBGPU_CPP_SOURCE}" "${AI_CHAT_WEBGPU_MATMUL_TILE}" "${AI_CHAT_WEBGPU_MATMUL_DECLS}")
+    if (NOT EXISTS "${AI_CHAT_MATMUL_SOURCE}")
+        message(FATAL_ERROR "Pinned GGML no-ShaderF16 matmul source is missing: ${AI_CHAT_MATMUL_SOURCE}")
     endif()
 endforeach()
 
-file(READ "\${AI_CHAT_WEBGPU_SHADER_LIB_SOURCE}" AI_CHAT_WEBGPU_SHADER_LIB_TEXT)
-string(FIND "\${AI_CHAT_WEBGPU_SHADER_LIB_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_PIPELINE_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_PIPELINE_PATCHED)
+file(READ "${AI_CHAT_WEBGPU_SHADER_LIB_SOURCE}" AI_CHAT_WEBGPU_SHADER_LIB_TEXT)
+string(FIND "${AI_CHAT_WEBGPU_SHADER_LIB_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_PIPELINE_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_PIPELINE_PATCHED)
 if (AI_CHAT_WEBGPU_QUANTIZED_GEMM_PIPELINE_PATCHED EQUAL -1)
     ai_chat_replace_once(AI_CHAT_WEBGPU_SHADER_LIB_TEXT
         "bool        supports_subgroups       = false;"
@@ -451,22 +452,22 @@ if (AI_CHAT_WEBGPU_QUANTIZED_GEMM_PIPELINE_PATCHED EQUAL -1)
         "std::vector<std::string> defines;\n        if (!context.supports_shader_f16) defines.push_back(\"NO_SHADER_F16\");\n        std::string              variant = key.use_subgroup_matrix ? \"mul_mat_subgroup_matrix\" : \"mul_mat_reg_tile\";"
         "select portable F32 arithmetic in upstream register-tile GEMM")
     string(APPEND AI_CHAT_WEBGPU_SHADER_LIB_TEXT "\n// AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_PIPELINE_V1\n")
-    file(WRITE "\${AI_CHAT_WEBGPU_SHADER_LIB_SOURCE}" "\${AI_CHAT_WEBGPU_SHADER_LIB_TEXT}")
+    file(WRITE "${AI_CHAT_WEBGPU_SHADER_LIB_SOURCE}" "${AI_CHAT_WEBGPU_SHADER_LIB_TEXT}")
 endif()
 
-file(READ "\${AI_CHAT_WEBGPU_CPP_SOURCE}" AI_CHAT_WEBGPU_CPP_TEXT)
-string(FIND "\${AI_CHAT_WEBGPU_CPP_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_CONTEXT_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_CONTEXT_PATCHED)
+file(READ "${AI_CHAT_WEBGPU_CPP_SOURCE}" AI_CHAT_WEBGPU_CPP_TEXT)
+string(FIND "${AI_CHAT_WEBGPU_CPP_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_CONTEXT_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_CONTEXT_PATCHED)
 if (AI_CHAT_WEBGPU_QUANTIZED_GEMM_CONTEXT_PATCHED EQUAL -1)
     ai_chat_replace_once(AI_CHAT_WEBGPU_CPP_TEXT
         "shader_lib_ctx.src0                     = src0;"
         "shader_lib_ctx.src0                     = src0;\n    shader_lib_ctx.supports_shader_f16 = ctx->global_ctx->capabilities.supports_shader_f16;"
         "propagate ShaderF16 capability to upstream matmul shader library")
     string(APPEND AI_CHAT_WEBGPU_CPP_TEXT "\n// AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_CONTEXT_V1\n")
-    file(WRITE "\${AI_CHAT_WEBGPU_CPP_SOURCE}" "\${AI_CHAT_WEBGPU_CPP_TEXT}")
+    file(WRITE "${AI_CHAT_WEBGPU_CPP_SOURCE}" "${AI_CHAT_WEBGPU_CPP_TEXT}")
 endif()
 
-file(READ "\${AI_CHAT_WEBGPU_MATMUL_TILE}" AI_CHAT_WEBGPU_MATMUL_TILE_TEXT)
-string(FIND "\${AI_CHAT_WEBGPU_MATMUL_TILE_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_TILE_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_TILE_PATCHED)
+file(READ "${AI_CHAT_WEBGPU_MATMUL_TILE}" AI_CHAT_WEBGPU_MATMUL_TILE_TEXT)
+string(FIND "${AI_CHAT_WEBGPU_MATMUL_TILE_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_TILE_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_TILE_PATCHED)
 if (AI_CHAT_WEBGPU_QUANTIZED_GEMM_TILE_PATCHED EQUAL -1)
     ai_chat_replace_once(AI_CHAT_WEBGPU_MATMUL_TILE_TEXT
         "enable f16;"
@@ -477,11 +478,11 @@ if (AI_CHAT_WEBGPU_QUANTIZED_GEMM_TILE_PATCHED EQUAL -1)
         "#include \"common_decls.tmpl\"\n#ifdef NO_SHADER_F16\n#define f16 f32\n#endif\n#include \"mul_mat_decls.tmpl\""
         "use F32 for no-ShaderF16 tile arithmetic")
     string(APPEND AI_CHAT_WEBGPU_MATMUL_TILE_TEXT "\n// AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_TILE_V1\n")
-    file(WRITE "\${AI_CHAT_WEBGPU_MATMUL_TILE}" "\${AI_CHAT_WEBGPU_MATMUL_TILE_TEXT}")
+    file(WRITE "${AI_CHAT_WEBGPU_MATMUL_TILE}" "${AI_CHAT_WEBGPU_MATMUL_TILE_TEXT}")
 endif()
 
-file(READ "\${AI_CHAT_WEBGPU_MATMUL_DECLS}" AI_CHAT_WEBGPU_MATMUL_DECLS_TEXT)
-string(FIND "\${AI_CHAT_WEBGPU_MATMUL_DECLS_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_DECLS_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_DECLS_PATCHED)
+file(READ "${AI_CHAT_WEBGPU_MATMUL_DECLS}" AI_CHAT_WEBGPU_MATMUL_DECLS_TEXT)
+string(FIND "${AI_CHAT_WEBGPU_MATMUL_DECLS_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_DECLS_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_DECLS_PATCHED)
 if (AI_CHAT_WEBGPU_QUANTIZED_GEMM_DECLS_PATCHED EQUAL -1)
     ai_chat_replace_once(AI_CHAT_WEBGPU_MATMUL_DECLS_TEXT
         "let d          = bitcast<vec2<f16>>(d_scales_h).x;"
@@ -492,14 +493,14 @@ if (AI_CHAT_WEBGPU_QUANTIZED_GEMM_DECLS_PATCHED EQUAL -1)
         "#ifdef NO_SHADER_F16\n        let d = unpack2x16float(scale_packed).x;\n#else\n        let d = f32(bitcast<vec2<f16>>(scale_packed).x);\n#endif"
         "decode packed IQ scale as F32 without ShaderF16")
     string(APPEND AI_CHAT_WEBGPU_MATMUL_DECLS_TEXT "\n// AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_DECLS_V1\n")
-    file(WRITE "\${AI_CHAT_WEBGPU_MATMUL_DECLS}" "\${AI_CHAT_WEBGPU_MATMUL_DECLS_TEXT}")
+    file(WRITE "${AI_CHAT_WEBGPU_MATMUL_DECLS}" "${AI_CHAT_WEBGPU_MATMUL_DECLS_TEXT}")
 endif()
 
 
-string(FIND "\${AI_CHAT_WEBGPU_SHADER_LIB_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_PIPELINE_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_PIPELINE_VERIFY)
-string(FIND "\${AI_CHAT_WEBGPU_MATMUL_TILE_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_TILE_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_TILE_VERIFY)
-string(FIND "\${AI_CHAT_WEBGPU_MATMUL_TILE_TEXT}" "#define f16 f32" AI_CHAT_WEBGPU_F16_ALIAS_VERIFY)
-string(FIND "\${AI_CHAT_WEBGPU_MATMUL_DECLS_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_DECLS_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_DECLS_VERIFY)
+string(FIND "${AI_CHAT_WEBGPU_SHADER_LIB_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_PIPELINE_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_PIPELINE_VERIFY)
+string(FIND "${AI_CHAT_WEBGPU_MATMUL_TILE_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_TILE_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_TILE_VERIFY)
+string(FIND "${AI_CHAT_WEBGPU_MATMUL_TILE_TEXT}" "#define f16 f32" AI_CHAT_WEBGPU_F16_ALIAS_VERIFY)
+string(FIND "${AI_CHAT_WEBGPU_MATMUL_DECLS_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_DECLS_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_DECLS_VERIFY)
 if (AI_CHAT_WEBGPU_QUANTIZED_GEMM_PIPELINE_VERIFY EQUAL -1 OR AI_CHAT_WEBGPU_QUANTIZED_GEMM_TILE_VERIFY EQUAL -1 OR AI_CHAT_WEBGPU_F16_ALIAS_VERIFY EQUAL -1 OR AI_CHAT_WEBGPU_QUANTIZED_GEMM_DECLS_VERIFY EQUAL -1)
     message(FATAL_ERROR "Portable no-ShaderF16 quantized GEMM source integration is incomplete")
 endif()
