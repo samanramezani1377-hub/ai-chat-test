@@ -42,6 +42,7 @@ grep -q 'shouldReadOpenClProfile' "$DIAGNOSTICS" || fail "Legacy OpenCL profile 
 grep -q 'GGML_VULKAN OFF' "$CMAKE" || fail "Vulkan must remain disabled"
 grep -q 'FeatureLevel::Compatibility' "$CMAKE" || fail "WebGPU compatibility mode must remain enabled"
 grep -q 'BackendType::OpenGLES' "$CMAKE" || fail "WebGPU must use the OpenGL ES backend"
+grep -q 'cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED' "$ROOT/core/runtime-android/src/main/cpp/native_runtime.cpp" || fail "Android must not select the unstable fused FLASH_ATTN_EXT path"
 
 # The imported AAR library must never be used as a native WebGPU C ABI provider.
 ! grep -q 'webgpu_c_bundled' "$FIND_DAWN" || fail "FindDawn must not link the AndroidX JNI-only library"
