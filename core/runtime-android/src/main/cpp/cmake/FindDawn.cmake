@@ -51,7 +51,7 @@ execute_process(
         --template-dir "${ai_chat_dawn_headers_SOURCE_DIR}/generator/templates"
         --output-dir "${_ai_chat_dawn_generated}"
         --dawn-json "${ai_chat_dawn_headers_SOURCE_DIR}/src/dawn/dawn.json"
-        --targets dawn_headers,cpp_headers
+        --targets headers,cpp_headers
     RESULT_VARIABLE _ai_chat_dawn_generator_result
     OUTPUT_VARIABLE _ai_chat_dawn_generator_stdout
     ERROR_VARIABLE _ai_chat_dawn_generator_stderr
@@ -62,6 +62,14 @@ if (NOT _ai_chat_dawn_generator_result EQUAL 0)
         "The Python environment must include Dawn generator dependencies (notably Jinja2). "
         "stdout: ${_ai_chat_dawn_generator_stdout} stderr: ${_ai_chat_dawn_generator_stderr}"
     )
+endif()
+
+# The public webgpu/webgpu.h wrapper includes dawn/webgpu.h. The generator's
+# C-header target is named "headers" (not "dawn_headers") and must emit it.
+if (NOT EXISTS "${_ai_chat_dawn_generated}/include/dawn/webgpu.h")
+    message(FATAL_ERROR
+        "Dawn header generation completed but did not produce include/dawn/webgpu.h. "
+        "Check the pinned Dawn generator target names and AAR source revision.")
 endif()
 
 if (NOT TARGET dawn::webgpu_dawn)
