@@ -13,6 +13,56 @@
 namespace ai_chat::gpu {
 namespace {
 
+class EglCurrentContext {
+public:
+    EglCurrentContext()
+        : previous_display_(eglGetCurrentDisplay()),
+          previous_draw_(eglGetCurrentSurface(EGL_DRAW)),
+          previous_read_(eglGetCurrentSurface(EGL_READ)),
+          previous_context_(eglGetCurrentContext()) {}
+    EglCurrentContext(const EglCurrentContext &) = delete;
+    EglCurrentContext & operator=(const EglCurrentContext &) = delete;
+
+    ~EglCurrentContext() { restore(); }
+
+    bool bind(EGLDisplay display, EGLSurface surface, EGLContext context) {
+        if (eglMakeCurrent(display, surface, surface, context) != EGL_TRUE) return false;
+        active_display_ = display;
+        changed_ = true;
+        return true;
+    }
+
+    bool restore() {
+        if (!changed_) return true;
+        EGLBoolean result = EGL_FALSE;
+        if (previous_context_ != EGL_NO_CONTEXT && previous_display_ != EGL_NO_DISPLAY) {
+            result = eglMakeCurrent(previous_display_, previous_draw_, previous_read_, previous_context_);
+        } else {
+            result = eglMakeCurrent(active_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        }
+        const EGLint restore_error = result == EGL_TRUE ? EGL_SUCCESS : eglGetError();
+        if (result != EGL_TRUE) {
+            // Best effort: do not leave the temporary probe context current if
+            // restoring an application-owned context failed.
+            eglMakeCurrent(active_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        }
+        changed_ = false;
+        last_restore_error_ = restore_error;
+        return result == EGL_TRUE;
+    }
+
+    EGLint last_restore_error() const { return last_restore_error_; }
+
+private:
+    EGLDisplay previous_display_ = EGL_NO_DISPLAY;
+    EGLSurface previous_draw_ = EGL_NO_SURFACE;
+    EGLSurface previous_read_ = EGL_NO_SURFACE;
+    EGLContext previous_context_ = EGL_NO_CONTEXT;
+    EGLDisplay active_display_ = EGL_NO_DISPLAY;
+    EGLint last_restore_error_ = EGL_SUCCESS;
+    bool changed_ = false;
+};
+
 class EglApiBinding {
 public:
     EglApiBinding() : previous_api_(eglQueryAPI()) {}
@@ -194,7 +244,8 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
         return caps;
     }
 
-    if (eglMakeCurrent(display, surface, surface, context) != EGL_TRUE) {
+    EglCurrentContext current_context;
+    if (!current_context.bind(display, surface, context)) {
         caps.failure_reason = "egl_make_current_failed_" + egl_error_name(eglGetError());
         eglDestroyContext(display, context);
         eglDestroySurface(display, surface);
@@ -239,7 +290,13 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
         caps.failure_reason = "opengles_3_1_compute_not_supported";
     }
 
-    eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    // Restore the thread's previous EGL context/surfaces before destroying
+    // the temporary probe context. The probe may run on a thread that already
+    // owns an application graphics context; unbinding it would break rendering.
+    if (!current_context.restore() && caps.failure_reason.empty()) {
+        caps.failure_reason = "egl_restore_previous_context_failed_" +
+            egl_error_name(current_context.last_restore_error());
+    }
     eglDestroyContext(display, context);
     eglDestroySurface(display, surface);
     return caps;
