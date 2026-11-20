@@ -80,8 +80,8 @@ static bool init_generation_context(bool use_webgpu_backend) {
     cp.n_batch = std::min<uint32_t>(cp.n_ctx, 128);
     cp.n_ubatch = std::min<uint32_t>(cp.n_ctx, 128);
     cp.n_rs_seq = 0;
-    // Keep optimized flash attention on a real OpenCL GPU, but disable it for
-    // CPU fallback on Android. The pinned llama.cpp revision can fail during
+    // Enable the backend's optimized flash-attention path only for a model
+    // loaded with WebGPU. Keep it disabled for CPU fallback on Android. The pinned llama.cpp revision can fail during
     // repeated hybrid/recurrent prompt batches on the CPU FLASH_ATTN_EXT path
     // (ggml_backend_sched_graph_compute_async -> GGML_STATUS_FAILED); this leaves
     // generation with zero tokens after spending tens of seconds in prefill.
@@ -93,7 +93,7 @@ static bool init_generation_context(bool use_webgpu_backend) {
         : LLAMA_FLASH_ATTN_TYPE_DISABLED;
     append_native_trace((std::string("NATIVE_ATTENTION_POLICY backend=") +
         (use_webgpu_attention ? "WEBGPU_AUTO" : "CPU_FLASH_ATTN_DISABLED") +
-        " reason=" + (use_webgpu_attention ? "webgpu_backend_available" : "android_cpu_fallback_stability")).c_str());
+        " reason=" + (use_webgpu_attention ? "webgpu_model_execution" : "android_cpu_fallback_stability")).c_str());
     cp.type_k = GGML_TYPE_F16;
     cp.type_v = GGML_TYPE_F16;
     cp.offload_kqv = true;
