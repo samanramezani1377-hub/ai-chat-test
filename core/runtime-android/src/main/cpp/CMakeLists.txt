@@ -221,7 +221,7 @@ if (AI_CHAT_OPENCL_PROFILING)
     include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_opencl_profiling.cmake")
 endif()
 
-add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp vision_runtime_android.cpp)
+add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp vision_runtime_android.cpp universal_gpu_adapter.cpp)
 
 # native_runtime.cpp intentionally includes llama.cpp/ggml internal headers for
 # strict backend and tensor-residency validation. Keep both internal source
@@ -253,13 +253,14 @@ target_link_options(ai_chat_runtime PRIVATE
 if (NOT TARGET ggml-webgpu)
     message(FATAL_ERROR "GGML_WEBGPU=ON was requested, but ggml-webgpu target was not created")
 endif()
-target_link_libraries(ai_chat_runtime PRIVATE llama llama-common mtmd ggml-opencl ggml-webgpu android log OpenCL)
+target_link_libraries(ai_chat_runtime PRIVATE llama llama-common mtmd ggml-opencl ggml-webgpu android log OpenCL EGL GLESv3)
 
 target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"
     AI_CHAT_GPU_BACKEND_OPENCL=1
     AI_CHAT_GPU_BACKEND_WEBGPU=1
     AI_CHAT_GPU_BACKEND_VULKAN=0
+    AI_CHAT_GPU_ADAPTER_OPENGL_ES=1
     AI_CHAT_GGML_OPENMP_ENABLED=1
     AI_CHAT_GGML_CPU_KLEIDIAI_ENABLED=1
     AI_CHAT_CPU_ARM_BASELINE="armv8-a"
