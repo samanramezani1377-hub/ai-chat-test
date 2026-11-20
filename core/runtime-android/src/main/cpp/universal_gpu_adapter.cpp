@@ -58,9 +58,13 @@ public:
         }
         const EGLint restore_error = result == EGL_TRUE ? EGL_SUCCESS : eglGetError();
         if (result != EGL_TRUE) {
-            // Best effort: do not leave the temporary probe context current if
-            // restoring an application-owned context failed.
+            // Best effort: the failed restore may have switched the thread API
+            // to the caller's API while the temporary GLES context is still
+            // current. Rebind GLES to safely release that temporary context,
+            // then restore the caller's API selection.
+            eglBindAPI(EGL_OPENGL_ES_API);
             eglMakeCurrent(active_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            eglBindAPI(previous_api_);
         }
         changed_ = false;
         last_restore_error_ = restore_error;
