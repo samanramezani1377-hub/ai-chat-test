@@ -207,6 +207,9 @@ jobs:
           restore-keys: |
             ccache-${{ runner.os }}-ndk27-arm64-
 
+      - name: Verify portable WebGPU native build contract
+        run: bash scripts/verify_webgpu_native_contract.sh
+
       - name: Verify WebGPU OpenGL ES compatibility runtime invariants
         run: |
           set -euo pipefail
