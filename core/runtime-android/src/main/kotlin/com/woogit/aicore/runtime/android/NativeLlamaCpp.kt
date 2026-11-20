@@ -161,8 +161,6 @@ internal object NativeLlamaCpp {
     @Synchronized
     fun stop() = nativeStop()
 
-    @Synchronized
-    private fun resetStop() = nativeResetStop()
     fun runtimeInfo(): String = nativeRuntimeInfo()
     fun contextLength(): Int = nativeContextLength()
 
