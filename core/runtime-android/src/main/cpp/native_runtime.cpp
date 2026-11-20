@@ -63,6 +63,7 @@ static bool g_universal_gles_compute_supported = false;
 
 static bool abort_callback(void *) { return g_stop.load(std::memory_order_relaxed); }
 static void append_native_trace(const char *text);
+static void checkpoint(const char *event);
 static bool init_generation_context(bool use_webgpu_backend);
 static bool init_speculative_runtime();
 static int available_cpu_cores() {
