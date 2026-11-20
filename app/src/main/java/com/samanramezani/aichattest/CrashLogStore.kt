@@ -32,7 +32,7 @@ object CrashLogStore {
     private const val KEY_PENDING_PLATFORM_EXIT = "pending_platform_exit"
     private const val KEY_PENDING_PLATFORM_TRACE = "pending_platform_trace"
     private const val FILE_NAME = "crash-log.txt"
-    private const val MAX_REPORT_CHARS = 120_000
+    private const val MAX_REPORT_CHARS = 40_000
     private val installed = AtomicBoolean(false)
     private val mutableReport = MutableStateFlow<String?>(null)
     val report: StateFlow<String?> = mutableReport.asStateFlow()
@@ -315,14 +315,26 @@ object CrashLogStore {
             File(context.cacheDir, "ai-chat-native-trace.txt"),
             File(context.filesDir, "ai-chat-native-trace.txt"),
         ).distinctBy { it.absolutePath }
-        return candidates.firstOrNull { it.isFile }?.let { runCatching { it.readText() }.getOrNull() }.orEmpty()
+        return candidates.firstOrNull { it.isFile }?.let { file ->
+            runCatching {
+                java.io.RandomAccessFile(file, "r").use { input ->
+                    val start = (input.length() - 256_000L).coerceAtLeast(0L)
+                    input.seek(start)
+                    if (start > 0L) input.readLine()
+                    val remaining = (input.length() - input.filePointer).coerceAtLeast(0L).coerceAtMost(256_000L).toInt()
+                    val bytes = ByteArray(remaining)
+                    input.readFully(bytes)
+                    String(bytes, Charsets.UTF_8)
+                }
+            }.getOrNull()
+        }.orEmpty()
     }
 
     private fun appendReport(context: Context, report: String) {
         val file = File(context.filesDir, FILE_NAME)
         file.parentFile?.mkdirs()
-        val old = if (file.isFile) file.readText() else ""
-        val updated = (old + "\n\n================ CRASH ================\n" + report).takeLast(MAX_REPORT_CHARS)
+        val old = if (file.isFile) file.readText().takeLast(12_000) else ""
+        val updated = (old + "\n\n================ CRASH ================\n" + report.takeLast(24_000)).takeLast(MAX_REPORT_CHARS)
         file.writeText(updated)
     }
 
