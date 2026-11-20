@@ -475,8 +475,8 @@ if (AI_CHAT_WEBGPU_QUANTIZED_GEMM_TILE_PATCHED EQUAL -1)
         "make register-tile ShaderF16 declaration conditional")
     ai_chat_replace_once(AI_CHAT_WEBGPU_MATMUL_TILE_TEXT
         "#include \"common_decls.tmpl\"\n#include \"mul_mat_decls.tmpl\""
-        "#include \"common_decls.tmpl\"\n#ifdef NO_SHADER_F16\n#define f16 f32\n#endif\n#include \"mul_mat_decls.tmpl\""
-        "use F32 for no-ShaderF16 tile arithmetic")
+        "#ifdef NO_SHADER_F16\n#define f16 f32\n#endif\n#include \"common_decls.tmpl\"\n#include \"mul_mat_decls.tmpl\""
+        "apply F32 alias before all shared quantized declarations")
     string(APPEND AI_CHAT_WEBGPU_MATMUL_TILE_TEXT "\n// AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_TILE_V1\n")
     file(WRITE "${AI_CHAT_WEBGPU_MATMUL_TILE}" "${AI_CHAT_WEBGPU_MATMUL_TILE_TEXT}")
 endif()
@@ -500,6 +500,10 @@ endif()
 string(FIND "${AI_CHAT_WEBGPU_SHADER_LIB_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_PIPELINE_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_PIPELINE_VERIFY)
 string(FIND "${AI_CHAT_WEBGPU_MATMUL_TILE_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_TILE_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_TILE_VERIFY)
 string(FIND "${AI_CHAT_WEBGPU_MATMUL_TILE_TEXT}" "#define f16 f32" AI_CHAT_WEBGPU_F16_ALIAS_VERIFY)
+string(FIND "${AI_CHAT_WEBGPU_MATMUL_TILE_TEXT}" "#include \"common_decls.tmpl\"" AI_CHAT_WEBGPU_COMMON_DECLS_INCLUDE)
+if (AI_CHAT_WEBGPU_F16_ALIAS_VERIFY EQUAL -1 OR AI_CHAT_WEBGPU_COMMON_DECLS_INCLUDE EQUAL -1 OR AI_CHAT_WEBGPU_F16_ALIAS_VERIFY GREATER AI_CHAT_WEBGPU_COMMON_DECLS_INCLUDE)
+    message(FATAL_ERROR "No-ShaderF16 F32 alias must precede common declarations and all quantized WGSL helpers")
+endif()
 string(FIND "${AI_CHAT_WEBGPU_MATMUL_DECLS_TEXT}" "AI_CHAT_NO_SHADER_F16_QUANTIZED_GEMM_DECLS_V1" AI_CHAT_WEBGPU_QUANTIZED_GEMM_DECLS_VERIFY)
 if (AI_CHAT_WEBGPU_QUANTIZED_GEMM_PIPELINE_VERIFY EQUAL -1 OR AI_CHAT_WEBGPU_QUANTIZED_GEMM_TILE_VERIFY EQUAL -1 OR AI_CHAT_WEBGPU_F16_ALIAS_VERIFY EQUAL -1 OR AI_CHAT_WEBGPU_QUANTIZED_GEMM_DECLS_VERIFY EQUAL -1)
     message(FATAL_ERROR "Portable no-ShaderF16 quantized GEMM source integration is incomplete")
