@@ -163,11 +163,10 @@ if (AI_CHAT_WEBGPU_CAPABILITIES_LOGGED EQUAL -1)
     if (AI_CHAT_WEBGPU_CAPABILITIES_POS EQUAL -1)
         message(FATAL_ERROR "Could not locate Dawn WebGPU capability diagnostic anchor")
     endif()
-    string(REPLACE
-        "${AI_CHAT_WEBGPU_CAPABILITIES_ANCHOR}"
-        "${AI_CHAT_WEBGPU_CAPABILITIES_ANCHOR}
+    set(AI_CHAT_WEBGPU_CAPABILITIES_REPLACEMENT [=[
+${AI_CHAT_WEBGPU_CAPABILITIES_ANCHOR}
     // AI_CHAT_WEBGPU_CAPABILITIES: report actual Dawn features, not GLES hints.
-    GGML_LOG_INFO(\"AI_CHAT_WEBGPU_CAPABILITIES vendor=%s shaderF16=%d subgroups=%d dotProduct=%d subgroupMatrix=%d maxStorageBufferBindingSize=%llu maxComputeInvocationsPerWorkgroup=%u maxComputeWorkgroupStorageSize=%u\n\",
+    GGML_LOG_INFO("AI_CHAT_WEBGPU_CAPABILITIES vendor=%s shaderF16=%d subgroups=%d dotProduct=%d subgroupMatrix=%d maxStorageBufferBindingSize=%llu maxComputeInvocationsPerWorkgroup=%u maxComputeWorkgroupStorageSize=%u\\n",
         ctx->webgpu_global_ctx->vendor.c_str(),
         static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_shader_f16),
         static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_subgroups),
@@ -175,7 +174,11 @@ if (AI_CHAT_WEBGPU_CAPABILITIES_LOGGED EQUAL -1)
         static_cast<int>(ctx->webgpu_global_ctx->capabilities.supports_subgroup_matrix),
         static_cast<unsigned long long>(ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize),
         ctx->webgpu_global_ctx->capabilities.limits.maxComputeInvocationsPerWorkgroup,
-        ctx->webgpu_global_ctx->capabilities.limits.maxComputeWorkgroupStorageSize);"
+        ctx->webgpu_global_ctx->capabilities.limits.maxComputeWorkgroupStorageSize);
+]=])
+    string(REPLACE
+        "${AI_CHAT_WEBGPU_CAPABILITIES_ANCHOR}"
+        "${AI_CHAT_WEBGPU_CAPABILITIES_REPLACEMENT}"
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
 endif()
 string(FIND "${AI_CHAT_WEBGPU_SOURCE_TEXT}" "AI_CHAT_WEBGPU_CAPABILITIES" AI_CHAT_WEBGPU_CAPABILITIES_VERIFY)
@@ -202,9 +205,17 @@ if (AI_CHAT_WEBGPU_FP32_PATCHED EQUAL -1)
         "bool         supports_subgroups       = false;"
         "bool         supports_shader_f16      = false;\n    bool         supports_subgroups       = false;"
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
+    set(AI_CHAT_WEBGPU_FP16_DISABLED_REPLACEMENT [=[
+ctx->webgpu_global_ctx->vendor                    = info.vendor;
+    ctx->webgpu_global_ctx->capabilities.supports_shader_f16 =
+        ctx->webgpu_global_ctx->adapter.HasFeature(wgpu::FeatureName::ShaderF16);
+    if (!ctx->webgpu_global_ctx->capabilities.supports_shader_f16) {
+        GGML_LOG_WARN("AI_CHAT_WEBGPU_FP16_FAST_KERNELS_DISABLED reason=shader_f16_unavailable; quantized_f32_matvec_fallback=enabled; prompt_prefill_gemm_fallback=portable_f32_register_tile; quantized_prefill_gemm_fallback=portable_f32_register_tile\\n");
+    }
+]=])
     string(REPLACE
         "ctx->webgpu_global_ctx->vendor                    = info.vendor;"
-        "ctx->webgpu_global_ctx->vendor                    = info.vendor;\n    ctx->webgpu_global_ctx->capabilities.supports_shader_f16 =\n        ctx->webgpu_global_ctx->adapter.HasFeature(wgpu::FeatureName::ShaderF16);\n    if (!ctx->webgpu_global_ctx->capabilities.supports_shader_f16) {\n        GGML_LOG_WARN(\"AI_CHAT_WEBGPU_FP16_FAST_KERNELS_DISABLED reason=shader_f16_unavailable; quantized_f32_matvec_fallback=enabled; prompt_prefill_gemm_fallback=portable_f32_register_tile;quantized_prefill_gemm_fallback=portable_f32_register_tile\n\");\n    }"
+        "${AI_CHAT_WEBGPU_FP16_DISABLED_REPLACEMENT}"
         AI_CHAT_WEBGPU_SOURCE_TEXT "${AI_CHAT_WEBGPU_SOURCE_TEXT}")
     string(REPLACE
         "std::vector<wgpu::FeatureName> required_features       = { wgpu::FeatureName::ShaderF16 };"
