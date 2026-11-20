@@ -41,7 +41,7 @@ private const val KEY_SEED = "seed"
 private const val KEY_STOPS = "stop_sequences"
 private const val KEY_MAX_ACTION_STEPS = "max_action_steps"
 
-private val sections = listOf("مدل", "صدا", "پاسخ", "زمینه", "عامل", "حباب و صفحه")
+private val sections = listOf("مدل", "صدا", "پاسخ", "زمینه", "عامل", "حباب و صفحه", "لاگ کرش")
 
 private enum class InferencePreset(val title: String, val description: String, val settings: InferenceSettings) {
     FAST("سریع", "برای گفت‌وگوی روزمره", InferenceSettings(temperature=.7, maxNewTokens=256, topK=32, topP=.9, minP=0.0, repeatPenalty=1.1, contextLength=2048, recentMessages=6, maxActionSteps=2)),
@@ -60,6 +60,7 @@ fun SettingsScreen(
     voiceSettingsContent: @Composable () -> Unit = {},
     initialSection: String = "مدل",
     onSectionChanged: (String) -> Unit = {},
+    crashLogContent: @Composable () -> Unit = {},
 ) {
     var section by remember(initialSection) { mutableStateOf(initialSection) }
     Column(Modifier.fillMaxSize()) {
@@ -84,9 +85,9 @@ fun SettingsScreen(
                 }
             }
         }
-        if (section == "صدا") {
+        if (section == "صدا" || section == "لاگ کرش") {
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                voiceSettingsContent()
+                if (section == "صدا") voiceSettingsContent() else crashLogContent()
             }
         } else {
             LazyColumn(
