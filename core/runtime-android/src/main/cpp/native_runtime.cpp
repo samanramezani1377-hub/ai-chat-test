@@ -145,7 +145,13 @@ static bool init_generation_context(bool use_webgpu_backend) {
     } else {
         append_native_trace("NATIVE_GRAPH_REUSE_POLICY hybridOrRecurrent=0 disabled=0");
     }
+    checkpoint(use_webgpu_backend
+        ? "WEBGPU_CONTEXT_GRAPH_RESERVATION_BEGIN"
+        : "CPU_CONTEXT_GRAPH_RESERVATION_BEGIN");
     g_context = llama_init_from_model(g_model, cp);
+    checkpoint(g_context
+        ? (use_webgpu_backend ? "WEBGPU_CONTEXT_GRAPH_RESERVATION_RETURNED" : "CPU_CONTEXT_GRAPH_RESERVATION_RETURNED")
+        : (use_webgpu_backend ? "WEBGPU_CONTEXT_GRAPH_RESERVATION_FAILED" : "CPU_CONTEXT_GRAPH_RESERVATION_FAILED"));
     if (hybrid_or_recurrent) {
         if (had_previous_graph_reuse) {
             setenv("LLAMA_GRAPH_REUSE_DISABLE", previous_graph_reuse_value.c_str(), 1);
@@ -189,24 +195,31 @@ static bool validate_gpu_model_residency() {
     const double gpu_percent = total_weight_bytes > 0
         ? (100.0 * static_cast<double>(gpu_bytes) / static_cast<double>(total_weight_bytes))
         : 0.0;
+    // Reject negligible GPU weight residency before graph/context construction.
+    // The byte-ratio policy is independent of model family and quantization.
+    constexpr double kMinimumUsefulGpuWeightPercent = 1.0;
+    const bool useful_gpu_residency =
+        gpu_bytes > 0 && gpu_percent >= kMinimumUsefulGpuWeightPercent;
     append_native_trace((std::string("WEBGPU_MODEL_RESIDENCY gpuBytes=") +
         std::to_string(gpu_bytes) + " gpuTensors=" + std::to_string(gpu_tensors) +
         " cpuBytes=" + std::to_string(cpu_bytes) + " cpuTensors=" +
         std::to_string(cpu_tensors) + " otherBytes=" + std::to_string(other_bytes) +
         " otherTensors=" + std::to_string(other_tensors) +
         " totalWeightBytes=" + std::to_string(total_weight_bytes) +
-        " gpuWeightPercent=" + std::to_string(gpu_percent)).c_str());
+        " gpuWeightPercent=" + std::to_string(gpu_percent) +
+        " minimumUsefulGpuWeightPercent=" + std::to_string(kMinimumUsefulGpuWeightPercent)).c_str());
 
-    // Do not equate a single GPU-owned tensor with whole-model residency.
-    // Report the actual byte share so different architectures and quantizations
-    // can be compared without a Q4/Q6/Q8-specific assumption.
     const char * residency_mode = gpu_bytes == 0 ? "WEBGPU_REJECTED_NO_GPU_WEIGHTS"
-        : (gpu_percent >= 99.0 ? "WEBGPU_FULL_WEIGHT_RESIDENCY"
-                              : "WEBGPU_MIXED_WEIGHT_RESIDENCY");
+        : (!useful_gpu_residency ? "WEBGPU_REJECTED_NEGLIGIBLE_WEIGHT_RESIDENCY"
+           : (gpu_percent >= 99.0 ? "WEBGPU_FULL_WEIGHT_RESIDENCY"
+                                  : "WEBGPU_MIXED_WEIGHT_RESIDENCY"));
     append_native_trace((std::string("WEBGPU_MODEL_RESIDENCY_POLICY mode=") +
         residency_mode + " gpuWeightPercent=" + std::to_string(gpu_percent) +
         " wholeModelCpuFallback=enabled").c_str());
-    return gpu_bytes > 0;
+    if (!useful_gpu_residency) {
+        append_native_trace("WEBGPU_RESIDENCY_REJECTED action=release_gpu_model_and_retry_cpu");
+    }
+    return useful_gpu_residency;
 }
 
 
@@ -716,13 +729,6 @@ static bool has_opencl_gpu_device() {
 
 static void append_native_trace(const char *text) {
     if (!text || !*text) return;
-    size_t phase_len = 0;
-    while (phase_len + 1 < sizeof(g_native_runtime_phase) &&
-           text[phase_len] && text[phase_len] != '\n' && text[phase_len] != '\r') {
-        g_native_runtime_phase[phase_len].store(text[phase_len], std::memory_order_relaxed);
-        ++phase_len;
-    }
-    g_native_runtime_phase[phase_len].store('\0', std::memory_order_relaxed);
     if (g_native_trace_file.empty()) return;
     std::lock_guard<std::mutex> lock(g_native_marker_mutex);
     // Keep the persistent diagnostic trace bounded. The newest 1 MiB is enough
@@ -858,7 +864,18 @@ static void install_native_fatal_handlers() {
     }
 
 static void checkpoint(const char *event) {
-    LOGI("NATIVE_CHECKPOINT %s", event);
+    // Only explicit checkpoints update the fatal phase snapshot. Raw ggml graph
+    // diagnostics are not lifecycle phases and can contain very long tensor dumps.
+    if (event) {
+        size_t phase_len = 0;
+        while (phase_len + 1 < sizeof(g_native_runtime_phase) &&
+               event[phase_len] && event[phase_len] != '\n' && event[phase_len] != '\r') {
+            g_native_runtime_phase[phase_len].store(event[phase_len], std::memory_order_relaxed);
+            ++phase_len;
+        }
+        g_native_runtime_phase[phase_len].store('\0', std::memory_order_relaxed);
+    }
+    LOGI("NATIVE_CHECKPOINT %s", event ? event : "UNKNOWN");
     append_native_trace(event);
     if (!g_native_marker_file.empty()) {
         std::lock_guard<std::mutex> lock(g_native_marker_mutex);
