@@ -282,15 +282,16 @@ proof that Dawn exposes WebGPU `ShaderF16`.
 
 
 
-### F32 softmax without ShaderF16
+### Softmax fallback without ShaderF16
 
-The pinned `soft_max.wgsl` shader declared `enable f16` unconditionally even
-though its normal logits/output path is F32 and F16 is only needed when the
-optional attention mask tensor itself is F16. The Android CMake patch now
-guards that declaration with `#ifdef MASK_F16`. The no-ShaderF16 whitelist
-can therefore safely include F32 softmax; F16-mask operations are still
-rejected by the generic tensor-type guard. CI verifies the patched shader
-source before packaging.
+The pinned upstream `soft_max.wgsl` shader still declares `enable f16`
+unconditionally. An attempted configure-time source rewrite failed in the
+Android CMake configure phase before compilation. To keep the backend
+conservative and portable, `GGML_OP_SOFT_MAX` is excluded from the no-ShaderF16
+F32/I32 whitelist and remains on CPU for adapters without ShaderF16. This is
+an intentional correctness-first fallback, not a claim of GPU acceleration.
+Revisit only after a reproducible shader-generation/compilation test validates
+a feature-conditional softmax variant.
 
 
 ### EGL thread-state preservation
