@@ -27,6 +27,7 @@
 #include <CL/cl.h>
 #include <set>
 #include "android_opencl_dispatch.h"
+#include "universal_gpu_adapter.h"
 
 // CL_PLATFORM_ICD_SUFFIX_KHR belongs to cl_khr_icd and is not declared by every
 // vendor-neutral OpenCL header package. Keep the standard extension value available
@@ -940,6 +941,15 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
 
     std::lock_guard<std::mutex> lock(g_backend_init_mutex);
     if (!g_backend_initialized) {
+        // Probe the platform's real OpenGL ES implementation before backend
+        // registration. This is vendor-neutral capability discovery only; Dawn/
+        // GGML remains responsible for actual GPU execution and kernel support.
+        const auto universal_gpu_caps = ai_chat::gpu::probe_universal_gpu_adapter();
+        append_native_trace(universal_gpu_caps.diagnostic_line().c_str());
+        append_native_trace((std::string("UNIVERSAL_GPU_ADAPTER_STATUS compute=") +
+            (universal_gpu_caps.gles_compute_supported ? "supported" : "unavailable") +
+            " eglContext=" + (universal_gpu_caps.egl_context_created ? "created" : "not_created") +
+            " executionBackend=GGML_WEBGPU_DAWN").c_str());
         // Use the same portable OpenCL policy on every Android GPU vendor.
         // Do not force Q6_K kernel variants globally: let upstream choose the
         // supported implementation for the active OpenCL device.
