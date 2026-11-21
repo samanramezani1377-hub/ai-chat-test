@@ -30,7 +30,7 @@ public:
         descriptor_.name = "llama";
         descriptor_.family = ArchitectureFamily::DenseTransformer;
         descriptor_.required_operators = {"Embedding", "MatMul", "RMSNorm", "RoPE",
-                                          "Attention", "SiLU", "Add", "Softmax"};
+                                          "Attention", "SiLU", "Multiply", "Add", "Softmax"};
         descriptor_.uses_attention = true;
         descriptor_.uses_kv_cache = true;
         descriptor_.supports_dynamic_shapes = true;
