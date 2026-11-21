@@ -128,36 +128,39 @@ if (NOT _alloc MATCHES "AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V1")
     file(WRITE "${_alloc_file}" "${_alloc}")
 endif()
 
-# Upgrade previously patched .cxx trees that still contain the old unbounded final chunk.
+# Upgrade cached allocator trees even when an earlier patch changed comments/formatting.
+# Patch only the semantic pieces that create an effectively unbounded virtual chunk.
 file(READ "${_alloc_file}" _alloc)
 if (NOT _alloc MATCHES "AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V2")
     if (_alloc MATCHES "SIZE_MAX/2")
-        ai_chat_replace_once(_alloc
-            [=[    struct tallocr_chunk * chunk = calloc(1, sizeof(struct tallocr_chunk));
-    chunk->n_free_blocks = 1;
-    chunk->free_blocks[0].offset = 0;
-    // available space in a chunk is limited to max_chunk_size, but can be higher if:
-    // 1. a single tensor exceeds the maximum, and cannot fit any other way
-    // 2. we are running out of chunks
-    // backends will either manage to allocate the larger size, or report an error.
-    chunk->free_blocks[0].size = MAX(min_size, alloc->max_chunk_size);
-    if (alloc->n_chunks == GGML_VBUFFER_MAX_CHUNKS - 1) {
-        chunk->free_blocks[0].size = SIZE_MAX/2;
-    }]=]
-            [=[    // Never manufacture an over-limit virtual chunk for a single oversized tensor.
-    if (min_size > alloc->max_chunk_size) {
-        return -1;
-    }
-    struct tallocr_chunk * chunk = calloc(1, sizeof(struct tallocr_chunk));
-    if (chunk == NULL) {
-        return -1;
-    }
-    chunk->n_free_blocks = 1;
-    chunk->free_blocks[0].offset = 0;
-    // Every chunk is strictly bounded by the backend's maximum buffer/binding size.
-    chunk->free_blocks[0].size = alloc->max_chunk_size;]=]
-            "upgrade cached allocator chunk bounds")
+        string(REGEX REPLACE
+            "if[ \t]*\\([ \t]*alloc->n_chunks[ \t]*==[ \t]*GGML_VBUFFER_MAX_CHUNKS[ \t]*-[ \t]*1[ \t]*\\)[ \t]*\\{[^}]*SIZE_MAX/2;[^}]*\\}"
+            ""
+            _alloc_without_unbounded_tail
+            "${_alloc}")
+        if (_alloc_without_unbounded_tail STREQUAL _alloc)
+            message(FATAL_ERROR "AI Chat bounded allocator upgrade: found SIZE_MAX/2 but could not isolate its final-chunk guard")
+        endif()
+        set(_alloc "${_alloc_without_unbounded_tail}")
     endif()
+
+    string(REPLACE
+        "chunk->free_blocks[0].size = MAX(min_size, alloc->max_chunk_size);"
+        "chunk->free_blocks[0].size = alloc->max_chunk_size;"
+        _alloc
+        "${_alloc}")
+    if (_alloc MATCHES "SIZE_MAX/2")
+        message(FATAL_ERROR "AI Chat bounded allocator upgrade: unbounded virtual chunk remains")
+    endif()
+
+    if (NOT _alloc MATCHES "min_size[ \t]*>[ \t]*alloc->max_chunk_size")
+        string(REPLACE
+            "    struct tallocr_chunk * chunk = calloc(1, sizeof(struct tallocr_chunk));"
+            "    if (min_size > alloc->max_chunk_size) { return -1; }\n    struct tallocr_chunk * chunk = calloc(1, sizeof(struct tallocr_chunk));"
+            _alloc
+            "${_alloc}")
+    endif()
+
     string(APPEND _alloc "\n// AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V2\n")
     file(WRITE "${_alloc_file}" "${_alloc}")
 endif()
