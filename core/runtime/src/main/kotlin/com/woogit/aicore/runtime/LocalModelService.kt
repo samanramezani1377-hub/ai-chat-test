@@ -271,7 +271,14 @@ class LocalModelService(
             stopInProgress.set(true)
             try {
                 generationJob?.cancel()
-                runCatching { runtime.stopGeneration() }
+                try {
+                    runtime.stopGeneration()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    // Native stop is best-effort; the generation job is still cancelled and
+                    // the mutex below remains the definitive barrier before lifecycle mutation.
+                }
                 generationMutex.withLock { block() }
             } finally {
                 stopInProgress.set(false)

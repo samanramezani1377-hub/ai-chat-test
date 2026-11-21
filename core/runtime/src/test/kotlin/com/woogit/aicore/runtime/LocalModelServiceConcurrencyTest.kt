@@ -44,6 +44,21 @@ class LocalModelServiceConcurrencyTest {
     }
 
     @Test
+    fun persistedActiveModelMustAlsoBeLoadedBeforeGeneration() = runBlocking {
+        val runtime = RecordingRuntime()
+        val repository = RecordingRepository(model()).apply { activeId = "model-a" }
+        val service = LocalModelService(NoOpImporter(), repository, runtime)
+
+        val result = service.generate(
+            listOf(userMessage("must not run")),
+            InferenceSettings(maxNewTokens = 1),
+        )
+
+        assertTrue(result is ModelResult.Failure)
+        assertEquals(0, runtime.generateCount.get(), "native generation must not run for an unloaded model")
+    }
+
+    @Test
     fun concurrentLifecycleOperationsAreSerialized() = runBlocking {
         val runtime = RecordingRuntime()
         val repository = RecordingRepository(model())
@@ -128,6 +143,7 @@ class LocalModelServiceConcurrencyTest {
         val unloadCount = AtomicInteger(0)
         val stopCount = AtomicInteger(0)
         val generationStarted = CompletableDeferred<Unit>()
+        val generateCount = AtomicInteger(0)
 
         @Volatile
         var blockGeneration = false
@@ -146,6 +162,7 @@ class LocalModelServiceConcurrencyTest {
             request: GenerationRequest,
             onToken: suspend (String) -> Unit,
         ): GenerationResult {
+            generateCount.incrementAndGet()
             if (blockGeneration) {
                 generationStarted.complete(Unit)
                 awaitCancellation()

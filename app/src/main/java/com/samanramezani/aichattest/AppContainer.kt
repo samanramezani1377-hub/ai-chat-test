@@ -41,6 +41,7 @@ import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeAdapter
 import com.woogit.aicore.runtime.RuntimeMetrics
 import java.nio.file.Files
+import kotlinx.coroutines.CancellationException
 import java.nio.file.LinkOption
 
 /** Application composition root: local GGUF and optional provider-backed inference share one agent path. */
@@ -166,24 +167,28 @@ class AppContainer(context: Context? = null) {
     fun actionTraces() = actionTraceSink.snapshot()
     fun actionErrors() = actionErrorLogSink.snapshot()
 
-    suspend fun approveAndExecute(executionId: String, conversationId: String? = null): ActionExecutionOutcome = runCatching {
+    suspend fun approveAndExecute(executionId: String, conversationId: String? = null): ActionExecutionOutcome = try {
         val prepared = lifecycle.checkpoint(executionId)
         if (conversationId != null) require(prepared.conversationId == conversationId) { "Approval belongs to another conversation" }
         val approved = lifecycle.approve(executionId)
         lifecycle.executeApproved(approved.executionId, verifier).let(::executionOutcome)
-    }.getOrElse {
-        reportError("Approval", "APPROVAL_FAILED", "تأیید و اجرای عملیات انجام نشد.", it, executionId = executionId)
-        ActionExecutionOutcome(false, false, it.message ?: "Approval failed", errorCode = "APPROVAL_FAILED")
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Throwable) {
+        reportError("Approval", "APPROVAL_FAILED", "تأیید و اجرای عملیات انجام نشد.", error, executionId = executionId)
+        ActionExecutionOutcome(false, false, error.message ?: "Approval failed", errorCode = "APPROVAL_FAILED")
     }
 
-    suspend fun reject(executionId: String, conversationId: String? = null): Boolean = runCatching {
+    suspend fun reject(executionId: String, conversationId: String? = null): Boolean = try {
         val prepared = lifecycle.checkpoint(executionId)
         if (conversationId != null) require(prepared.conversationId == conversationId) { "Approval belongs to another conversation" }
         check(prepared.state == ActionExecutionState.AwaitingApproval) { "Action is not awaiting approval" }
         lifecycle.reject(prepared)
         true
-    }.getOrElse {
-        reportError("Approval", "REJECT_FAILED", "رد کردن عملیات انجام نشد.", it)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Throwable) {
+        reportError("Approval", "REJECT_FAILED", "رد کردن عملیات انجام نشد.", error)
         false
     }
 
