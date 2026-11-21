@@ -1,12 +1,12 @@
 # Universal GPU Adapter → Native Android GPU Backend
 
-Status: Phase 1 started; GLES compute self-test implemented, device validation pending.
+Status: Phase 1 foundation in progress; persistent owner-thread EGL/GLES context and compute self-test implemented, device validation pending.
 Target branch: `new-kor`.
 Platform policy: Android `arm64-v8a`, OpenGL ES compute, no Vulkan.
 
 ## Goal
 
-Evolve `universal_gpu_adapter.cpp/.h` from a temporary EGL/OpenGL ES capability probe into the owner of a vendor-neutral native GPU execution backend. The backend must eventually execute supported GGML graph operations directly through Android's EGL + OpenGL ES compute API, without Dawn, WebGPU, OpenCL, vendor-specific SDKs, or a third-party GPU inference backend.
+Evolve `universal_gpu_adapter.cpp/.h` from a persistent EGL/OpenGL ES compute foundation into the owner of a vendor-neutral native GPU execution backend. The backend must eventually execute supported GGML graph operations directly through Android's EGL + OpenGL ES compute API, without Dawn, WebGPU, OpenCL, vendor-specific SDKs, or a third-party GPU inference backend.
 
 This does **not** mean removing the Android GPU driver or platform EGL/GLES libraries. Those are the hardware execution interface and remain required. It also does not initially replace llama.cpp/GGML graph construction, model loading, tokenization, scheduling, or CPU fallback.
 
@@ -59,9 +59,9 @@ Implement inside the Universal GPU Adapter:
 - a deterministic vector-add and reduction self-test against CPU results;
 - structured failure reporting and cleanup after partial initialization.
 
-**Current progress:** the temporary probe context now compiles and dispatches a baseline integer compute shader, writes to an SSBO, applies a memory barrier, reads the result back, and checks the exact CPU reference output. GPU selection now requires this self-test to pass; raw GLES 3.1 capability detection alone is insufficient.
+**Current progress:** `PersistentGlesProbe` creates and owns the EGL display/context/pbuffer on a dedicated worker thread. The context remains current on that same thread after startup; the baseline integer compute shader compiles, dispatches, writes an SSBO, applies a memory barrier, reads the result back, and checks the exact CPU reference output. Teardown is also performed on the owner thread. The process-lifetime adapter has an explicit shutdown API, and its static owner performs shutdown during native-library teardown. GPU selection still requires the compute self-test to pass; raw GLES 3.1 capability detection alone is insufficient.
 
-**Remaining:** persistent context ownership, dedicated worker-thread lifecycle, repeatable init/teardown tests, and physical-device validation. No model operations are routed to this backend yet.
+**Remaining:** a real command queue/API for GPU operations, bounded SSBO memory manager, shader/program cache, explicit fences, repeatable init/teardown and concurrent-rendering tests, and physical-device validation. No model operations are routed to this backend yet.
 
 **Acceptance:** tests pass on at least two distinct Android GPU families; repeated init/teardown and concurrent app rendering do not crash or leak EGL state.
 
@@ -128,11 +128,11 @@ Only after Phase 6 passes:
 - A successful EGL context or shader self-test does not prove transformer-kernel correctness.
 - GPU memory availability is not reliably inferred from a single GLES query; allocations must be bounded and recoverable.
 - Driver shader compilers may have vendor-specific bugs. The baseline must remain portable GLSL ES and fail closed.
-- A custom backend is a substantial engineering project. This plan does not claim that the current 341-line probe already performs model inference.
+- A custom backend is a substantial engineering project. This plan does not claim that the current GLES context/self-test foundation already performs model inference.
 - Replacing llama.cpp/GGML itself is out of scope for this migration; the first goal is to remove third-party GPU backend engines while retaining the mature model/runtime orchestration.
 
 ## Current source boundary
 
-At present, `universal_gpu_adapter.cpp` creates a temporary EGL pbuffer/context, reads GLES capabilities, restores the previous context and destroys the temporary objects. It does not own persistent GPU memory, compile/dispatch compute shaders, register a GGML backend, or execute model tensors.
+At present, `universal_gpu_adapter.cpp` owns a persistent EGL pbuffer/context on a dedicated worker thread and runs one integer compute self-test with SSBO readback. It does not yet expose a general command queue or persistent GPU memory manager, register a GGML backend, or execute model tensors.
 
 The current model path still selects `ggml-webgpu` backed by Dawn/OpenGL ES. The native adapter is only a capability probe and must not be reported as the active inference backend until the GGML bridge and kernels are implemented and verified.
