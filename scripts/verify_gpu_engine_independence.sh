@@ -23,9 +23,9 @@ if printf '%s\n' "$core_block" "$dawn_block" "$gles_block" "$android_block" | gr
     exit 1
 fi
 link_blocks="$(awk '
-    /^[[:space:]]*target_link_libraries\\(ai_chat_gpu_/ { in_block = 1 }
+    /^[[:space:]]*target_link_libraries\(ai_chat_gpu_/ { in_block = 1 }
     in_block { print }
-    in_block && /\\)/ { in_block = 0 }
+    in_block && /\)/ { in_block = 0 }
 ' "$cmake_file")"
 if printf '%s\n' "$link_blocks" | grep -Eiq '(ggml|llama)'; then
     echo "::error::A GPU engine target links llama.cpp/GGML."
