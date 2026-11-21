@@ -1788,6 +1788,45 @@ void test_dense_model_plan_selects_q4_0_matmul_adapter() {
 }
 
 
+
+void test_dense_model_plan_selects_q5_matmul_adapter(uint32_t q5_type_id, const std::string& expected_operator) {
+    ArchitectureRegistry registry;
+    assert(register_builtin_architecture_adapters(registry).ok());
+    const auto adapter=registry.find("llama");
+    assert(adapter);
+    GgufFileInfo model;
+    model.architecture="llama";
+    model.metadata["llama.block_count"]=uint64_t{1};
+    model.metadata["llama.embedding_length"]=uint64_t{32};
+    model.metadata["llama.attention.head_count"]=uint64_t{1};
+    model.metadata["llama.feed_forward_length"]=uint64_t{32};
+    model.tokenizer.tokens={"a","b"};
+    const std::vector<std::pair<std::string,std::vector<uint64_t>>> tensors={
+        {"token_embd.weight",{32,2}},{"output.weight",{32,2}},{"output_norm.weight",{32}},
+        {"blk.0.attn_norm.weight",{32}},{"blk.0.attn_q.weight",{32,32}},
+        {"blk.0.attn_k.weight",{32,32}},{"blk.0.attn_v.weight",{32,32}},
+        {"blk.0.attn_output.weight",{32,32}},{"blk.0.ffn_norm.weight",{32}},
+        {"blk.0.ffn_gate.weight",{32,32}},{"blk.0.ffn_up.weight",{32,32}},
+        {"blk.0.ffn_down.weight",{32,32}}
+    };
+    for(const auto& item:tensors){
+        GgufTensorInfo tensor;tensor.name=item.first;tensor.dimensions=item.second;
+        tensor.type_id=tensor.name=="blk.0.attn_q.weight"?q5_type_id:0u;
+        tensor.type=GgufReader::tensor_type_info(tensor.type_id);
+        uint64_t elements=1;for(uint64_t dimension:tensor.dimensions)elements*=dimension;
+        tensor.byte_size_known=true;
+        const uint64_t block_bytes=q5_type_id==6?22u:24u;
+        tensor.byte_size=tensor.type_id==q5_type_id?(elements/32)*block_bytes:elements*sizeof(float);
+        model.tensors.push_back(std::move(tensor));
+    }
+    ModelExecutionPlan plan;
+    assert(adapter->build_execution_plan(model,plan).ok());
+    const auto projection=std::find_if(plan.operations.begin(),plan.operations.end(),
+        [](const ModelPlanOperation& operation){return operation.id=="layer.0.q_proj";});
+    assert(projection!=plan.operations.end());
+    assert(projection->operator_name==expected_operator);
+}
+
 void test_dense_model_plan_selects_q4_1_matmul_adapter() {
     ArchitectureRegistry registry;
     assert(register_builtin_architecture_adapters(registry).ok());
@@ -2967,6 +3006,8 @@ int main() {
     test_dense_model_plan_selects_q8_0_matmul_adapter();
     test_dense_model_plan_selects_q4_0_matmul_adapter();
     test_dense_model_plan_selects_q4_1_matmul_adapter();
+    test_dense_model_plan_selects_q5_matmul_adapter(6, "MatMul_Q5_0");
+    test_dense_model_plan_selects_q5_matmul_adapter(7, "MatMul_Q5_1");
     test_llama_model_execution_plan_is_structural_only();
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
     test_model_and_quantization_registry_fail_closed();
