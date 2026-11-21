@@ -1,6 +1,7 @@
 #include "model_lowerings.h"
 #include "kv_cache.h"
 #include "operators.h"
+#include "quantization.h"
 
 #include <cmath>
 #include <limits>
@@ -109,6 +110,28 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
             return backend == BackendKind::OpenGles
                 ? build_matmul_f32_gles_candidate(*lhs, *rhs, *output, dispatch)
                 : build_matmul_f32_candidate(*lhs, *rhs, *output, dispatch);
+        });
+    if (!status.ok()) return status;
+
+    status = registry.register_lowering(backend, "MatMul_Q8_0",
+        [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
+                  ComputeDispatch& dispatch) {
+            if (operation.inputs.size() != 1 || operation.weight_tensors.size() != 1)
+                return Status{StatusCode::InvalidArgument, "Q8_0 MatMul requires one activation and one quantized weight"};
+            const Tensor *input = nullptr, *output = nullptr;
+            Status result = lookup_operand(operation, context, 0, input);
+            if (!result.ok()) return result;
+            result = lookup_output(operation, context, output);
+            if (!result.ok()) return result;
+            const auto weight = context.quantized_weights.find(operation.weight_tensors.front());
+            if (weight == context.quantized_weights.end() || !weight->second.buffer ||
+                weight->second.byte_size == 0)
+                return Status{StatusCode::InvalidArgument, "Q8_0 weight binding is missing from the model execution context"};
+            return backend == BackendKind::OpenGles
+                ? build_q8_0_matmul_gles_candidate(*input, weight->second.buffer,
+                    weight->second.byte_size, *output, dispatch)
+                : build_q8_0_matmul_candidate(*input, weight->second.buffer,
+                    weight->second.byte_size, *output, dispatch);
         });
     if (!status.ok()) return status;
 

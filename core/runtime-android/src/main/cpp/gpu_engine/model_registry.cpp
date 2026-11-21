@@ -170,12 +170,20 @@ public:
             (plan.rotary_dimensions & 1u) != 0)
             plan.blockers.emplace_back("INVALID_ROTARY_DIMENSION");
         plan.external_inputs = {"token_ids"};
-        auto add = [&plan, head_dimension, kv_heads](std::string id, std::string op,
+        auto add = [&plan, &model, head_dimension, kv_heads](std::string id, std::string op,
                            std::vector<std::string> inputs,
                            std::vector<std::string> weights,
                            std::string output, std::vector<uint64_t> shape = {}) {
             ModelPlanOperation operation{std::move(id), std::move(op), std::move(inputs),
                                          std::move(weights), std::move(output), std::move(shape), {}, {}, {}, {}, false};
+            if (operation.operator_name == "MatMul" && operation.weight_tensors.size() == 1) {
+                const auto found = std::find_if(model.tensors.begin(), model.tensors.end(),
+                    [&operation](const GgufTensorInfo& tensor) {
+                        return tensor.name == operation.weight_tensors.front();
+                    });
+                if (found != model.tensors.end() && found->type.name == "Q8_0")
+                    operation.operator_name = "MatMul_Q8_0";
+            }
             if (operation.operator_name == "RMSNorm")
                 operation.float_attributes["epsilon"] = plan.rms_norm_epsilon;
             if (operation.operator_name == "RoPE") {

@@ -1262,6 +1262,45 @@ void test_builtin_architecture_adapter_is_fail_closed() {
 
 
 
+
+void test_q8_0_model_lowering_supports_gles_3d_projection() {
+    FakeBackend backend(BackendKind::OpenGles);
+    ModelLoweringRegistry lowerings;
+    assert(register_builtin_model_lowerings(BackendKind::OpenGles, lowerings).ok());
+    BufferDesc activation_desc{2 * 32 * sizeof(float), 4, MemoryDomain::Device, false, "q8-activation"};
+    BufferDesc output_desc{2 * 4 * sizeof(float), 4, MemoryDomain::Device, false, "q8-output"};
+    BufferDesc weight_desc{4 * 34, 4, MemoryDomain::Device, true, "q8-weight"};
+    std::shared_ptr<Buffer> activation_buffer, output_buffer, weight_buffer;
+    assert(backend.allocate(activation_desc, activation_buffer).ok());
+    assert(backend.allocate(output_desc, output_buffer).ok());
+    assert(backend.allocate(weight_desc, weight_buffer).ok());
+    TensorDesc activation_td; activation_td.shape = {2, 32}; activation_td.data_type = DataType::F32;
+    TensorDesc output_td; output_td.shape = {2, 2, 2}; output_td.data_type = DataType::F32;
+    Tensor activation, output;
+    assert(Tensor::create(activation_td, activation_buffer, 0, activation).ok());
+    assert(Tensor::create(output_td, output_buffer, 0, output).ok());
+    ModelExecutionContext context;
+    context.tensors.emplace("activation", activation);
+    context.tensors.emplace("output", output);
+    QuantizedWeightBinding binding;
+    binding.buffer = weight_buffer;
+    binding.byte_size = 4 * 34;
+    binding.file_type_id = 8;
+    binding.dimensions = {32, 4};
+    context.quantized_weights.emplace("q.weight", binding);
+    ModelPlanOperation operation;
+    operation.id = "q8-matmul";
+    operation.operator_name = "MatMul_Q8_0";
+    operation.inputs = {"activation"};
+    operation.weight_tensors = {"q.weight"};
+    operation.output = "output";
+    ComputeDispatch dispatch;
+    assert((*lowerings.find(BackendKind::OpenGles, "MatMul_Q8_0"))(operation, context, dispatch).ok());
+    assert(dispatch.backend == BackendKind::OpenGles);
+    assert(dispatch.glsl_source.find("const uint OUTPUT_CHANNELS = 4u;") != std::string::npos);
+    assert(dispatch.validation == KernelValidation::Unverified);
+}
+
 void test_embedding_model_lowering_uploads_token_ids_and_binds_buffer() {
     FakeBackend backend(BackendKind::OpenGles);
     ModelLoweringRegistry lowerings;
@@ -1947,6 +1986,7 @@ int main() {
     test_model_kv_cache_view_binding_uses_planned_sequence_length();
     test_activation_allocator_reuses_non_overlapping_tensor_slots();
     test_embedding_model_lowering_uploads_token_ids_and_binds_buffer();
+    test_q8_0_model_lowering_supports_gles_3d_projection();
     test_llama_model_execution_plan_is_structural_only();
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
     test_model_and_quantization_registry_fail_closed();
