@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <unordered_map>
 #include <vector>
 
 namespace ai_chat::gpu_engine {
@@ -96,7 +97,8 @@ Status compile_program(const std::string& source, GLuint& program) {
     return Status::success();
 }
 
-Status dispatch_gles(const ComputeDispatch& d, const ai_chat::gpu::UniversalGpuCapabilities& caps) {
+Status dispatch_gles(const ComputeDispatch& d, const ai_chat::gpu::UniversalGpuCapabilities& caps,
+                     std::unordered_map<std::string, GLuint>* program_cache = nullptr) {
     if (d.backend != BackendKind::OpenGles || d.validation != KernelValidation::Validated ||
         d.kernel_id.empty() || d.glsl_source.empty() || !d.workgroups_x || !d.workgroups_y || !d.workgroups_z)
         return {StatusCode::Unsupported, "GLES dispatch requires a validated GLSL kernel and non-zero dispatch dimensions"};
@@ -129,8 +131,20 @@ Status dispatch_gles(const ComputeDispatch& d, const ai_chat::gpu::UniversalGpuC
             return {StatusCode::InvalidArgument, "GLES SSBO range violates alignment or size limits"};
     }
     GLuint program = 0;
-    Status compile_status = compile_program(d.glsl_source, program);
-    if (!compile_status.ok()) return compile_status;
+    bool cache_hit = false;
+    const std::string cache_key = d.kernel_id + "\n" + d.glsl_source;
+    if (program_cache) {
+        const auto found = program_cache->find(cache_key);
+        if (found != program_cache->end()) { program = found->second; cache_hit = true; }
+    }
+    if (!cache_hit) {
+        Status compile_status = compile_program(d.glsl_source, program);
+        if (!compile_status.ok()) return compile_status;
+        if (program_cache) {
+            try { program_cache->emplace(cache_key, program); cache_hit = true; }
+            catch (...) { /* Cache failure must not prevent inference. */ }
+        }
+    }
     clear_errors();
     glUseProgram(program);
     for (const auto& binding : d.bindings) {
@@ -144,7 +158,7 @@ Status dispatch_gles(const ComputeDispatch& d, const ai_chat::gpu::UniversalGpuC
     const GLenum error = glGetError();
     glUseProgram(0);
     for (const auto& binding : d.bindings) glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding.binding, 0);
-    glDeleteProgram(program);
+    if (!cache_hit) glDeleteProgram(program);
     return error == GL_NO_ERROR ? Status::success() : gl_error("glDispatchCompute", error);
 }
 Status self_test_gles_backend(const ai_chat::gpu::UniversalGpuCapabilities& caps) {
@@ -190,6 +204,7 @@ Status self_test_gles_backend(const ai_chat::gpu::UniversalGpuCapabilities& caps
 
 class UniversalGlesBackend final : public Backend {
 public:
+    ~UniversalGlesBackend() override { shutdown(); }
     BackendKind kind() const noexcept override { return BackendKind::OpenGles; }
     Status enumerate_devices(std::vector<DeviceInfo>& out) override {
         out.clear();
@@ -251,7 +266,7 @@ public:
                     glCopyBufferSubData(GL_COPY_READ_BUFFER,GL_COPY_WRITE_BUFFER,static_cast<GLintptr>(c.source_offset),static_cast<GLintptr>(c.destination_offset),static_cast<GLsizeiptr>(c.size));
                     glBindBuffer(GL_COPY_READ_BUFFER,0); glBindBuffer(GL_COPY_WRITE_BUFFER,0);
                     const GLenum e=glGetError(); if(e!=GL_NO_ERROR) result=gl_error("glCopyBufferSubData",e);
-                } else result=dispatch_gles(c.dispatch,caps_);
+                } else result=dispatch_gles(c.dispatch,caps_,&program_cache_);
             }
             glFlush();
         },detail);
@@ -289,10 +304,20 @@ public:
         },detail);
         if(!ran)return {StatusCode::DeviceLost,detail}; return e==GL_NO_ERROR?Status::success():gl_error("GLES readback",e);
     }
-    Status shutdown() override { healthy_=false; return Status::success(); }
+    Status shutdown() override {
+        healthy_ = false;
+        std::string detail;
+        const bool ran = ai_chat::gpu::run_universal_gpu_task([&]() {
+            for (const auto& entry : program_cache_) if (entry.second) glDeleteProgram(entry.second);
+            program_cache_.clear();
+        }, detail);
+        if (!ran) return {StatusCode::DeviceLost, detail};
+        return Status::success();
+    }
     bool healthy() const noexcept override { return healthy_.load(std::memory_order_acquire); }
 private:
     ai_chat::gpu::UniversalGpuCapabilities caps_;
+    std::unordered_map<std::string, GLuint> program_cache_;
     std::atomic<bool> healthy_{false};
 };
 } // namespace
