@@ -709,8 +709,35 @@ void test_add_operator_candidate_and_reference() {
     float gqa_output[4] = {};
     assert(reference_attention_f32(gqa_query, gqa_key, gqa_value, gqa_output,
                                    1, 2, 1, 2, 1).ok());
-    assert(std::abs(gqa_output[0] - 2.0f) < 1.0f);
-    assert(std::abs(gqa_output[3] - 8.0f) < 1.0f);
+    assert(std::abs(gqa_output[0] - 3.320188f) < 1e-4f);
+    assert(std::abs(gqa_output[1] - 5.320188f) < 1e-4f);
+    assert(std::abs(gqa_output[2] - 4.679812f) < 1e-4f);
+    assert(std::abs(gqa_output[3] - 6.679812f) < 1e-4f);
+
+    BufferDesc gqa_query_desc{16, 4, MemoryDomain::Device, false, "gqa-query"};
+    BufferDesc gqa_kv_desc{16, 4, MemoryDomain::Device, false, "gqa-kv"};
+    std::shared_ptr<Buffer> gqa_query_buffer, gqa_key_buffer, gqa_value_buffer, gqa_output_buffer;
+    assert(backend.allocate(gqa_query_desc, gqa_query_buffer).ok());
+    assert(backend.allocate(gqa_kv_desc, gqa_key_buffer).ok());
+    assert(backend.allocate(gqa_kv_desc, gqa_value_buffer).ok());
+    assert(backend.allocate(gqa_query_desc, gqa_output_buffer).ok());
+    TensorDesc gqa_query_tensor_desc;
+    gqa_query_tensor_desc.shape = {1, 2, 2};
+    gqa_query_tensor_desc.data_type = DataType::F32;
+    Tensor gqa_query_tensor, gqa_output_tensor;
+    assert(Tensor::create(gqa_query_tensor_desc, gqa_query_buffer, 0, gqa_query_tensor).ok());
+    assert(Tensor::create(gqa_query_tensor_desc, gqa_output_buffer, 0, gqa_output_tensor).ok());
+    TensorDesc gqa_kv_tensor_desc;
+    gqa_kv_tensor_desc.shape = {2, 1, 2};
+    gqa_kv_tensor_desc.data_type = DataType::F32;
+    Tensor gqa_key_tensor, gqa_value_tensor;
+    assert(Tensor::create(gqa_kv_tensor_desc, gqa_key_buffer, 0, gqa_key_tensor).ok());
+    assert(Tensor::create(gqa_kv_tensor_desc, gqa_value_buffer, 0, gqa_value_tensor).ok());
+    ComputeDispatch gqa_dispatch;
+    assert(build_attention_f32_candidate(gqa_query_tensor, gqa_key_tensor, gqa_value_tensor,
+                                         gqa_output_tensor, 1, gqa_dispatch).ok());
+    assert(gqa_dispatch.wgsl_source.find("const QUERY_HEADS: u32 = 2u;") != std::string::npos);
+    assert(gqa_dispatch.wgsl_source.find("const KV_HEADS: u32 = 1u;") != std::string::npos);
 
     BufferDesc attention_desc{8, 4, MemoryDomain::Device, false, "attention"};
     std::shared_ptr<Buffer> q_buffer, k_buffer, v_buffer, attention_output_buffer;
