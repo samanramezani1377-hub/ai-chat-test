@@ -209,6 +209,26 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         return {StatusCode::Unsupported, last_error_};
     }
 
+    for (const auto& operation : plan_.operations) {
+        for (const auto& name : operation.weight_tensors) {
+            const GgufTensorInfo* tensor = reader.find_tensor(name);
+            if (!tensor) continue;
+            const bool compatible_q4_0 = tensor->type.name == "Q4_0" &&
+                (operation.operator_name == "MatMul_Q4_0" || operation.operator_name == "Embedding_Q4_0");
+            const bool compatible_q4_1 = tensor->type.name == "Q4_1" &&
+                (operation.operator_name == "MatMul_Q4_1" || operation.operator_name == "Embedding_Q4_1");
+            const bool compatible_q8_0 = tensor->type.name == "Q8_0" &&
+                operation.operator_name == "MatMul_Q8_0";
+            if (tensor->type.name != "F32" &&
+                !compatible_q4_0 && !compatible_q4_1 && !compatible_q8_0) {
+                last_error_ = "Quantized weight is attached to an operator without a matching packed kernel: " +
+                              operation.operator_name + ":" + name;
+                unload_locked();
+                return {StatusCode::Unsupported, last_error_};
+            }
+        }
+    }
+
     for (uint32_t type_id : quantization_types) {
         if (type_id == 2) {
             status = validate_q4_0_matmul_kernel(*engine_->active_backend(), *operators_, *quantizations_);
