@@ -1337,7 +1337,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         gpu_failure_reason = "webgpu_no_gpu_device";
     }
     append_native_trace((std::string("NATIVE_EXECUTION_POLICY mode=WEBGPU_OPENGL_ES_COMPATIBILITY gpuRequested=") +
-        (gpu_layers > 0 ? "1" : "0") +
+        (gpu_layers != 0 ? "1" : "0") +
         " webgpuAvailable=" + (gpu_available ? "1" : "0") +
         " glesComputeAvailable=" + (g_universal_gles_compute_supported ? "1" : "0") +
         " glesCapabilityKnown=" + (g_universal_gles_version_known ? "1" : "0") +
