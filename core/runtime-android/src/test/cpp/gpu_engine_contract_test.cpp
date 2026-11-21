@@ -612,6 +612,31 @@ void test_add_operator_candidate_and_reference() {
     assert(reference_embedding_f32(embedding_weights, 3, 2, token_ids, embedding_output).ok());
     assert(embedding_output[0] == 5 && embedding_output[1] == 6 &&
            embedding_output[2] == 1 && embedding_output[3] == 2);
+
+    BufferDesc embedding_weights_desc{24, 4, MemoryDomain::Device, false, "embedding-weights"};
+    BufferDesc embedding_ids_desc{8, 4, MemoryDomain::Device, false, "embedding-token-ids"};
+    BufferDesc embedding_output_desc{16, 4, MemoryDomain::Device, false, "embedding-output"};
+    std::shared_ptr<Buffer> embedding_weights_buffer, embedding_ids_buffer, embedding_output_buffer;
+    assert(backend.allocate(embedding_weights_desc, embedding_weights_buffer).ok());
+    assert(backend.allocate(embedding_ids_desc, embedding_ids_buffer).ok());
+    assert(backend.allocate(embedding_output_desc, embedding_output_buffer).ok());
+    TensorDesc embedding_weights_tensor_desc;
+    embedding_weights_tensor_desc.shape = {3, 2};
+    embedding_weights_tensor_desc.data_type = DataType::F32;
+    Tensor embedding_weights_tensor, embedding_output_tensor;
+    assert(Tensor::create(embedding_weights_tensor_desc, embedding_weights_buffer, 0,
+                          embedding_weights_tensor).ok());
+    TensorDesc embedding_output_tensor_desc;
+    embedding_output_tensor_desc.shape = {2, 2};
+    embedding_output_tensor_desc.data_type = DataType::F32;
+    assert(Tensor::create(embedding_output_tensor_desc, embedding_output_buffer, 0,
+                          embedding_output_tensor).ok());
+    ComputeDispatch embedding_dispatch;
+    assert(build_embedding_f32_candidate(embedding_weights_tensor, embedding_ids_buffer,
+                                         token_ids, embedding_output_tensor,
+                                         embedding_dispatch).ok());
+    assert(embedding_dispatch.bindings.size() == 3);
+    assert(embedding_dispatch.wgsl_source.find("const VOCABULARY_SIZE: u32 = 3u;") != std::string::npos);
     const std::vector<uint32_t> invalid_token_ids = {3};
     assert(reference_embedding_f32(embedding_weights, 3, 2, invalid_token_ids, embedding_output).code ==
            StatusCode::InvalidArgument);

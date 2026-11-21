@@ -269,8 +269,8 @@ Status build_embedding_f32_candidate(const Tensor& embedding_weights,
                                      ComputeDispatch& dispatch) {
     dispatch = ComputeDispatch{};
     if (!is_contiguous_f32(embedding_weights) || !is_contiguous_f32(output) ||
-        !token_ids_buffer)
-        return {StatusCode::Unsupported, "Embedding requires F32 weights/output and a valid device token-id buffer"};
+        !token_ids_buffer || token_ids_buffer->memory_domain() == MemoryDomain::Host)
+        return {StatusCode::Unsupported, "Embedding requires F32 weights/output and a device/shared token-id buffer"};
     const auto& weights_shape = embedding_weights.descriptor().shape;
     const auto& output_shape = output.descriptor().shape;
     if (weights_shape.size() != 2 || output_shape.size() != 2 ||
