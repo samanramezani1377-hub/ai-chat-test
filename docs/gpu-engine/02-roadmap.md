@@ -65,3 +65,5 @@ CI/source checks are useful but not hardware evidence. Do not wait for CI to pro
 
 - **2026-11-22 / model lowerings:** introduced backend-scoped model-plan lowering callbacks for F32 Add, Multiply, MatMul, RMSNorm, SiLU, Softmax and RoPE. Registered both Dawn and Universal GLES lowering sets through the Android composition root. Embedding and Attention remain intentionally unsupported at the lowering layer until token upload and KV-cache contracts are integrated.
 - **2026-11-22 / graph execution orchestration:** added a fail-closed plan-to-graph-to-scheduler entry point. Every dispatch still requires a backend-specific validated kernel; execution success is recorded separately and does not imply model-family readiness.
+
+- **2026-11-22 / device KV cache path:** added typed tensor validation, device-to-device K/V cache append via command-buffer copies (no host readback), post-synchronization valid-token accounting, and tensor views over valid cache prefixes. Integration into staged model graph execution remains pending.

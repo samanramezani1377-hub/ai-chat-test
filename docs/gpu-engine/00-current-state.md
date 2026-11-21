@@ -100,3 +100,5 @@ The backend rejects dispatches unless their kernel identity is marked `Validated
 - A successful graph run does not mark a model GPU-ready. Architecture/tokenizer/quantization and end-to-end model parity qualification remain separate gates.
 - Embedding is not registered as a model lowering until backend-owned token-ID upload/lifetime is integrated. Attention is not registered until KV-cache append/read semantics are connected. The present F32 MatMul builder accepts only its currently implemented matrix layout; unsupported rank/layout combinations fail closed.
 - The model lowering layer and full app inference integration remain UNVERIFIED; no model generation route has been switched away from llama.cpp.
+
+- KV cache now supports typed, contiguous device-to-device K/V appends through the backend command-copy path, advances valid-token state only after successful submit/synchronization, and exposes valid-prefix K/V tensor views. The primitive is host-contract-tested; it is not yet sequenced between projection/RoPE and Attention nodes in an end-to-end model graph.
