@@ -1188,8 +1188,8 @@ void test_model_plan_graph_compilation_is_fail_closed() {
     plan.structurally_validated = true;
     plan.operator_coverage_validated = true;
     plan.operations = {
-        {"add", "Add", {"input_a", "input_b"}, {}, "sum", {4}},
-        {"mul", "Multiply", {"sum", "input_c"}, {}, "product", {4}}
+        {"add", "Add", {"input_a", "input_b"}, {}, "sum", {4}, {}, {}, {}},
+        {"mul", "Multiply", {"sum", "input_c"}, {}, "product", {4}, {}, {}, {}}
     };
     FakeBackend backend;
     ModelExecutionContext context;

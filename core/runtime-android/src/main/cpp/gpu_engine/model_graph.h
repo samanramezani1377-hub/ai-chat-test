@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gguf_reader.h"
+#include "execution_engine.h"
 
 #include <cstddef>
 #include <cstdint>

@@ -81,7 +81,7 @@ grep -q 'glMemoryBarrier' "$GPU_ADAPTER_CPP" || fail "GLES compute self-test mus
 grep -q 'glMapBufferRange' "$GPU_ADAPTER_CPP" || fail "GLES compute self-test must read back GPU results"
 grep -q 'class PersistentGlesProbe' "$GPU_ADAPTER_CPP" || fail "Persistent GLES context owner is missing"
 grep -q 'std::thread(&PersistentGlesProbe::run, this)' "$GPU_ADAPTER_CPP" || fail "GLES context must be created on its dedicated owner thread"
-grep -q 'shutdown_cv_.wait' "$GPU_ADAPTER_CPP" || fail "Persistent GLES context owner must have a blocking lifecycle"
+grep -q 'task_cv_.wait' "$GPU_ADAPTER_CPP" || fail "Persistent GLES context owner must block while waiting for queued work"
 grep -q 'eglMakeCurrent(display, surface, surface, context)' "$GPU_ADAPTER_CPP" || fail "Persistent GLES context must be made current on its owner thread"
 grep -q 'eglDestroyContext(display, context)' "$GPU_ADAPTER_CPP" || fail "Persistent GLES context must be destroyed by its owner thread"
 grep -q 'shutdown_universal_gpu_adapter' "$GPU_ADAPTER_H" || fail "Explicit native adapter shutdown API is missing"

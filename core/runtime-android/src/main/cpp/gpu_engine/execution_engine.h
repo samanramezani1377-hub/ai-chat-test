@@ -9,6 +9,8 @@
 
 namespace ai_chat::gpu_engine {
 
+class QuantizationRegistry;
+
 class Tensor {
 public:
     static Status required_bytes(const TensorDesc& descriptor, uint64_t& out_bytes);
