@@ -464,6 +464,16 @@ class LlamaCppAndroidRuntimeAdapter(
     override fun runtimeInfo(): RuntimeInfo {
         val nativeInfo = NativeLlamaCpp.runtimeInfo()
         val usingIndependentGpuEngine = nativeInfo.startsWith("runtime=AIChatGpuEngine;status=READY")
+        if (usingIndependentGpuEngine) {
+            selectedBackend = nativeInfo.substringAfter("backend=", "").substringBefore(';').ifBlank { "UnknownGPU" }
+            selectedGpuLayers = requestedGpuLayers
+            selectedCpuThreads = 0
+        } else if (nativeInfo.isNotBlank()) {
+            selectedBackend = nativeInfo.substringAfter("backend=", "").substringBefore(';').ifBlank { "CPU" }
+            selectedGpuLayers = 0
+            selectedCpuThreads = nativeInfo.substringAfter("generationThreads=", "").substringBefore(';').toIntOrNull()
+                ?: Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        }
         val nativeVersion = if (usingIndependentGpuEngine) "experimental" else
             nativeInfo.substringAfter("llama.cpp=", "").substringBefore(';').ifBlank { "unknown" }
         return RuntimeInfo(
