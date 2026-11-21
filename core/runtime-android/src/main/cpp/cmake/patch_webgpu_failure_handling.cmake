@@ -223,7 +223,7 @@ ai_chat_replace_once(_webgpu
     "    if (status == wgpu::WaitStatus::TimedOut) {\n        GGML_ABORT(\"ggml_webgpu: event_synchronize timed out after %u ms\\n\", WEBGPU_RUNTIME_WAIT_TIMEOUT_MS);\n    }\n    event_ctx->recorded = false;"
     "    if (status != wgpu::WaitStatus::Success) {\n        g_webgpu_graph_error.store(true, std::memory_order_release);\n        GGML_LOG_ERROR(\"AI_CHAT_WEBGPU_EVENT_WAIT_FAILED status=%d timeoutMs=%u\\n\", static_cast<int>(status), WEBGPU_RUNTIME_WAIT_TIMEOUT_MS);\n    }\n    event_ctx->recorded = false;"
     "replace event synchronization abort with a graph failure")
-string(APPEND _webgpu "\\n// AI_CHAT_WEBGPU_READBACK_GUARDS_V1\\n")
+string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_READBACK_GUARDS_V1\n")
 endif()
 
 file(WRITE "${_webgpu_file}" "${_webgpu}")
