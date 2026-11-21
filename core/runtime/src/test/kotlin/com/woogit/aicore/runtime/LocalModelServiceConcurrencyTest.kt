@@ -153,6 +153,29 @@ class LocalModelServiceConcurrencyTest {
     }
 
     @Test
+    fun failedActiveModelUnloadPreventsFileDeletionAndAllowsRecovery() = runBlocking {
+        val directory = Files.createTempDirectory("active-model-delete")
+        try {
+            val modelPath = directory.resolve("model-a.gguf")
+            Files.writeString(modelPath, "known-good-model")
+            val runtime = RecordingRuntime().apply { unloadFailuresRemaining = 2 }
+            val repository = RecordingRepository(model(modelPath)).apply { activeId = "model-a" }
+            val service = LocalModelService(NoOpImporter(), repository, runtime)
+
+            assertTrue(service.deleteModel("model-a") is ModelResult.Failure)
+            assertTrue(Files.exists(modelPath), "an unload failure must not delete the model file")
+            assertEquals(null, repository.activeId)
+            assertEquals(2, runtime.unloadCount.get())
+
+            assertTrue(service.activate("model-a") is ModelResult.Success<*>)
+            assertEquals(3, runtime.unloadCount.get(), "activation must retry cleanup of unknown native state")
+            assertEquals(1, runtime.loadCount.get())
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun concurrentLifecycleOperationsAreSerialized() = runBlocking {
         val runtime = RecordingRuntime()
         val repository = RecordingRepository(model())
