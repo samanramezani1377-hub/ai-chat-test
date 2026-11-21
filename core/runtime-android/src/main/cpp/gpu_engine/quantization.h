@@ -20,7 +20,7 @@ Status decode_q4_1_blocks(const uint8_t* source, size_t source_bytes,
                           float* destination, size_t destination_elements);
 
 // Decodes complete GGUF Q8_0 blocks (32 signed values + one FP16 scale).
-// This validates the host decoder only; no GPU Q8_0 MatMul kernel is implied.
+// Host decoder validation is independent; WGSL/GLES Q8_0 MatMul candidates remain UNVERIFIED.
 Status decode_q8_0_blocks(const uint8_t* source, size_t source_bytes,
                           float* destination, size_t destination_elements);
 const char* q8_0_matmul_wgsl_source() noexcept;
