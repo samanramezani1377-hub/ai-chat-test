@@ -640,7 +640,7 @@ void test_gpu_engine_lifecycle() {
         definition.output_type = DataType::F32;
         definition.validation = KernelValidation::Validated;
         if (backend == BackendKind::OpenGles) {
-            definition.glsl_source = "#version 310 es\\nlayout(local_size_x=1) in; void main() {}";
+            definition.glsl_source = "#version 310 es\nlayout(local_size_x=1) in; void main() {}";
         } else {
             definition.wgsl_source = "@compute @workgroup_size(1) fn main() {}";
         }
@@ -1085,7 +1085,7 @@ void test_operator_registry_fail_closed() {
     gles_definition.min_rank = 1;
     gles_definition.max_rank = 4;
     gles_definition.validation = KernelValidation::Validated;
-    gles_definition.glsl_source = "#version 310 es\\nvoid main(){}";
+    gles_definition.glsl_source = "#version 310 es\nvoid main(){}";
     assert(gles_registry.register_kernel(gles_definition).ok());
     KernelDefinition gles_selected;
     assert(gles_registry.select_kernel("Add", BackendKind::OpenGles,
