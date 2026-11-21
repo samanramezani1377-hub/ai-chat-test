@@ -562,6 +562,8 @@ void test_q8_0_decoder_and_registry() {
     assert(register_builtin_quantization_formats(registry).ok());
     assert(registry.can_decode(8));
     assert(!registry.can_execute_on_gpu(8));
+    assert(registry.can_decode(2));
+    assert(!registry.can_execute_on_gpu(2));
 
     FakeBackend backend;
     BufferDesc encoded_desc{36, 4, MemoryDomain::Device, false, "q8-encoded"};
@@ -579,6 +581,33 @@ void test_q8_0_decoder_and_registry() {
     assert(build_q8_0_dequantize_candidate(encoded_buffer, 34, output_tensor, dispatch).ok());
     assert(dispatch.bindings.size() == 2);
     assert(dispatch.label.find("unverified") != std::string::npos);
+
+    BufferDesc q4_matmul_weights_desc{72, 4, MemoryDomain::Device, true, "q4-matmul-weights"};
+    std::shared_ptr<Buffer> q4_matmul_weights;
+    assert(backend.allocate(q4_matmul_weights_desc, q4_matmul_weights).ok());
+    BufferDesc q4_activation_desc{2 * 64 * sizeof(float), 4, MemoryDomain::Device, false, "q4-matmul-activation"};
+    std::shared_ptr<Buffer> q4_activation_buffer;
+    assert(backend.allocate(q4_activation_desc, q4_activation_buffer).ok());
+    BufferDesc q4_matmul_output_desc{2 * 2 * sizeof(float), 4, MemoryDomain::Device, false, "q4-matmul-output"};
+    std::shared_ptr<Buffer> q4_matmul_output_buffer;
+    assert(backend.allocate(q4_matmul_output_desc, q4_matmul_output_buffer).ok());
+    TensorDesc q4_activation_tensor_desc; q4_activation_tensor_desc.shape = {2, 64};
+    q4_activation_tensor_desc.data_type = DataType::F32;
+    TensorDesc q4_matmul_output_tensor_desc; q4_matmul_output_tensor_desc.shape = {2, 2};
+    q4_matmul_output_tensor_desc.data_type = DataType::F32;
+    Tensor q4_activation_tensor, q4_matmul_output_tensor;
+    assert(Tensor::create(q4_activation_tensor_desc, q4_activation_buffer, 0, q4_activation_tensor).ok());
+    assert(Tensor::create(q4_matmul_output_tensor_desc, q4_matmul_output_buffer, 0, q4_matmul_output_tensor).ok());
+    ComputeDispatch q4_matmul_dispatch;
+    assert(build_q4_0_matmul_candidate(q4_activation_tensor, q4_matmul_weights, 72,
+                                       q4_matmul_output_tensor, q4_matmul_dispatch).ok());
+    assert(q4_matmul_dispatch.kernel_id == "dawn-q4-0-matmul-f32-activation-v1");
+    assert(q4_matmul_dispatch.wgsl_source.find("WEIGHT_ROW_BYTES: u32 = 36u") != std::string::npos);
+    ComputeDispatch q4_gles_dispatch;
+    assert(build_q4_0_matmul_gles_candidate(q4_activation_tensor, q4_matmul_weights, 72,
+                                            q4_matmul_output_tensor, q4_gles_dispatch).ok());
+    assert(q4_gles_dispatch.backend == BackendKind::OpenGles);
+    assert(q4_gles_dispatch.glsl_source.find("WEIGHT_ROW_BYTES = 36u") != std::string::npos);
     OperatorRegistry gles_registry;
     assert(register_builtin_gles_operator_candidates(gles_registry).ok());
     assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") != std::string::npos);

@@ -47,6 +47,8 @@ std::string probe_gpu_engine() {
         *engine.active_backend(), operators, operator_report);
     const Status q8_status = validate_q8_0_matmul_kernel(
         *engine.active_backend(), operators, quantizations);
+    const Status q4_status = validate_q4_0_matmul_kernel(
+        *engine.active_backend(), operators, quantizations);
 
     const DeviceInfo* device = engine.active_device();
     report << ";backend=" << backend_name(engine.diagnostics().selected_backend)
@@ -55,6 +57,7 @@ std::string probe_gpu_engine() {
            << ";operators_rejected=" << operator_report.rejected.size()
            << ";operators_unavailable=" << operator_report.unavailable.size()
            << ";q8_0_validation=" << (q8_status.ok() ? "VALIDATED" : "UNVERIFIED")
+           << ";q4_0_validation=" << (q4_status.ok() ? "VALIDATED" : "UNVERIFIED")
            << ";fallback_used=" << (engine.diagnostics().fallback_used ? "true" : "false")
            << ";fallback_reason=" << (engine.diagnostics().fallback_reason.empty()
                 ? "none" : engine.diagnostics().fallback_reason);
