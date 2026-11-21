@@ -64,3 +64,5 @@ The audit above is a historical snapshot at `07890ec925240671c29a1a485b525511014
 The active Android inference route is still llama.cpp/GGML for both current GPU and CPU modes. No migration or route switch has been performed. The current branch still does not meet the goal of replacing llama.cpp GPU inference.
 
 - An independent per-layer KV cache primitive now estimates and allocates key/value buffers under the GPU memory budget, enforces sequential appends and tracks logical valid-token lengths. It is not yet wired into an Attention operator or model generation.
+- A GGUF model inspection loader now orchestrates independent parsing and fail-closed architecture/quantization preflight; it does not yet load an executable graph or claim GPU readiness.
+- Operator candidates now also include F32 Embedding and RoPE, plus direct Q8_0 quantized-weight MatMul for F32 activations. These GPU paths remain unverified and are not selected for inference.
