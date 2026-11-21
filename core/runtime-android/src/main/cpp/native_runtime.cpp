@@ -1322,9 +1322,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     append_native_trace("SPECULATIVE_AUTO_DETECTION_DISABLED_DURING_TARGET_LOAD");
     ggml_backend_dev_t webgpu_device = find_webgpu_gpu_device();
     const bool universal_gles_rejects_compute = g_universal_gles_version_known && !g_universal_gles_compute_supported;
-    const bool gpu_available = g_webgpu_backend_loaded && webgpu_device != nullptr && gpu_layers > 0 && !universal_gles_rejects_compute;
+    const bool gpu_available = g_webgpu_backend_loaded && webgpu_device != nullptr && gpu_layers != 0 && !universal_gles_rejects_compute;
     std::string gpu_failure_reason = "gpu_not_requested_or_unavailable";
-    if (gpu_layers <= 0) {
+    if (gpu_layers == 0) {
         gpu_failure_reason = "gpu_offload_disabled";
     } else if (universal_gles_rejects_compute) {
         gpu_failure_reason = "universal_gles_compute_not_supported";
@@ -1353,14 +1353,15 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     if (gpu_available) {
         gpu_attempted = true;
         llama_model_params gpu_params = llama_model_default_params();
-        gpu_params.n_gpu_layers = 999;
+        const int effective_gpu_layers = gpu_layers == -1 ? 999 : gpu_layers;
+        gpu_params.n_gpu_layers = effective_gpu_layers;
         gpu_params.load_mode = LLAMA_LOAD_MODE_NONE;
         gpu_params.check_tensors = false;
         ggml_backend_dev_t preferred_webgpu_devices[] = { webgpu_device, nullptr };
         gpu_params.devices = preferred_webgpu_devices;
         append_native_trace("MODEL_LOAD_STARTED_WEBGPU_PREFERRED");
         append_native_trace((std::string("MODEL_LOAD_PARAMS requestedGpuLayers=") +
-            std::to_string((int)gpu_layers) + " effectiveGpuLayers=999 load_mode=" +
+            std::to_string(effective_gpu_layers) + " load_mode=" +
             llama_load_mode_name(gpu_params.load_mode) + " no_host=1").c_str());
         g_model = load_model_android(stable_model_path.c_str(), gpu_params, true);
         checkpoint(g_model ? "WEBGPU_MODEL_LOAD_RETURNED_SUCCESS" : "WEBGPU_MODEL_LOAD_RETURNED_FAILED");
