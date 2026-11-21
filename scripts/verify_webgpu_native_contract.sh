@@ -57,6 +57,9 @@ grep -q 'shutdown_cv_.wait' "$GPU_ADAPTER_CPP" || fail "Persistent GLES context 
 grep -q 'eglMakeCurrent(display, surface, surface, context)' "$GPU_ADAPTER_CPP" || fail "Persistent GLES context must be made current on its owner thread"
 grep -q 'eglDestroyContext(display, context)' "$GPU_ADAPTER_CPP" || fail "Persistent GLES context must be destroyed by its owner thread"
 grep -q 'shutdown_universal_gpu_adapter' "$GPU_ADAPTER_H" || fail "Explicit native adapter shutdown API is missing"
+grep -q 'g_webgpu_device_error' "$ROOT/core/runtime-android/src/main/cpp/cmake/patch_bounded_buffer_allocation.cmake" || fail "Dawn callback failure state must be process-safe"
+! grep -q 'void \\* userdata' "$ROOT/core/runtime-android/src/main/cpp/cmake/patch_bounded_buffer_allocation.cmake" || fail "Do not use an unsupported Dawn C++ userdata callback overload"
+! grep -q '\[ctx\](const wgpu::Device' "$ROOT/core/runtime-android/src/main/cpp/cmake/patch_bounded_buffer_allocation.cmake" || fail "Dawn C++ callbacks must not capture context"
 grep -q 'gles_compute_supported &&' "$ROOT/core/runtime-android/src/main/cpp/native_runtime.cpp" || fail "GPU selection must require the verified GLES compute self-test"
 
 # The selected inference backend is WebGPU. OpenCL remains a separate legacy
