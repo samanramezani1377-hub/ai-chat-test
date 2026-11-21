@@ -169,7 +169,7 @@ public:
 
         wgpu::AdapterInfo info{};
         adapter_.GetInfo(&info);
-        wgpu::SupportedLimits supported{};
+        wgpu::Limits supported{};
         const bool has_limits = adapter_.GetLimits(&supported);
 
         DeviceInfo device;
@@ -184,14 +184,14 @@ public:
         device.compute_self_test_passed = false;
         device.inference_ready = false;
         if (has_limits) {
-            device.limits.max_buffer_size = supported.limits.maxBufferSize;
+            device.limits.max_buffer_size = supported.maxBufferSize;
             max_buffer_size_ = supported.limits.maxBufferSize;
-            device.limits.max_storage_buffer_binding_size = supported.limits.maxStorageBufferBindingSize;
-            device.limits.max_compute_workgroup_size_x = supported.limits.maxComputeWorkgroupSizeX;
-            device.limits.max_compute_workgroup_size_y = supported.limits.maxComputeWorkgroupSizeY;
-            device.limits.max_compute_workgroup_size_z = supported.limits.maxComputeWorkgroupSizeZ;
-            device.limits.max_compute_workgroup_invocations = supported.limits.maxComputeInvocationsPerWorkgroup;
-            device.limits.max_compute_workgroup_storage_bytes = supported.limits.maxComputeWorkgroupStorageSize;
+            device.limits.max_storage_buffer_binding_size = supported.maxStorageBufferBindingSize;
+            device.limits.max_compute_workgroup_size_x = supported.maxComputeWorkgroupSizeX;
+            device.limits.max_compute_workgroup_size_y = supported.maxComputeWorkgroupSizeY;
+            device.limits.max_compute_workgroup_size_z = supported.maxComputeWorkgroupSizeZ;
+            device.limits.max_compute_workgroup_invocations = supported.maxComputeInvocationsPerWorkgroup;
+            device.limits.max_compute_workgroup_storage_bytes = supported.maxComputeWorkgroupStorageSize;
         }
         if (adapter_.HasFeature(wgpu::FeatureName::ShaderF16)) device.features.emplace_back("shader-f16");
         if (adapter_.HasFeature(wgpu::FeatureName::Subgroups)) device.features.emplace_back("subgroups");
