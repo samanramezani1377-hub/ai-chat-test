@@ -254,12 +254,22 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
     if (!status.ok()) return status;
     const bool has_attention = std::any_of(plan.operations.begin(), plan.operations.end(),
         [](const ModelPlanOperation& operation) { return operation.operator_name == "Attention"; });
+    const bool has_kv_append = std::any_of(plan.operations.begin(), plan.operations.end(),
+        [](const ModelPlanOperation& operation) { return operation.operator_name == "KVCacheAppend"; });
+    if ((has_attention || has_kv_append) &&
+        (!context.kv_cache || context.sequence_length != token_count))
+        return {StatusCode::NotReady, "Streamed attention execution requires a KV cache and a sequence length matching the invocation"};
     if (has_attention) {
-        if (!context.kv_cache || context.sequence_length == 0)
-            return {StatusCode::NotReady, "Streamed attention execution requires a bound KV cache and sequence length"};
         status = bind_model_kv_cache_views(plan, *context.kv_cache, context.past_length,
                                            context.sequence_length, context);
         if (!status.ok()) return status;
+    }
+    for (const auto& operation : plan.operations) {
+        for (const auto& weight : operation.weight_tensors) {
+            if (context.tensors.find(weight) != context.tensors.end() ||
+                context.quantized_weights.find(weight) != context.quantized_weights.end())
+                return {StatusCode::InvalidArgument, "Streamed execution requires model weights to be loaded on demand, not pre-bound"};
+        }
     }
 
     ExecutionScheduler scheduler;
