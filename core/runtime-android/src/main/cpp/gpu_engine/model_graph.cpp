@@ -223,6 +223,9 @@ Status bind_model_kv_cache_views(const ModelExecutionPlan& plan, KvCache& cache,
         const auto layer_attr = operation.integer_attributes.find("layer_index");
         if (layer_attr == operation.integer_attributes.end() || layer_attr->second > UINT32_MAX)
             return {StatusCode::InvalidArgument, "Attention plan is missing a valid KV cache layer index"};
+        if (context.tensors.find(operation.inputs[1]) != context.tensors.end() ||
+            context.tensors.find(operation.inputs[2]) != context.tensors.end())
+            return {StatusCode::InvalidArgument, "KV cache key/value tensor binding already exists"};
         Tensor keys, values;
         Status status = cache.key_tensor_for_length(static_cast<uint32_t>(layer_attr->second),
                                                     total_length, keys);
@@ -230,12 +233,8 @@ Status bind_model_kv_cache_views(const ModelExecutionPlan& plan, KvCache& cache,
         status = cache.value_tensor_for_length(static_cast<uint32_t>(layer_attr->second),
                                                total_length, values);
         if (!status.ok()) return status;
-        const auto key_result = context.tensors.emplace(operation.inputs[1], std::move(keys));
-        if (!key_result.second)
-            return {StatusCode::InvalidArgument, "KV cache key tensor binding already exists"};
-        const auto value_result = context.tensors.emplace(operation.inputs[2], std::move(values));
-        if (!value_result.second)
-            return {StatusCode::InvalidArgument, "KV cache value tensor binding already exists"};
+        context.tensors.emplace(operation.inputs[1], std::move(keys));
+        context.tensors.emplace(operation.inputs[2], std::move(values));
     }
     context.kv_cache = &cache;
     context.past_length = past_length;

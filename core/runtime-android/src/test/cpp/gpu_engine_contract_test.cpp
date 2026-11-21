@@ -1296,6 +1296,63 @@ void test_embedding_model_lowering_uploads_token_ids_and_binds_buffer() {
     assert(dispatch.glsl_source.find("const uint TOKEN_COUNT = 2u;") != std::string::npos);
 }
 
+
+void test_model_graph_executes_kv_copy_node_before_committing_cache_state() {
+    FakeBackend backend(BackendKind::OpenGles);
+    MemoryManager memory(backend, 4096);
+    KvCacheConfig config; config.layers = 1; config.kv_heads = 2;
+    config.head_dimension = 2; config.maximum_sequence_length = 4;
+    std::unique_ptr<KvCache> cache;
+    assert(KvCache::create(backend, memory, config, cache).ok());
+
+    BufferDesc source_desc{16, 4, MemoryDomain::Device, false, "graph-kv-source"};
+    std::shared_ptr<Buffer> key_buffer, value_buffer;
+    assert(backend.allocate(source_desc, key_buffer).ok());
+    assert(backend.allocate(source_desc, value_buffer).ok());
+    const float key_values[] = {1, 2, 3, 4};
+    const float val_values[] = {5, 6, 7, 8};
+    auto key_fake = std::dynamic_pointer_cast<FakeBuffer>(key_buffer);
+    auto value_fake = std::dynamic_pointer_cast<FakeBuffer>(value_buffer);
+    std::memcpy(key_fake->bytes.data(), key_values, sizeof(key_values));
+    std::memcpy(value_fake->bytes.data(), val_values, sizeof(val_values));
+    TensorDesc td; td.shape = {1, 2, 2}; td.data_type = DataType::F32;
+    Tensor key_tensor, value_tensor;
+    assert(Tensor::create(td, key_buffer, 0, key_tensor).ok());
+    assert(Tensor::create(td, value_buffer, 0, value_tensor).ok());
+
+    ModelExecutionPlan plan;
+    plan.structurally_validated = true;
+    plan.operator_coverage_validated = true;
+    ModelPlanOperation append;
+    append.id = "cache-append";
+    append.operator_name = "KVCacheAppend";
+    append.inputs = {"key", "value"};
+    append.output = "cache-ready";
+    append.side_effect = true;
+    append.integer_attributes["layer_index"] = 0;
+    plan.operations.push_back(append);
+    ModelExecutionContext context;
+    context.kv_cache = cache.get();
+    context.past_length = 0;
+    context.sequence_length = 1;
+    context.tensors.emplace("key", key_tensor);
+    context.tensors.emplace("value", value_tensor);
+
+    ModelLoweringRegistry lowerings;
+    assert(register_builtin_model_lowerings(BackendKind::OpenGles, lowerings).ok());
+    OperatorRegistry operators;
+    ModelGraphCompileReport report;
+    assert(execute_model_execution_plan(plan, backend, lowerings, operators, {},
+                                        context, nullptr, report).ok());
+    assert(report.compiled && report.executed && report.compiled_nodes == 1);
+    assert(plan.execution_validated && !plan.gpu_ready);
+    assert(cache->valid_tokens(0) == 1);
+    auto stored_keys = std::dynamic_pointer_cast<FakeBuffer>(cache->key_buffer(0));
+    auto stored_values = std::dynamic_pointer_cast<FakeBuffer>(cache->value_buffer(0));
+    assert(std::memcmp(stored_keys->bytes.data(), key_values, sizeof(key_values)) == 0);
+    assert(std::memcmp(stored_values->bytes.data(), val_values, sizeof(val_values)) == 0);
+}
+
 void test_model_execution_never_promotes_unvalidated_kernels() {
     FakeBackend backend(BackendKind::OpenGles);
     ModelExecutionPlan plan;
@@ -1830,6 +1887,7 @@ int main() {
     test_model_plan_graph_compilation_is_fail_closed();
     test_builtin_model_lowerings_are_backend_scoped_and_fail_closed();
     test_model_execution_never_promotes_unvalidated_kernels();
+    test_model_graph_executes_kv_copy_node_before_committing_cache_state();
     test_embedding_model_lowering_uploads_token_ids_and_binds_buffer();
     test_llama_model_execution_plan_is_structural_only();
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
