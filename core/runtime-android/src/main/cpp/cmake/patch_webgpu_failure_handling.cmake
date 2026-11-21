@@ -199,6 +199,7 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_SET_ROWS_FAILURE_V2")
 endif()
 
 # A failed MapAsync must not be followed by GetConstMappedRange on an unmapped buffer.
+if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_READBACK_GUARDS_V1")
 ai_chat_replace_once(_webgpu
     "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->set_rows_host_error_buf, wgpu::MapMode::Read, 0,\n                                   ctx->set_rows_host_error_buf.GetSize());\n    const uint32_t * error_data"
     "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->set_rows_host_error_buf, wgpu::MapMode::Read, 0,\n                                   ctx->set_rows_host_error_buf.GetSize());\n    if (g_webgpu_graph_error.load(std::memory_order_acquire)) return;\n    const uint32_t * error_data"
@@ -222,5 +223,8 @@ ai_chat_replace_once(_webgpu
     "    if (status == wgpu::WaitStatus::TimedOut) {\n        GGML_ABORT(\\"ggml_webgpu: event_synchronize timed out after %u ms\\n\\", WEBGPU_RUNTIME_WAIT_TIMEOUT_MS);\n    }\n    event_ctx->recorded = false;"
     "    if (status != wgpu::WaitStatus::Success) {\n        g_webgpu_graph_error.store(true, std::memory_order_release);\n        GGML_LOG_ERROR(\\"AI_CHAT_WEBGPU_EVENT_WAIT_FAILED status=%d timeoutMs=%u\\n\\", static_cast<int>(status), WEBGPU_RUNTIME_WAIT_TIMEOUT_MS);\n    }\n    event_ctx->recorded = false;"
     "replace event synchronization abort with a graph failure")
+string(APPEND _webgpu "\\n// AI_CHAT_WEBGPU_READBACK_GUARDS_V1\\n")
+endif()
+
 file(WRITE "${_webgpu_file}" "${_webgpu}")
 message(STATUS "AI Chat: safe Dawn callback lifetime, recoverable waits, and graph failure propagation enabled")
