@@ -10,6 +10,7 @@
 #include "tokenizer.h"
 
 #include <exception>
+#include <cstdlib>
 #include <sstream>
 #include <string>
 
@@ -126,6 +127,8 @@ extern "C" JNIEXPORT jint JNICALL
 Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineLoadModel(
         JNIEnv* env, jclass, jstring path, jint context_length, jlong memory_budget_bytes) {
     try {
+        if (context_length <= 0 || memory_budget_bytes <= 0)
+            return static_cast<jint>(ai_chat::gpu_engine::StatusCode::InvalidArgument);
         const std::string model_path = ai_chat::gpu_engine::from_java_string(env, path);
         const auto status = ai_chat::gpu_engine::gpu_inference_session().load_model(
             model_path, static_cast<uint32_t>(context_length),
@@ -141,6 +144,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineGenerate(
         JNIEnv* env, jclass, jstring prompt, jint max_tokens, jfloat temperature,
         jint top_k, jfloat top_p, jfloat min_p, jobject listener) {
     try {
+        if (max_tokens <= 0)
+            return static_cast<jint>(ai_chat::gpu_engine::StatusCode::InvalidArgument);
         const std::string prompt_text = ai_chat::gpu_engine::from_java_string(env, prompt);
         ai_chat::gpu_engine::SamplingConfig sampling;
         sampling.temperature = temperature;
