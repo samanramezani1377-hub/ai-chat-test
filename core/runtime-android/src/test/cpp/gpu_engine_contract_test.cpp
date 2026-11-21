@@ -1,5 +1,6 @@
 #include "execution_engine.h"
 #include "gguf_reader.h"
+#include "model_registry.h"
 
 #include <algorithm>
 #include <cassert>
@@ -182,6 +183,52 @@ void test_tensor_and_memory_lease() {
     assert(Tensor::required_bytes(desc, bytes).code == StatusCode::InvalidArgument);
 }
 
+
+class FakeArchitecture final : public ArchitectureAdapter {
+public:
+    FakeArchitecture() {
+        descriptor_.name = "test-architecture";
+        descriptor_.family = ArchitectureFamily::DenseTransformer;
+        descriptor_.validation = SupportState::Validated;
+    }
+    const ArchitectureDescriptor& descriptor() const noexcept override { return descriptor_; }
+    Status validate_metadata(const GgufFileInfo&) const override { return Status::success(); }
+private:
+    ArchitectureDescriptor descriptor_;
+};
+
+void test_model_and_quantization_registry_fail_closed() {
+    QuantizationRegistry quantizations;
+    QuantizationFormat q4;
+    q4.file_type_id = 2;
+    q4.name = "Q4_0";
+    q4.block_elements = 32;
+    q4.bytes_per_block = 18;
+    q4.quantized = true;
+    assert(quantizations.register_format(q4).ok());
+    assert(!quantizations.can_decode(2));
+    assert(!quantizations.can_execute_on_gpu(2));
+
+    ArchitectureRegistry architectures;
+    assert(architectures.register_adapter(std::make_shared<FakeArchitecture>()).ok());
+    GgufFileInfo model;
+    model.architecture = "test-architecture";
+    model.tensor_count = 1;
+    GgufTensorInfo tensor;
+    tensor.name = "weight";
+    tensor.type_id = 2;
+    tensor.type = GgufReader::tensor_type_info(2);
+    tensor.byte_size_known = true;
+    tensor.byte_size = 18;
+    model.tensors.push_back(tensor);
+
+    const auto report = evaluate_model_preflight(model, architectures, quantizations);
+    assert(report.architecture_known);
+    assert(!report.all_quantization_decoders_validated);
+    assert(!report.gpu_execution_ready);
+    assert(report.unverified_quantized_tensors == 1);
+}
+
 void test_operator_registry_fail_closed() {
     OperatorRegistry registry;
     KernelDefinition definition;
@@ -246,6 +293,7 @@ int main() {
     test_independent_gguf_reader();
     test_tensor_and_memory_lease();
     test_operator_registry_fail_closed();
+    test_model_and_quantization_registry_fail_closed();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";
     return 0;
