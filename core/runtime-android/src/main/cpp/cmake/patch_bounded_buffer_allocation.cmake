@@ -129,11 +129,13 @@ endif()
 # limit before calling Dawn. A failed buffer allocation is returned to ggml-alloc
 # as NULL so graph reservation can fail cleanly and the caller can select fallback.
 file(READ "${_webgpu_file}" _webgpu)
-# std::nothrow is used when creating the host-side buffer context.
-ai_chat_replace_once(_webgpu
-    "#include <memory>"
-    "#include <memory>\n#include <new>\n#include <algorithm> // AI_CHAT_WEBGPU_NOTHROW_INCLUDE_V1"
-    "include std::nothrow declaration")
+# std::nothrow and std::min are used by the allocation checks.
+if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_NOTHROW_INCLUDE_V1")
+    ai_chat_replace_once(_webgpu
+        "#include <memory>"
+        "#include <memory>\n#include <new>\n#include <algorithm> // AI_CHAT_WEBGPU_NOTHROW_INCLUDE_V1"
+        "include std::nothrow and algorithm declarations")
+endif()
 if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
     ai_chat_replace_once(_webgpu
         [=[    ggml_backend_webgpu_device_context * ctx = static_cast<ggml_backend_webgpu_device_context *>(buft->device->context);
