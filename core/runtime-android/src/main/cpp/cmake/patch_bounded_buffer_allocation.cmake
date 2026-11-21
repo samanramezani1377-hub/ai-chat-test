@@ -37,15 +37,18 @@ if (NOT _alloc MATCHES "AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V1")
     if (alloc->n_chunks == GGML_VBUFFER_MAX_CHUNKS - 1) {
         chunk->free_blocks[0].size = SIZE_MAX/2;
     }]=]
-        [=[    struct tallocr_chunk * chunk = calloc(1, sizeof(struct tallocr_chunk));
+        [=[    // Never manufacture an over-limit virtual chunk for a single oversized tensor.
+    if (min_size > alloc->max_chunk_size) {
+        return -1;
+    }
+    struct tallocr_chunk * chunk = calloc(1, sizeof(struct tallocr_chunk));
     if (chunk == NULL) {
         return -1;
     }
     chunk->n_free_blocks = 1;
     chunk->free_blocks[0].offset = 0;
-    // Keep every chunk bounded by the backend's maximum buffer/binding size.
-    // An individually oversized tensor is rejected by the backend allocator.
-    chunk->free_blocks[0].size = MAX(min_size, alloc->max_chunk_size);]=]
+    // Every chunk is strictly bounded by the backend's maximum buffer/binding size.
+    chunk->free_blocks[0].size = alloc->max_chunk_size;]=]
         "remove unbounded final virtual-buffer chunk")
     ai_chat_replace_once(_alloc
         [=[    if (best_fit_chunk == -1) {
