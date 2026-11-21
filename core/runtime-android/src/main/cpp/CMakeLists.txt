@@ -150,6 +150,7 @@ add_library(ai_chat_gpu_engine STATIC
     gpu_engine/model_graph.cpp
     gpu_engine/model_lowerings.cpp
     gpu_engine/operators.cpp
+    gpu_engine/kernel_validation.cpp
     gpu_engine/weight_streamer.cpp
     gpu_engine/sampler.cpp
     gpu_engine/quantization.cpp
