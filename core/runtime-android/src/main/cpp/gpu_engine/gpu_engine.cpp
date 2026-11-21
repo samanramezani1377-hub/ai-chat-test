@@ -63,6 +63,7 @@ Status GpuEngine::initialize(BackendKind preferred_backend) {
     Status status = active_backend_->enumerate_devices(devices);
     if (!status.ok()) {
         diagnostics_.last_error = status.message;
+        active_backend_->shutdown();
         active_backend_.reset();
         return status;
     }
@@ -70,6 +71,7 @@ Status GpuEngine::initialize(BackendKind preferred_backend) {
         [](const DeviceInfo& device) { return device.compute_available; });
     if (selected == devices.end()) {
         diagnostics_.last_error = "No compute-capable device was discovered by the selected backend";
+        active_backend_->shutdown();
         active_backend_.reset();
         return {StatusCode::Unsupported, diagnostics_.last_error};
     }
