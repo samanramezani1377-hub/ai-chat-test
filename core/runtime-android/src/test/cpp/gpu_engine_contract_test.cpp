@@ -436,8 +436,25 @@ void test_q8_0_decoder_and_registry() {
     assert(register_builtin_gles_operator_candidates(gles_registry).ok());
     assert(gles_registry.select_kernel("Add", BackendKind::OpenGles, DataType::F32,
                                        DataType::F32, 2, 2, selected).code == StatusCode::Unsupported);
+    TensorDesc rhs_matmul_desc = tensor_desc;
+    rhs_matmul_desc.shape = {3, 2};
+    TensorDesc output_matmul_desc = tensor_desc;
+    output_matmul_desc.shape = {2, 2};
+    Tensor rhs_matmul, output_matmul;
+    assert(Tensor::create(rhs_matmul_desc, b, 0, rhs_matmul).ok());
+    assert(Tensor::create(output_matmul_desc, out, 0, output_matmul).ok());
     ComputeDispatch gles_matmul;
-    assert(build_matmul_f32_gles_candidate(lhs, rhs, output, gles_matmul).code == StatusCode::InvalidArgument);
+    assert(build_matmul_f32_gles_candidate(lhs, rhs_matmul, output_matmul, gles_matmul).ok());
+    assert(gles_matmul.backend == BackendKind::OpenGles);
+    assert(gles_matmul.workgroups_x == 1 && gles_matmul.workgroups_y == 1);
+    assert(gles_matmul.glsl_source.find("const uint ROWS = 2u;") != std::string::npos);
+    assert(gles_matmul.glsl_source.find("const uint COLUMNS = 2u;") != std::string::npos);
+    const float matmul_lhs[] = {1, 2, 3, 4, 5, 6};
+    const float matmul_rhs[] = {7, 8, 9, 10, 11, 12};
+    float matmul_output[] = {0, 0, 0, 0};
+    assert(reference_matmul_f32(matmul_lhs, matmul_rhs, matmul_output, 2, 2, 3).ok());
+    assert(matmul_output[0] == 58 && matmul_output[1] == 64 &&
+           matmul_output[2] == 139 && matmul_output[3] == 154);
     assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") != std::string::npos);
 
     BufferDesc q4_encoded_desc{20, 4, MemoryDomain::Device, false, "q4-encoded"};
