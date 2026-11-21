@@ -292,6 +292,11 @@ Status ExecutionScheduler::execute(Backend& backend, const ComputeGraph& graph,
     std::vector<size_t> order;
     Status status = graph.topological_order(order);
     if (!status.ok()) return status;
+    for (size_t index : order) {
+        if (graph.nodes_[index].dispatch.backend != backend.kind()) {
+            return {StatusCode::Unsupported, "Graph kernel backend does not match the active device backend"};
+        }
+    }
     std::unique_ptr<CommandBatch> batch;
     status = backend.begin_commands(batch);
     if (!status.ok()) return status;
@@ -300,9 +305,6 @@ Status ExecutionScheduler::execute(Backend& backend, const ComputeGraph& graph,
     for (size_t index : order) {
         if (cancellation && cancellation->load(std::memory_order_relaxed)) {
             return {StatusCode::Cancelled, "Graph execution was cancelled before submission"};
-        }
-        if (graph.nodes_[index].dispatch.backend != backend.kind()) {
-            return {StatusCode::Unsupported, "Graph kernel backend does not match the active device backend"};
         }
         status = batch->dispatch_compute(graph.nodes_[index].dispatch);
         if (!status.ok()) return status;
