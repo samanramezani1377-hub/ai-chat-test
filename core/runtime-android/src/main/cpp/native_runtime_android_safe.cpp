@@ -1,4 +1,5 @@
 #include "llama.h"
+#include <atomic>
 #include <vector>
 #include <cstdint>
 #include <algorithm>
@@ -13,6 +14,7 @@
 #include <sstream>
 #include <cstring>
 #include <limits>
+#include <mutex>
 #include <utility>
 
 // Tokens represented by the resident prompt prefix in the native KV cache.
