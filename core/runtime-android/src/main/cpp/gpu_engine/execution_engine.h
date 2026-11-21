@@ -81,6 +81,7 @@ public:
                          KernelDefinition& out) const;
     Status authorize_dispatch(const std::string& kernel_id, BackendKind backend,
                               ComputeDispatch& dispatch) const;
+    bool is_validated_kernel(const std::string& kernel_id, BackendKind backend) const noexcept;
     std::vector<std::string> registered_operators() const;
 
 private:
@@ -93,9 +94,11 @@ struct GraphNode {
     ComputeDispatch dispatch;
 };
 
+class OperatorRegistry;
+
 class ComputeGraph {
 public:
-    Status add_node(GraphNode node, size_t& out_index);
+    Status add_node(GraphNode node, const OperatorRegistry& registry, size_t& out_index);
     Status topological_order(std::vector<size_t>& out_order) const;
     size_t node_count() const noexcept;
 

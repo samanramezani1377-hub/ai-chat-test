@@ -200,6 +200,16 @@ Status OperatorRegistry::select_kernel(const std::string& operator_name, Backend
 }
 
 
+
+bool OperatorRegistry::is_validated_kernel(const std::string& kernel_id,
+                                           BackendKind backend) const noexcept {
+    return std::any_of(kernels_.begin(), kernels_.end(),
+        [&kernel_id, backend](const KernelDefinition& definition) {
+            return definition.kernel_id == kernel_id && definition.backend == backend &&
+                   definition.validation == KernelValidation::Validated;
+        });
+}
+
 Status OperatorRegistry::authorize_dispatch(const std::string& kernel_id, BackendKind backend,
                                              ComputeDispatch& dispatch) const {
     const auto found = std::find_if(kernels_.begin(), kernels_.end(),
@@ -226,7 +236,7 @@ std::vector<std::string> OperatorRegistry::registered_operators() const {
     return result;
 }
 
-Status ComputeGraph::add_node(GraphNode node, size_t& out_index) {
+Status ComputeGraph::add_node(GraphNode node, const OperatorRegistry& registry, size_t& out_index) {
     out_index = nodes_.size();
     for (size_t dependency : node.dependencies) {
         if (dependency >= nodes_.size()) {
@@ -235,8 +245,9 @@ Status ComputeGraph::add_node(GraphNode node, size_t& out_index) {
     }
     if (node.name.empty()) return {StatusCode::InvalidArgument, "Graph node name cannot be empty"};
     if (node.dispatch.validation != KernelValidation::Validated || node.dispatch.kernel_id.empty() ||
-        node.dispatch.backend == BackendKind::Unknown) {
-        return {StatusCode::Unsupported, "Compute graph rejects unverified or unidentified kernels"};
+        node.dispatch.backend == BackendKind::Unknown ||
+        !registry.is_validated_kernel(node.dispatch.kernel_id, node.dispatch.backend)) {
+        return {StatusCode::Unsupported, "Compute graph rejects kernels not authorized by the active registry"};
     }
     nodes_.push_back(std::move(node));
     return Status::success();

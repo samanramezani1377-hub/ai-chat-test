@@ -590,6 +590,18 @@ void test_gpu_engine_lifecycle() {
     assert(engine.diagnostics().device_name == "fake-test-device");
     assert(!engine.active_device()->inference_ready);
 
+        OperatorRegistry test_registry;
+    auto register_test_kernel = [&test_registry](const std::string& id, BackendKind backend) {
+        KernelDefinition definition;
+        definition.operator_name = id;
+        definition.kernel_id = id;
+        definition.backend = backend;
+        definition.input_type = DataType::F32;
+        definition.output_type = DataType::F32;
+        definition.validation = KernelValidation::Validated;
+        definition.wgsl_source = "@compute @workgroup_size(1) fn main() {}";
+        return test_registry.register_kernel(std::move(definition));
+    };
     ComputeGraph graph;
     GraphNode node;
     node.name = "single";
@@ -597,11 +609,12 @@ void test_gpu_engine_lifecycle() {
     node.dispatch.kernel_id = "test-single";
     node.dispatch.backend = BackendKind::OpenGles;
     node.dispatch.validation = KernelValidation::Validated;
+    assert(register_test_kernel("test-single", BackendKind::OpenGles).ok());
     size_t index = 0;
     GraphNode unverified_node;
     unverified_node.name = "unverified";
-    assert(graph.add_node(unverified_node, index).code == StatusCode::Unsupported);
-    assert(graph.add_node(node, index).ok());
+    assert(graph.add_node(unverified_node, test_registry, index).code == StatusCode::Unsupported);
+    assert(graph.add_node(node, test_registry, index).ok());
     assert(engine.execute(graph).ok());
     assert(engine.shutdown().ok());
     assert(!engine.ready());
@@ -970,6 +983,18 @@ void test_operator_registry_fail_closed() {
 
 void test_graph_scheduler_order_and_cancel() {
     FakeBackend backend;
+    OperatorRegistry test_registry;
+    auto register_test_kernel = [&test_registry](const std::string& id, BackendKind backend) {
+        KernelDefinition definition;
+        definition.operator_name = id;
+        definition.kernel_id = id;
+        definition.backend = backend;
+        definition.input_type = DataType::F32;
+        definition.output_type = DataType::F32;
+        definition.validation = KernelValidation::Validated;
+        definition.wgsl_source = "@compute @workgroup_size(1) fn main() {}";
+        return test_registry.register_kernel(std::move(definition));
+    };
     ComputeGraph graph;
     size_t index = 0;
     GraphNode first;
@@ -978,7 +1003,8 @@ void test_graph_scheduler_order_and_cancel() {
     first.dispatch.kernel_id = "test-first";
     first.dispatch.backend = BackendKind::OpenGles;
     first.dispatch.validation = KernelValidation::Validated;
-    assert(graph.add_node(first, index).ok());
+    assert(register_test_kernel("test-first", BackendKind::OpenGles).ok());
+    assert(graph.add_node(first, test_registry, index).ok());
 
     GraphNode second;
     second.name = "second";
@@ -987,7 +1013,8 @@ void test_graph_scheduler_order_and_cancel() {
     second.dispatch.kernel_id = "test-second";
     second.dispatch.backend = BackendKind::OpenGles;
     second.dispatch.validation = KernelValidation::Validated;
-    assert(graph.add_node(second, index).ok());
+    assert(register_test_kernel("test-second", BackendKind::OpenGles).ok());
+    assert(graph.add_node(second, test_registry, index).ok());
 
     GraphNode independent;
     independent.name = "independent";
@@ -995,7 +1022,8 @@ void test_graph_scheduler_order_and_cancel() {
     independent.dispatch.kernel_id = "test-independent";
     independent.dispatch.backend = BackendKind::OpenGles;
     independent.dispatch.validation = KernelValidation::Validated;
-    assert(graph.add_node(independent, index).ok());
+    assert(register_test_kernel("test-independent", BackendKind::OpenGles).ok());
+    assert(graph.add_node(independent, test_registry, index).ok());
 
     std::vector<size_t> order;
     assert(graph.topological_order(order).ok());
@@ -1010,8 +1038,9 @@ void test_graph_scheduler_order_and_cancel() {
     mismatched.dispatch.kernel_id = "test-dawn-only";
     mismatched.dispatch.backend = BackendKind::DawnWebGpu;
     mismatched.dispatch.validation = KernelValidation::Validated;
+    assert(register_test_kernel("test-dawn-only", BackendKind::DawnWebGpu).ok());
     size_t mismatch_index = 0;
-    assert(mismatched_graph.add_node(mismatched, mismatch_index).ok());
+    assert(mismatched_graph.add_node(mismatched, test_registry, mismatch_index).ok());
     assert(scheduler.execute(backend, mismatched_graph).code == StatusCode::Unsupported);
     assert(backend.submit_count == 0);
 
