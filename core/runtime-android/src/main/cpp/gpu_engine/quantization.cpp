@@ -1599,7 +1599,39 @@ Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry
     q4_gles.validation = KernelValidation::Unverified;
     q4_gles.kernel_id = "gles-q4-0-matmul-f32-activation-v1";
     q4_gles.glsl_source = q4_0_matmul_glsl_source();
-    return registry.register_kernel(std::move(q4_gles));
+    status = registry.register_kernel(std::move(q4_gles));
+    if (!status.ok()) return status;
+
+    KernelDefinition q4_1;
+    q4_1.operator_name = "MatMul_Q4_1";
+    q4_1.backend = BackendKind::DawnWebGpu;
+    q4_1.input_type = DataType::F32;
+    q4_1.input_types = {DataType::F32, DataType::U32};
+    q4_1.output_type = DataType::F32;
+    q4_1.min_input_count = 2;
+    q4_1.max_input_count = 2;
+    q4_1.min_rank = 2;
+    q4_1.max_rank = 3;
+    q4_1.validation = KernelValidation::Unverified;
+    q4_1.kernel_id = "dawn-q4-1-matmul-f32-activation-v1";
+    q4_1.wgsl_source = q4_1_matmul_wgsl_source();
+    status = registry.register_kernel(std::move(q4_1));
+    if (!status.ok()) return status;
+
+    KernelDefinition q4_1_gles;
+    q4_1_gles.operator_name = "MatMul_Q4_1";
+    q4_1_gles.backend = BackendKind::OpenGles;
+    q4_1_gles.input_type = DataType::F32;
+    q4_1_gles.input_types = {DataType::F32, DataType::U32};
+    q4_1_gles.output_type = DataType::F32;
+    q4_1_gles.min_input_count = 2;
+    q4_1_gles.max_input_count = 2;
+    q4_1_gles.min_rank = 2;
+    q4_1_gles.max_rank = 3;
+    q4_1_gles.validation = KernelValidation::Unverified;
+    q4_1_gles.kernel_id = "gles-q4-1-matmul-f32-activation-v1";
+    q4_1_gles.glsl_source = q4_1_matmul_glsl_source();
+    return registry.register_kernel(std::move(q4_1_gles));
 }
 
 ModelQuantizationBackendReport evaluate_model_quantization_backend(
