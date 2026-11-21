@@ -49,6 +49,8 @@ std::string probe_gpu_engine() {
         *engine.active_backend(), operators, quantizations);
     const Status q4_status = validate_q4_0_matmul_kernel(
         *engine.active_backend(), operators, quantizations);
+    const Status q4_0_embedding_status = validate_q4_0_embedding_kernel(
+        *engine.active_backend(), operators);
     const Status q4_1_status = validate_q4_1_matmul_kernel(
         *engine.active_backend(), operators, quantizations);
 
@@ -60,6 +62,7 @@ std::string probe_gpu_engine() {
            << ";operators_unavailable=" << operator_report.unavailable.size()
            << ";q8_0_validation=" << (q8_status.ok() ? "VALIDATED" : "UNVERIFIED")
            << ";q4_0_validation=" << (q4_status.ok() ? "VALIDATED" : "UNVERIFIED")
+           << ";q4_0_embedding_validation=" << (q4_0_embedding_status.ok() ? "VALIDATED" : "UNVERIFIED")
            << ";q4_1_validation=" << (q4_1_status.ok() ? "VALIDATED" : "UNVERIFIED")
            << ";fallback_used=" << (engine.diagnostics().fallback_used ? "true" : "false")
            << ";fallback_reason=" << (engine.diagnostics().fallback_reason.empty()
