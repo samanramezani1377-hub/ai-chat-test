@@ -34,11 +34,6 @@ internal fun AppSidebar(
 }
 
 @Composable
-internal fun AppQuickMenu(onDiagnostics: () -> Unit, onSettings: () -> Unit) {
-    AppQuickMenu(onDiagnostics = onDiagnostics, onSettings = onSettings)
-}
-
-@Composable
 internal fun RuntimeDetailsDialog(
     model: ModelDescriptor?,
     status: String,
