@@ -92,6 +92,27 @@ Status GpuEngine::initialize(BackendKind preferred_backend) {
     return Status::success();
 }
 
+Status GpuEngine::initialize_with_fallback(const std::vector<BackendKind>& preference_order) {
+    if (preference_order.empty())
+        return {StatusCode::InvalidArgument, "GPU backend preference order is empty"};
+    if (active_backend_) return Status::success();
+    std::vector<std::string> failures;
+    Status last_status{StatusCode::Unsupported, "No GPU backend preference was attempted"};
+    for (BackendKind kind : preference_order) {
+        last_status = initialize(kind);
+        if (last_status.ok()) {
+            if (!failures.empty()) {
+                diagnostics_.fallback_used = true;
+                diagnostics_.fallback_reason = failures.front();
+            }
+            return Status::success();
+        }
+        failures.emplace_back(to_string(kind) + ": " + last_status.message);
+    }
+    diagnostics_.last_error = "No preferred GPU backend initialized";
+    for (const auto& failure : failures) diagnostics_.last_error += " | " + failure;
+    return {last_status.code, diagnostics_.last_error};
+}
 Status GpuEngine::execute(const ComputeGraph& graph, const std::atomic<bool>* cancellation) {
     if (!active_backend_) return {StatusCode::NotReady, "GPU engine is not initialized"};
     ExecutionScheduler scheduler;
