@@ -536,6 +536,10 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";gpu_memory_total=unknown"
            << ";gpu_memory_free=unknown"
            << ";weight_streaming=per-operation"
+           << ";single_tensor_chunking=UNSUPPORTED"
+           << ";backend_kernel_validation=runtime-numerical"
+           << ";model_reference_parity=UNVERIFIED"
+           << ";model_graph_validation=UNVERIFIED"
            << ";context_length=" << context_length_
            << ";ttft_ms=" << last_ttft_ms_
            << ";decode_tokens_per_second=" << last_decode_tokens_per_second_
