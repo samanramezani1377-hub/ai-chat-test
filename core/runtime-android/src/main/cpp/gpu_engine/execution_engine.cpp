@@ -164,7 +164,12 @@ Status OperatorRegistry::register_kernel(KernelDefinition definition) {
         definition.backend == BackendKind::Unknown || definition.input_type == DataType::Unknown ||
         definition.output_type == DataType::Unknown || definition.min_input_count == 0 ||
         definition.min_input_count > definition.max_input_count ||
-        definition.min_rank == 0 || definition.min_rank > definition.max_rank) {
+        definition.min_rank == 0 || definition.min_rank > definition.max_rank ||
+        (!definition.input_types.empty() &&
+         (definition.input_types.size() < definition.min_input_count ||
+          definition.input_types.size() > definition.max_input_count ||
+          std::any_of(definition.input_types.begin(), definition.input_types.end(),
+                      [](DataType type) { return type == DataType::Unknown; }))) {
         return {StatusCode::InvalidArgument, "Kernel definition is missing required identity or valid constraints"};
     }
     if (definition.validation == KernelValidation::Validated && definition.wgsl_source.empty()) {
