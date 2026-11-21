@@ -638,12 +638,24 @@ Status GpuInferenceSession::count_tokens(const std::string& text, uint32_t& out_
 std::string GpuInferenceSession::diagnostics() const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::ostringstream report;
+    const DeviceInfo* device = engine_ ? engine_->active_device() : nullptr;
     report << "runtime=AIChatGpuEngine"
            << ";status=" << (loaded_ ? "READY" : "UNLOADED")
+           << ";runtime_version=0.1.0"
            << ";backend=" << backend_name()
            << ";backend_fallback_reason=" << (backend_fallback_reason_.empty() ? "none" : backend_fallback_reason_)
+           << ";gpu_vendor=" << (device && !device->vendor.empty() ? device->vendor : "unknown")
+           << ";gpu_device=" << (device && !device->name.empty() ? device->name : "unknown")
+           << ";gpu_architecture=" << (device && !device->architecture.empty() ? device->architecture : "unknown")
+           << ";gpu_driver=" << (device && !device->driver.empty() ? device->driver : "unknown")
+           << ";gpu_api=" << (device && !device->api_version.empty() ? device->api_version : "unknown")
+           << ";gpu_compute_available=" << (device && device->compute_available ? "true" : "false")
+           << ";gpu_self_test=" << (device && device->compute_self_test_passed ? "passed" : "unknown")
+           << ";gpu_max_buffer_bytes=" << (device ? device->limits.max_buffer_size : 0)
+           << ";gpu_max_storage_binding_bytes=" << (device ? device->limits.max_storage_buffer_binding_size : 0)
+           << ";gpu_max_workgroup_invocations=" << (device ? device->limits.max_compute_workgroup_invocations : 0)
            << ";architecture=" << (plan_.architecture.empty() ? "unknown" : plan_.architecture)
-           << ";device=" << (engine_ && engine_->active_device() ? engine_->active_device()->name : "unknown")
+           << ";device=" << (device && !device->name.empty() ? device->name : "unknown")
            << ";model=" << (model_path_.empty() ? "unknown" : model_path_)
            << ";weight_bytes=" << total_weight_bytes_
            << ";largest_weight_tensor_bytes=" << largest_weight_tensor_bytes_
@@ -662,6 +674,9 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";ttft_ms=" << last_ttft_ms_
            << ";decode_tokens_per_second=" << last_decode_tokens_per_second_
            << ";cpu_fallback_available=true"
+           << ";gpu_memory_total=unknown"
+           << ";gpu_memory_free=unknown"
+           << ";gpu_feature_count=" << (device ? device->features.size() : 0)
            << ";last_error=" << (last_error_.empty() ? "none" : last_error_);
     return report.str();
 }
