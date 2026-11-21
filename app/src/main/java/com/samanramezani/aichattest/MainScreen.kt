@@ -535,6 +535,33 @@ internal fun MainScreen(container: AppContainer, initialSettingsSection: String?
     fun openConversation(record: ConversationRecord) { loadConversation(record); destination = AppDestination.CHAT; sidebarOpen = false }
     fun deleteConversation(record: ConversationRecord) { scope.launch(Dispatchers.Default) { val removed = history.delete(record.id) ?: return@launch; val replacement = if (current?.id == removed.id) history.recent(1).firstOrNull() else null; withContext(Dispatchers.Main) { if (replacement != null) loadConversation(replacement) else if (current?.id == removed.id) { current = null; messages = emptyList() }; refreshHistory(); deleted = DeletedConversation(removed) } } }
     fun restoreDeleted(record: ConversationRecord) { scope.launch(Dispatchers.Default) { if (history.restore(record)) withContext(Dispatchers.Main) { loadConversation(record); refreshHistory(); deleted = null } } }
+    fun stop() {
+        if (!generating || approvalBusy) return
+        activeStreamId = null
+        generating = false
+        runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"
+        execution = execution?.copy(
+            status = "متوقف شد",
+            finishedAt = System.currentTimeMillis(),
+        )
+
+        scope.launch(Dispatchers.Default) {
+            try {
+                container.modelRuntime.stopGeneration()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                withContext(Dispatchers.Main) {
+                    runtimeStatus = "خطا"
+                    diagnostic = formatDiagnostic(
+                        error.message ?: "Unable to stop generation",
+                        "توقف تولید",
+                    )
+                }
+            }
+        }
+    }
+
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) { AppTheme { Surface(Modifier.fillMaxSize()) { Box(Modifier.fillMaxSize()) { Column(Modifier.fillMaxSize()) { AppHeader(destination, runtimeStatus, activeModel, { destination = it; quickMenuOpen = false }, { quickMenuOpen = !quickMenuOpen }, { quickMenuOpen = false; sidebarOpen = !sidebarOpen }, { runtimeDetailsOpen = !runtimeDetailsOpen }); Box(Modifier.weight(1f).fillMaxWidth()) { when (destination) { AppDestination.VOICE -> Unit; AppDestination.HISTORY -> ConversationHistoryPage(conversations = conversations, currentId = current?.id, searchIndex = conversationSearchIndex, previews = conversationPreviews, onOpen = ::openConversation, onNew = ::createConversation, onRename = { renameTarget = it }, onDelete = ::deleteConversation, onMore = { recentLimit += 20; refreshHistory() }, canShowMore = conversations.size >= recentLimit); AppDestination.CHAT -> ChatPage(messages, composer, generating, approvalBusy, { composer = it }, ::send, ::stop, execution, ::approveExecution, ::rejectExecution, { destination = AppDestination.WORK }, { value ->
                             try {
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
