@@ -15,6 +15,15 @@ class OperatorRegistry;
 class ComputeGraph;
 using ModelTensorBindings = std::unordered_map<std::string, Tensor>;
 
+struct ModelExecutionContext {
+    ModelTensorBindings tensors;
+    std::vector<uint32_t> token_ids;
+    uint64_t past_length = 0;
+    uint64_t sequence_length = 0;
+    uint64_t context_length = 0;
+    bool prefill = false;
+};
+
 struct ModelPlanOperation {
     std::string id;
     std::string operator_name;
@@ -68,7 +77,7 @@ struct ModelGraphCompileReport {
 
 class ModelLoweringRegistry {
 public:
-    using Lowering = std::function<Status(const ModelPlanOperation&, const ModelTensorBindings&, ComputeDispatch&)>;
+    using Lowering = std::function<Status(const ModelPlanOperation&, const ModelExecutionContext&, ComputeDispatch&)>;
     Status register_lowering(BackendKind backend, const std::string& operator_name,
                              Lowering lowering);
     const Lowering* find(BackendKind backend, const std::string& operator_name) const;
@@ -81,7 +90,7 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
                                     const ModelLoweringRegistry& lowerings,
                                     const OperatorRegistry& operators,
                                     const std::vector<std::string>& external_inputs,
-                                    const ModelTensorBindings& tensors,
+                                    const ModelExecutionContext& context,
                                     ComputeGraph& graph, ModelGraphCompileReport& report);
 
 Status validate_model_plan_operator_coverage(ModelExecutionPlan& plan,

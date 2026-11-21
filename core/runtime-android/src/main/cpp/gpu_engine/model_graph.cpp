@@ -34,7 +34,7 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
                                     const ModelLoweringRegistry& lowerings,
                                     const OperatorRegistry& operators,
                                     const std::vector<std::string>& external_inputs,
-                                    const ModelTensorBindings& tensors,
+                                    const ModelExecutionContext& context,
                                     ComputeGraph& graph, ModelGraphCompileReport& report) {
     report = ModelGraphCompileReport{};
     plan.graph_compiled = false;
@@ -68,18 +68,18 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
                 report.unresolved_inputs.push_back(operation.id + ":" + input);
                 inputs_ready = false;
             }
-            if (tensors.find(input) == tensors.end()) {
+            if (context.tensors.find(input) == context.tensors.end()) {
                 report.unresolved_inputs.push_back(operation.id + ":UNBOUND:" + input);
                 inputs_ready = false;
             }
         }
         for (const auto& weight : operation.weight_tensors) {
-            if (tensors.find(weight) == tensors.end()) {
+            if (context.tensors.find(weight) == context.tensors.end()) {
                 report.missing_weight_tensors.push_back(operation.id + ":" + weight);
                 inputs_ready = false;
             }
         }
-        if (tensors.find(operation.output) == tensors.end()) {
+        if (context.tensors.find(operation.output) == context.tensors.end()) {
             report.errors.push_back(operation.id + ":UNBOUND_OUTPUT:" + operation.output);
             inputs_ready = false;
         }
@@ -91,7 +91,7 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
             continue;
         }
         ComputeDispatch dispatch;
-        Status status = (*lowering)(operation, tensors, dispatch);
+        Status status = (*lowering)(operation, context, dispatch);
         if (!status.ok()) {
             report.errors.push_back(operation.id + ":" + status.message);
             continue;
