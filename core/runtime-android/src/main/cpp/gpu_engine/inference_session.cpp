@@ -10,6 +10,8 @@
 namespace ai_chat::gpu_engine {
 namespace {
 
+constexpr uint64_t kGpuMemorySafetyReserveDivisor = 8;
+
 const char* backend_label(BackendKind backend) {
     switch (backend) {
         case BackendKind::DawnWebGpu: return "DawnWebGPU";
@@ -241,13 +243,20 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     }
     const uint64_t max_single_buffer = std::min(device->limits.max_buffer_size,
                                                 device->limits.max_storage_buffer_binding_size);
-    if (largest_weight_tensor_bytes_ > max_single_buffer) {
+    const uint64_t padded_largest_weight_bytes =
+        largest_weight_tensor_bytes_ > UINT64_MAX - 3 ? UINT64_MAX : (largest_weight_tensor_bytes_ + 3) & ~uint64_t{3};
+    if (padded_largest_weight_bytes > max_single_buffer) {
         last_error_ = "A single model tensor exceeds the backend storage-buffer limit; multi-chunk operator execution is not implemented";
         unload_locked();
         return {StatusCode::Unsupported, last_error_};
     }
-    if (plan_.layer_count == 0 || plan_.kv_heads == 0 || plan_.head_dimension == 0 ||
-        plan_.vocabulary_size == 0 || plan_.vocabulary_size > UINT32_MAX) {
+    if (plan_.layer_count == 0 || plan_.layer_count > UINT32_MAX ||
+        plan_.kv_heads == 0 || plan_.kv_heads > UINT32_MAX ||
+        plan_.head_dimension == 0 || plan_.head_dimension > UINT32_MAX ||
+        plan_.vocabulary_size == 0 || plan_.vocabulary_size > INT32_MAX ||
+        std::find(plan_.retained_outputs.begin(), plan_.retained_outputs.end(), "logits") == plan_.retained_outputs.end() ||
+        model.tokenizer.tokens.size() != plan_.vocabulary_size ||
+        model.tokenizer.eos_token_id > INT32_MAX) {
         last_error_ = "Model plan is missing valid layer, KV-head, head-dimension or vocabulary metadata";
         unload_locked();
         return {StatusCode::Unsupported, last_error_};
@@ -257,11 +266,11 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     memory_budget_bytes_ = memory_budget_bytes;
     ModelGpuMemoryEstimateInput estimate_input;
     estimate_input.total_weight_bytes = total_weight_bytes_;
-    estimate_input.streaming_chunk_bytes = largest_weight_tensor_bytes_;
+    estimate_input.streaming_chunk_bytes = padded_largest_weight_bytes;
     estimate_input.token_count = context_length_;
     estimate_input.context_length = context_length_;
     estimate_input.bytes_per_element = sizeof(float);
-    estimate_input.safety_reserve_bytes = memory_budget_bytes_ / 8;
+    estimate_input.safety_reserve_bytes = memory_budget_bytes_ / kGpuMemorySafetyReserveDivisor;
     estimate_input.device_budget_bytes = memory_budget_bytes_;
     estimate_input.stream_weights = true;
     memory_estimate_ = estimate_model_gpu_memory(plan_, estimate_input);
@@ -336,7 +345,12 @@ Status GpuInferenceSession::read_last_token_logits(std::vector<float>& logits) {
         return {StatusCode::Unsupported, "Logits output must be contiguous F32 [tokens,vocabulary]"};
     const uint64_t vocabulary = shape[1];
     const uint64_t row_bytes = vocabulary * sizeof(float);
-    const uint64_t offset = tensor.byte_offset() + (shape[0] - 1) * row_bytes;
+    if (row_bytes == 0 || shape[0] - 1 > UINT64_MAX / row_bytes)
+        return {StatusCode::InvalidArgument, "Logits row offset overflowed"};
+    const uint64_t row_offset = (shape[0] - 1) * row_bytes;
+    if (tensor.byte_offset() > UINT64_MAX - row_offset)
+        return {StatusCode::InvalidArgument, "Logits byte offset overflowed"};
+    const uint64_t offset = tensor.byte_offset() + row_offset;
     if (offset > tensor.buffer()->size_bytes() ||
         row_bytes > tensor.buffer()->size_bytes() - offset)
         return {StatusCode::InvalidArgument, "Logits readback range exceeds its backing buffer"};
@@ -394,7 +408,14 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
     Sampler sampler(sampling);
     std::vector<int32_t> history;
     history.reserve(prompt_tokens.size() + max_new_tokens);
-    for (uint32_t token : prompt_tokens) history.push_back(static_cast<int32_t>(token));
+    for (uint32_t token : prompt_tokens) {
+        if (token > static_cast<uint32_t>(INT32_MAX) ||
+            static_cast<uint64_t>(token) >= plan_.vocabulary_size) {
+            last_error_ = "Tokenizer returned an ID outside the sampler's validated token range";
+            return {StatusCode::InvalidArgument, last_error_};
+        }
+        history.push_back(static_cast<int32_t>(token));
+    }
     StopController stop(static_cast<int32_t>(loader_->reader()->info().tokenizer.eos_token_id));
     std::vector<uint32_t> generated;
     generated.reserve(max_new_tokens);
