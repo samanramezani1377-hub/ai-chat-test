@@ -986,6 +986,27 @@ void test_operator_registry_fail_closed() {
     unknown.wgsl_source = selected.wgsl_source;
     assert(registry.authorize_dispatch(unknown.kernel_id, selected.backend, unknown).code ==
            StatusCode::Unsupported);
+
+    KernelDefinition mixed;
+    mixed.operator_name = "Mixed";
+    mixed.kernel_id = "mixed-f32-u32-v1";
+    mixed.backend = BackendKind::DawnWebGpu;
+    mixed.input_type = DataType::F32;
+    mixed.input_types = {DataType::F32, DataType::U32};
+    mixed.output_type = DataType::F32;
+    mixed.min_input_count = 2;
+    mixed.max_input_count = 2;
+    mixed.min_rank = 2;
+    mixed.max_rank = 2;
+    mixed.validation = KernelValidation::Validated;
+    mixed.wgsl_source = "@compute @workgroup_size(1) fn main() {}";
+    assert(registry.register_kernel(mixed).ok());
+    assert(registry.select_kernel("Mixed", BackendKind::DawnWebGpu,
+                                  std::vector<DataType>{DataType::F32, DataType::U32},
+                                  DataType::F32, 2, selected).ok());
+    assert(registry.select_kernel("Mixed", BackendKind::DawnWebGpu,
+                                  std::vector<DataType>{DataType::F32, DataType::F32},
+                                  DataType::F32, 2, selected).code == StatusCode::Unsupported);
 }
 
 void test_graph_scheduler_order_and_cancel() {
