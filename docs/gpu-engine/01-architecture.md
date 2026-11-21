@@ -12,7 +12,7 @@ Android / AI Core
   |     |
   |     +-- GPU Runtime Adapter
   |            +-- GPU Engine API
-  |                 +-- Model Format Readers (GGUF first; independent parser)
+  |                 +-- Model Format Readers (GGUF first; independent parser)\n  |                 +-- Tokenizer Registry (BPE / Unigram / SentencePiece adapters)\n  |                 +-- Sampling / Generation Controller
   |                 +-- Architecture Adapters
   |                 +-- Graph Builder / Optimizer
   |                 +-- Execution Scheduler

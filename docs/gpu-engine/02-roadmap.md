@@ -16,7 +16,7 @@ All unvalidated items are **UNVERIFIED**. This roadmap is cumulative; do not ski
 | 9 | Compatibility and soak | device matrix, long runs, memory pressure, device loss, numerical and performance reports |
 | 10 | GPU migration | route validated combinations to new engine; retain llama.cpp CPU fallback; remove legacy GPU only after parity |
 
-## Immediate next increments
+## Additional required inference components\n\nThe first architecture pass exposed two runtime components that were implicit in the original outline but are mandatory for true independence: a standalone tokenizer engine and a standalone sampler/generation controller. They must not call llama.cpp on the GPU route. GGUF tokenizer arrays, normalization/pre-tokenization rules, special token IDs, BPE/Unigram merge behavior, and exact parity tests must be implemented before a first model can be considered end-to-end supported.\n\n## Immediate next increments
 
 1. Keep the active inference route unchanged.
 2. Add a standalone `ai_chat_gpu_engine` C++ library with no llama.cpp/GGML include or link dependency.
