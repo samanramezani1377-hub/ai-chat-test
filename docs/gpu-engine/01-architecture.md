@@ -147,3 +147,8 @@ The activation allocator derives each output shape from the model plan and runti
 ### Android diagnostic entry point
 
 The Android JNI probe is explicitly diagnostic-only: it initializes the independent backend composition, reports device identity/capabilities/fallback state and shuts down the engine. It neither loads weights nor changes the active llama.cpp model/context. A successful probe proves backend initialization/self-test only, not operator or model inference readiness.
+
+
+### GGUF weight binding and Q8_0 projection
+
+The current plan-driven weight binder loads only weights referenced by the execution plan. F32 tensors become F32 device Tensor bindings; Q8_0 tensors remain encoded and are stored as quantized-weight bindings rather than fully dequantized. Each binding must fit in one backend storage binding; multi-chunk tensor execution is not yet wired into the graph. The Dense architecture plan marks Q8_0 MatMul operations explicitly so the backend-specific Q8_0 candidate is selected. Candidate registration is not validation: the Q8_0 kernels remain UNVERIFIED until numerical parity validation passes on each backend.
