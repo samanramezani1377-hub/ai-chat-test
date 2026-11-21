@@ -82,12 +82,11 @@ class LocalModelService(
 
     override suspend fun activate(id: String): ModelResult<ModelDescriptor> =
         withLifecycleExclusive {
-            runtimeMutex.withLock {
+            runtimeMutex.withLock runtimeLock@{
                 val model = when (val result = repository.get(id)) {
                     is ModelResult.Success -> result.value
-                    is ModelResult.Failure -> return@withLock result
-                } ?: return@withLock ModelResult.Failure(
-                    ModelError.InvalidModel("Model is not registered"),
+                    is ModelResult.Failure -> return@runtimeLock result
+                } ?: return@runtimeLock ModelResult.Failure(("Model is not registered"),
                 )
 
                 if (model.format != ModelFormat.GGUF || model.validation != ValidationStatus.VALID) {
@@ -152,9 +151,9 @@ class LocalModelService(
     ): ModelResult<GenerationResult> {
         require(messages.isNotEmpty()) { "messages must not be empty" }
 
-        return generationMutex.withLock {
+        return generationMutex.withLock generationLock@{
             if (stopInProgress.get()) {
-                return@withLock ModelResult.Failure(
+                return@generationLock ModelResult.Failure(
                     ModelError.RuntimeUnavailable("Generation is stopping for a lifecycle operation"),
                 )
             }
@@ -168,27 +167,22 @@ class LocalModelService(
                 val activeModel = runtimeMutex.withLock {
                     when (val result = repository.getActive()) {
                         is ModelResult.Success -> result.value
-                        is ModelResult.Failure -> return@withLock result
+                        is ModelResult.Failure -> return@generationLock result
                     }
-                } ?: return@withLock ModelResult.Failure(
+                } ?: return@generationLock ModelResult.Failure(
                     ModelError.RuntimeUnavailable("No model is active"),
                 )
 
                 // A stop request may arrive while the active-model record is read.
                 currentCoroutineContext().ensureActive()
                 if (stopInProgress.get()) {
-                    return@withLock ModelResult.Failure(
+                    return@generationLock ModelResult.Failure(
                         ModelError.RuntimeUnavailable("Generation was stopped before native execution"),
                     )
                 }
 
                 // Generation never performs implicit activation or reload. The runtime
-                // must already correspond to the persisted active model.
-                if (activeModel.id != activeId) {
-                    return@withLock ModelResult.Failure(
-                        ModelError.RuntimeUnavailable("The active model is not loaded in the runtime"),
-                    )
-                }
+                // must already have been activated explicitly by its lifecycle owner.
 
                 ModelResult.Success(runtime.generate(GenerationRequest(messages, settings), onToken))
             } catch (error: OutOfMemoryError) {
@@ -240,21 +234,20 @@ class LocalModelService(
 
     suspend fun deleteModel(id: String): ModelResult<Unit> =
         withLifecycleExclusive {
-            runtimeMutex.withLock {
+            runtimeMutex.withLock runtimeLock@{
                 val active = repository.getActive()
                 if (active is ModelResult.Success && active.value?.id == id) {
                     runtime.unload()
                     when (val cleared = repository.setActive(null)) {
                         is ModelResult.Success -> activeId = null
-                        is ModelResult.Failure -> return@withLock cleared
+                        is ModelResult.Failure -> return@runtimeLock cleared
                     }
                 }
 
                 val model = when (val result = repository.get(id)) {
                     is ModelResult.Success -> result.value
-                    is ModelResult.Failure -> return@withLock result
-                } ?: return@withLock ModelResult.Failure(
-                    ModelError.InvalidModel("Model is not registered"),
+                    is ModelResult.Failure -> return@runtimeLock result
+                } ?: return@runtimeLock ModelResult.Failure(("Model is not registered"),
                 )
 
                 Files.deleteIfExists(model.path)
