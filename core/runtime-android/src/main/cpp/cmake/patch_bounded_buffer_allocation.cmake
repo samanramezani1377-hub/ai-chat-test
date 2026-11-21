@@ -217,8 +217,8 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
                            static_cast<int>(reason), std::string(message).c_str());]=]
         "do not turn recoverable WebGPU validation errors into SIGABRT")
     ai_chat_replace_once(_webgpu
-        "#define WEBGPU_STORAGE_BUF_BINDING_MULT          4"
-        "#define WEBGPU_STORAGE_BUF_BINDING_MULT          4\n\n// Dawn C++ callback wrappers require non-capturing function pointers; keep a process-wide fail-closed state.\nstatic std::atomic<bool> g_webgpu_device_error{false};"
+        "#define WEBGPU_STORAGE_BUF_BINDING_MULT          4    // a storage buffer binding size must be a multiple of 4"
+        "#define WEBGPU_STORAGE_BUF_BINDING_MULT          4    // a storage buffer binding size must be a multiple of 4\n\n// Dawn C++ callback wrappers require non-capturing function pointers; keep a process-wide fail-closed state.\nstatic std::atomic<bool> g_webgpu_device_error{false};"
         "track WebGPU device errors without userdata callbacks")
     ai_chat_replace_once(_webgpu
         "    wgpu::Queue    queue;"
@@ -230,7 +230,6 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
                 return;
             }
             GGML_UNUSED(device);
-            g_webgpu_device_error.store(true, std::memory_order_release);
             GGML_LOG_ERROR("ggml_webgpu: Device lost! Reason: %d, Message: %s\n", static_cast<int>(reason),
                            std::string(message).c_str());
         });]=]
