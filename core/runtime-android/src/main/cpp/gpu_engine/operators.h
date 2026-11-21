@@ -27,6 +27,8 @@ Status build_rms_norm_f32_gles_candidate(const Tensor& input, const Tensor& weig
                                          ComputeDispatch& dispatch);
 Status build_silu_f32_gles_candidate(const Tensor& input, const Tensor& output,
                                      ComputeDispatch& dispatch);
+Status build_softmax_f32_gles_candidate(const Tensor& input, const Tensor& output,
+                                        ComputeDispatch& dispatch);
 Status register_builtin_gles_operator_candidates(OperatorRegistry& registry);
 Status reference_multiply_f32(const float* lhs, const float* rhs, float* output,
                               uint64_t element_count);

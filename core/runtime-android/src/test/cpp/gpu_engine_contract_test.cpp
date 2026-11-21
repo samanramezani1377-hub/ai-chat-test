@@ -467,6 +467,10 @@ void test_q8_0_decoder_and_registry() {
     assert(build_rms_norm_f32_gles_candidate(lhs, weight_tensor, output, 1.0e-5f, gles_rms).ok());
     assert(gles_rms.workgroups_x == 2);
     assert(gles_rms.glsl_source.find("const uint COLUMNS = 3u;") != std::string::npos);
+    ComputeDispatch gles_softmax;
+    assert(build_softmax_f32_gles_candidate(lhs, output, gles_softmax).ok());
+    assert(gles_softmax.workgroups_x == 2);
+    assert(gles_softmax.glsl_source.find("const uint COLUMNS = 3u;") != std::string::npos);
     assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") != std::string::npos);
 
     BufferDesc q4_encoded_desc{20, 4, MemoryDomain::Device, false, "q4-encoded"};

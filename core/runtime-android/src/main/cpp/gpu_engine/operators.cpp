@@ -123,6 +123,45 @@ void main() {
 }
 )glsl";
 
+constexpr char kSoftmaxF32Glsl[] = R"glsl(#version 310 es
+precision highp float;
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Input { float input_values[]; };
+layout(std430, binding = 1) writeonly buffer Output { float output_values[]; };
+const uint ROWS = 1u;
+const uint COLUMNS = 1u;
+shared float partial[64];
+void main() {
+    uint row = gl_WorkGroupID.x;
+    uint lane = gl_LocalInvocationID.x;
+    if (row >= ROWS) return;
+    float local_max = -3.402823466e+38;
+    for (uint column = lane; column < COLUMNS; column += 64u)
+        local_max = max(local_max, input_values[row * COLUMNS + column]);
+    partial[lane] = local_max;
+    barrier();
+    for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+        if (lane < stride) partial[lane] = max(partial[lane], partial[lane + stride]);
+        barrier();
+    }
+    float maximum = partial[0];
+    float local_sum = 0.0;
+    for (uint column = lane; column < COLUMNS; column += 64u)
+        local_sum += exp(input_values[row * COLUMNS + column] - maximum);
+    partial[lane] = local_sum;
+    barrier();
+    for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+        if (lane < stride) partial[lane] += partial[lane + stride];
+        barrier();
+    }
+    float denominator = partial[0];
+    for (uint column = lane; column < COLUMNS; column += 64u) {
+        uint index = row * COLUMNS + column;
+        output_values[index] = exp(input_values[index] - maximum) / denominator;
+    }
+}
+)glsl";
+
 constexpr char kRmsNormF32Glsl[] = R"glsl(#version 310 es
 precision highp float;
 layout(local_size_x = 64) in;
@@ -967,6 +1006,23 @@ Status build_softmax_f32_candidate(const Tensor& input, const Tensor& output,
     return Status::success();
 }
 
+Status build_softmax_f32_gles_candidate(const Tensor& input, const Tensor& output,
+                                        ComputeDispatch& dispatch) {
+    Status status = build_softmax_f32_candidate(input, output, dispatch);
+    if (!status.ok()) return status;
+    const auto& shape = input.descriptor().shape;
+    dispatch.backend = BackendKind::OpenGles;
+    dispatch.kernel_id = "gles-softmax-f32-generic-v1";
+    dispatch.label = "gles-softmax-f32-generic-unverified";
+    dispatch.wgsl_source.clear();
+    dispatch.glsl_source = kSoftmaxF32Glsl;
+    dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const uint ROWS = 1u;",
+        "const uint ROWS = " + std::to_string(shape[0]) + "u;");
+    dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const uint COLUMNS = 1u;",
+        "const uint COLUMNS = " + std::to_string(shape[1]) + "u;");
+    return Status::success();
+}
+
 Status reference_softmax_f32(const float* input, float* output,
                              uint64_t rows, uint64_t columns) {
     if ((!input || !output) && rows && columns)
@@ -1305,7 +1361,22 @@ Status register_builtin_gles_operator_candidates(OperatorRegistry& registry) {
     silu.validation = KernelValidation::Unverified;
     silu.kernel_id = "gles-silu-f32-generic-v1";
     silu.glsl_source = kSiluF32Glsl;
-    return registry.register_kernel(std::move(silu));
+    status = registry.register_kernel(std::move(silu));
+    if (!status.ok()) return status;
+
+    KernelDefinition softmax;
+    softmax.operator_name = "Softmax";
+    softmax.backend = BackendKind::OpenGles;
+    softmax.input_type = DataType::F32;
+    softmax.output_type = DataType::F32;
+    softmax.min_input_count = 1;
+    softmax.max_input_count = 1;
+    softmax.min_rank = 2;
+    softmax.max_rank = 2;
+    softmax.validation = KernelValidation::Unverified;
+    softmax.kernel_id = "gles-softmax-f32-generic-v1";
+    softmax.glsl_source = kSoftmaxF32Glsl;
+    return registry.register_kernel(std::move(softmax));
 }
 
 } // namespace ai_chat::gpu_engine
