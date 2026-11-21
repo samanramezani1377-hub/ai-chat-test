@@ -1238,6 +1238,46 @@ void test_llama_model_execution_plan_is_structural_only() {
     assert(!plan.structurally_validated);
 }
 
+void test_qwen2_dense_adapter_builds_bias_aware_structural_plan() {
+    ArchitectureRegistry registry;
+    assert(register_builtin_architecture_adapters(registry).ok());
+    const auto adapter = registry.find("qwen2");
+    assert(adapter);
+    GgufFileInfo model;
+    model.architecture = "qwen2";
+    model.metadata["qwen2.block_count"] = uint64_t{1};
+    model.metadata["qwen2.embedding_length"] = uint64_t{8};
+    model.metadata["qwen2.attention.head_count"] = uint64_t{2};
+    model.metadata["qwen2.attention.head_count_kv"] = uint64_t{1};
+    model.metadata["qwen2.feed_forward_length"] = uint64_t{16};
+    model.metadata["qwen2.tie_word_embeddings"] = false;
+    model.tokenizer.tokens = {"a", "b"};
+    const std::vector<std::pair<std::string, std::vector<uint64_t>>> tensors = {
+        {"token_embd.weight",{8,2}}, {"output.weight",{8,2}}, {"output_norm.weight",{8}},
+        {"blk.0.attn_norm.weight",{8}}, {"blk.0.attn_q.weight",{8,8}},
+        {"blk.0.attn_k.weight",{8,4}}, {"blk.0.attn_v.weight",{8,4}},
+        {"blk.0.attn_output.weight",{8,8}}, {"blk.0.ffn_norm.weight",{8}},
+        {"blk.0.ffn_gate.weight",{8,16}}, {"blk.0.ffn_up.weight",{8,16}},
+        {"blk.0.ffn_down.weight",{16,8}}, {"blk.0.attn_q.bias",{8}},
+        {"blk.0.attn_k.bias",{4}}, {"blk.0.attn_v.bias",{4}},
+        {"blk.0.attn_output.bias",{8}}
+    };
+    for (const auto& item : tensors) {
+        GgufTensorInfo tensor; tensor.name=item.first; tensor.dimensions=item.second;
+        uint64_t elements=1; for(uint64_t d:tensor.dimensions) elements*=d;
+        tensor.byte_size_known=true; tensor.byte_size=elements*4; model.tensors.push_back(tensor);
+    }
+    ModelExecutionPlan plan;
+    assert(adapter->build_execution_plan(model, plan).ok());
+    assert(plan.architecture == "qwen2" && plan.structurally_validated);
+    assert(!plan.gpu_ready && !plan.execution_validated);
+    assert(std::find_if(plan.operations.begin(), plan.operations.end(), [](const auto& op) {
+        return op.id == "blk.0.attn_q.bias.apply" && op.operator_name == "Add";
+    }) != plan.operations.end());
+    model.tensors.pop_back();
+    assert(adapter->build_execution_plan(model, plan).code == StatusCode::Unsupported);
+}
+
 void test_model_and_quantization_registry_fail_closed() {
     QuantizationRegistry quantizations;
     QuantizationFormat q4;
@@ -1475,6 +1515,7 @@ int main() {
     test_universal_gles_operator_candidate_is_fail_closed();
     test_model_plan_graph_compilation_is_fail_closed();
     test_llama_model_execution_plan_is_structural_only();
+    test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
     test_model_and_quantization_registry_fail_closed();
     test_builtin_architecture_adapter_is_fail_closed();
     test_add_operator_candidate_and_reference();

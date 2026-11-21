@@ -196,6 +196,107 @@ private:
     ArchitectureDescriptor descriptor_;
 };
 
+class Qwen2DenseArchitectureAdapter final : public ArchitectureAdapter {
+public:
+    Qwen2DenseArchitectureAdapter() {
+        descriptor_.name = "qwen2";
+        descriptor_.family = ArchitectureFamily::DenseTransformer;
+        descriptor_.required_operators = {"Embedding", "MatMul", "RMSNorm", "RoPE",
+                                          "Attention", "SiLU", "Multiply", "Add", "Softmax"};
+        descriptor_.uses_attention = true;
+        descriptor_.uses_kv_cache = true;
+        descriptor_.supports_dynamic_shapes = true;
+        descriptor_.validation = SupportState::Unverified;
+    }
+
+    const ArchitectureDescriptor& descriptor() const noexcept override { return descriptor_; }
+
+    Status validate_metadata(const GgufFileInfo& model) const override {
+        GgufFileInfo llama_view = make_llama_view(model);
+        LlamaDenseArchitectureAdapter llama;
+        return llama.validate_metadata(llama_view);
+    }
+
+    Status build_execution_plan(const GgufFileInfo& model,
+                                ModelExecutionPlan& plan) const override {
+        GgufFileInfo llama_view = make_llama_view(model);
+        LlamaDenseArchitectureAdapter llama;
+        Status status = llama.build_execution_plan(llama_view, plan);
+        if (!status.ok()) return status;
+        plan.architecture = descriptor_.name;
+
+        std::unordered_map<std::string, const GgufTensorInfo*> tensors;
+        for (const auto& tensor : model.tensors) tensors.emplace(tensor.name, &tensor);
+        const auto require_bias = [&tensors](const std::string& name, uint64_t length) {
+            const auto found = tensors.find(name);
+            return found != tensors.end() && found->second->dimensions == std::vector<uint64_t>{length} &&
+                   found->second->byte_size_known && found->second->byte_size >= length * sizeof(float);
+        };
+        const uint64_t head_dimension = plan.embedding_length / plan.attention_heads;
+        const uint64_t kv_dimension = head_dimension * plan.kv_heads;
+        std::vector<ModelPlanOperation> biased;
+        biased.reserve(plan.operations.size() + static_cast<size_t>(plan.layer_count) * 4);
+        for (auto operation : plan.operations) {
+            const std::string prefix = "blk." + std::to_string(
+                operation.id.rfind("layer.", 0) == 0
+                    ? std::stoull(operation.id.substr(6)) : 0) + ".";
+            const std::string layer_id = operation.id.rfind("layer.", 0) == 0
+                ? operation.id.substr(0, operation.id.find('.', 6)) : std::string{};
+            std::string bias_name;
+            uint64_t bias_length = 0;
+            std::string biased_output;
+            if (operation.id.size() >= 6 && operation.id.rfind("layer.", 0) == 0) {
+                const size_t dot = operation.id.find('.', 6);
+                const std::string layer = operation.id.substr(6, dot == std::string::npos ? std::string::npos : dot - 6);
+                const std::string p = "blk." + layer + ".";
+                const std::string x = "layer." + layer + ".";
+                if (operation.id == x + "q_proj") { bias_name=p+"attn_q.bias"; bias_length=plan.embedding_length; biased_output=x+"q"; }
+                else if (operation.id == x + "k_proj") { bias_name=p+"attn_k.bias"; bias_length=kv_dimension; biased_output=x+"k"; }
+                else if (operation.id == x + "v_proj") { bias_name=p+"attn_v.bias"; bias_length=kv_dimension; biased_output=x+"v"; }
+                else if (operation.id == x + "attention_output") { bias_name=p+"attn_output.bias"; bias_length=plan.embedding_length; biased_output=x+"attention_projected"; }
+            }
+            if (bias_name.empty()) {
+                biased.push_back(std::move(operation));
+                continue;
+            }
+            if (!require_bias(bias_name, bias_length)) {
+                plan.blockers.emplace_back("MISSING_OR_INVALID_QWEN2_ATTENTION_BIAS:" + bias_name);
+                return {StatusCode::Unsupported, "Qwen2 attention projection bias tensor is missing or has an invalid shape/storage size"};
+            }
+            const std::string linear_output = operation.output + "_linear";
+            operation.output = linear_output;
+            biased.push_back(std::move(operation));
+            const std::string op_id = bias_name + ".apply";
+            biased.push_back({op_id, "Add", {linear_output}, {bias_name}, biased_output, {}});
+        }
+        plan.operations = std::move(biased);
+        plan.blockers.emplace_back("QWEN2_BIAS_PATH_NUMERICAL_VALIDATION_PENDING");
+        plan.gpu_ready = false;
+        return Status::success();
+    }
+
+private:
+    static GgufFileInfo make_llama_view(const GgufFileInfo& model) {
+        GgufFileInfo view = model;
+        view.architecture = "llama";
+        const char* suffixes[] = {
+            "block_count", "embedding_length", "attention.head_count",
+            "attention.head_count_kv", "feed_forward_length"
+        };
+        for (const char* suffix : suffixes) {
+            const std::string source = std::string("qwen2.") + suffix;
+            const std::string target = std::string("llama.") + suffix;
+            const auto found = model.metadata.find(source);
+            if (found != model.metadata.end()) view.metadata[target] = found->second;
+        }
+        const auto tied = model.metadata.find("qwen2.tie_word_embeddings");
+        if (tied != model.metadata.end()) view.metadata["llama.tie_word_embeddings"] = tied->second;
+        return view;
+    }
+
+    ArchitectureDescriptor descriptor_;
+};
+
 } // namespace
 
 Status register_builtin_architecture_adapters(ArchitectureRegistry& registry) {
