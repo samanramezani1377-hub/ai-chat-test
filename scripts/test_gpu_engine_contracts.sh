@@ -33,6 +33,7 @@ if grep -nE '#include[[:space:]]*[<"]((llama|ggml)[^>"]*)[>"]' \
     "$ENGINE/gguf_reader.h" "$ENGINE/gguf_reader.cpp" \
     "$ENGINE/model_registry.h" "$ENGINE/model_registry.cpp" \
     "$ENGINE/model_graph.h" "$ENGINE/model_graph.cpp" \
+    "$ENGINE/model_lowerings.h" "$ENGINE/model_lowerings.cpp" \
     "$ENGINE/operators.h" "$ENGINE/operators.cpp" \
     "$ENGINE/weight_streamer.h" "$ENGINE/weight_streamer.cpp" \
     "$ENGINE/sampler.h" "$ENGINE/sampler.cpp" \

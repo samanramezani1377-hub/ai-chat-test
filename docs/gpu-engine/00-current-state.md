@@ -90,3 +90,13 @@ The backend rejects dispatches unless their kernel identity is marked `Validated
 - GGUF tokenizer metadata now preserves space-prefix, whitespace normalization and byte-fallback flags.
 - Independent SentencePiece-score-merging and byte-level BPE adapters are registered for selected profiles (`llama/default`, `llama/llama`, `spm/default`, and `gpt2` with `gpt2`, `llama3`, `qwen2`, `qwen3` pre-tokenizers). Their tokenization/pre-tokenization parity is **UNVERIFIED**; model preflight reports this explicitly and the public TokenizerEngine refuses to execute unvalidated adapters.
 - An initial direct Q8_0 F32-activation MatMul candidate is available for WGSL and Universal GLES. It remains **UNVERIFIED** and is not eligible for production dispatch.
+
+
+## Model graph lowering and execution orchestration — 2026-11-22
+
+- Added backend-scoped lowering registries for F32 Add, Multiply, MatMul, RMSNorm, SiLU, Softmax and RoPE. Lowerings resolve named activation/weight/output tensors from an explicit execution context and create backend-specific dispatch candidates.
+- The Android composition API now registers Dawn and Universal GLES lowering sets into a caller-owned registry.
+- Added a graph execution entry point that compiles the full graph, authorizes every kernel against the selected backend's validated operator registry, schedules the graph and marks a run as executed only after backend synchronization succeeds.
+- A successful graph run does not mark a model GPU-ready. Architecture/tokenizer/quantization and end-to-end model parity qualification remain separate gates.
+- Embedding is not registered as a model lowering until backend-owned token-ID upload/lifetime is integrated. Attention is not registered until KV-cache append/read semantics are connected. The present F32 MatMul builder accepts only its currently implemented matrix layout; unsupported rank/layout combinations fail closed.
+- The model lowering layer and full app inference integration remain UNVERIFIED; no model generation route has been switched away from llama.cpp.

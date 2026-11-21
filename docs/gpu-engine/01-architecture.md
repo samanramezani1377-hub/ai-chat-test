@@ -122,3 +122,8 @@ Tokenizer behavior is separate from model architecture and from GGUF parsing. `T
 ### Android backend composition
 
 `register_android_gpu_backends` registers Dawn before Universal GLES. `initialize_android_gpu_engine` tries the ordered preference list and records fallback diagnostics. This only establishes backend readiness and compute self-tests; it does not imply that a model graph, tokenizer, quantized kernel or full inference path is validated.
+
+
+### Model graph lowering and execution
+
+The lowering registry is keyed by backend and operator, and resolves tensors through an explicit model execution context. Built-in F32 lowerings currently cover Add, Multiply, MatMul, RMSNorm, SiLU, Softmax and RoPE candidates. Embedding and Attention are deliberately absent until token-ID upload ownership and KV-cache semantics are implemented. Lowering produces only a candidate dispatch: OperatorRegistry must independently authorize a backend-specific validated kernel before a graph node can be added. The execution wrapper compiles the complete graph before submitting it, then marks only that graph run as executed after synchronization. It never promotes a model to gpu_ready on the strength of one graph run.
