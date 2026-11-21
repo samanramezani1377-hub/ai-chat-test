@@ -188,7 +188,10 @@ target_compile_features(ai_chat_gpu_backend_gles PUBLIC cxx_std_17)
 target_link_libraries(ai_chat_gpu_backend_gles PUBLIC ai_chat_gpu_engine PRIVATE EGL GLESv3)
 
 # Composition root: exposes Dawn and Universal GLES backends to Android runtime callers.
-add_library(ai_chat_gpu_backends_android STATIC gpu_engine/android_backends.cpp)
+add_library(ai_chat_gpu_backends_android STATIC
+    gpu_engine/android_backends.cpp
+    gpu_engine/inference_session.cpp
+)
 target_include_directories(ai_chat_gpu_backends_android PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 target_compile_features(ai_chat_gpu_backends_android PUBLIC cxx_std_17)
 target_link_libraries(ai_chat_gpu_backends_android PUBLIC
