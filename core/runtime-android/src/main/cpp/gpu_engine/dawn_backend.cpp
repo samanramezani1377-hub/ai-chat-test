@@ -76,6 +76,15 @@ public:
              dispatch.workgroups_z > limits_.max_compute_workgroups_per_dimension)) {
             return {StatusCode::Unsupported, "Compute dispatch exceeds Dawn workgroup-count limits"};
         }
+        const uint64_t local_invocations = static_cast<uint64_t>(dispatch.workgroup_size_x) *
+            dispatch.workgroup_size_y * dispatch.workgroup_size_z;
+        if (!dispatch.workgroup_size_x || !dispatch.workgroup_size_y || !dispatch.workgroup_size_z ||
+            (limits_.max_compute_workgroup_size_x && dispatch.workgroup_size_x > limits_.max_compute_workgroup_size_x) ||
+            (limits_.max_compute_workgroup_size_y && dispatch.workgroup_size_y > limits_.max_compute_workgroup_size_y) ||
+            (limits_.max_compute_workgroup_size_z && dispatch.workgroup_size_z > limits_.max_compute_workgroup_size_z) ||
+            (limits_.max_compute_workgroup_invocations && local_invocations > limits_.max_compute_workgroup_invocations)) {
+            return {StatusCode::Unsupported, "Compute dispatch exceeds Dawn local workgroup-size or invocation limits"};
+        }
         if (limits_.max_storage_buffers_per_shader_stage != 0 &&
             dispatch.bindings.size() > limits_.max_storage_buffers_per_shader_stage) {
             return {StatusCode::Unsupported, "Compute dispatch exceeds Dawn storage-buffer binding count"};

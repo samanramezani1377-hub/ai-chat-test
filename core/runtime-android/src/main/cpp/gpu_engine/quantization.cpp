@@ -436,6 +436,8 @@ Status build_q8_0_matmul_candidate(const Tensor& activations,
     dispatch.kernel_id = "dawn-q8-0-matmul-f32-activation-v1";
     dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = kQ8_0MatMulWgsl;
+    dispatch.workgroup_size_x = 8;
+    dispatch.workgroup_size_y = 8;
     const std::pair<std::string, std::string> constants[] = {
         {"const ROWS: u32 = 1u;", "const ROWS: u32 = " + std::to_string(a[0]) + "u;"},
         {"const OUTPUT_CHANNELS: u32 = 1u;", "const OUTPUT_CHANNELS: u32 = " + std::to_string(o[1]) + "u;"},
@@ -513,6 +515,7 @@ Status build_q5_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
     dispatch.kernel_id = "dawn-q5-0-dequantize-generic-v1";
     dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = kQ5_0DequantizeWgsl;
+    dispatch.workgroup_size_x = 64;
     const std::string placeholder = "const ELEMENT_COUNT: u32 = 32u;";
     const std::string replacement = "const ELEMENT_COUNT: u32 = " + std::to_string(output.element_count()) + "u;";
     const size_t position = dispatch.wgsl_source.find(placeholder);
@@ -550,6 +553,7 @@ Status build_q5_1_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
     dispatch.kernel_id = "dawn-q5-1-dequantize-generic-v1";
     dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = kQ5_1DequantizeWgsl;
+    dispatch.workgroup_size_x = 64;
     const std::string placeholder = "const ELEMENT_COUNT: u32 = 32u;";
     const std::string replacement = "const ELEMENT_COUNT: u32 = " + std::to_string(output.element_count()) + "u;";
     const size_t position = dispatch.wgsl_source.find(placeholder);
@@ -589,6 +593,7 @@ Status build_q4_1_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
     dispatch.kernel_id = "dawn-q4-1-dequantize-generic-v1";
     dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = kQ4_1DequantizeWgsl;
+    dispatch.workgroup_size_x = 64;
     const std::string placeholder = "const ELEMENT_COUNT: u32 = 32u;";
     const std::string replacement = "const ELEMENT_COUNT: u32 = " +
                                     std::to_string(output.element_count()) + "u;";
@@ -633,6 +638,7 @@ Status build_q4_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
     dispatch.kernel_id = "dawn-q4-0-dequantize-generic-v1";
     dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = kQ4_0DequantizeWgsl;
+    dispatch.workgroup_size_x = 64;
     const std::string placeholder = "const ELEMENT_COUNT: u32 = 32u;";
     const std::string replacement = "const ELEMENT_COUNT: u32 = " +
                                     std::to_string(output.element_count()) + "u;";
@@ -681,6 +687,7 @@ Status build_q8_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
     dispatch.kernel_id = "dawn-q8-0-dequantize-generic-v1";
     dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = kQ8_0DequantizeWgsl;
+    dispatch.workgroup_size_x = 64;
     const std::string placeholder = "const ELEMENT_COUNT: u32 = 32u;";
     const std::string replacement = "const ELEMENT_COUNT: u32 = " +
                                     std::to_string(output.element_count()) + "u;";

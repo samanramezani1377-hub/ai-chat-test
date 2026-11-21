@@ -102,6 +102,14 @@ Status dispatch_gles(const ComputeDispatch& d, const ai_chat::gpu::UniversalGpuC
         d.workgroups_z>static_cast<uint32_t>(std::max(0,caps.max_compute_workgroup_count_z)) ||
         d.bindings.size()>static_cast<size_t>(std::max(0,caps.max_shader_storage_buffer_bindings)))
         return {StatusCode::Unsupported,"GLES dispatch exceeds discovered workgroup or SSBO binding limits"};
+    const uint64_t local_invocations = static_cast<uint64_t>(d.workgroup_size_x) *
+        d.workgroup_size_y * d.workgroup_size_z;
+    if (!d.workgroup_size_x || !d.workgroup_size_y || !d.workgroup_size_z ||
+        d.workgroup_size_x > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_size_x)) ||
+        d.workgroup_size_y > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_size_y)) ||
+        d.workgroup_size_z > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_size_z)) ||
+        local_invocations > static_cast<uint64_t>(std::max(0, caps.max_compute_invocations)))
+        return {StatusCode::Unsupported,"GLES dispatch exceeds discovered local workgroup-size or invocation limits"};
     GLuint program=0; Status st=compile_program(d.glsl_source,program); if(!st.ok()) return st;
     clear_errors(); glUseProgram(program);
     for (const auto& b:d.bindings) {
@@ -150,6 +158,7 @@ Status self_test_gles_backend(const ai_chat::gpu::UniversalGpuCapabilities& caps
         "void main(){ uint i=gl_GlobalInvocationID.x; values[i]=values[i]*3u+7u; }";
     dispatch.bindings.push_back({0, buffer, 0, sizeof(input)});
     dispatch.workgroups_x = 1;
+    dispatch.workgroup_size_x = 4;
     status = dispatch_gles(dispatch, caps);
     if (!status.ok()) return status;
     glFinish();

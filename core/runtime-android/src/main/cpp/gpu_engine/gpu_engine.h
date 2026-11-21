@@ -148,6 +148,9 @@ struct ComputeDispatch {
     uint32_t workgroups_x = 1;
     uint32_t workgroups_y = 1;
     uint32_t workgroups_z = 1;
+    uint32_t workgroup_size_x = 1;
+    uint32_t workgroup_size_y = 1;
+    uint32_t workgroup_size_z = 1;
 };
 
 class CommandBatch {
