@@ -1090,7 +1090,20 @@ void test_llama_model_execution_plan_is_structural_only() {
         "blk.0.attn_output.weight", "blk.0.ffn_norm.weight",
         "blk.0.ffn_gate.weight", "blk.0.ffn_up.weight", "blk.0.ffn_down.weight"
     };
-    for (const auto& name : names) { GgufTensorInfo tensor; tensor.name = name; model.tensors.push_back(tensor); }
+    model.tokenizer.tokens = {"a", "b"};
+    for (const auto& name : names) {
+        GgufTensorInfo tensor; tensor.name = name;
+        if (name == "token_embd.weight") tensor.dimensions = {8, 2};
+        else if (name == "output_norm.weight" || name.ends_with("attn_norm.weight") ||
+                 name.ends_with("ffn_norm.weight")) tensor.dimensions = {8};
+        else if (name.ends_with("attn_k.weight") || name.ends_with("attn_v.weight"))
+            tensor.dimensions = {8, 4};
+        else if (name.ends_with("ffn_gate.weight") || name.ends_with("ffn_up.weight"))
+            tensor.dimensions = {8, 16};
+        else if (name.ends_with("ffn_down.weight")) tensor.dimensions = {16, 8};
+        else tensor.dimensions = {8, 8};
+        model.tensors.push_back(tensor);
+    }
     ModelExecutionPlan plan;
     assert(adapter->build_execution_plan(model, plan).ok());
     assert(plan.structurally_validated);

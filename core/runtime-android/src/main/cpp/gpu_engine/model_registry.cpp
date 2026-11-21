@@ -58,22 +58,39 @@ public:
         const auto has_tensor = [&tensors](const std::string& name) {
             return tensors.find(name) != tensors.end();
         };
+        const auto expect_shape = [&tensors, &plan](const std::string& name,
+                                                    const std::vector<uint64_t>& expected) {
+            const auto found = tensors.find(name);
+            if (found == tensors.end()) {
+                plan.blockers.emplace_back("MISSING_TENSOR:" + name);
+            } else if (found->second->dimensions != expected) {
+                plan.blockers.emplace_back("TENSOR_SHAPE_MISMATCH:" + name);
+            }
+        };
         const std::string embedding_weight = "token_embd.weight";
         const std::string output_norm = "output_norm.weight";
-        if (!has_tensor(embedding_weight)) plan.blockers.emplace_back("MISSING_TENSOR:token_embd.weight");
-        if (!has_tensor(output_norm)) plan.blockers.emplace_back("MISSING_TENSOR:output_norm.weight");
+        if (model.tokenizer.tokens.empty()) {
+            plan.blockers.emplace_back("TOKENIZER_VOCABULARY_REQUIRED_FOR_EMBEDDING_SHAPE");
+        } else {
+            expect_shape(embedding_weight, {embedding, model.tokenizer.tokens.size()});
+        }
+        expect_shape(output_norm, {embedding});
+        const uint64_t head_dimension = embedding / heads;
+        const uint64_t kv_dimension = head_dimension * kv_heads;
         const bool tied_output = !has_tensor("output.weight");
+        if (!tied_output && !model.tokenizer.tokens.empty())
+            expect_shape("output.weight", {embedding, model.tokenizer.tokens.size()});
         for (uint64_t layer = 0; layer < layers; ++layer) {
             const std::string prefix = "blk." + std::to_string(layer) + ".";
-            const char* required[] = {
-                "attn_norm.weight", "attn_q.weight", "attn_k.weight", "attn_v.weight",
-                "attn_output.weight", "ffn_norm.weight", "ffn_gate.weight",
-                "ffn_up.weight", "ffn_down.weight"
-            };
-            for (const char* suffix : required) {
-                const std::string name = prefix + suffix;
-                if (!has_tensor(name)) plan.blockers.emplace_back("MISSING_TENSOR:" + name);
-            }
+            expect_shape(prefix + "attn_norm.weight", {embedding});
+            expect_shape(prefix + "attn_q.weight", {embedding, embedding});
+            expect_shape(prefix + "attn_k.weight", {embedding, kv_dimension});
+            expect_shape(prefix + "attn_v.weight", {embedding, kv_dimension});
+            expect_shape(prefix + "attn_output.weight", {embedding, embedding});
+            expect_shape(prefix + "ffn_norm.weight", {embedding});
+            expect_shape(prefix + "ffn_gate.weight", {embedding, feed_forward});
+            expect_shape(prefix + "ffn_up.weight", {embedding, feed_forward});
+            expect_shape(prefix + "ffn_down.weight", {feed_forward, embedding});
         }
         if (!plan.blockers.empty()) return {StatusCode::Unsupported, "Llama GGUF is missing tensors required by the dense execution plan"};
 
