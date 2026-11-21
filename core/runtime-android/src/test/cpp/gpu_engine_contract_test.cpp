@@ -363,6 +363,43 @@ void test_add_operator_candidate_and_reference() {
     assert(reference_rms_norm_f32(norm_input, norm_weight, norm_output, 2, 2, 1e-5f).ok());
     assert(std::abs(norm_output[0] - 0.63245f) < 1e-4f);
     assert(std::abs(norm_output[1] - 1.26491f) < 1e-4f);
+
+    BufferDesc mat_a_desc{24, 4, MemoryDomain::Device, false, "mat-a"};
+    BufferDesc mat_b_desc{24, 4, MemoryDomain::Device, false, "mat-b"};
+    BufferDesc mat_out_desc{16, 4, MemoryDomain::Device, false, "mat-out"};
+    std::shared_ptr<Buffer> mat_a, mat_b, mat_out;
+    assert(backend.allocate(mat_a_desc, mat_a).ok());
+    assert(backend.allocate(mat_b_desc, mat_b).ok());
+    assert(backend.allocate(mat_out_desc, mat_out).ok());
+    TensorDesc a_desc; a_desc.shape = {2, 3}; a_desc.data_type = DataType::F32;
+    TensorDesc b_desc; b_desc.shape = {3, 2}; b_desc.data_type = DataType::F32;
+    TensorDesc c_desc; c_desc.shape = {2, 2}; c_desc.data_type = DataType::F32;
+    Tensor a_tensor, b_tensor, c_tensor;
+    assert(Tensor::create(a_desc, mat_a, 0, a_tensor).ok());
+    assert(Tensor::create(b_desc, mat_b, 0, b_tensor).ok());
+    assert(Tensor::create(c_desc, mat_out, 0, c_tensor).ok());
+    ComputeDispatch mat_dispatch;
+    assert(build_matmul_f32_candidate(a_tensor, b_tensor, c_tensor, mat_dispatch).ok());
+    assert(mat_dispatch.bindings.size() == 3);
+    assert(mat_dispatch.wgsl_source.find("@binding(3)") == std::string::npos);
+    assert(mat_dispatch.wgsl_source.find("const ROWS: u32 = 2u;") != std::string::npos);
+
+    BufferDesc norm_x_desc{16, 4, MemoryDomain::Device, false, "norm-x"};
+    BufferDesc norm_w_desc{8, 4, MemoryDomain::Device, false, "norm-w"};
+    std::shared_ptr<Buffer> norm_x, norm_w, norm_y;
+    assert(backend.allocate(norm_x_desc, norm_x).ok());
+    assert(backend.allocate(norm_w_desc, norm_w).ok());
+    assert(backend.allocate(norm_x_desc, norm_y).ok());
+    TensorDesc nx_desc; nx_desc.shape = {2, 2}; nx_desc.data_type = DataType::F32;
+    TensorDesc nw_desc; nw_desc.shape = {2}; nw_desc.data_type = DataType::F32;
+    Tensor nx, nw, ny;
+    assert(Tensor::create(nx_desc, norm_x, 0, nx).ok());
+    assert(Tensor::create(nw_desc, norm_w, 0, nw).ok());
+    assert(Tensor::create(nx_desc, norm_y, 0, ny).ok());
+    ComputeDispatch norm_dispatch;
+    assert(build_rms_norm_f32_candidate(nx, nw, ny, 1e-5f, norm_dispatch).ok());
+    assert(norm_dispatch.bindings.size() == 3);
+    assert(norm_dispatch.wgsl_source.find("@binding(3)") == std::string::npos);
 }
 
 void test_model_and_quantization_registry_fail_closed() {

@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <limits>
+#include <iomanip>
+#include <sstream>
 #include <utility>
 
 namespace ai_chat::gpu_engine {
@@ -24,16 +26,17 @@ constexpr char kMatMulF32Wgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> lhs: array<f32>;
 @group(0) @binding(1) var<storage, read> rhs: array<f32>;
 @group(0) @binding(2) var<storage, read_write> output: array<f32>;
-struct Params { rows: u32, columns: u32, inner: u32, };
-@group(0) @binding(3) var<uniform> params: Params;
+const ROWS: u32 = 1u;
+const COLUMNS: u32 = 1u;
+const INNER: u32 = 1u;
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let row = gid.y;
     let column = gid.x;
-    if (row >= params.rows || column >= params.columns) { return; }
+    if (row >= ROWS || column >= COLUMNS) { return; }
     var sum = 0.0;
-    for (var k = 0u; k < params.inner; k = k + 1u) {
-        sum = sum + lhs[row * params.inner + k] * rhs[k * params.columns + column];
+    for (var k = 0u; k < INNER; k = k + 1u) {
+        sum = sum + lhs[row * params.inner + k] * rhs[k * COLUMNS + column];
     }
     output[row * params.columns + column] = sum;
 }
@@ -43,8 +46,8 @@ constexpr char kRmsNormF32Wgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read> weight: array<f32>;
 @group(0) @binding(2) var<storage, read_write> output: array<f32>;
-struct Params { columns: u32, epsilon: f32, };
-@group(0) @binding(3) var<uniform> params: Params;
+const COLUMNS: u32 = 1u;
+const EPSILON: f32 = 0.00001;
 var<workgroup> partial: array<f32, 64>;
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) group: vec3<u32>,
@@ -64,13 +67,19 @@ fn main(@builtin(workgroup_id) group: vec3<u32>,
         workgroupBarrier();
         stride = stride / 2u;
     }
-    let inverse = inverseSqrt(partial[0] / f32(params.columns) + params.epsilon);
+    let inverse = inverseSqrt(partial[0] / f32(params.columns) + EPSILON);
     for (var column = local.x; column < params.columns; column = column + 64u) {
         output[row * params.columns + column] =
             input[row * params.columns + column] * inverse * weight[column];
     }
 }
 )wgsl";
+
+std::string replace_once(std::string source, const std::string& from, const std::string& to) {
+    const size_t position = source.find(from);
+    if (position != std::string::npos) source.replace(position, from.size(), to);
+    return source;
+}
 
 bool is_contiguous_f32(const Tensor& tensor) {
     const TensorDesc& desc = tensor.descriptor();
@@ -148,6 +157,12 @@ Status build_matmul_f32_candidate(const Tensor& lhs, const Tensor& rhs,
         return {StatusCode::Unsupported, "MatMul dispatch dimensions exceed uint32"};
     dispatch.label = "matmul-f32-generic-unverified";
     dispatch.wgsl_source = kMatMulF32Wgsl;
+    dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source), "const ROWS: u32 = 1u;",
+        "const ROWS: u32 = " + std::to_string(a[0]) + "u;");
+    dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source), "const COLUMNS: u32 = 1u;",
+        "const COLUMNS: u32 = " + std::to_string(b[1]) + "u;");
+    dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source), "const INNER: u32 = 1u;",
+        "const INNER: u32 = " + std::to_string(a[1]) + "u;");
     dispatch.workgroups_x = static_cast<uint32_t>(groups_x);
     dispatch.workgroups_y = static_cast<uint32_t>(groups_y);
     dispatch.bindings = {
@@ -195,6 +210,14 @@ Status build_rms_norm_f32_candidate(const Tensor& input, const Tensor& weight,
         return {StatusCode::Unsupported, "RMSNorm output must use a distinct buffer"};
     dispatch.label = "rms-norm-f32-generic-unverified";
     dispatch.wgsl_source = kRmsNormF32Wgsl;
+    dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source), "const COLUMNS: u32 = 1u;",
+        "const COLUMNS: u32 = " + std::to_string(x[1]) + "u;");
+    std::ostringstream epsilon_literal;
+    epsilon_literal << std::setprecision(9) << epsilon;
+    std::string epsilon_text = epsilon_literal.str();
+    if (epsilon_text.find_first_of(".eE") == std::string::npos) epsilon_text += ".0";
+    dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source), "const EPSILON: f32 = 0.00001;",
+        "const EPSILON: f32 = " + epsilon_text + ";");
     dispatch.workgroups_x = static_cast<uint32_t>(x[0]);
     dispatch.bindings = {
         {0, input.buffer(), input.byte_offset(), input.byte_size()},
