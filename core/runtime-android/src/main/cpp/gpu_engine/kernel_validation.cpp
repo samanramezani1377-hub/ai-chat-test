@@ -289,15 +289,15 @@ Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& reg
     };
 
     if (backend.kind() == BackendKind::DawnWebGpu) {
-        run( "Add", "dawn-add-f32-generic-v1",
+        run("Add", "dawn-add-f32-generic-v1",
                 [&] { return validate_dawn_add_f32_kernel(backend, registry); });
     } else {
-        run_one(backend, registry, report, "Add", "gles-add-f32-generic-v1",
+        run( "Add", "gles-add-f32-generic-v1",
                 [&] { return validate_gles_add_f32_kernel(backend, registry); });
     }
 
     const bool gles = backend.kind() == BackendKind::OpenGles;
-    run_one(backend, registry, report, "Multiply",
+    run( "Multiply",
             gles ? "gles-multiply-f32-generic-v1" : "dawn-multiply-f32-generic-v1",
             [&] {
                 return validate_multiply(backend, [&](const Tensor& a, const Tensor& b,
@@ -306,7 +306,7 @@ Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& reg
                                 : build_multiply_f32_candidate(a, b, out, dispatch);
                 });
             });
-    run_one(backend, registry, report, "MatMul",
+    run( "MatMul",
             gles ? "gles-matmul-f32-generic-v1" : "dawn-matmul-f32-generic-v1",
             [&] {
                 return validate_matmul(backend, [&](const Tensor& a, const Tensor& b,
@@ -315,7 +315,7 @@ Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& reg
                                 : build_matmul_f32_candidate(a, b, out, dispatch);
                 });
             });
-    run_one(backend, registry, report, "RMSNorm",
+    run( "RMSNorm",
             gles ? "gles-rms-norm-f32-generic-v1" : "dawn-rms-norm-f32-generic-v1",
             [&] {
                 return validate_rms_norm(backend, [&](const Tensor& input, const Tensor& weight,
@@ -324,7 +324,7 @@ Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& reg
                                 : build_rms_norm_f32_candidate(input, weight, out, epsilon, dispatch);
                 });
             });
-    run_one(backend, registry, report, "SiLU",
+    run( "SiLU",
             gles ? "gles-silu-f32-generic-v1" : "dawn-silu-f32-generic-v1",
             [&] {
                 return validate_unary(backend, [&](const Tensor& input, const Tensor& out,
@@ -333,7 +333,7 @@ Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& reg
                                 : build_silu_f32_candidate(input, out, dispatch);
                 }, false);
             });
-    run_one(backend, registry, report, "Softmax",
+    run( "Softmax",
             gles ? "gles-softmax-f32-generic-v1" : "dawn-softmax-f32-generic-v1",
             [&] {
                 return validate_unary(backend, [&](const Tensor& input, const Tensor& out,
@@ -342,7 +342,7 @@ Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& reg
                                 : build_softmax_f32_candidate(input, out, dispatch);
                 }, true);
             });
-    run_one(backend, registry, report, "RoPE",
+    run( "RoPE",
             gles ? "gles-rope-f32-generic-v1" : "dawn-rope-f32-generic-v1",
             [&] {
                 return validate_rope(backend, [&](const Tensor& input, const Tensor& out,
@@ -351,7 +351,7 @@ Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& reg
                                 : build_rope_f32_candidate(input, out, config, dispatch);
                 });
             });
-    run_one(backend, registry, report, "Attention",
+    run( "Attention",
             gles ? "gles-attention-f32-causal-gqa-v1" : "dawn-attention-f32-causal-gqa-v1",
             [&] {
                 return validate_attention(backend, [&](const Tensor& q, const Tensor& k,
@@ -360,7 +360,7 @@ Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& reg
                                 : build_attention_f32_candidate(q, k, v, out, past, dispatch);
                 });
             });
-    run_one(backend, registry, report, "Embedding",
+    run( "Embedding",
             gles ? "gles-embedding-f32-generic-v1" : "dawn-embedding-f32-generic-v1",
             [&] {
                 return validate_embedding(backend, [&](const Tensor& weights,
