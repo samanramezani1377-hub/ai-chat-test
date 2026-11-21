@@ -71,8 +71,11 @@ internal object NativeLlamaCpp {
         if (gpuEngineActive) {
             nativeGpuEngineUnload()
             gpuEngineActive = false
+        } else if (loadedModelPath.isNotBlank() && nativeInitialized) {
+            nativeUnload()
         }
-
+        loadedModelPath = ""
+        loadedContextLength = 0
         lastGpuEngineFallbackDiagnostics = ""
         val fullGpuRequest = gpuLayers == GPU_LAYERS_ALL || gpuLayers == GPU_LAYERS_MAX
         if (fullGpuRequest) {
