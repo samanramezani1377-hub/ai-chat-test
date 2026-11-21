@@ -61,7 +61,10 @@ class AppContainer(context: Context? = null) {
             ?: LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_ALL,
     )
     val providerStore: CloudflareProviderStore? = appContext?.let { CloudflareProviderStore(it) }
-    fun setGpuLayers(value: Int) = localModelRuntime.setGpuLayers(value)
+    fun setGpuLayers(value: Int) {
+        localModelRuntime.setGpuLayers(value)
+        modelManager?.requestRuntimeReload()
+    }
     fun gpuLayers(): Int = localModelRuntime.gpuLayers()
 
     val modelRuntime: RuntimeAdapter = if (providerStore != null) ProviderRoutingModelRuntime(localModelRuntime, providerStore) else localModelRuntime

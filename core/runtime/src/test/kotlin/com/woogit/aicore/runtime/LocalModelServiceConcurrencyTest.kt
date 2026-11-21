@@ -80,6 +80,23 @@ class LocalModelServiceConcurrencyTest {
     }
 
     @Test
+    fun runtimeConfigurationChangeBypassesSameModelActivationShortcut() = runBlocking {
+        val runtime = RecordingRuntime()
+        val repository = RecordingRepository(model())
+        val service = LocalModelService(NoOpImporter(), repository, runtime)
+
+        assertTrue(service.activate("model-a") is ModelResult.Success<*>)
+        assertEquals(1, runtime.loadCount.get())
+
+        service.requestRuntimeReload()
+        assertTrue(service.activate("model-a") is ModelResult.Success<*>)
+
+        assertEquals(2, runtime.loadCount.get(), "the adapter must be allowed to re-check changed GPU preferences")
+        assertEquals("model-a", service.activeModelId())
+        assertEquals("model-a", repository.activeId)
+    }
+
+    @Test
     fun concurrentLifecycleOperationsAreSerialized() = runBlocking {
         val runtime = RecordingRuntime()
         val repository = RecordingRepository(model())

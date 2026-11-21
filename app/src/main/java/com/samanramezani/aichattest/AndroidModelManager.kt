@@ -193,6 +193,8 @@ class AndroidModelManager(
         }
     }
 
+    fun requestRuntimeReload() = service.requestRuntimeReload()
+
     suspend fun activeModel(): ModelResult<ModelDescriptor?> = service.activeModel()
 
     suspend fun restoreActive(): ModelResult<ModelDescriptor?> = withContext(Dispatchers.IO) {

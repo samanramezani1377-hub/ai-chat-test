@@ -52,6 +52,9 @@ class LocalModelService(
     private var runtimeStateUnknown = false
 
     @Volatile
+    private var runtimeReloadRequested = false
+
+    @Volatile
     private var generationJob: Job? = null
 
     suspend fun importModel(source: Path): ModelResult<ModelDescriptor> {
@@ -87,6 +90,11 @@ class LocalModelService(
         }
     }
 
+    /** Ask the next activation of the same model to re-check runtime configuration. */
+    fun requestRuntimeReload() {
+        runtimeReloadRequested = true
+    }
+
     override suspend fun activate(id: String): ModelResult<ModelDescriptor> =
         withLifecycleExclusive {
             runtimeMutex.withLock runtimeLock@{
@@ -104,7 +112,7 @@ class LocalModelService(
                 }
 
                 try {
-                    if (activeId == id) {
+                    if (activeId == id && !runtimeReloadRequested) {
                         return@runtimeLock ModelResult.Success(
                             model.copy(
                                 state = ModelState.ACTIVE,
@@ -117,7 +125,7 @@ class LocalModelService(
                         runtime.unload()
                         runtimeStateUnknown = false
                     }
-                    if (activeId != null) {
+                    if (activeId != null && activeId != id) {
                         // Clear advertised state before unload so cancellation cannot leave a stale active ID.
                         activeId = null
                         runtimeStateUnknown = true
@@ -131,6 +139,7 @@ class LocalModelService(
                     when (val persisted = repository.setActive(id)) {
                         is ModelResult.Success -> {
                             activeId = id
+                            runtimeReloadRequested = false
                             ModelResult.Success(
                                 model.copy(
                                     state = ModelState.ACTIVE,
@@ -313,6 +322,7 @@ class LocalModelService(
      */
     private suspend fun resetRuntimeState() {
         activeId = null
+        runtimeReloadRequested = false
         runtimeStateUnknown = true
         withContext(NonCancellable) {
             try {
