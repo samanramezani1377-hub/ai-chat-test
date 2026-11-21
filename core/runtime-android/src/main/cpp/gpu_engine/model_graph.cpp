@@ -1,4 +1,5 @@
 #include "model_graph.h"
+#include "kv_cache.h"
 #include "execution_engine.h"
 
 #include <algorithm>

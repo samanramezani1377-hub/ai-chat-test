@@ -1,4 +1,5 @@
 #include "model_lowerings.h"
+#include "kv_cache.h"
 #include "operators.h"
 
 #include <cmath>
