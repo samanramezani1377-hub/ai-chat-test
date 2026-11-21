@@ -5,6 +5,9 @@
 #include "operators.h"
 #include "quantization.h"
 #include "tokenizer.h"
+
+#include <utility>
+#include <vector>
 #include "model_lowerings.h"
 
 namespace ai_chat::gpu_engine {
@@ -54,7 +57,38 @@ Status initialize_android_gpu_runtime(GpuEngine& engine, OperatorRegistry& opera
     if (!status.ok()) return status;
     status = register_android_gpu_runtime_components(operators, quantizations, architectures, tokenizers, lowerings);
     if (!status.ok()) return status;
-    return engine.initialize_with_fallback({BackendKind::DawnWebGpu, BackendKind::OpenGles});
+
+    // Backend selection is not complete at device discovery. A backend must
+    // compile, dispatch and numerically validate every baseline F32 operator
+    // before it can be selected for the current dense-model execution path.
+    // This lets Universal GLES take over when Dawn exists but lacks a working
+    // operator implementation on the actual device.
+    std::vector<std::string> failures;
+    for (BackendKind kind : {BackendKind::DawnWebGpu, BackendKind::OpenGles}) {
+        status = engine.initialize(kind);
+        if (!status.ok()) {
+            failures.emplace_back((kind == BackendKind::DawnWebGpu ? "DawnWebGPU: " : "UniversalGLES: ") +
+                                  status.message);
+            continue;
+        }
+
+        KernelValidationReport validation;
+        status = validate_builtin_operator_kernels(*engine.active_backend(), operators, validation);
+        if (status.ok() && validation.complete) return Status::success();
+
+        std::string reason = status.ok()
+            ? "baseline operator validation incomplete"
+            : status.message;
+        for (const auto& item : validation.unavailable) reason += " | unavailable=" + item;
+        for (const auto& item : validation.rejected) reason += " | rejected=" + item;
+        failures.emplace_back((kind == BackendKind::DawnWebGpu ? "DawnWebGPU: " : "UniversalGLES: ") +
+                              reason);
+        engine.shutdown();
+    }
+
+    std::string message = "No GPU backend passed baseline operator validation";
+    for (const auto& failure : failures) message += " || " + failure;
+    return {StatusCode::Unsupported, std::move(message)};
 }
 
 } // namespace ai_chat::gpu_engine
