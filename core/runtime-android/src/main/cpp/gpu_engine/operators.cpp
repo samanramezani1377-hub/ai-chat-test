@@ -1703,7 +1703,7 @@ Status register_builtin_gles_operator_candidates(OperatorRegistry& registry) {
     rms.min_input_count = 2;
     rms.max_input_count = 2;
     rms.min_rank = 2;
-    rms.max_rank = 2;
+    rms.max_rank = 3;
     rms.validation = KernelValidation::Unverified;
     rms.kernel_id = "gles-rms-norm-f32-generic-v1";
     rms.glsl_source = kRmsNormF32Glsl;
