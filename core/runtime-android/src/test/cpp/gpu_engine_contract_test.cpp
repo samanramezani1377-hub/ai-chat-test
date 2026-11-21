@@ -425,7 +425,7 @@ void test_q8_0_decoder_and_registry() {
         q8_weights[36 + i] = 2;
     }
     float activation_values[32];
-    std::fill(std::begin(activation_values), std::end(activation_values), 1.0f);
+    for (float& value : activation_values) value = 1.0f;
     float q8_matmul_output[2] = {};
     assert(reference_q8_0_matmul(activation_values, q8_weights.data(), q8_weights.size(),
                                  q8_matmul_output, 1, 2, 32).ok());

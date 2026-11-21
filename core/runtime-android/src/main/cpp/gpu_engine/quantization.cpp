@@ -5,6 +5,7 @@
 #include <limits>
 #include <utility>
 #include <string>
+#include <vector>
 
 namespace ai_chat::gpu_engine {
 namespace {
