@@ -105,3 +105,5 @@ CI/source checks are useful but not hardware evidence. Do not wait for CI to pro
 - **2026-11-22 / GGUF streamed-read efficiency:** the independent GGUF reader now retains one synchronized file stream for the reader lifetime instead of reopening the model file for every streamed weight chunk. Repeated and concurrent range reads serialize on the retained stream; the parser and weight layout remain independent of GGML.
 
 - **2026-11-22 / GGUF metadata lookup:** the independent reader now builds a tensor-name index at parse time, replacing repeated linear scans during per-operation weight streaming with indexed lookup. The index is rebuilt from the validated tensor table and does not change file parsing or tensor offsets.
+
+- **2026-11-22 / enforced dependency boundary:** added a CI guard that scans the backend-neutral GPU engine source for llama.cpp/GGML API includes or symbols and checks that the engine core, Dawn backend, Universal GLES backend, and Android composition targets do not link llama.cpp/GGML. The legacy runtime target may still link those libraries for the preserved CPU implementation; Vulkan remains explicitly disabled.
