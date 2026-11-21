@@ -23,6 +23,7 @@ fail() {
 # The native CMake entry point delegates to independently validated patch modules.
 grep -q 'patch_webgpu_backend.cmake' "${CMAKE}" || fail "CMake must include the isolated WebGPU patch module"
 grep -q 'patch_android_opencl.cmake' "${CMAKE}" || fail "CMake must include the isolated Android OpenCL patch module"
+grep -q 'android_opencl_dispatch.h' "${OPENCL_PATCH}" || fail "Android OpenCL module must retain direct vendor dispatch integration"
 grep -q 'AIChatPatchHelpers.cmake' "${CMAKE}" || fail "CMake must load the shared strict patch helper"
 grep -q 'function(ai_chat_replace_once' "${PATCH_HELPERS}" || fail "Strict patch helper definition is missing"
 grep -q 'AI_CHAT_WEBGPU_QUANT_MATMUL_OP_VERIFY' "${WEBGPU_PATCH}" || fail "Quantized MatMul patch verification must use its defined variable"
