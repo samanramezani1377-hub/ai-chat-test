@@ -92,6 +92,7 @@ private:
     std::string path_;
     GgufFileInfo info_;
     std::shared_ptr<GgufFileStream> file_stream_;
+    std::unordered_map<std::string, size_t> tensor_indices_;
 };
 
 } // namespace ai_chat::gpu_engine

@@ -441,13 +441,16 @@ Status GgufReader::open(const std::string& path, GgufReader& out) {
     out.path_ = path;
     out.info_ = std::move(info);
     out.file_stream_ = std::move(stream);
+    out.tensor_indices_.reserve(out.info_.tensors.size());
+    for (size_t index = 0; index < out.info_.tensors.size(); ++index)
+        out.tensor_indices_.emplace(out.info_.tensors[index].name, index);
     return Status::success();
 }
 
 const GgufTensorInfo* GgufReader::find_tensor(const std::string& name) const noexcept {
-    const auto found = std::find_if(info_.tensors.begin(), info_.tensors.end(),
-        [&name](const GgufTensorInfo& tensor) { return tensor.name == name; });
-    return found == info_.tensors.end() ? nullptr : &*found;
+    const auto found = tensor_indices_.find(name);
+    if (found == tensor_indices_.end() || found->second >= info_.tensors.size()) return nullptr;
+    return &info_.tensors[found->second];
 }
 
 Status GgufReader::read_tensor_chunk(const GgufTensorInfo& tensor, uint64_t tensor_offset,
