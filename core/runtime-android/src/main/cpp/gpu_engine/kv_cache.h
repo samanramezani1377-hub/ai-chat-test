@@ -26,8 +26,7 @@ public:
                   const void* keys, const void* values);
     // Copies device-resident K/V tensors into the cache without a host readback.
     Status append_device(uint32_t layer, uint32_t start_position, uint32_t token_count,
-                         const std::shared_ptr<Buffer>& keys, uint64_t keys_offset,
-                         const std::shared_ptr<Buffer>& values, uint64_t values_offset);
+                         const Tensor& keys, const Tensor& values);
     Status reset_layer(uint32_t layer);
     uint32_t valid_tokens(uint32_t layer) const noexcept;
     std::shared_ptr<Buffer> key_buffer(uint32_t layer) const noexcept;

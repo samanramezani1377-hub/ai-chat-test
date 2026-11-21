@@ -363,7 +363,13 @@ void test_kv_cache_device_append_avoids_host_roundtrip() {
     const float value_data[] = {5, 6, 7, 8};
     std::memcpy(key_bytes->bytes.data(), key_data, sizeof(key_data));
     std::memcpy(value_bytes->bytes.data(), value_data, sizeof(value_data));
-    assert(cache->append_device(0, 0, 1, keys, 0, values, 0).ok());
+    TensorDesc source_tensor_desc;
+    source_tensor_desc.shape = {1, 2, 2};
+    source_tensor_desc.data_type = DataType::F32;
+    Tensor key_source_tensor, value_source_tensor;
+    assert(Tensor::create(source_tensor_desc, keys, 0, key_source_tensor).ok());
+    assert(Tensor::create(source_tensor_desc, values, 0, value_source_tensor).ok());
+    assert(cache->append_device(0, 0, 1, key_source_tensor, value_source_tensor).ok());
     assert(cache->valid_tokens(0) == 1);
     Tensor cached_key_tensor, cached_value_tensor;
     assert(cache->key_tensor(0, cached_key_tensor).ok());
@@ -374,7 +380,7 @@ void test_kv_cache_device_append_avoids_host_roundtrip() {
     auto cached_values = std::dynamic_pointer_cast<FakeBuffer>(cache->value_buffer(0));
     assert(std::memcmp(cached_keys->bytes.data(), key_data, sizeof(key_data)) == 0);
     assert(std::memcmp(cached_values->bytes.data(), value_data, sizeof(value_data)) == 0);
-    assert(cache->append_device(0, 2, 1, keys, 0, values, 0).code == StatusCode::InvalidArgument);
+    assert(cache->append_device(0, 2, 1, key_source_tensor, value_source_tensor).code == StatusCode::InvalidArgument);
     assert(cache->valid_tokens(0) == 1);
 }
 

@@ -110,14 +110,22 @@ Status KvCache::append(uint32_t layer, uint32_t start_position, uint32_t token_c
 
 
 Status KvCache::append_device(uint32_t layer, uint32_t start_position, uint32_t token_count,
-                              const std::shared_ptr<Buffer>& keys, uint64_t keys_offset,
-                              const std::shared_ptr<Buffer>& values, uint64_t values_offset) {
-    if (layer >= layers_.size() || token_count == 0 || !keys || !values)
+                              const Tensor& keys, const Tensor& values) {
+    if (layer >= layers_.size() || token_count == 0 || !keys.buffer() || !values.buffer())
         return {StatusCode::InvalidArgument, "Device KV cache append arguments are invalid"};
     if (!backend_.healthy())
         return {StatusCode::DeviceLost, "KV cache backend is unhealthy"};
-    if (keys->memory_domain() == MemoryDomain::Host || values->memory_domain() == MemoryDomain::Host)
-        return {StatusCode::InvalidArgument, "Device KV cache append requires device/shared source buffers"};
+    const std::vector<uint64_t> expected_shape = {token_count, config_.kv_heads, config_.head_dimension};
+    if (keys.descriptor().shape != expected_shape || values.descriptor().shape != expected_shape ||
+        keys.descriptor().data_type != config_.data_type ||
+        values.descriptor().data_type != config_.data_type ||
+        keys.descriptor().layout != TensorLayout::Contiguous ||
+        values.descriptor().layout != TensorLayout::Contiguous ||
+        keys.descriptor().memory == MemoryDomain::Host ||
+        values.descriptor().memory == MemoryDomain::Host ||
+        keys.buffer()->memory_domain() == MemoryDomain::Host ||
+        values.buffer()->memory_domain() == MemoryDomain::Host)
+        return {StatusCode::InvalidArgument, "Device KV cache source tensors must match the configured contiguous K/V shape, type and memory domain"};
     Layer& state = layers_[layer];
     if (start_position != state.valid_tokens || start_position > config_.maximum_sequence_length ||
         token_count > config_.maximum_sequence_length - start_position)
@@ -126,8 +134,11 @@ Status KvCache::append_device(uint32_t layer, uint32_t start_position, uint32_t 
     uint64_t destination_offset = 0, byte_count = 0;
     if (!multiply_checked(start_position, bytes_per_token_, destination_offset) ||
         !multiply_checked(token_count, bytes_per_token_, byte_count) ||
-        keys_offset > keys->size_bytes() || byte_count > keys->size_bytes() - keys_offset ||
-        values_offset > values->size_bytes() || byte_count > values->size_bytes() - values_offset)
+        keys.byte_size() != byte_count || values.byte_size() != byte_count ||
+        keys.byte_offset() > keys.buffer()->size_bytes() ||
+        byte_count > keys.buffer()->size_bytes() - keys.byte_offset() ||
+        values.byte_offset() > values.buffer()->size_bytes() ||
+        byte_count > values.buffer()->size_bytes() - values.byte_offset())
         return {StatusCode::InvalidArgument, "Device KV cache source or destination range is invalid"};
 
     std::unique_ptr<CommandBatch> commands;
@@ -135,9 +146,9 @@ Status KvCache::append_device(uint32_t layer, uint32_t start_position, uint32_t 
     if (!status.ok()) return status;
     if (!commands)
         return {StatusCode::BackendFailure, "Backend returned an empty KV cache copy batch"};
-    status = commands->copy_buffer(keys, keys_offset, state.keys.buffer(), destination_offset, byte_count);
+    status = commands->copy_buffer(keys.buffer(), keys.byte_offset(), state.keys.buffer(), destination_offset, byte_count);
     if (!status.ok()) return status;
-    status = commands->copy_buffer(values, values_offset, state.values.buffer(), destination_offset, byte_count);
+    status = commands->copy_buffer(values.buffer(), values.byte_offset(), state.values.buffer(), destination_offset, byte_count);
     if (!status.ok()) return status;
     status = backend_.submit(std::move(commands));
     if (!status.ok()) return status;
