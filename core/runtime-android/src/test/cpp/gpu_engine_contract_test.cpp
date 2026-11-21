@@ -1635,12 +1635,12 @@ void test_dense_model_plan_selects_q4_1_matmul_adapter() {
         GgufTensorInfo tensor;
         tensor.name = item.first;
         tensor.dimensions = item.second;
-        tensor.type_id = tensor.name == "blk.0.attn_q.weight" ? 3u : 0u;
+        tensor.type_id = (tensor.name == "blk.0.attn_q.weight" || tensor.name == "token_embd.weight") ? 3u : 0u;
         tensor.type = GgufReader::tensor_type_info(tensor.type_id);
         uint64_t elements = 1;
         for (uint64_t dimension : tensor.dimensions) elements *= dimension;
         tensor.byte_size_known = true;
-        tensor.byte_size = tensor.type_id == 3 ? 32 * 20 : elements * sizeof(float);
+        tensor.byte_size = tensor.type_id == 3 ? (elements / 32) * 20 : elements * sizeof(float);
         model.tensors.push_back(std::move(tensor));
     }
     ModelExecutionPlan plan;
@@ -1649,6 +1649,10 @@ void test_dense_model_plan_selects_q4_1_matmul_adapter() {
         [](const ModelPlanOperation& operation) { return operation.id == "layer.0.q_proj"; });
     assert(projection != plan.operations.end());
     assert(projection->operator_name == "MatMul_Q4_1");
+    const auto embedding = std::find_if(plan.operations.begin(), plan.operations.end(),
+        [](const ModelPlanOperation& operation) { return operation.id == "embedding"; });
+    assert(embedding != plan.operations.end());
+    assert(embedding->operator_name == "Embedding_Q4_1");
 }
 
 
@@ -1818,6 +1822,41 @@ void test_q4_0_embedding_model_lowering_supports_gles() {
     assert(dispatch.kernel_id == "gles-q4-0-embedding-f32-v1");
     assert(dispatch.glsl_source.find("VOCABULARY_SIZE = 2u") != std::string::npos);
     assert(dispatch.validation == KernelValidation::Unverified);
+}
+
+void test_q4_1_embedding_model_lowering_supports_gles() {
+    FakeBackend backend(BackendKind::OpenGles);
+    ModelLoweringRegistry lowerings;
+    assert(register_builtin_model_lowerings(BackendKind::OpenGles, lowerings).ok());
+    BufferDesc weight_desc{40, 4, MemoryDomain::Device, true, "q4-1-embedding-weight"};
+    BufferDesc output_desc{2 * 32 * sizeof(float), 4, MemoryDomain::Device, false, "q4-1-embedding-output"};
+    std::shared_ptr<Buffer> weight_buffer, output_buffer;
+    assert(backend.allocate(weight_desc, weight_buffer).ok());
+    assert(backend.allocate(output_desc, output_buffer).ok());
+    TensorDesc output_td; output_td.shape = {2, 32}; output_td.data_type = DataType::F32;
+    Tensor output;
+    assert(Tensor::create(output_td, output_buffer, 0, output).ok());
+    ModelExecutionContext context;
+    context.backend = &backend;
+    context.token_ids = {1, 0};
+    context.tensors.emplace("embedding", output);
+    QuantizedWeightBinding binding;
+    binding.buffer = weight_buffer;
+    binding.byte_size = 40;
+    binding.file_type_id = 3;
+    binding.dimensions = {32, 2};
+    context.quantized_weights.emplace("token_embd.weight", binding);
+    ModelPlanOperation operation;
+    operation.id = "embedding";
+    operation.operator_name = "Embedding_Q4_1";
+    operation.inputs = {"token_ids"};
+    operation.weight_tensors = {"token_embd.weight"};
+    operation.output = "embedding";
+    ComputeDispatch dispatch;
+    assert((*lowerings.find(BackendKind::OpenGles, "Embedding_Q4_1"))(operation, context, dispatch).ok());
+    assert(dispatch.backend == BackendKind::OpenGles);
+    assert(dispatch.kernel_id == "gles-q4-1-embedding-f32-v1");
+    assert(dispatch.glsl_source.find("WEIGHT_ROW_BYTES = 20u") != std::string::npos);
 }
 
 void test_embedding_model_lowering_uploads_token_ids_and_binds_buffer() {
@@ -2551,6 +2590,7 @@ int main() {
     test_model_kv_cache_view_binding_uses_planned_sequence_length();
     test_activation_allocator_reuses_non_overlapping_tensor_slots();
     test_q4_0_embedding_model_lowering_supports_gles();
+    test_q4_1_embedding_model_lowering_supports_gles();
     test_embedding_model_lowering_uploads_token_ids_and_binds_buffer();
     test_q8_0_model_lowering_supports_gles_3d_projection();
     test_q4_0_model_lowering_supports_gles_3d_projection();
