@@ -293,6 +293,32 @@ void test_kv_cache_memory_and_sequential_append() {
     assert(KvCache::estimate_bytes(config, estimate).code == StatusCode::InvalidArgument);
 }
 
+
+void test_q4_decoders() {
+    std::vector<uint8_t> q4_0(18, 0);
+    q4_0[0] = 0x00; q4_0[1] = 0x38; // d = 0.5
+    for (size_t i = 0; i < 16; ++i) q4_0[2 + i] = 0x98; // low=8, high=9
+    float q4_0_output[32] = {};
+    assert(decode_q4_0_blocks(q4_0.data(), q4_0.size(), q4_0_output, 32).ok());
+    assert(q4_0_output[0] == 0.0f && q4_0_output[16] == 0.5f);
+
+    std::vector<uint8_t> q4_1(20, 0);
+    q4_1[0] = 0x00; q4_1[1] = 0x38; // d = 0.5
+    q4_1[2] = 0x00; q4_1[3] = 0x3c; // m = 1.0
+    for (size_t i = 0; i < 16; ++i) q4_1[4 + i] = 0xf0;
+    float q4_1_output[32] = {};
+    assert(decode_q4_1_blocks(q4_1.data(), q4_1.size(), q4_1_output, 32).ok());
+    assert(q4_1_output[0] == 1.0f && q4_1_output[16] == 8.5f);
+    assert(decode_q4_1_blocks(q4_1.data(), q4_1.size() - 1, q4_1_output, 32).code ==
+           StatusCode::InvalidArgument);
+
+    QuantizationRegistry registry;
+    assert(register_builtin_quantization_formats(registry).ok());
+    assert(registry.can_decode(2) && registry.can_decode(3) && registry.can_decode(8));
+    assert(!registry.can_execute_on_gpu(2) && !registry.can_execute_on_gpu(3) &&
+           !registry.can_execute_on_gpu(8));
+}
+
 void test_q8_0_decoder_and_registry() {
     std::vector<uint8_t> encoded(34, 0);
     encoded[0] = 0x00;
@@ -732,6 +758,7 @@ int main() {
     test_gpu_engine_lifecycle();
     test_gguf_weight_streaming();
     test_independent_sampler_and_stop_controller();
+    test_q4_decoders();
     test_q8_0_decoder_and_registry();
     test_kv_cache_memory_and_sequential_append();
     test_runtime_router_fails_closed_to_cpu();

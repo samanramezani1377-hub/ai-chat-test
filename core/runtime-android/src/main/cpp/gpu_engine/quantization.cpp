@@ -71,6 +71,64 @@ uint16_t read_u16_le(const uint8_t* source) {
 
 } // namespace
 
+
+Status decode_q4_0_blocks(const uint8_t* source, size_t source_bytes,
+                          float* destination, size_t destination_elements) {
+    constexpr size_t kElementsPerBlock = 32;
+    constexpr size_t kBytesPerBlock = 18;
+    if ((!source || !destination) && (source_bytes != 0 || destination_elements != 0))
+        return {StatusCode::InvalidArgument, "Q4_0 decoder received a null buffer"};
+    if (destination_elements == 0 || destination_elements % kElementsPerBlock != 0)
+        return {StatusCode::InvalidArgument, "Q4_0 destination must contain complete blocks"};
+    const size_t blocks = destination_elements / kElementsPerBlock;
+    if (blocks > std::numeric_limits<size_t>::max() / kBytesPerBlock ||
+        source_bytes != blocks * kBytesPerBlock)
+        return {StatusCode::InvalidArgument, "Q4_0 source and destination sizes do not match complete blocks"};
+    for (size_t block = 0; block < blocks; ++block) {
+        const uint8_t* encoded = source + block * kBytesPerBlock;
+        const float scale = half_to_float(read_u16_le(encoded));
+        if (!std::isfinite(scale))
+            return {StatusCode::NumericalFailure, "Q4_0 block has a non-finite FP16 scale"};
+        for (size_t i = 0; i < 16; ++i) {
+            const uint8_t packed = encoded[2 + i];
+            destination[block * 32 + i] =
+                scale * static_cast<float>(static_cast<int32_t>(packed & 0x0fu) - 8);
+            destination[block * 32 + i + 16] =
+                scale * static_cast<float>(static_cast<int32_t>(packed >> 4) - 8);
+        }
+    }
+    return Status::success();
+}
+
+Status decode_q4_1_blocks(const uint8_t* source, size_t source_bytes,
+                          float* destination, size_t destination_elements) {
+    constexpr size_t kElementsPerBlock = 32;
+    constexpr size_t kBytesPerBlock = 20;
+    if ((!source || !destination) && (source_bytes != 0 || destination_elements != 0))
+        return {StatusCode::InvalidArgument, "Q4_1 decoder received a null buffer"};
+    if (destination_elements == 0 || destination_elements % kElementsPerBlock != 0)
+        return {StatusCode::InvalidArgument, "Q4_1 destination must contain complete blocks"};
+    const size_t blocks = destination_elements / kElementsPerBlock;
+    if (blocks > std::numeric_limits<size_t>::max() / kBytesPerBlock ||
+        source_bytes != blocks * kBytesPerBlock)
+        return {StatusCode::InvalidArgument, "Q4_1 source and destination sizes do not match complete blocks"};
+    for (size_t block = 0; block < blocks; ++block) {
+        const uint8_t* encoded = source + block * kBytesPerBlock;
+        const float scale = half_to_float(read_u16_le(encoded));
+        const float minimum = half_to_float(read_u16_le(encoded + 2));
+        if (!std::isfinite(scale) || !std::isfinite(minimum))
+            return {StatusCode::NumericalFailure, "Q4_1 block has a non-finite FP16 scale or minimum"};
+        for (size_t i = 0; i < 16; ++i) {
+            const uint8_t packed = encoded[4 + i];
+            destination[block * 32 + i] =
+                scale * static_cast<float>(packed & 0x0fu) + minimum;
+            destination[block * 32 + i + 16] =
+                scale * static_cast<float>(packed >> 4) + minimum;
+        }
+    }
+    return Status::success();
+}
+
 Status decode_q8_0_blocks(const uint8_t* source, size_t source_bytes,
                           float* destination, size_t destination_elements) {
     constexpr size_t kElementsPerBlock = 32;
@@ -147,6 +205,28 @@ Status build_q8_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
 }
 
 Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
+    QuantizationFormat q4_0;
+    q4_0.file_type_id = 2;
+    q4_0.name = "Q4_0";
+    q4_0.block_elements = 32;
+    q4_0.bytes_per_block = 18;
+    q4_0.quantized = true;
+    q4_0.decoder_state = SupportState::Validated;
+    q4_0.gpu_kernel_state = SupportState::Unverified;
+    Status status = registry.register_format(std::move(q4_0));
+    if (!status.ok()) return status;
+
+    QuantizationFormat q4_1;
+    q4_1.file_type_id = 3;
+    q4_1.name = "Q4_1";
+    q4_1.block_elements = 32;
+    q4_1.bytes_per_block = 20;
+    q4_1.quantized = true;
+    q4_1.decoder_state = SupportState::Validated;
+    q4_1.gpu_kernel_state = SupportState::Unverified;
+    status = registry.register_format(std::move(q4_1));
+    if (!status.ok()) return status;
+
     QuantizationFormat q8;
     q8.file_type_id = 8;
     q8.name = "Q8_0";
