@@ -22,6 +22,19 @@ if printf '%s\n' "$core_block" "$dawn_block" "$gles_block" "$android_block" | gr
     echo "::error::A standalone GPU engine target contains a llama.cpp/GGML dependency."
     exit 1
 fi
+extract_link_block() {
+    local target="$1"
+    sed -n "/target_link_libraries(${target} /,/^)/p" "$cmake_file"
+}
+link_blocks="$(extract_link_block ai_chat_gpu_engine)
+$(extract_link_block ai_chat_gpu_backend_dawn)
+$(extract_link_block ai_chat_gpu_backend_gles)
+$(extract_link_block ai_chat_gpu_backends_android)"
+if printf '%s\\n' "$link_blocks" | grep -Eiq '(ggml|llama)'; then
+    echo "::error::A GPU engine target links llama.cpp/GGML."
+    exit 1
+fi
+
 if ! grep -q 'set(GGML_VULKAN OFF' "$cmake_file"; then
     echo "::error::Vulkan must remain explicitly disabled."
     exit 1
