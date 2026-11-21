@@ -342,6 +342,37 @@ void test_runtime_router_fails_closed_to_cpu() {
     assert(!report.gpu_selected);
 }
 
+
+void test_kv_cache_device_append_avoids_host_roundtrip() {
+    FakeBackend backend;
+    DeviceInfo device; device.backend = BackendKind::OpenGles;
+    assert(backend.initialize(device).ok());
+    MemoryManager memory(backend, 4096);
+    KvCacheConfig config; config.layers = 1; config.kv_heads = 2;
+    config.head_dimension = 2; config.maximum_sequence_length = 4;
+    std::unique_ptr<KvCache> cache;
+    assert(KvCache::create(backend, memory, config, cache).ok());
+
+    BufferDesc source_desc{32, 4, MemoryDomain::Device, false, "source-kv"};
+    std::shared_ptr<Buffer> keys, values;
+    assert(backend.allocate(source_desc, keys).ok());
+    assert(backend.allocate(source_desc, values).ok());
+    auto key_bytes = std::dynamic_pointer_cast<FakeBuffer>(keys);
+    auto value_bytes = std::dynamic_pointer_cast<FakeBuffer>(values);
+    const float key_data[] = {1, 2, 3, 4};
+    const float value_data[] = {5, 6, 7, 8};
+    std::memcpy(key_bytes->bytes.data(), key_data, sizeof(key_data));
+    std::memcpy(value_bytes->bytes.data(), value_data, sizeof(value_data));
+    assert(cache->append_device(0, 0, 1, keys, 0, values, 0).ok());
+    assert(cache->valid_tokens(0) == 1);
+    auto cached_keys = std::dynamic_pointer_cast<FakeBuffer>(cache->key_buffer(0));
+    auto cached_values = std::dynamic_pointer_cast<FakeBuffer>(cache->value_buffer(0));
+    assert(std::memcmp(cached_keys->bytes.data(), key_data, sizeof(key_data)) == 0);
+    assert(std::memcmp(cached_values->bytes.data(), value_data, sizeof(value_data)) == 0);
+    assert(cache->append_device(0, 2, 1, keys, 0, values, 0).code == StatusCode::InvalidArgument);
+    assert(cache->valid_tokens(0) == 1);
+}
+
 void test_kv_cache_memory_and_sequential_append() {
     FakeBackend backend;
     MemoryManager memory(backend, 512);
@@ -1771,6 +1802,7 @@ int main() {
     test_quantization_backend_compatibility_is_backend_specific();
     test_q8_0_decoder_and_registry();
     test_kv_cache_memory_and_sequential_append();
+    test_kv_cache_device_append_avoids_host_roundtrip();
     test_model_gpu_memory_estimate_includes_kv_and_scratch();
     test_gpu_backend_fallback_order();
     test_runtime_router_fails_closed_to_cpu();
