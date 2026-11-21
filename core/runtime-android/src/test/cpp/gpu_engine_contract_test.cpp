@@ -1908,6 +1908,7 @@ void test_streamed_execution_loads_and_releases_quantized_weights_per_operation(
     assert(context.tensors.find("q4_weight") == context.tensors.end());
     assert(context.tensors.at("logits").descriptor().shape == std::vector<uint64_t>({1, 2}));
     assert(context.weight_leases.empty());
+    assert(memory.allocated_bytes() == 2 * sizeof(float));
     assert(plan.execution_validated && !plan.gpu_ready);
     std::remove(path.c_str());
 }
