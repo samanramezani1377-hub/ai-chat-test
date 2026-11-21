@@ -56,14 +56,14 @@ Status GgufWeightStreamer::load_tensor(const GgufReader& reader,
         return {StatusCode::Unsupported, "This streamer currently targets backend-managed device/shared memory"};
     }
 
-    uint64_t maximum = policy.maximum_chunk_bytes;
-    if (maximum == 0) {
-        maximum = device.limits.max_storage_buffer_binding_size;
-        if (maximum == 0 || (device.limits.max_buffer_size != 0 && device.limits.max_buffer_size < maximum)) {
-            maximum = device.limits.max_buffer_size;
-        }
+    uint64_t backend_limit = device.limits.max_storage_buffer_binding_size;
+    if (backend_limit == 0 || (device.limits.max_buffer_size != 0 &&
+                               device.limits.max_buffer_size < backend_limit)) {
+        backend_limit = device.limits.max_buffer_size;
     }
-    if (maximum == 0) return {StatusCode::Unsupported, "Backend did not report a usable storage-buffer limit"};
+    if (backend_limit == 0) return {StatusCode::Unsupported, "Backend did not report a usable storage-buffer limit"};
+    const uint64_t maximum = policy.maximum_chunk_bytes == 0
+        ? backend_limit : std::min(policy.maximum_chunk_bytes, backend_limit);
     const uint64_t preferred = policy.preferred_chunk_bytes == 0 ? maximum : policy.preferred_chunk_bytes;
     uint64_t chunk_limit = std::min(preferred, maximum);
     const uint64_t block_bytes = canonical->type.bytes_per_block;
