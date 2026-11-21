@@ -1,6 +1,5 @@
-# Convert Dawn wait/callback failures into explicit GGML backend failures.
-# Callback state is heap-owned so AllowSpontaneous callbacks can never reference
-# stack variables after WaitAny returns (including timeout/error paths).
+# Convert Dawn callback and wait failures into explicit GGML backend failures.
+# AllowSpontaneous callbacks own heap-backed result state, never stack references.
 if (NOT DEFINED llama_cpp_SOURCE_DIR)
     message(FATAL_ERROR "llama_cpp_SOURCE_DIR is required")
 endif()
@@ -10,7 +9,17 @@ if (NOT EXISTS "${_webgpu_file}")
 endif()
 
 file(READ "${_webgpu_file}" _webgpu)
-if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_WAIT_RESULT_V1")
+
+# Keep terminal device loss separate from recoverable graph/wait failures.
+if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_GRAPH_ERROR_STATE_V1")
+    ai_chat_replace_once(_webgpu
+        "static std::atomic<bool> g_webgpu_device_error{false};"
+        "static std::atomic<bool> g_webgpu_device_error{false};\nstatic std::atomic<bool> g_webgpu_graph_error{false};"
+        "separate device loss from recoverable graph errors")
+    string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_GRAPH_ERROR_STATE_V1\n")
+endif()
+
+if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_WAIT_RESULT_V2")
     if (NOT _webgpu MATCHES "#include <mutex>")
         string(REPLACE "#include <memory>" "#include <memory>\n#include <mutex>" _webgpu "${_webgpu}")
     endif()
@@ -31,7 +40,7 @@ struct ai_chat_webgpu_wait_result {
     std::string message;
 };
 
-// AI_CHAT_WEBGPU_WAIT_RESULT_V1
+// AI_CHAT_WEBGPU_WAIT_RESULT_V2
 template <typename T>
 static bool ggml_backend_webgpu_check_wait_status(wgpu::WaitStatus wait_status,
                                                   T callback_status,
@@ -42,7 +51,7 @@ static bool ggml_backend_webgpu_check_wait_status(wgpu::WaitStatus wait_status,
     const bool wait_ok = wait_status == wgpu::WaitStatus::Success;
     const bool callback_ok = callback_status == success_status;
     if (!wait_ok || !callback_ok) {
-        g_webgpu_device_error.store(true, std::memory_order_release);
+        g_webgpu_graph_error.store(true, std::memory_order_release);
         if (wait_status == wgpu::WaitStatus::TimedOut) {
             GGML_LOG_ERROR("AI_CHAT_WEBGPU_WAIT_FAILED kind=%s reason=timeout timeoutMs=%u callbackStatus=%d message=%s\n",
                 wait_name, WEBGPU_RUNTIME_WAIT_TIMEOUT_MS, static_cast<int>(callback_status), callback_message);
@@ -67,7 +76,8 @@ static uint32_t ggml_backend_webgpu_get_command_submit_batch_size() {
 }
 
 static bool ggml_backend_webgpu_wait_queue(webgpu_global_context & ctx) {
-    if (ctx->device_error.load(std::memory_order_acquire)) return false;
+    if (ctx->device_error.load(std::memory_order_acquire) ||
+        g_webgpu_graph_error.load(std::memory_order_acquire)) return false;
     auto result = std::make_shared<ai_chat_webgpu_wait_result>();
     const wgpu::WaitStatus wait_status = ctx->instance.WaitAny(
         ctx->queue.OnSubmittedWorkDone(
@@ -86,15 +96,13 @@ static bool ggml_backend_webgpu_wait_queue(webgpu_global_context & ctx) {
         std::lock_guard<std::mutex> lock(result->message_mutex);
         message = result->message;
     }
-    const auto callback_status = status_value < 0
-        ? wgpu::QueueWorkDoneStatus::Error
-        : static_cast<wgpu::QueueWorkDoneStatus>(status_value);
     if (status_value < 0) {
-        g_webgpu_device_error.store(true, std::memory_order_release);
+        g_webgpu_graph_error.store(true, std::memory_order_release);
         GGML_LOG_ERROR("AI_CHAT_WEBGPU_WAIT_FAILED kind=queue reason=callback_not_delivered waitStatus=%d\n",
             static_cast<int>(wait_status));
         return false;
     }
+    const auto callback_status = static_cast<wgpu::QueueWorkDoneStatus>(status_value);
     return ggml_backend_webgpu_check_wait_status(wait_status, callback_status,
         wgpu::QueueWorkDoneStatus::Success, "Queue wait", "Queue work", message.c_str());
 }
@@ -104,7 +112,8 @@ static bool ggml_backend_webgpu_map_buffer(webgpu_global_context & ctx,
                                            wgpu::MapMode mode,
                                            size_t offset,
                                            size_t size) {
-    if (ctx->device_error.load(std::memory_order_acquire)) return false;
+    if (ctx->device_error.load(std::memory_order_acquire) ||
+        g_webgpu_graph_error.load(std::memory_order_acquire)) return false;
     auto result = std::make_shared<ai_chat_webgpu_wait_result>();
     const wgpu::WaitStatus wait_status = ctx->instance.WaitAny(
         buffer.MapAsync(mode, offset, size, wgpu::CallbackMode::AllowSpontaneous,
@@ -122,76 +131,81 @@ static bool ggml_backend_webgpu_map_buffer(webgpu_global_context & ctx,
         std::lock_guard<std::mutex> lock(result->message_mutex);
         message = result->message;
     }
-    const auto callback_status = status_value < 0
-        ? wgpu::MapAsyncStatus::Error
-        : static_cast<wgpu::MapAsyncStatus>(status_value);
     if (status_value < 0) {
-        g_webgpu_device_error.store(true, std::memory_order_release);
+        g_webgpu_graph_error.store(true, std::memory_order_release);
         GGML_LOG_ERROR("AI_CHAT_WEBGPU_WAIT_FAILED kind=map reason=callback_not_delivered waitStatus=%d\n",
             static_cast<int>(wait_status));
         return false;
     }
+    const auto callback_status = static_cast<wgpu::MapAsyncStatus>(status_value);
     return ggml_backend_webgpu_check_wait_status(wait_status, callback_status,
         wgpu::MapAsyncStatus::Success, "Buffer map wait", "Buffer map", message.c_str());
 }
 ]=])
     set(_webgpu "${_webgpu_before_wait}${_wait_replacement}${_webgpu_after_wait}")
-
 endif()
 
-# The pinned source uses webgpu_context in the submit helper. Keep the replacement
-# narrow and independently verifiable.
-if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_SUBMIT_GUARD_V1")
+# Stop command submission after a failed wait; return the failure through graph_compute.
+if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_SUBMIT_GUARD_V2")
     ai_chat_replace_once(_webgpu
         "    if (num_inflight_batches >= ctx->global_ctx->max_inflight_batches) {\n        ggml_backend_webgpu_wait_queue(ctx->global_ctx);\n        num_inflight_batches = 0;\n    }\n\n    ctx->global_ctx->queue.Submit(1, &commands);"
-        "    if (ctx->global_ctx->device_error.load(std::memory_order_acquire)) return;\n    if (num_inflight_batches >= ctx->global_ctx->max_inflight_batches) {\n        if (!ggml_backend_webgpu_wait_queue(ctx->global_ctx)) return;\n        num_inflight_batches = 0;\n    }\n    if (ctx->global_ctx->device_error.load(std::memory_order_acquire)) return;\n\n    ctx->global_ctx->queue.Submit(1, &commands);"
+        "    if (ctx->global_ctx->device_error.load(std::memory_order_acquire) || g_webgpu_graph_error.load(std::memory_order_acquire)) return;\n    if (num_inflight_batches >= ctx->global_ctx->max_inflight_batches) {\n        if (!ggml_backend_webgpu_wait_queue(ctx->global_ctx)) return;\n        num_inflight_batches = 0;\n    }\n    if (ctx->global_ctx->device_error.load(std::memory_order_acquire) || g_webgpu_graph_error.load(std::memory_order_acquire)) return;\n\n    ctx->global_ctx->queue.Submit(1, &commands);"
         "stop command submission after a failed queue wait")
-    string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_SUBMIT_GUARD_V1\n")
+    string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_SUBMIT_GUARD_V2\n")
 endif()
 
-# Device callbacks must never abort the process. A device-loss/error flag prevents
-# subsequent placement on a backend that is no longer safe to execute.
-if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_NONFATAL_CALLBACKS_V1")
+# The bounded-allocation patch already marks device loss; give the event a clear marker.
+if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_NONFATAL_CALLBACKS_V2")
     ai_chat_replace_once(_webgpu
-        [=[            GGML_UNUSED(device);
-            GGML_LOG_ERROR("ggml_webgpu: Device lost! Reason: %d, Message: %s\n", static_cast<int>(reason),
+        [=[            GGML_LOG_ERROR("ggml_webgpu: Device lost! Reason: %d, Message: %s\n", static_cast<int>(reason),
                            std::string(message).c_str());]=]
-        [=[            GGML_UNUSED(device);
-            g_webgpu_device_error.store(true, std::memory_order_release);
-            GGML_LOG_ERROR("AI_CHAT_WEBGPU_DEVICE_LOST reason=%d message=%s\n", static_cast<int>(reason),
+        [=[            GGML_LOG_ERROR("AI_CHAT_WEBGPU_DEVICE_LOST reason=%d message=%s\n", static_cast<int>(reason),
                            std::string(message).c_str());]=]
-        "persist device loss before later graph placement")
+        "identify terminal device loss in diagnostics")
     ai_chat_replace_once(_webgpu
-        [=[            GGML_ABORT("ggml_webgpu: Device error! Reason: %d, Message: %s\n", static_cast<int>(reason),
-                       std::string(message).c_str());]=]
-        [=[            g_webgpu_device_error.store(true, std::memory_order_release);
+        [=[            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error (non-fatal diagnostic): reason=%d message=%s\n",
+                           static_cast<int>(reason), std::string(message).c_str());]=]
+        [=[            g_webgpu_graph_error.store(true, std::memory_order_release);
             GGML_LOG_ERROR("AI_CHAT_WEBGPU_UNCAPTURED_ERROR reason=%d message=%s\n",
                            static_cast<int>(reason), std::string(message).c_str());]=]
-        "replace uncaptured-error abort with explicit backend failure state")
-    string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_NONFATAL_CALLBACKS_V1\n")
+        "record uncaptured Dawn validation errors as recoverable graph failures")
+    string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_NONFATAL_CALLBACKS_V2\n")
 endif()
 
-# Do not continue encoding/return success after a wait or callback has failed.
-if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_GRAPH_FAILURE_PROPAGATION_V1")
+# Reset only transient graph errors before a new graph. Device loss remains sticky.
+if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_GRAPH_FAILURE_PROPAGATION_V2")
+    ai_chat_replace_once(_webgpu
+        "    webgpu_context                ctx         = backend_ctx->webgpu_ctx;"
+        "    webgpu_context                ctx         = backend_ctx->webgpu_ctx;\n    if (ctx->global_ctx->device_error.load(std::memory_order_acquire)) {\n        GGML_LOG_ERROR(\"AI_CHAT_WEBGPU_GRAPH_ABORTED reason=device_lost\\n\");\n        return GGML_STATUS_FAILED;\n    }\n    g_webgpu_graph_error.store(false, std::memory_order_release);"
+        "reset transient graph errors without clearing device loss")
     ai_chat_replace_once(_webgpu
         "    while (node_idx < cgraph->n_nodes) {"
-        "    while (node_idx < cgraph->n_nodes) {\n        if (ctx->global_ctx->device_error.load(std::memory_order_acquire)) {\n            GGML_LOG_ERROR(\"AI_CHAT_WEBGPU_GRAPH_ABORTED stage=encode node=%d totalNodes=%d\\n\", node_idx, cgraph->n_nodes);\n            WEBGPU_CPU_PROFILE_TOTAL_END(graph_compute, ctx->global_ctx);\n            return GGML_STATUS_FAILED;\n        }"
-        "stop graph encoding when the device enters an error state")
+        "    while (node_idx < cgraph->n_nodes) {\n        if (ctx->global_ctx->device_error.load(std::memory_order_acquire) || g_webgpu_graph_error.load(std::memory_order_acquire)) {\n            GGML_LOG_ERROR(\"AI_CHAT_WEBGPU_GRAPH_ABORTED stage=encode node=%d totalNodes=%d\\n\", node_idx, cgraph->n_nodes);\n            WEBGPU_CPU_PROFILE_TOTAL_END(graph_compute, ctx->global_ctx);\n            return GGML_STATUS_FAILED;\n        }"
+        "stop graph encoding after a callback or wait failure")
     ai_chat_replace_once(_webgpu
         "    WEBGPU_CPU_PROFILE_TOTAL_END(graph_compute, ctx->global_ctx);\n    return GGML_STATUS_SUCCESS;"
-        "    const bool ai_chat_graph_ok = !ctx->global_ctx->device_error.load(std::memory_order_acquire);\n    WEBGPU_CPU_PROFILE_TOTAL_END(graph_compute, ctx->global_ctx);\n    if (!ai_chat_graph_ok) {\n        GGML_LOG_ERROR(\"AI_CHAT_WEBGPU_GRAPH_ABORTED stage=completion nodes=%d\\n\", cgraph->n_nodes);\n        return GGML_STATUS_FAILED;\n    }\n    return GGML_STATUS_SUCCESS;"
-        "propagate WebGPU wait/callback errors to GGML scheduler")
-    string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_GRAPH_FAILURE_PROPAGATION_V1\n")
+        "    const bool ai_chat_graph_ok = !ctx->global_ctx->device_error.load(std::memory_order_acquire) && !g_webgpu_graph_error.load(std::memory_order_acquire);\n    WEBGPU_CPU_PROFILE_TOTAL_END(graph_compute, ctx->global_ctx);\n    if (!ai_chat_graph_ok) {\n        GGML_LOG_ERROR(\"AI_CHAT_WEBGPU_GRAPH_ABORTED stage=completion nodes=%d\\n\", cgraph->n_nodes);\n        return GGML_STATUS_FAILED;\n    }\n    return GGML_STATUS_SUCCESS;"
+        "propagate WebGPU failures to the GGML scheduler")
+    string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_GRAPH_FAILURE_PROPAGATION_V2\n")
 endif()
 
-# Avoid process abort for the explicit SET_ROWS overflow diagnostic as well.
-if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_SET_ROWS_FAILURE_V1")
+# SET_ROWS overflow is a backend limitation, not a reason to terminate the app.
+if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_SET_ROWS_FAILURE_V2")
     ai_chat_replace_once(_webgpu
         "        GGML_ABORT(\"ggml_webgpu: SET_ROWS index > 2^32, unsupported.\");"
-        "        g_webgpu_device_error.store(true, std::memory_order_release);\n        GGML_LOG_ERROR(\"AI_CHAT_WEBGPU_SET_ROWS_UNSUPPORTED indexWidth=64\\n\");"
-        "return a failed graph status instead of aborting on unsupported index width")
-    string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_SET_ROWS_FAILURE_V1\n")
+        "        g_webgpu_graph_error.store(true, std::memory_order_release);\n        GGML_LOG_ERROR(\"AI_CHAT_WEBGPU_SET_ROWS_UNSUPPORTED indexWidth=64\\n\");"
+        "return an explicit graph failure for unsupported SET_ROWS index width")
+    string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_SET_ROWS_FAILURE_V2\n")
 endif()
 
+# A failed MapAsync must not be followed by GetConstMappedRange on an unmapped buffer.
+ai_chat_replace_once(_webgpu
+    "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->set_rows_host_error_buf, wgpu::MapMode::Read, 0,\n                                   ctx->set_rows_host_error_buf.GetSize());\n    const uint32_t * error_data"
+    "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->set_rows_host_error_buf, wgpu::MapMode::Read, 0,\n                                   ctx->set_rows_host_error_buf.GetSize());\n    if (g_webgpu_graph_error.load(std::memory_order_acquire)) return;\n    const uint32_t * error_data"
+    "guard SET_ROWS mapped-range access")
+ai_chat_replace_once(_webgpu
+    "    ggml_backend_webgpu_map_buffer(buf_ctx->global_ctx, buf_ctx->global_ctx->get_tensor_staging_buf,\n                                   wgpu::MapMode::Read, 0, final_size);\n    // Must specify size here"
+    "    ggml_backend_webgpu_map_buffer(buf_ctx->global_ctx, buf_ctx->global_ctx->get_tensor_staging_buf,\n                                   wgpu::MapMode::Read, 0, final_size);\n    if (g_webgpu_graph_error.load(std::memory_order_acquire)) return;\n    // Must specify size here"
+    "guard tensor readback after a failed map")
 file(WRITE "${_webgpu_file}" "${_webgpu}")
-message(STATUS "AI Chat: Dawn callback lifetime, non-fatal errors, and GGML failure propagation enabled")
+message(STATUS "AI Chat: safe Dawn callback lifetime, recoverable waits, and graph failure propagation enabled")
