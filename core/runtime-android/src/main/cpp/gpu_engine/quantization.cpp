@@ -525,6 +525,7 @@ Status validate_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& operators
     if (kernel == operators.kernels_.end())
         return {StatusCode::NotReady, "Q8_0 MatMul candidate is not registered for the selected backend"};
     if (kernel->validation == KernelValidation::Validated) {
+        format->second.backend_gpu_kernel_states[backend_kind] = SupportState::Validated;
         format->second.gpu_kernel_state = SupportState::Validated;
         return Status::success();
     }
@@ -893,6 +894,10 @@ Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry
 }
 
 Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
+    const auto initialize_backend_states = [](QuantizationFormat& format) {
+        format.backend_gpu_kernel_states[BackendKind::DawnWebGpu] = SupportState::Unverified;
+        format.backend_gpu_kernel_states[BackendKind::OpenGles] = SupportState::Unverified;
+    };
     QuantizationFormat q4_0;
     q4_0.file_type_id = 2;
     q4_0.name = "Q4_0";
@@ -901,6 +906,7 @@ Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
     q4_0.quantized = true;
     q4_0.decoder_state = SupportState::Validated;
     q4_0.gpu_kernel_state = SupportState::Unverified;
+    initialize_backend_states(q4_0);
     Status status = registry.register_format(std::move(q4_0));
     if (!status.ok()) return status;
 
@@ -912,6 +918,7 @@ Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
     q4_1.quantized = true;
     q4_1.decoder_state = SupportState::Validated;
     q4_1.gpu_kernel_state = SupportState::Unverified;
+    initialize_backend_states(q4_1);
     status = registry.register_format(std::move(q4_1));
     if (!status.ok()) return status;
 
@@ -923,6 +930,7 @@ Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
     q5_0.quantized = true;
     q5_0.decoder_state = SupportState::Validated;
     q5_0.gpu_kernel_state = SupportState::Unverified;
+    initialize_backend_states(q5_0);
     status = registry.register_format(std::move(q5_0));
     if (!status.ok()) return status;
 
@@ -934,6 +942,7 @@ Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
     q5_1.quantized = true;
     q5_1.decoder_state = SupportState::Validated;
     q5_1.gpu_kernel_state = SupportState::Unverified;
+    initialize_backend_states(q5_1);
     status = registry.register_format(std::move(q5_1));
     if (!status.ok()) return status;
 
@@ -945,6 +954,7 @@ Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
     q8.quantized = true;
     q8.decoder_state = SupportState::Validated;
     q8.gpu_kernel_state = SupportState::Unverified;
+    initialize_backend_states(q8);
     return registry.register_format(std::move(q8));
 }
 
