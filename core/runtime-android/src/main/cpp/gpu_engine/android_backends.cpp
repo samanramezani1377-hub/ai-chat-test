@@ -1,6 +1,7 @@
 #include "android_backends.h"
 #include "execution_engine.h"
 #include "model_registry.h"
+#include "model_lowerings.h"
 #include "operators.h"
 #include "quantization.h"
 #include "tokenizer.h"

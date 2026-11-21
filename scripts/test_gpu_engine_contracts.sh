@@ -14,6 +14,7 @@ trap 'rm -rf "$TMP"' EXIT
   "$ENGINE/gguf_reader.cpp" \
   "$ENGINE/model_registry.cpp" \
   "$ENGINE/model_graph.cpp" \
+  "$ENGINE/model_lowerings.cpp" \
   "$ENGINE/operators.cpp" \
   "$ENGINE/weight_streamer.cpp" \
   "$ENGINE/sampler.cpp" \

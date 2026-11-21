@@ -1183,6 +1183,39 @@ void test_builtin_architecture_adapter_is_fail_closed() {
 }
 
 
+
+void test_builtin_model_lowerings_are_backend_scoped_and_fail_closed() {
+    ModelLoweringRegistry dawn, gles;
+    assert(register_builtin_model_lowerings(BackendKind::DawnWebGpu, dawn).ok());
+    assert(register_builtin_model_lowerings(BackendKind::OpenGles, gles).ok());
+    assert(dawn.find(BackendKind::DawnWebGpu, "Add") != nullptr);
+    assert(gles.find(BackendKind::OpenGles, "MatMul") != nullptr);
+    assert(gles.find(BackendKind::OpenGles, "Attention") == nullptr);
+    assert(register_builtin_model_lowerings(BackendKind::Unknown, dawn).code == StatusCode::Unsupported);
+
+    FakeBackend backend(BackendKind::OpenGles);
+    ModelExecutionContext context;
+    for (const char* name : {"a", "b", "out"}) {
+        BufferDesc desc{16, 4, MemoryDomain::Device, false, name};
+        std::shared_ptr<Buffer> buffer;
+        assert(backend.allocate(desc, buffer).ok());
+        TensorDesc td; td.shape = {4}; td.data_type = DataType::F32;
+        Tensor tensor;
+        assert(Tensor::create(td, buffer, 0, tensor).ok());
+        context.tensors.emplace(name, tensor);
+    }
+    ModelPlanOperation operation;
+    operation.id = "add";
+    operation.operator_name = "Add";
+    operation.inputs = {"a", "b"};
+    operation.output = "out";
+    ComputeDispatch dispatch;
+    assert((*gles.find(BackendKind::OpenGles, "Add"))(operation, context, dispatch).ok());
+    assert(dispatch.backend == BackendKind::OpenGles);
+    assert(dispatch.kernel_id == "gles-add-f32-generic-v1");
+    assert(dispatch.validation == KernelValidation::Unverified);
+}
+
 void test_model_plan_graph_compilation_is_fail_closed() {
     ModelExecutionPlan plan;
     plan.structurally_validated = true;
@@ -1646,6 +1679,7 @@ int main() {
     test_operator_registry_fail_closed();
     test_universal_gles_operator_candidate_is_fail_closed();
     test_model_plan_graph_compilation_is_fail_closed();
+    test_builtin_model_lowerings_are_backend_scoped_and_fail_closed();
     test_llama_model_execution_plan_is_structural_only();
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
     test_model_and_quantization_registry_fail_closed();
