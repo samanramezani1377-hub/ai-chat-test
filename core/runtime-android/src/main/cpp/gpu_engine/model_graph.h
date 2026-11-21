@@ -25,6 +25,9 @@ struct ModelPlanOperation {
     std::string output;
     // A leading zero denotes the dynamic token/sequence dimension.
     std::vector<uint64_t> output_shape;
+    std::unordered_map<std::string, double> float_attributes;
+    std::unordered_map<std::string, uint64_t> integer_attributes;
+    std::unordered_map<std::string, bool> bool_attributes;
 };
 
 struct ModelExecutionPlan {
@@ -36,6 +39,10 @@ struct ModelExecutionPlan {
     uint64_t feed_forward_length = 0;
     uint64_t vocabulary_size = 0;
     uint64_t head_dimension = 0;
+    uint64_t rotary_dimensions = 0;
+    double rms_norm_epsilon = 0.00001;
+    double rope_theta = 10000.0;
+    bool rope_neox_style = true;
     std::vector<std::string> external_inputs;
     std::vector<ModelPlanOperation> operations;
     std::vector<std::string> blockers;
