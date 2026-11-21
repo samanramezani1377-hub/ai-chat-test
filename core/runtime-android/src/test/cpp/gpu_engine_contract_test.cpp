@@ -630,6 +630,7 @@ void test_model_and_quantization_registry_fail_closed() {
     const auto report = evaluate_model_preflight(model, architectures, quantizations);
     assert(report.architecture_known);
     assert(!report.all_quantization_decoders_validated);
+    assert(!report.all_quantization_gpu_kernels_validated);
     assert(!report.gpu_execution_ready);
     assert(report.unverified_quantized_tensors == 1);
 }

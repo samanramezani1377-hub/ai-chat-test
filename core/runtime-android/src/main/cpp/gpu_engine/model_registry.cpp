@@ -142,6 +142,7 @@ ModelPreflightReport evaluate_model_preflight(const GgufFileInfo& model,
     }
     report.all_tensor_storage_known = true;
     report.all_quantization_decoders_validated = true;
+    report.all_quantization_gpu_kernels_validated = true;
 
     const auto adapter = architectures.find(model.architecture);
     report.architecture_known = static_cast<bool>(adapter);
@@ -179,9 +180,11 @@ ModelPreflightReport evaluate_model_preflight(const GgufFileInfo& model,
             const QuantizationFormat* format = quantizations.find(tensor.type_id);
             if (!format || format->decoder_state != SupportState::Validated) {
                 report.all_quantization_decoders_validated = false;
+                report.all_quantization_gpu_kernels_validated = false;
                 ++report.unverified_quantized_tensors;
                 report.blockers.emplace_back("UNVERIFIED_QUANT_DECODER:" + tensor.type.name);
             } else if (format->gpu_kernel_state != SupportState::Validated) {
+                report.all_quantization_gpu_kernels_validated = false;
                 report.blockers.emplace_back("UNVERIFIED_GPU_QUANT_KERNEL:" + tensor.type.name);
             }
         }

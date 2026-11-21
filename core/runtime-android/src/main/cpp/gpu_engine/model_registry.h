@@ -87,6 +87,7 @@ struct ModelPreflightReport {
     bool architecture_known = false;
     bool all_tensor_storage_known = false;
     bool all_quantization_decoders_validated = false;
+    bool all_quantization_gpu_kernels_validated = false;
     bool gpu_execution_ready = false;
     std::vector<std::string> blockers;
 };
