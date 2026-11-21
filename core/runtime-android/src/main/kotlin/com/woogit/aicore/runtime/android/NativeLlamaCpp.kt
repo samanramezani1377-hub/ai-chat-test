@@ -17,6 +17,8 @@ internal object NativeLlamaCpp {
     private const val TAG = "AIChatRuntime"
     private const val PREFLIGHT_FILE = "ai-chat-model-preflight.txt"
     private var nativeInitialized = false
+    private var gpuEngineActive = false
+    private var loadedContextLength = 0
 
     const val GPU_LAYERS_MAX = 99
     const val GPU_LAYERS_ALL = -1
@@ -27,15 +29,30 @@ internal object NativeLlamaCpp {
         Log.i(TAG, "ACTIVATION_NATIVE_LIBRARY_LOAD_RETURNED")
     }
 
-    /** Prefer WebGPU OpenGL ES Compatibility where supported; native llama.cpp may place unsupported work on CPU. */
+    /** Initialize llama.cpp for the CPU fallback only. GPU inference is owned by AIChatGpuEngine. */
     private fun ensureNativeInitialized() {
         synchronized(this) {
-            Log.i(TAG, "ACTIVATION_NATIVE_INIT_REQUESTED backend=WebGPU-OpenGLES previously_initialized=$nativeInitialized")
-            nativeInit(true)
-            nativeInstallFatalHandlers()
-            nativeInitialized = true
-            Log.i(TAG, "ACTIVATION_NATIVE_INIT_RETURNED backend=WebGPU-OpenGLES")
+            if (!nativeInitialized) {
+                Log.i(TAG, "ACTIVATION_NATIVE_INIT_REQUESTED backend=CPU previously_initialized=false")
+                nativeInit(false)
+                nativeInstallFatalHandlers()
+                nativeInitialized = true
+                Log.i(TAG, "ACTIVATION_NATIVE_INIT_RETURNED backend=CPU")
+            }
         }
+    }
+
+    /** Shared-memory mobile GPUs use a conservative quarter of currently safe system memory. */
+    private fun conservativeGpuMemoryBudgetBytes(): Long {
+        val appContext = try {
+            Class.forName("android.app.ActivityThread")
+                .getMethod("currentApplication")
+                .invoke(null) as? Context
+        } catch (_: Throwable) { null } ?: return 0L
+        val manager = appContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return 0L
+        val memoryInfo = ActivityManager.MemoryInfo()
+        manager.getMemoryInfo(memoryInfo)
+        return (memoryInfo.availMem - memoryInfo.threshold).coerceAtLeast(0L) / 4L
     }
 
     /** One serialized native activation transaction. Native side owns model/context lifetime. */
@@ -47,12 +64,44 @@ internal object NativeLlamaCpp {
         require(file.isFile && file.canRead()) { "Model file is not readable: $path" }
 
         persistModelLoadPreflight(path, contextLength, gpuLayers)
+        if (gpuEngineActive) {
+            nativeGpuEngineUnload()
+            gpuEngineActive = false
+        }
+
+        val fullGpuRequest = gpuLayers == GPU_LAYERS_ALL || gpuLayers == GPU_LAYERS_MAX
+        if (fullGpuRequest) {
+            val budgetBytes = conservativeGpuMemoryBudgetBytes()
+            if (budgetBytes > 0L) {
+                val gpuResult = try {
+                    nativeGpuEngineLoadModel(path, contextLength, budgetBytes)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "GPU_ENGINE_LOAD_EXCEPTION type=${t::class.java.name} message=${t.message}", t)
+                    -1
+                }
+                if (gpuResult == 0) {
+                    gpuEngineActive = true
+                    loadedContextLength = contextLength
+                    Log.i(TAG, "ACTIVATION_LOAD_END result=0 runtime=AIChatGpuEngine gpu_backend=selected memory_budget_bytes=$budgetBytes")
+                    return 0
+                }
+                val gpuDiagnostics = nativeGpuEngineDiagnostics()
+                Log.w(TAG, "GPU_ENGINE_LOAD_FALLBACK code=$gpuResult diagnostics=$gpuDiagnostics")
+                nativeGpuEngineUnload()
+            } else {
+                Log.w(TAG, "GPU_ENGINE_LOAD_FALLBACK reason=NO_SAFE_SHARED_MEMORY_BUDGET")
+            }
+        } else if (gpuLayers != 0) {
+            Log.w(TAG, "GPU_ENGINE_LOAD_FALLBACK reason=PARTIAL_GPU_LAYER_MODE_NOT_SUPPORTED requested_layers=$gpuLayers")
+        }
+
         configurePersistentPrefixCache()
         ensureNativeInitialized()
-        Log.i(TAG, "ACTIVATION_LOAD_BEGIN ctx_len=$contextLength gpu_layers=$gpuLayers file=${file.name}")
+        Log.i(TAG, "ACTIVATION_LOAD_BEGIN ctx_len=$contextLength gpu_layers=0 runtime=llama.cpp-CPU file=${file.name}")
         return try {
-            val result = nativeLoad(path, contextLength, gpuLayers)
-            Log.i(TAG, "ACTIVATION_LOAD_END result=$result gpu_layers=$gpuLayers")
+            val result = nativeLoad(path, contextLength, 0)
+            loadedContextLength = if (result == 0) contextLength else 0
+            Log.i(TAG, "ACTIVATION_LOAD_END result=$result runtime=llama.cpp-CPU")
             result
         } catch (t: Throwable) {
             Log.e(TAG, "ACTIVATION_LOAD_EXCEPTION type=${t::class.java.name} message=${t.message}", t)
@@ -63,7 +112,13 @@ internal object NativeLlamaCpp {
     @Synchronized
     fun unload() {
         Log.i(TAG, "ACTIVATION_UNLOAD_BEGIN")
-        nativeUnload()
+        if (gpuEngineActive) {
+            nativeGpuEngineUnload()
+            gpuEngineActive = false
+        } else if (nativeInitialized) {
+            nativeUnload()
+        }
+        loadedContextLength = 0
         Log.i(TAG, "ACTIVATION_UNLOAD_END")
     }
 
@@ -125,7 +180,7 @@ internal object NativeLlamaCpp {
         }
     }
 
-    fun countTokens(prompt: String): Int = nativeCountTokens(prompt)
+    fun countTokens(prompt: String): Int = if (gpuEngineActive) nativeGpuEngineCountTokens(prompt) else nativeCountTokens(prompt)
 
     fun generate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float, cachePrefixTokens: Int = 0, continuationPrefixTokens: Int = 0): Flow<String> = callbackFlow {
         val listener = object : TokenListener {
@@ -140,34 +195,37 @@ internal object NativeLlamaCpp {
                 }
             }
         }
-        // Reset before launching the blocking JNI worker. If cancellation wins
-        // the race before nativeGenerate enters, native code must retain the stop.
-        nativeResetStop()
+        val useGpuEngine = gpuEngineActive
+        // The GPU session resets its own cancellation state at generation start.
+        // llama.cpp retains its existing reset/stop protocol on the CPU path.
+        if (!useGpuEngine) nativeResetStop()
         val worker = launch {
-            val result = nativeGenerate(prompt, maxTokens, temperature, topK, topP, minP, cachePrefixTokens, continuationPrefixTokens, listener)
+            val result = if (useGpuEngine) {
+                nativeGpuEngineGenerate(prompt, maxTokens, temperature, topK, topP, minP, listener)
+            } else {
+                nativeGenerate(prompt, maxTokens, temperature, topK, topP, minP, cachePrefixTokens, continuationPrefixTokens, listener)
+            }
             if (result == 0 || result == 9) close()
-            else close(IllegalStateException("llama.cpp generation failed: code=$result"))
+            else close(IllegalStateException("AI inference generation failed: code=$result"))
         }
         awaitClose {
             if (!worker.isCompleted) {
-                // callbackFlow cancellation does not interrupt a blocking JNI call.
-                // Stop the native decode and wait for it to return before releasing
-                // the Flow, otherwise the next generation can race the previous one.
-                nativeStop()
+                // Stop the active runtime and wait for the blocking JNI call to return.
+                if (useGpuEngine) nativeGpuEngineStop() else nativeStop()
                 runBlocking { worker.join() }
             }
         }
     }.buffer(Channel.UNLIMITED)
 
     @Synchronized
-    fun stop() = nativeStop()
+    fun stop() { if (gpuEngineActive) nativeGpuEngineStop() else nativeStop() }
 
     /** Probes the independent Dawn/Universal GLES engine without loading a model or changing llama.cpp state. */
     @Synchronized
-    fun gpuEngineDiagnostics(): String = nativeGpuEngineProbe()
+    fun gpuEngineDiagnostics(): String = if (gpuEngineActive) nativeGpuEngineDiagnostics() else nativeGpuEngineProbe()
 
-    fun runtimeInfo(): String = nativeRuntimeInfo()
-    fun contextLength(): Int = nativeContextLength()
+    fun runtimeInfo(): String = if (gpuEngineActive) nativeGpuEngineDiagnostics() else nativeRuntimeInfo()
+    fun contextLength(): Int = if (gpuEngineActive) nativeGpuEngineContextLength() else nativeContextLength()
 
     private interface TokenListener { fun onToken(token: String) }
     @JvmStatic private external fun nativeSetCacheDirectory(path: String): Boolean
@@ -180,6 +238,13 @@ internal object NativeLlamaCpp {
     @JvmStatic private external fun nativeStop()
     @JvmStatic private external fun nativeUnload()
     @JvmStatic private external fun nativeGpuEngineProbe(): String
+    @JvmStatic private external fun nativeGpuEngineLoadModel(path: String, contextLength: Int, memoryBudgetBytes: Long): Int
+    @JvmStatic private external fun nativeGpuEngineGenerate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float, listener: TokenListener): Int
+    @JvmStatic private external fun nativeGpuEngineCountTokens(text: String): Int
+    @JvmStatic private external fun nativeGpuEngineContextLength(): Int
+    @JvmStatic private external fun nativeGpuEngineStop()
+    @JvmStatic private external fun nativeGpuEngineUnload()
+    @JvmStatic private external fun nativeGpuEngineDiagnostics(): String
     @JvmStatic private external fun nativeRuntimeInfo(): String
     @JvmStatic private external fun nativeContextLength(): Int
 }
