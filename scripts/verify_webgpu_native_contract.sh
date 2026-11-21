@@ -65,6 +65,7 @@ grep -q 'AI_CHAT_WEBGPU_WAIT_RESULT_V2' "$WEBGPU_FAILURE_PATCH" || fail "Dawn ca
 grep -q 'std::make_shared<ai_chat_webgpu_wait_result>' "$WEBGPU_FAILURE_PATCH" || fail "AllowSpontaneous callbacks must not capture stack-owned result state"
 grep -q 'AI_CHAT_WEBGPU_GRAPH_FAILURE_PROPAGATION_V2' "$WEBGPU_FAILURE_PATCH" || fail "WebGPU execution errors must propagate as GGML_STATUS_FAILED"
 grep -q 'AI_CHAT_WEBGPU_GRAPH_SYNC_COMPLETED' "$WEBGPU_FAILURE_PATCH" || fail "Queue completion must be checked before reporting graph success"
+grep -q 'AI_CHAT_WEBGPU_QUEUE_COMPLETION_GUARD_V1' "$WEBGPU_FAILURE_PATCH" || fail "Cached CMake source trees must receive queue completion guard upgrades"
 grep -q 'AI_CHAT_WEBGPU_GRAPH_ERROR_STATE_V1' "$WEBGPU_FAILURE_PATCH" || fail "Transient graph errors must be separated from terminal device loss"
 grep -q 'AI_CHAT_WEBGPU_READBACK_GUARDS_V2' "$WEBGPU_FAILURE_PATCH" || fail "Failed MapAsync must not be followed by mapped-range access"
 grep -q 'AI_CHAT_WEBGPU_UNCAPTURED_ERROR' "$WEBGPU_FAILURE_PATCH" || fail "Uncaptured Dawn errors must be persisted without GGML_ABORT"
