@@ -110,10 +110,18 @@ public:
                 expect_shape(prefix + "attn_k.bias", {kv_dimension});
                 expect_shape(prefix + "attn_v.bias", {kv_dimension});
                 expect_shape(prefix + "attn_output.bias", {embedding});
-                for (const char* bias : {"attn_q.bias", "attn_k.bias", "attn_v.bias", "attn_output.bias"}) {
-                    const auto found = tensors.find(prefix + bias);
-                    if (found != tensors.end() && found->second->type.name != "F32")
-                        plan.blockers.emplace_back("UNSUPPORTED_QWEN2_BIAS_DTYPE:" + prefix + bias);
+                const std::pair<const char*, uint64_t> bias_layouts[] = {
+                    {"attn_q.bias", embedding}, {"attn_k.bias", kv_dimension},
+                    {"attn_v.bias", kv_dimension}, {"attn_output.bias", embedding}
+                };
+                for (const auto& bias : bias_layouts) {
+                    const auto found = tensors.find(prefix + bias.first);
+                    if (found != tensors.end() &&
+                        (found->second->type.name != "F32" ||
+                         bias.second > std::numeric_limits<uint64_t>::max() / sizeof(float) ||
+                         found->second->byte_size != bias.second * sizeof(float))) {
+                        plan.blockers.emplace_back("UNSUPPORTED_QWEN2_BIAS_STORAGE_OR_DTYPE:" + prefix + bias.first);
+                    }
                 }
             }
             expect_shape(prefix + "attn_output.weight", {embedding, embedding});
