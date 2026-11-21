@@ -113,3 +113,12 @@ GPU initialization, memory allocation, shader compilation, command submission, s
 ## 8. Initial implementation boundary
 
 The first code increment introduces backend-neutral contracts and a bridge to Universal GPU Adapter diagnostics. It intentionally does not route inference through the new engine and does not claim a working Dawn inference backend. This preserves the CPU path and existing GPU inference while the independent engine is built.
+
+
+### Tokenizer adapter boundary
+
+Tokenizer behavior is separate from model architecture and from GGUF parsing. `TokenizerRegistry` selects an adapter by the exact pair `tokenizer.ggml.model` + `tokenizer.ggml.pre`. The initial SentencePiece and byte-level BPE adapters parse the GGUF token vocabulary, merges/scores and special-token metadata without llama.cpp. Their algorithms are intentionally registered as `UNVERIFIED`; `TokenizerEngine` rejects encode/decode until profile-specific parity tests promote them. Unknown tokenizer profiles fail preflight instead of silently falling back to a different algorithm.
+
+### Android backend composition
+
+`register_android_gpu_backends` registers Dawn before Universal GLES. `initialize_android_gpu_engine` tries the ordered preference list and records fallback diagnostics. This only establishes backend readiness and compute self-tests; it does not imply that a model graph, tokenizer, quantized kernel or full inference path is validated.
