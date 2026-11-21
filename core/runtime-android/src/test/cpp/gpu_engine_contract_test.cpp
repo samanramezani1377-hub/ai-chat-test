@@ -59,6 +59,11 @@ public:
     BackendKind kind() const noexcept override { return BackendKind::OpenGles; }
     Status enumerate_devices(std::vector<DeviceInfo>& out) override {
         out.clear();
+        DeviceInfo device;
+        device.backend = BackendKind::OpenGles;
+        device.name = "fake-test-device";
+        device.compute_available = true;
+        out.push_back(device);
         return Status::success();
     }
     Status initialize(const DeviceInfo&) override { ready = true; return Status::success(); }
@@ -199,6 +204,28 @@ private:
 };
 
 
+
+void test_gpu_engine_lifecycle() {
+    GpuEngine engine;
+    auto backend = std::make_shared<FakeBackend>();
+    assert(engine.register_backend(backend).ok());
+    assert(engine.initialize(BackendKind::OpenGles).ok());
+    assert(engine.ready());
+    assert(engine.active_device());
+    assert(engine.diagnostics().device_name == "fake-test-device");
+    assert(!engine.active_device()->inference_ready);
+
+    ComputeGraph graph;
+    GraphNode node;
+    node.name = "single";
+    node.dispatch.label = "single";
+    size_t index = 0;
+    assert(graph.add_node(node, index).ok());
+    assert(engine.execute(graph).ok());
+    assert(engine.shutdown().ok());
+    assert(!engine.ready());
+}
+
 void test_add_operator_candidate_and_reference() {
     OperatorRegistry registry;
     assert(register_builtin_operator_candidates(registry).ok());
@@ -333,6 +360,7 @@ int main() {
     test_operator_registry_fail_closed();
     test_model_and_quantization_registry_fail_closed();
     test_add_operator_candidate_and_reference();
+    test_gpu_engine_lifecycle();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";
     return 0;

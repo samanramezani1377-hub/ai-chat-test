@@ -183,6 +183,26 @@ private:
     std::vector<std::shared_ptr<Backend>> backends_;
 };
 
+struct RuntimeDiagnostics;
+
+class GpuEngine {
+public:
+    Status register_backend(std::shared_ptr<Backend> backend);
+    Status initialize(BackendKind preferred_backend = BackendKind::DawnWebGpu);
+    Status execute(const ComputeGraph& graph, const std::atomic<bool>* cancellation = nullptr);
+    Status shutdown();
+
+    bool ready() const noexcept;
+    const DeviceInfo* active_device() const noexcept;
+    const RuntimeDiagnostics& diagnostics() const noexcept;
+
+private:
+    BackendRegistry registry_;
+    std::shared_ptr<Backend> active_backend_;
+    DeviceInfo active_device_;
+    RuntimeDiagnostics diagnostics_;
+};
+
 struct RuntimeDiagnostics {
     std::string runtime_name = "AIChatGpuEngine";
     std::string runtime_version = "0.1.0";
