@@ -1,6 +1,7 @@
 #include "kv_cache.h"
 
 #include <limits>
+#include <string>
 #include <utility>
 
 namespace ai_chat::gpu_engine {
@@ -37,7 +38,7 @@ Status KvCache::estimate_bytes(const KvCacheConfig& config, uint64_t& out_bytes)
     }
     uint64_t bytes = 0;
     if (!multiply_checked(config.kv_heads, config.head_dimension, bytes) ||
-        !multiply_checked(bytes, item_size, bytes) ||
+        !multiply_checked(bytes, item_size, bytes) || bytes % 4 != 0 ||
         !multiply_checked(bytes, config.maximum_sequence_length, bytes) ||
         !multiply_checked(bytes, config.layers, bytes) ||
         !multiply_checked(bytes, 2, out_bytes)) {
