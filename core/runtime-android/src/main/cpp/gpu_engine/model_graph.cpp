@@ -1,5 +1,6 @@
 #include "model_graph.h"
 #include "execution_engine.h"
+#include <unordered_map>
 
 #include <algorithm>
 #include <unordered_set>
@@ -125,6 +126,85 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
     return Status::success();
 }
 
+
+
+namespace {
+std::string builder_key(const std::string& name, BackendKind backend) {
+    return name + "#" + std::to_string(static_cast<int>(backend));
+}
+}
+
+Status OperatorDispatchRegistry::register_builder(OperatorDispatchBuilderDefinition definition) {
+    if (definition.operator_name.empty() || definition.backend == BackendKind::Unknown || !definition.build)
+        return {StatusCode::InvalidArgument, "Operator dispatch builder requires operator, backend and callback"};
+    const std::string key = builder_key(definition.operator_name, definition.backend);
+    if (builders_.find(key) != builders_.end())
+        return {StatusCode::InvalidArgument, "Operator dispatch builder is already registered"};
+    builders_.emplace(key, std::move(definition));
+    return Status::success();
+}
+
+const OperatorDispatchBuilderDefinition* OperatorDispatchRegistry::find(
+        const std::string& operator_name, BackendKind backend) const noexcept {
+    const auto found = builders_.find(builder_key(operator_name, backend));
+    return found == builders_.end() ? nullptr : &found->second;
+}
+
+Status ModelGraphCompiler::compile(const ModelExecutionPlan& plan, const TensorBindings& tensors,
+                                   const OperatorDispatchRegistry& builders,
+                                   const OperatorRegistry& operators, BackendKind backend,
+                                   ComputeGraph& graph) const {
+    if (!plan.structurally_validated || !plan.operator_coverage_validated ||
+        !plan.execution_validated || !plan.blockers.empty()) {
+        return {StatusCode::Unsupported, "Model plan has not passed structural, operator and execution validation"};
+    }
+    ComputeGraph candidate;
+    std::unordered_map<std::string, size_t> producers;
+    std::unordered_set<std::string> external(plan.external_inputs.begin(), plan.external_inputs.end());
+    for (const auto& operation : plan.operations) {
+        const auto* definition = builders.find(operation.operator_name, backend);
+        if (!definition || definition->validation != SupportState::Validated)
+            return {StatusCode::Unsupported, "No validated dispatch builder for operator: " + operation.operator_name};
+        std::vector<Tensor> inputs, weights;
+        std::vector<size_t> dependencies;
+        for (const auto& name : operation.inputs) {
+            const auto tensor = tensors.find(name);
+            if (tensor == tensors.end())
+                return {StatusCode::InvalidArgument, "Missing model graph input tensor: " + name};
+            inputs.push_back(tensor->second);
+            const auto producer = producers.find(name);
+            if (producer != producers.end()) dependencies.push_back(producer->second);
+            else if (external.find(name) == external.end())
+                return {StatusCode::InvalidArgument, "Model graph input has no producer or external-input declaration: " + name};
+        }
+        for (const auto& name : operation.weight_tensors) {
+            const auto weight = tensors.find(name);
+            if (weight == tensors.end())
+                return {StatusCode::InvalidArgument, "Missing model weight tensor: " + name};
+            weights.push_back(weight->second);
+        }
+        const auto output = tensors.find(operation.output);
+        if (output == tensors.end())
+            return {StatusCode::InvalidArgument, "Missing model graph output tensor: " + operation.output};
+        std::sort(dependencies.begin(), dependencies.end());
+        dependencies.erase(std::unique(dependencies.begin(), dependencies.end()), dependencies.end());
+        ComputeDispatch dispatch;
+        Status status = definition->build(operation, inputs, weights, output->second, dispatch);
+        if (!status.ok()) return status;
+        if (dispatch.backend != backend || dispatch.validation != KernelValidation::Validated)
+            return {StatusCode::Unsupported, "Dispatch builder returned an unvalidated or mismatched backend kernel"};
+        GraphNode node;
+        node.name = operation.id;
+        node.dependencies = std::move(dependencies);
+        node.dispatch = std::move(dispatch);
+        size_t index = 0;
+        status = candidate.add_node(std::move(node), operators, index);
+        if (!status.ok()) return status;
+        producers[operation.output] = index;
+    }
+    graph = std::move(candidate);
+    return Status::success();
+}
 
 Status validate_model_plan_operator_coverage(ModelExecutionPlan& plan,
                                              const OperatorRegistry& registry,

@@ -117,6 +117,7 @@ public:
         plan.attention_heads = heads;
         plan.kv_heads = kv_heads;
         plan.feed_forward_length = feed_forward;
+        plan.external_inputs = {"token_ids", "kv_cache"};
         auto add = [&plan](std::string id, std::string op,
                            std::vector<std::string> inputs,
                            std::vector<std::string> weights,
