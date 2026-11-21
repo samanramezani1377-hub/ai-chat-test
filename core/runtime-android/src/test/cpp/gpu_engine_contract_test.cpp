@@ -1379,8 +1379,12 @@ void test_qwen2_dense_adapter_builds_bias_aware_structural_plan() {
     assert(adapter->build_execution_plan(model, plan).ok());
     assert(plan.architecture == "qwen2" && plan.structurally_validated);
     assert(!plan.gpu_ready && !plan.execution_validated);
+    assert(plan.vocabulary_size == 2 && plan.head_dimension == 4);
     assert(std::find_if(plan.operations.begin(), plan.operations.end(), [](const auto& op) {
-        return op.id == "blk.0.attn_q.bias.apply" && op.operator_name == "Add";
+        return op.id == "layer.0.attention_output_bias.apply" && op.operator_name == "Add";
+    }) != plan.operations.end());
+    assert(std::find_if(plan.operations.begin(), plan.operations.end(), [](const auto& op) {
+        return op.id == "layer.0.q_bias.apply" && op.operator_name == "Add";
     }) != plan.operations.end());
     model.tensors.pop_back();
     assert(adapter->build_execution_plan(model, plan).code == StatusCode::Unsupported);
