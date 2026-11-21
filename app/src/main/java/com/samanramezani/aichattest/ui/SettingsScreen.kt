@@ -9,6 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import com.samanramezani.aichattest.AppContainer
 import com.samanramezani.aichattest.InferenceSettingsAccess
 import com.samanramezani.aichattest.providers.CloudflareConfig
 import com.samanramezani.aichattest.providers.CloudflareProvider
@@ -40,8 +41,9 @@ private const val KEY_RECENT_MESSAGES = "recent_messages"
 private const val KEY_SEED = "seed"
 private const val KEY_STOPS = "stop_sequences"
 private const val KEY_MAX_ACTION_STEPS = "max_action_steps"
+private const val KEY_GPU_LAYERS = "gpu_layers"
 
-private val sections = listOf("مدل", "صدا", "پاسخ", "زمینه", "عامل", "حباب و صفحه", "لاگ کرش")
+private val sections = listOf("مدل", "GPU", "صدا", "پاسخ", "زمینه", "عامل", "حباب و صفحه", "لاگ کرش")
 
 private enum class InferencePreset(val title: String, val description: String, val settings: InferenceSettings) {
     FAST("سریع", "برای گفت‌وگوی روزمره", InferenceSettings(temperature=.7, maxNewTokens=256, topK=32, topP=.9, minP=0.0, repeatPenalty=1.1, contextLength=2048, recentMessages=6, maxActionSteps=2)),
@@ -98,6 +100,7 @@ fun SettingsScreen(
                 item {
                     when (section) {
                         "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete, onProviderChanged, providerStore)
+                        "GPU" -> GpuLayerControls()
                         "پاسخ" -> InferenceControls()
                         "زمینه" -> ContextControls()
                         "عامل" -> AgentControls()
@@ -290,6 +293,41 @@ private fun CloudflareProviderSettings(onProviderChanged: () -> Unit, sharedStor
             Text(error.message, color = MaterialTheme.colorScheme.onErrorContainer)
             Text("اقدام پیشنهادی: ${error.action}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
         }
+    }
+}
+
+@Composable
+private fun GpuLayerControls() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val preferences = remember(context) { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
+    var selected by remember(preferences) { mutableIntStateOf(preferences.getInt(KEY_GPU_LAYERS, -1)) }
+    var dirty by remember { mutableStateOf(false) }
+    val choices = listOf(0, 1, 2, 4, 8, 16, 32, 64, 99, -1)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("لایه‌های GPU", style = MaterialTheme.typography.titleLarge)
+        Text("تعداد لایه‌هایی که برای اجرا به GPU منتقل می‌شوند. صفر یعنی فقط CPU؛ «همه» یعنی درخواست انتقال تمام لایه‌های قابل پشتیبانی. تغییر پس از بارگذاری مجدد مدل اعمال می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                choices.chunked(3).forEach { group ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        group.forEach { value ->
+                            val label = when (value) { 0 -> "CPU"; -1 -> "همه"; else -> value.toString() }
+                            FilterChip(selected = selected == value, onClick = { selected = value; dirty = true }, label = { Text(label) })
+                        }
+                    }
+                }
+            }
+        }
+        SaveRow(dirty, apply = {
+            preferences.edit().putInt(KEY_GPU_LAYERS, selected).apply()
+            AppContainer.latest?.setGpuLayers(selected)
+            dirty = false
+        }, reset = {
+            selected = -1
+            preferences.edit().putInt(KEY_GPU_LAYERS, -1).apply()
+            AppContainer.latest?.setGpuLayers(-1)
+            dirty = false
+        })
     }
 }
 
