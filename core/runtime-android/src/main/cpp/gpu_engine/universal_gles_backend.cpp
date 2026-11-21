@@ -118,7 +118,10 @@ Status dispatch_gles(const ComputeDispatch& d, const ai_chat::gpu::UniversalGpuC
     }
     glDispatchCompute(d.workgroups_x,d.workgroups_y,d.workgroups_z);
     glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT|GL_BUFFER_UPDATE_BARRIER_BIT);
-    const GLenum error=glGetError(); glUseProgram(0); glDeleteProgram(program);
+    const GLenum error=glGetError();
+    glUseProgram(0);
+    for (const auto& binding : d.bindings) glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding.binding, 0);
+    glDeleteProgram(program);
     return error==GL_NO_ERROR?Status::success():gl_error("glDispatchCompute",error);
 }
 
@@ -132,7 +135,8 @@ Status self_test_gles_backend(const ai_chat::gpu::UniversalGpuCapabilities& caps
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, id);
     glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(input), input, GL_DYNAMIC_COPY);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-    Status status = glGetError() == GL_NO_ERROR ? Status::success() : gl_error("self-test buffer allocation", glGetError());
+    const GLenum allocation_error = glGetError();
+    Status status = allocation_error == GL_NO_ERROR ? Status::success() : gl_error("self-test buffer allocation", allocation_error);
     if (!status.ok()) { glDeleteBuffers(1, &id); return status; }
     auto buffer = std::make_shared<GlesBuffer>(id, sizeof(input), MemoryDomain::Device);
     ComputeDispatch dispatch;
@@ -140,9 +144,9 @@ Status self_test_gles_backend(const ai_chat::gpu::UniversalGpuCapabilities& caps
     dispatch.kernel_id = "internal-gles-u32-transform-v1";
     dispatch.backend = BackendKind::OpenGles;
     dispatch.validation = KernelValidation::Validated;
-    dispatch.glsl_source = "#version 310 es\\n"
-        "layout(local_size_x=4) in;\\n"
-        "layout(std430,binding=0) buffer Data { uint values[]; };\\n"
+    dispatch.glsl_source = "#version 310 es\n"
+        "layout(local_size_x=4) in;\n"
+        "layout(std430,binding=0) buffer Data { uint values[]; };\n"
         "void main(){ uint i=gl_GlobalInvocationID.x; values[i]=values[i]*3u+7u; }";
     dispatch.bindings.push_back({0, buffer, 0, sizeof(input)});
     dispatch.workgroups_x = 1;
