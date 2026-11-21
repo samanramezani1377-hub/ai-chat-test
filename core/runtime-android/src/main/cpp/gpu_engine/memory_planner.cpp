@@ -111,10 +111,12 @@ Status allocate_model_activation_tensors(const ModelExecutionPlan& model, Memory
             : (last == last_use.end() ? index : last->second);
     }
 
-    for (auto& entry : pending_tensors) {
-        if (!context.tensors.emplace(entry.first, std::move(entry.second)).second)
+    for (const auto& entry : pending_tensors) {
+        if (context.tensors.find(entry.first) != context.tensors.end())
             return {StatusCode::InvalidArgument, "Activation tensor binding was concurrently created"};
     }
+    for (auto& entry : pending_tensors)
+        context.tensors.emplace(entry.first, std::move(entry.second));
     context.activation_leases.insert(context.activation_leases.end(),
                                      std::make_move_iterator(leases.begin()),
                                      std::make_move_iterator(leases.end()));
