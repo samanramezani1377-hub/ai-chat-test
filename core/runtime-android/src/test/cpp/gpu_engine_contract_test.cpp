@@ -365,6 +365,11 @@ void test_kv_cache_device_append_avoids_host_roundtrip() {
     std::memcpy(value_bytes->bytes.data(), value_data, sizeof(value_data));
     assert(cache->append_device(0, 0, 1, keys, 0, values, 0).ok());
     assert(cache->valid_tokens(0) == 1);
+    Tensor cached_key_tensor, cached_value_tensor;
+    assert(cache->key_tensor(0, cached_key_tensor).ok());
+    assert(cache->value_tensor(0, cached_value_tensor).ok());
+    assert(cached_key_tensor.descriptor().shape == std::vector<uint64_t>({1, 2, 2}));
+    assert(cached_value_tensor.element_count() == 4);
     auto cached_keys = std::dynamic_pointer_cast<FakeBuffer>(cache->key_buffer(0));
     auto cached_values = std::dynamic_pointer_cast<FakeBuffer>(cache->value_buffer(0));
     assert(std::memcmp(cached_keys->bytes.data(), key_data, sizeof(key_data)) == 0);

@@ -32,6 +32,8 @@ public:
     uint32_t valid_tokens(uint32_t layer) const noexcept;
     std::shared_ptr<Buffer> key_buffer(uint32_t layer) const noexcept;
     std::shared_ptr<Buffer> value_buffer(uint32_t layer) const noexcept;
+    Status key_tensor(uint32_t layer, Tensor& out) const;
+    Status value_tensor(uint32_t layer, Tensor& out) const;
     uint64_t bytes_per_token() const noexcept;
     uint64_t total_bytes() const noexcept;
 

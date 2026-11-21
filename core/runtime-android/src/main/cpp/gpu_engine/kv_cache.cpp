@@ -167,6 +167,31 @@ std::shared_ptr<Buffer> KvCache::value_buffer(uint32_t layer) const noexcept {
     return layer < layers_.size() ? layers_[layer].values.buffer() : std::shared_ptr<Buffer>{};
 }
 
+
+Status KvCache::key_tensor(uint32_t layer, Tensor& out) const {
+    if (layer >= layers_.size() || layers_[layer].valid_tokens == 0)
+        return {StatusCode::NotReady, "KV cache key tensor has no valid tokens"};
+    TensorDesc descriptor;
+    descriptor.shape = {layers_[layer].valid_tokens, config_.kv_heads, config_.head_dimension};
+    descriptor.data_type = config_.data_type;
+    descriptor.memory = MemoryDomain::Device;
+    descriptor.layout = TensorLayout::Contiguous;
+    descriptor.alignment = 4;
+    return Tensor::create(std::move(descriptor), layers_[layer].keys.buffer(), 0, out);
+}
+
+Status KvCache::value_tensor(uint32_t layer, Tensor& out) const {
+    if (layer >= layers_.size() || layers_[layer].valid_tokens == 0)
+        return {StatusCode::NotReady, "KV cache value tensor has no valid tokens"};
+    TensorDesc descriptor;
+    descriptor.shape = {layers_[layer].valid_tokens, config_.kv_heads, config_.head_dimension};
+    descriptor.data_type = config_.data_type;
+    descriptor.memory = MemoryDomain::Device;
+    descriptor.layout = TensorLayout::Contiguous;
+    descriptor.alignment = 4;
+    return Tensor::create(std::move(descriptor), layers_[layer].values.buffer(), 0, out);
+}
+
 uint64_t KvCache::bytes_per_token() const noexcept { return bytes_per_token_; }
 uint64_t KvCache::total_bytes() const noexcept { return total_bytes_; }
 
