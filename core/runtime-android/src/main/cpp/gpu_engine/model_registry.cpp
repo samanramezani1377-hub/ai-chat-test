@@ -140,13 +140,37 @@ public:
         plan.feed_forward_length = feed_forward;
         plan.vocabulary_size = model.tokenizer.tokens.size();
         plan.head_dimension = head_dimension;
+        plan.rotary_dimensions = head_dimension;
+        metadata_u64(model, metadata_prefix + "rope.dimension_count", plan.rotary_dimensions);
+        if (!metadata_f64(model, metadata_prefix + "attention.layer_norm_rms_epsilon", plan.rms_norm_epsilon))
+            plan.rms_norm_epsilon = 0.00001;
+        if (!metadata_f64(model, metadata_prefix + "rope.freq_base", plan.rope_theta))
+            plan.rope_theta = 10000.0;
+        if (plan.rotary_dimensions == 0 || plan.rotary_dimensions > head_dimension ||
+            (plan.rotary_dimensions & 1u) != 0)
+            plan.blockers.emplace_back("INVALID_ROTARY_DIMENSION");
         plan.external_inputs = {"token_ids", "kv_cache"};
         auto add = [&plan](std::string id, std::string op,
                            std::vector<std::string> inputs,
                            std::vector<std::string> weights,
                            std::string output, std::vector<uint64_t> shape = {}) {
-            plan.operations.push_back({std::move(id), std::move(op), std::move(inputs),
-                                       std::move(weights), std::move(output), std::move(shape)});
+            ModelPlanOperation operation{std::move(id), std::move(op), std::move(inputs),
+                                         std::move(weights), std::move(output), std::move(shape)};
+            if (operation.operator_name == "RMSNorm")
+                operation.float_attributes["epsilon"] = plan.rms_norm_epsilon;
+            if (operation.operator_name == "RoPE") {
+                operation.float_attributes["theta"] = plan.rope_theta;
+                operation.integer_attributes["rotary_dimensions"] = plan.rotary_dimensions;
+                operation.bool_attributes["neox_style"] = plan.rope_neox_style;
+            }
+            if (operation.operator_name == "Attention") {
+                operation.float_attributes["scale"] = 1.0 / std::sqrt(static_cast<double>(head_dimension));
+                operation.integer_attributes["kv_heads"] = kv_heads;
+                operation.bool_attributes["causal"] = true;
+            }
+            if (operation.operator_name == "Embedding")
+                operation.integer_attributes["vocabulary_size"] = plan.vocabulary_size;
+            plan.operations.push_back(std::move(operation));
         };
         add("embedding", "Embedding", {"token_ids"}, {embedding_weight},
             "hidden", {0, embedding});
@@ -207,6 +231,7 @@ public:
         plan.blockers.emplace_back("TOKENIZER_EXECUTION_NOT_VALIDATED");
         plan.blockers.emplace_back("OPERATOR_KERNEL_COVERAGE_NOT_VALIDATED");
         plan.blockers.emplace_back("MODEL_GRAPH_EXECUTION_NOT_VALIDATED");
+        plan.blockers.emplace_back("ROPE_STYLE_NUMERICAL_VALIDATION_PENDING");
         plan.gpu_ready = false;
         return Status::success();
     }
