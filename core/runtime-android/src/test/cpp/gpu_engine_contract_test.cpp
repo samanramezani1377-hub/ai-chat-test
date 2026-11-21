@@ -228,6 +228,9 @@ public:
     }
     const ArchitectureDescriptor& descriptor() const noexcept override { return descriptor_; }
     Status validate_metadata(const GgufFileInfo&) const override { return Status::success(); }
+    Status build_execution_plan(const GgufFileInfo&, ModelExecutionPlan&) const override {
+        return {StatusCode::Unsupported, "test adapter has no execution plan"};
+    }
 private:
     ArchitectureDescriptor descriptor_;
 };
