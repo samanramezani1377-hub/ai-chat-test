@@ -694,6 +694,36 @@ void test_add_operator_candidate_and_reference() {
     assert(rope_dispatch.bindings.size() == 2);
     assert(rope_dispatch.wgsl_source.find("const START_POSITION: u32 = 1u;") != std::string::npos);
 
+    const float q_values[] = {1.0f, 0.0f};
+    const float k_values[] = {1.0f, 0.0f};
+    const float v_values[] = {2.0f, 4.0f};
+    float attention_output[2] = {};
+    assert(reference_attention_f32(q_values, k_values, v_values, attention_output,
+                                   1, 1, 1, 2, 0).ok());
+    assert(std::abs(attention_output[0] - 2.0f) < 1e-6f &&
+           std::abs(attention_output[1] - 4.0f) < 1e-6f);
+
+    BufferDesc attention_desc{8, 4, MemoryDomain::Device, false, "attention"};
+    std::shared_ptr<Buffer> q_buffer, k_buffer, v_buffer, attention_output_buffer;
+    assert(backend.allocate(attention_desc, q_buffer).ok());
+    assert(backend.allocate(attention_desc, k_buffer).ok());
+    assert(backend.allocate(attention_desc, v_buffer).ok());
+    assert(backend.allocate(attention_desc, attention_output_buffer).ok());
+    TensorDesc attention_tensor_desc;
+    attention_tensor_desc.shape = {1, 1, 2};
+    attention_tensor_desc.data_type = DataType::F32;
+    Tensor q_tensor, k_tensor, v_tensor, attention_tensor;
+    assert(Tensor::create(attention_tensor_desc, q_buffer, 0, q_tensor).ok());
+    assert(Tensor::create(attention_tensor_desc, k_buffer, 0, k_tensor).ok());
+    assert(Tensor::create(attention_tensor_desc, v_buffer, 0, v_tensor).ok());
+    assert(Tensor::create(attention_tensor_desc, attention_output_buffer, 0, attention_tensor).ok());
+    ComputeDispatch attention_dispatch;
+    assert(build_attention_f32_candidate(q_tensor, k_tensor, v_tensor, attention_tensor,
+                                         0, attention_dispatch).ok());
+    assert(attention_dispatch.bindings.size() == 4);
+    assert(attention_dispatch.wgsl_source.find("const SCALE: f32 = 0.707106781187;") != std::string::npos ||
+           attention_dispatch.wgsl_source.find("const SCALE: f32 = 0.7071067812;") != std::string::npos);
+
     BufferDesc activation_desc{12, 4, MemoryDomain::Device, false, "silu"};
     std::shared_ptr<Buffer> activation_input_buffer, activation_output_buffer;
     assert(backend.allocate(activation_desc, activation_input_buffer).ok());

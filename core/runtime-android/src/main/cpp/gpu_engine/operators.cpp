@@ -11,6 +11,56 @@
 namespace ai_chat::gpu_engine {
 namespace {
 
+constexpr char kAttentionF32Wgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> query: array<f32>;
+@group(0) @binding(1) var<storage, read> key: array<f32>;
+@group(0) @binding(2) var<storage, read> value: array<f32>;
+@group(0) @binding(3) var<storage, read_write> output: array<f32>;
+const TOKENS: u32 = 1u;
+const QUERY_HEADS: u32 = 1u;
+const KV_HEADS: u32 = 1u;
+const HEAD_DIM: u32 = 2u;
+const PAST_LENGTH: u32 = 0u;
+const SEQUENCE_LENGTH: u32 = 1u;
+const SCALE: f32 = 0.70710678118;
+@compute @workgroup_size(1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let head_task = gid.x;
+    if (head_task >= TOKENS * QUERY_HEADS) { return; }
+    let token = head_task / QUERY_HEADS;
+    let query_head = head_task % QUERY_HEADS;
+    let kv_head = query_head / (QUERY_HEADS / KV_HEADS);
+    let query_base = head_task * HEAD_DIM;
+    let kv_base = kv_head * SEQUENCE_LENGTH * HEAD_DIM;
+    var accumulator: array<f32, 256>;
+    for (var d = 0u; d < HEAD_DIM; d = d + 1u) { accumulator[d] = 0.0; }
+    var maximum = -3.402823466e+38;
+    var denominator = 0.0;
+    let allowed = PAST_LENGTH + token + 1u;
+    for (var sequence = 0u; sequence < allowed; sequence = sequence + 1u) {
+        var score = 0.0;
+        for (var d = 0u; d < HEAD_DIM; d = d + 1u) {
+            score = score + query[query_base + d] *
+                    key[kv_base + sequence * HEAD_DIM + d];
+        }
+        score = score * SCALE;
+        let next_maximum = max(maximum, score);
+        let old_weight = exp(maximum - next_maximum);
+        let new_weight = exp(score - next_maximum);
+        denominator = denominator * old_weight + new_weight;
+        for (var d = 0u; d < HEAD_DIM; d = d + 1u) {
+            accumulator[d] = accumulator[d] * old_weight +
+                value[kv_base + sequence * HEAD_DIM + d] * new_weight;
+        }
+        maximum = next_maximum;
+    }
+    let output_base = head_task * HEAD_DIM;
+    for (var d = 0u; d < HEAD_DIM; d = d + 1u) {
+        output[output_base + d] = accumulator[d] / denominator;
+    }
+}
+)wgsl";
+
 constexpr char kEmbeddingF32Wgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> embedding_weights: array<f32>;
 @group(0) @binding(1) var<storage, read> token_ids: array<u32>;
@@ -259,6 +309,107 @@ Status build_binary_f32_candidate(const Tensor& lhs, const Tensor& rhs,
 
 } // namespace
 
+
+
+const char* attention_f32_wgsl_source() noexcept { return kAttentionF32Wgsl; }
+
+Status build_attention_f32_candidate(const Tensor& query, const Tensor& key,
+                                     const Tensor& value, const Tensor& output,
+                                     uint32_t past_length, ComputeDispatch& dispatch) {
+    dispatch = ComputeDispatch{};
+    if (!is_contiguous_f32(query) || !is_contiguous_f32(key) ||
+        !is_contiguous_f32(value) || !is_contiguous_f32(output))
+        return {StatusCode::Unsupported, "Attention candidate requires contiguous device/shared F32 tensors"};
+    const auto& q = query.descriptor().shape;
+    const auto& k = key.descriptor().shape;
+    const auto& v = value.descriptor().shape;
+    if (q.size() != 3 || k.size() != 3 || v != k || output.descriptor().shape != q ||
+        q[0] == 0 || q[1] == 0 || q[2] == 0 || k[0] == 0 || k[1] == 0 ||
+        q[2] != k[2] || q[1] % k[1] != 0 || q[2] > 256 ||
+        q[0] > UINT32_MAX || q[1] > UINT32_MAX || k[1] > UINT32_MAX ||
+        k[0] > UINT32_MAX || q[2] > UINT32_MAX ||
+        q[0] > UINT32_MAX - past_length || k[0] != static_cast<uint64_t>(past_length) + q[0] ||
+        query.element_count() > UINT32_MAX || key.element_count() > UINT32_MAX ||
+        value.element_count() > UINT32_MAX || output.element_count() > UINT32_MAX)
+        return {StatusCode::InvalidArgument, "Attention expects Q[T,Hq,D], K/V[S,Hkv,D] with causal S=past+T and valid GQA dimensions"};
+    if (!query.buffer() || !key.buffer() || !value.buffer() || !output.buffer() ||
+        output.buffer().get() == query.buffer().get() || output.buffer().get() == key.buffer().get() ||
+        output.buffer().get() == value.buffer().get())
+        return {StatusCode::InvalidArgument, "Attention output must use a distinct valid buffer"};
+    dispatch.label = "attention-f32-causal-gqa-online-softmax-unverified";
+    dispatch.wgsl_source = kAttentionF32Wgsl;
+    const double scale = 1.0 / std::sqrt(static_cast<double>(q[2]));
+    std::ostringstream scale_literal;
+    scale_literal << std::setprecision(12) << scale;
+    std::string scale_text = scale_literal.str();
+    if (scale_text.find_first_of(".eE") == std::string::npos) scale_text += ".0";
+    const std::pair<std::string, std::string> constants[] = {
+        {"const TOKENS: u32 = 1u;", "const TOKENS: u32 = " + std::to_string(q[0]) + "u;"},
+        {"const QUERY_HEADS: u32 = 1u;", "const QUERY_HEADS: u32 = " + std::to_string(q[1]) + "u;"},
+        {"const KV_HEADS: u32 = 1u;", "const KV_HEADS: u32 = " + std::to_string(k[1]) + "u;"},
+        {"const HEAD_DIM: u32 = 2u;", "const HEAD_DIM: u32 = " + std::to_string(q[2]) + "u;"},
+        {"const PAST_LENGTH: u32 = 0u;", "const PAST_LENGTH: u32 = " + std::to_string(past_length) + "u;"},
+        {"const SEQUENCE_LENGTH: u32 = 1u;", "const SEQUENCE_LENGTH: u32 = " + std::to_string(k[0]) + "u;"},
+        {"const SCALE: f32 = 0.70710678118;", "const SCALE: f32 = " + scale_text + ";"},
+    };
+    for (const auto& constant : constants) {
+        const size_t position = dispatch.wgsl_source.find(constant.first);
+        if (position == std::string::npos)
+            return {StatusCode::BackendFailure, "Attention WGSL constant placeholder is missing"};
+        dispatch.wgsl_source.replace(position, constant.first.size(), constant.second);
+    }
+    dispatch.workgroups_x = static_cast<uint32_t>(q[0] * q[1]);
+    dispatch.bindings = {
+        {0, query.buffer(), query.byte_offset(), query.byte_size()},
+        {1, key.buffer(), key.byte_offset(), key.byte_size()},
+        {2, value.buffer(), value.byte_offset(), value.byte_size()},
+        {3, output.buffer(), output.byte_offset(), output.byte_size()},
+    };
+    return Status::success();
+}
+
+Status reference_attention_f32(const float* query, const float* key, const float* value,
+                               float* output, uint32_t tokens, uint32_t query_heads,
+                               uint32_t kv_heads, uint32_t head_dimension,
+                               uint32_t past_length) {
+    if ((!query || !key || !value || !output) && tokens && query_heads && kv_heads && head_dimension)
+        return {StatusCode::InvalidArgument, "Attention reference received a null pointer"};
+    if (tokens == 0 || query_heads == 0 || kv_heads == 0 || head_dimension == 0 ||
+        head_dimension > 256 || query_heads % kv_heads != 0 ||
+        tokens > UINT32_MAX - past_length)
+        return {StatusCode::InvalidArgument, "Attention reference dimensions are invalid"};
+    const uint32_t sequence_length = past_length + tokens;
+    const float scale = 1.0f / std::sqrt(static_cast<float>(head_dimension));
+    std::vector<float> accumulator(head_dimension);
+    for (uint32_t token = 0; token < tokens; ++token) {
+        for (uint32_t head = 0; head < query_heads; ++head) {
+            const uint32_t kv_head = head / (query_heads / kv_heads);
+            const uint64_t qbase = (static_cast<uint64_t>(token) * query_heads + head) * head_dimension;
+            const uint64_t kvbase = static_cast<uint64_t>(kv_head) * sequence_length * head_dimension;
+            std::fill(accumulator.begin(), accumulator.end(), 0.0f);
+            float maximum = -std::numeric_limits<float>::infinity();
+            float denominator = 0.0f;
+            for (uint32_t position = 0; position <= past_length + token; ++position) {
+                float score = 0.0f;
+                for (uint32_t d = 0; d < head_dimension; ++d)
+                    score += query[qbase + d] * key[kvbase + static_cast<uint64_t>(position) * head_dimension + d];
+                score *= scale;
+                const float next_maximum = std::max(maximum, score);
+                const float old_weight = std::exp(maximum - next_maximum);
+                const float new_weight = std::exp(score - next_maximum);
+                denominator = denominator * old_weight + new_weight;
+                for (uint32_t d = 0; d < head_dimension; ++d)
+                    accumulator[d] = accumulator[d] * old_weight +
+                        value[kvbase + static_cast<uint64_t>(position) * head_dimension + d] * new_weight;
+                maximum = next_maximum;
+            }
+            const uint64_t out_base = (static_cast<uint64_t>(token) * query_heads + head) * head_dimension;
+            for (uint32_t d = 0; d < head_dimension; ++d)
+                output[out_base + d] = accumulator[d] / denominator;
+        }
+    }
+    return Status::success();
+}
 
 const char* embedding_f32_wgsl_source() noexcept { return kEmbeddingF32Wgsl; }
 
@@ -754,6 +905,21 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     softmax.kernel_id = "dawn-softmax-f32-generic-v1";
     softmax.wgsl_source = kSoftmaxF32Wgsl;
     status = registry.register_kernel(std::move(softmax));
+    if (!status.ok()) return status;
+
+    KernelDefinition attention;
+    attention.operator_name = "Attention";
+    attention.backend = BackendKind::DawnWebGpu;
+    attention.input_type = DataType::F32;
+    attention.output_type = DataType::F32;
+    attention.min_input_count = 3;
+    attention.max_input_count = 3;
+    attention.min_rank = 3;
+    attention.max_rank = 3;
+    attention.validation = KernelValidation::Unverified;
+    attention.kernel_id = "dawn-attention-f32-causal-gqa-v1";
+    attention.wgsl_source = kAttentionF32Wgsl;
+    status = registry.register_kernel(std::move(attention));
     if (!status.ok()) return status;
 
     KernelDefinition rope;

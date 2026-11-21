@@ -66,6 +66,15 @@ Status reference_rope_f32(const float* input, float* output,
                           uint32_t tokens, uint32_t heads, uint32_t head_dimension,
                           const RopeConfig& config);
 
+const char* attention_f32_wgsl_source() noexcept;
+Status build_attention_f32_candidate(const Tensor& query, const Tensor& key,
+                                     const Tensor& value, const Tensor& output,
+                                     uint32_t past_length, ComputeDispatch& dispatch);
+Status reference_attention_f32(const float* query, const float* key, const float* value,
+                               float* output, uint32_t tokens, uint32_t query_heads,
+                               uint32_t kv_heads, uint32_t head_dimension,
+                               uint32_t past_length);
+
 Status register_builtin_operator_candidates(OperatorRegistry& registry);
 
 } // namespace ai_chat::gpu_engine
