@@ -61,7 +61,8 @@ public:
     }
 
     Status dispatch_compute(const ComputeDispatch& dispatch) override {
-        if (dispatch.validation != KernelValidation::Validated || dispatch.kernel_id.empty()) {
+        if (dispatch.validation != KernelValidation::Validated || dispatch.kernel_id.empty() ||
+            dispatch.backend != BackendKind::DawnWebGpu) {
             return {StatusCode::Unsupported, "Dawn refuses dispatches without a validated kernel identity"};
         }
         if (dispatch.wgsl_source.empty() ||

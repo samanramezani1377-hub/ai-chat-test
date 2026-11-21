@@ -432,6 +432,7 @@ Status build_q8_0_matmul_candidate(const Tensor& activations,
         return {StatusCode::InvalidArgument, "Q8_0 MatMul buffer ranges are inconsistent"};
     dispatch.label = "q8-0-matmul-f32-activation-generic-unverified";
     dispatch.kernel_id = "dawn-q8-0-matmul-f32-activation-v1";
+    dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = kQ8_0MatMulWgsl;
     const std::pair<std::string, std::string> constants[] = {
         {"const ROWS: u32 = 1u;", "const ROWS: u32 = " + std::to_string(a[0]) + "u;"},
@@ -508,6 +509,7 @@ Status build_q5_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
         return {StatusCode::InvalidArgument, "Q5_0 input/output buffer ranges are inconsistent"};
     dispatch.label = "q5-0-dequantize-generic-unverified";
     dispatch.kernel_id = "dawn-q5-0-dequantize-generic-v1";
+    dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = kQ5_0DequantizeWgsl;
     const std::string placeholder = "const ELEMENT_COUNT: u32 = 32u;";
     const std::string replacement = "const ELEMENT_COUNT: u32 = " + std::to_string(output.element_count()) + "u;";
@@ -544,6 +546,7 @@ Status build_q5_1_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
         return {StatusCode::InvalidArgument, "Q5_1 input/output buffer ranges are inconsistent"};
     dispatch.label = "q5-1-dequantize-generic-unverified";
     dispatch.kernel_id = "dawn-q5-1-dequantize-generic-v1";
+    dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = kQ5_1DequantizeWgsl;
     const std::string placeholder = "const ELEMENT_COUNT: u32 = 32u;";
     const std::string replacement = "const ELEMENT_COUNT: u32 = " + std::to_string(output.element_count()) + "u;";
@@ -582,6 +585,7 @@ Status build_q4_1_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
         return {StatusCode::InvalidArgument, "Q4_1 input/output buffer ranges are inconsistent"};
     dispatch.label = "q4-1-dequantize-generic-unverified";
     dispatch.kernel_id = "dawn-q4-1-dequantize-generic-v1";
+    dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = kQ4_1DequantizeWgsl;
     const std::string placeholder = "const ELEMENT_COUNT: u32 = 32u;";
     const std::string replacement = "const ELEMENT_COUNT: u32 = " +
@@ -625,6 +629,7 @@ Status build_q4_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
         return {StatusCode::InvalidArgument, "Q4_0 input/output buffer ranges are inconsistent"};
     dispatch.label = "q4-0-dequantize-generic-unverified";
     dispatch.kernel_id = "dawn-q4-0-dequantize-generic-v1";
+    dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = kQ4_0DequantizeWgsl;
     const std::string placeholder = "const ELEMENT_COUNT: u32 = 32u;";
     const std::string replacement = "const ELEMENT_COUNT: u32 = " +
@@ -672,6 +677,7 @@ Status build_q8_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
     }
     dispatch.label = "q8-0-dequantize-generic-unverified";
     dispatch.kernel_id = "dawn-q8-0-dequantize-generic-v1";
+    dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = kQ8_0DequantizeWgsl;
     const std::string placeholder = "const ELEMENT_COUNT: u32 = 32u;";
     const std::string replacement = "const ELEMENT_COUNT: u32 = " +

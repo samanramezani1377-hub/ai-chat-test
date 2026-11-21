@@ -595,6 +595,7 @@ void test_gpu_engine_lifecycle() {
     node.name = "single";
     node.dispatch.label = "single";
     node.dispatch.kernel_id = "test-single";
+    node.dispatch.backend = BackendKind::OpenGles;
     node.dispatch.validation = KernelValidation::Validated;
     size_t index = 0;
     GraphNode unverified_node;
@@ -975,6 +976,7 @@ void test_graph_scheduler_order_and_cancel() {
     first.name = "first";
     first.dispatch.label = "first";
     first.dispatch.kernel_id = "test-first";
+    first.dispatch.backend = BackendKind::OpenGles;
     first.dispatch.validation = KernelValidation::Validated;
     assert(graph.add_node(first, index).ok());
 
@@ -983,6 +985,7 @@ void test_graph_scheduler_order_and_cancel() {
     second.dependencies = {0};
     second.dispatch.label = "second";
     second.dispatch.kernel_id = "test-second";
+    second.dispatch.backend = BackendKind::OpenGles;
     second.dispatch.validation = KernelValidation::Validated;
     assert(graph.add_node(second, index).ok());
 
@@ -990,6 +993,7 @@ void test_graph_scheduler_order_and_cancel() {
     independent.name = "independent";
     independent.dispatch.label = "independent";
     independent.dispatch.kernel_id = "test-independent";
+    independent.dispatch.backend = BackendKind::OpenGles;
     independent.dispatch.validation = KernelValidation::Validated;
     assert(graph.add_node(independent, index).ok());
 

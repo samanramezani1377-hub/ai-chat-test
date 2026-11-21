@@ -139,6 +139,7 @@ struct BufferBinding {
 struct ComputeDispatch {
     std::string label;
     std::string kernel_id;
+    BackendKind backend = BackendKind::Unknown;
     KernelValidation validation = KernelValidation::Unverified;
     std::string wgsl_source;
     std::string entry_point = "main";

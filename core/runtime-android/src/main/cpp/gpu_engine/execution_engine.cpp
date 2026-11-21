@@ -211,6 +211,7 @@ Status OperatorRegistry::authorize_dispatch(const std::string& kernel_id, Backen
         return {StatusCode::Unsupported, "Kernel is not registered as validated for this backend"};
     if (dispatch.wgsl_source.empty() || dispatch.kernel_id != kernel_id)
         return {StatusCode::InvalidArgument, "Dispatch does not match the requested registered kernel"};
+    dispatch.backend = backend;
     dispatch.validation = KernelValidation::Validated;
     return Status::success();
 }
@@ -233,7 +234,8 @@ Status ComputeGraph::add_node(GraphNode node, size_t& out_index) {
         }
     }
     if (node.name.empty()) return {StatusCode::InvalidArgument, "Graph node name cannot be empty"};
-    if (node.dispatch.validation != KernelValidation::Validated || node.dispatch.kernel_id.empty()) {
+    if (node.dispatch.validation != KernelValidation::Validated || node.dispatch.kernel_id.empty() ||
+        node.dispatch.backend == BackendKind::Unknown) {
         return {StatusCode::Unsupported, "Compute graph rejects unverified or unidentified kernels"};
     }
     nodes_.push_back(std::move(node));
