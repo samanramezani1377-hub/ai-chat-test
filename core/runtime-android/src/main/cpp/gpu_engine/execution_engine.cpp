@@ -354,9 +354,23 @@ Status ComputeGraph::add_node(GraphNode node, const OperatorRegistry& registry, 
         }
     }
     if (node.name.empty()) return {StatusCode::InvalidArgument, "Graph node name cannot be empty"};
-    if (node.dispatch.validation != KernelValidation::Validated || node.dispatch.kernel_id.empty() ||
-        node.dispatch.backend == BackendKind::Unknown ||
-        !registry.is_validated_kernel(node.dispatch.kernel_id, node.dispatch.backend)) {
+    if (node.dispatch.backend == BackendKind::Unknown)
+        return {StatusCode::InvalidArgument, "Graph node dispatch must identify its backend"};
+    if (node.dispatch.copy_only) {
+        if (node.dispatch.buffer_copies.empty() || !node.dispatch.wgsl_source.empty() ||
+            !node.dispatch.glsl_source.empty() || !node.dispatch.bindings.empty())
+            return {StatusCode::InvalidArgument, "Copy-only graph nodes require only validated buffer-copy commands"};
+        for (const auto& copy : node.dispatch.buffer_copies) {
+            if (!copy.source || !copy.destination || copy.size_bytes == 0 ||
+                copy.source_offset > copy.source->size_bytes() ||
+                copy.size_bytes > copy.source->size_bytes() - copy.source_offset ||
+                copy.destination_offset > copy.destination->size_bytes() ||
+                copy.size_bytes > copy.destination->size_bytes() - copy.destination_offset)
+                return {StatusCode::InvalidArgument, "Graph buffer-copy range is invalid"};
+        }
+    } else if (node.dispatch.validation != KernelValidation::Validated ||
+               node.dispatch.kernel_id.empty() ||
+               !registry.is_validated_kernel(node.dispatch.kernel_id, node.dispatch.backend)) {
         return {StatusCode::Unsupported, "Compute graph rejects kernels not authorized by the active registry"};
     }
     nodes_.push_back(std::move(node));
@@ -403,8 +417,9 @@ Status ExecutionScheduler::execute(Backend& backend, const ComputeGraph& graph,
     Status status = graph.topological_order(order);
     if (!status.ok()) return status;
     for (size_t index : order) {
-        if (graph.nodes_[index].dispatch.backend != backend.kind()) {
-            return {StatusCode::Unsupported, "Graph kernel backend does not match the active device backend"};
+        const auto& dispatch = graph.nodes_[index].dispatch;
+        if (dispatch.backend != backend.kind()) {
+            return {StatusCode::Unsupported, "Graph node backend does not match the active device backend"};
         }
     }
     std::unique_ptr<CommandBatch> batch;
@@ -416,8 +431,17 @@ Status ExecutionScheduler::execute(Backend& backend, const ComputeGraph& graph,
         if (cancellation && cancellation->load(std::memory_order_relaxed)) {
             return {StatusCode::Cancelled, "Graph execution was cancelled before submission"};
         }
-        status = batch->dispatch_compute(graph.nodes_[index].dispatch);
-        if (!status.ok()) return status;
+        const auto& dispatch = graph.nodes_[index].dispatch;
+        for (const auto& copy : dispatch.buffer_copies) {
+            status = batch->copy_buffer(copy.source, copy.source_offset,
+                                        copy.destination, copy.destination_offset,
+                                        copy.size_bytes);
+            if (!status.ok()) return status;
+        }
+        if (!dispatch.copy_only) {
+            status = batch->dispatch_compute(dispatch);
+            if (!status.ok()) return status;
+        }
     }
     if (cancellation && cancellation->load(std::memory_order_relaxed)) {
         return {StatusCode::Cancelled, "Graph execution was cancelled before submission"};

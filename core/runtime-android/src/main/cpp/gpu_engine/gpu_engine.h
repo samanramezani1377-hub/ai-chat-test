@@ -129,6 +129,14 @@ public:
     virtual MemoryDomain memory_domain() const noexcept = 0;
 };
 
+struct BufferCopy {
+    std::shared_ptr<Buffer> source;
+    uint64_t source_offset = 0;
+    std::shared_ptr<Buffer> destination;
+    uint64_t destination_offset = 0;
+    uint64_t size_bytes = 0;
+};
+
 struct BufferBinding {
     uint32_t binding = 0;
     std::shared_ptr<Buffer> buffer;
@@ -145,6 +153,8 @@ struct ComputeDispatch {
     std::string glsl_source;
     std::string entry_point = "main";
     std::vector<BufferBinding> bindings;
+    std::vector<BufferCopy> buffer_copies;
+    bool copy_only = false;
     uint32_t workgroups_x = 1;
     uint32_t workgroups_y = 1;
     uint32_t workgroups_z = 1;
