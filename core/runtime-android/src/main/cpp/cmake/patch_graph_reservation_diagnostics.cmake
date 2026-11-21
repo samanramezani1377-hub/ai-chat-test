@@ -94,15 +94,45 @@ bool ggml_backend_sched_reserve(ggml_backend_sched_t sched, struct ggml_cgraph *
         "void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgraph * graph) {\n    GGML_LOG_INFO(\"AI_CHAT_GRAPH_SPLIT_INTERNAL_BEGIN nodes=%d leafs=%d\\n\", graph->n_nodes, graph->n_leafs);"
         "record entry to backend graph splitting")
 
+
+
+
+    file(WRITE "${_backend_file}" "${_backend}")
+endif()
+
+# Upgrade cached FetchContent trees as well as clean builds. These safeguards use
+# independent markers so later revisions are not skipped by the reservation V2 marker.
+file(READ "${_backend_file}" _backend)
+if (NOT _backend MATCHES "#include <stdexcept>")
+    if (NOT _backend MATCHES "#include <chrono>")
+        string(REPLACE "#include <algorithm>" "#include <algorithm>\n#include <chrono>" _backend "${_backend}")
+    endif()
+    string(REPLACE "#include <chrono>" "#include <chrono>\n#include <stdexcept>" _backend "${_backend}")
+    file(WRITE "${_backend_file}" "${_backend}")
+endif()
+
+if (NOT _backend MATCHES "AI_CHAT_GRAPH_RUNTIME_SPLIT_GUARD_V1")
     ai_chat_replace_once(_backend
         "    ggml_backend_sched_split_graph(sched, graph);\n\n    if (!ggml_backend_sched_alloc_splits(sched)) {"
-        "    try {\n        ggml_backend_sched_split_graph(sched, graph);\n    } catch (const std::exception & err) {\n        GGML_LOG_ERROR(\"AI_CHAT_GRAPH_SPLIT_FAILED stage=runtime reason=%s\\n\", err.what());\n        return false;\n    }\n\n    if (!ggml_backend_sched_alloc_splits(sched)) {"
+        "    try {\n        ggml_backend_sched_split_graph(sched, graph);\n    } catch (const std::exception & err) {\n        GGML_LOG_ERROR(\\"AI_CHAT_GRAPH_SPLIT_FAILED stage=runtime reason=%s\\\\n\\", err.what());\n        return false;\n    }\n\n    if (!ggml_backend_sched_alloc_splits(sched)) {"
         "return a recoverable graph allocation failure instead of propagating exceptions during inference")
-    ai_chat_replace_once(_backend
-        "    sched->ctx = ggml_init(params);\n    if (sched->ctx == NULL) {\n        GGML_ABORT(\"%s: failed to initialize context\\n\", __func__);\n    }"
-        "    GGML_LOG_INFO(\"AI_CHAT_GRAPH_SPLIT_CONTEXT_CREATE_BEGIN bytes=%zu\\n\", sched->context_buffer_size);\n    sched->ctx = ggml_init(params);\n    if (sched->ctx == NULL) {\n        GGML_LOG_ERROR(\"AI_CHAT_GRAPH_SPLIT_CONTEXT_CREATE_FAILED bytes=%zu\\n\", sched->context_buffer_size);\n        throw std::runtime_error(\"failed to initialize backend scheduler graph context\");\n    }\n    GGML_LOG_INFO(\"AI_CHAT_GRAPH_SPLIT_CONTEXT_CREATE_END success=1\\n\");"
-        "record scheduler context allocation failures before upstream abort")
+    string(APPEND _backend "\n// AI_CHAT_GRAPH_RUNTIME_SPLIT_GUARD_V1\n")
+    file(WRITE "${_backend_file}" "${_backend}")
+endif()
 
+if (NOT _backend MATCHES "AI_CHAT_GRAPH_SPLIT_CONTEXT_FAILURE_V1")
+    if (_backend MATCHES "AI_CHAT_GRAPH_SPLIT_CONTEXT_CREATE_BEGIN")
+        ai_chat_replace_once(_backend
+            "        GGML_ABORT(\\"%s: failed to initialize context\\\\n\\", __func__);"
+            "        throw std::runtime_error(\\"failed to initialize backend scheduler graph context\\");"
+            "convert cached scheduler context abort to recoverable exception")
+    else()
+        ai_chat_replace_once(_backend
+            "    sched->ctx = ggml_init(params);\n    if (sched->ctx == NULL) {\n        GGML_ABORT(\\"%s: failed to initialize context\\\\n\\", __func__);\n    }"
+            "    GGML_LOG_INFO(\\"AI_CHAT_GRAPH_SPLIT_CONTEXT_CREATE_BEGIN bytes=%zu\\\\n\\", sched->context_buffer_size);\n    sched->ctx = ggml_init(params);\n    if (sched->ctx == NULL) {\n        GGML_LOG_ERROR(\\"AI_CHAT_GRAPH_SPLIT_CONTEXT_CREATE_FAILED bytes=%zu\\\\n\\", sched->context_buffer_size);\n        throw std::runtime_error(\\"failed to initialize backend scheduler graph context\\");\n    }\n    GGML_LOG_INFO(\\"AI_CHAT_GRAPH_SPLIT_CONTEXT_CREATE_END success=1\\\\n\\");"
+            "trace and recover scheduler context allocation failure")
+    endif()
+    string(APPEND _backend "\n// AI_CHAT_GRAPH_SPLIT_CONTEXT_FAILURE_V1\n")
     file(WRITE "${_backend_file}" "${_backend}")
 endif()
 
