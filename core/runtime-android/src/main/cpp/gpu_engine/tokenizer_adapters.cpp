@@ -122,7 +122,9 @@ public:
             for(const auto& item:special){size_t p=text.find(item.first,pos);if(p<found||(p==found&&item.first.size()>len)){found=p;len=item.first.size();id=item.second;}}
             size_t end=found==std::string::npos?text.size():found;
             if(end>pos){s=encode_plain(m,map,text.substr(pos,end-pos),out);if(!s.ok()){out.clear();return s;}}
-            if(found==std::string::npos)break;out.push_back(id);pos=found+len;
+            if (found == std::string::npos) break;
+            out.push_back(id);
+            pos = found + len;
         }
         add_eos(m,out);return Status::success();
     }
@@ -131,7 +133,8 @@ public:
         for(uint32_t id:ids){if(id>=m.tokens.size())return {StatusCode::InvalidArgument,"SentencePiece token id out of range"};if(special_type(m,id))continue;
             uint8_t b=0;if(byte_token(m.tokens[id],b)){out.push_back(static_cast<char>(b));continue;}
             std::string piece=m.tokens[id];size_t p=0;while((p=piece.find("\xe2\x96\x81",p))!=std::string::npos){piece.replace(p,3," ");++p;}out+=piece;}
-        if(m.add_space_prefix&&!out.empty()&&out[0]==' ')out.erase(out.begin());return Status::success();
+        if (m.add_space_prefix && !out.empty() && out[0] == ' ') out.erase(out.begin());
+        return Status::success();
     }
 private:
     Status encode_plain(const GgufTokenizerInfo&m,const std::unordered_map<std::string,uint32_t>&map,
@@ -145,7 +148,10 @@ private:
         for(size_t i=0;i<norm.size();){size_t n=char_size(norm,i);symbols.emplace_back(norm.substr(i,n));i+=n;}
         while(symbols.size()>1){double best=-std::numeric_limits<double>::infinity();size_t at=symbols.size();
             for(size_t i=0;i+1<symbols.size();++i){auto it=map.find(symbols[i]+symbols[i+1]);if(it!=map.end()&&m.scores[it->second]>best){best=m.scores[it->second];at=i;}}
-            if(at==symbols.size())break;symbols[at]+=symbols[at+1];symbols.erase(symbols.begin()+static_cast<std::ptrdiff_t>(at+1));}
+            if (at == symbols.size()) break;
+            symbols[at] += symbols[at + 1];
+            symbols.erase(symbols.begin() + static_cast<std::ptrdiff_t>(at + 1));
+        }
         for(const auto&piece:symbols){Status s=append_piece(m,map,piece,out);if(!s.ok())return s;}return Status::success();
     }
     TokenizerDescriptor desc_;
