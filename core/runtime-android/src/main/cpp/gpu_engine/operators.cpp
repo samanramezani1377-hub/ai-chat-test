@@ -113,6 +113,7 @@ void main() {
 
 constexpr char kAttentionF32Glsl[] = R"glsl(#version 310 es
 precision highp float;
+precision highp int;
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 layout(std430, binding = 0) readonly buffer Query { float query_values[]; };
 layout(std430, binding = 1) readonly buffer Key { float key_values[]; };
@@ -207,55 +208,6 @@ void main() {
 }
 )glsl";
 
-constexpr char kAttentionF32Glsl[] = R"glsl(#version 310 es
-precision highp float;
-precision highp int;
-layout(local_size_x = 1, local_size_y = 1) in;
-layout(std430, binding = 0) readonly buffer Query { float query_values[]; };
-layout(std430, binding = 1) readonly buffer Key { float key_values[]; };
-layout(std430, binding = 2) readonly buffer Value { float value_values[]; };
-layout(std430, binding = 3) writeonly buffer Output { float output_values[]; };
-const uint TOKENS = 1u;
-const uint QUERY_HEADS = 1u;
-const uint KV_HEADS = 1u;
-const uint HEAD_DIM = 2u;
-const uint PAST_LENGTH = 0u;
-const uint SEQUENCE_LENGTH = 1u;
-const float SCALE = 0.70710678118;
-void main() {
-    uint token = gl_WorkGroupID.x;
-    uint query_head = gl_WorkGroupID.y;
-    if (token >= TOKENS || query_head >= QUERY_HEADS) return;
-    uint kv_head = query_head / (QUERY_HEADS / KV_HEADS);
-    uint head_task = token * QUERY_HEADS + query_head;
-    uint query_base = head_task * HEAD_DIM;
-    uint kv_head_offset = kv_head * HEAD_DIM;
-    float accumulator[256];
-    for (uint d = 0u; d < HEAD_DIM; ++d) accumulator[d] = 0.0;
-    float maximum = -3.402823466e+38;
-    float denominator = 0.0;
-    uint allowed = PAST_LENGTH + token + 1u;
-    for (uint sequence = 0u; sequence < allowed; ++sequence) {
-        float score = 0.0;
-        for (uint d = 0u; d < HEAD_DIM; ++d)
-            score += query_values[query_base + d] *
-                key_values[sequence * KV_HEADS * HEAD_DIM + kv_head_offset + d];
-        score *= SCALE;
-        float next_maximum = max(maximum, score);
-        float old_weight = exp(maximum - next_maximum);
-        float new_weight = exp(score - next_maximum);
-        denominator = denominator * old_weight + new_weight;
-        for (uint d = 0u; d < HEAD_DIM; ++d)
-            accumulator[d] = accumulator[d] * old_weight +
-                value_values[sequence * KV_HEADS * HEAD_DIM + kv_head_offset + d] * new_weight;
-        maximum = next_maximum;
-    }
-    uint output_base = head_task * HEAD_DIM;
-    for (uint d = 0u; d < HEAD_DIM; ++d)
-        output_values[output_base + d] = accumulator[d] / denominator;
-}
-)glsl";
-
 constexpr char kAddF32Wgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> lhs: array<f32>;
 @group(0) @binding(1) var<storage, read> rhs: array<f32>;
@@ -269,26 +221,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 )wgsl";
 
-constexpr char kEmbeddingF32Glsl[] = R"glsl(#version 310 es
-precision highp float;
-precision highp int;
-layout(local_size_x = 64) in;
-layout(std430, binding = 0) readonly buffer Weights { float weights[]; };
-layout(std430, binding = 1) readonly buffer TokenIds { uint token_ids[]; };
-layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
-const uint VOCABULARY_SIZE = 1u;
-const uint EMBEDDING_DIMENSION = 1u;
-const uint TOKEN_COUNT = 1u;
-void main() {
-    uint index = gl_GlobalInvocationID.x;
-    uint row = index / EMBEDDING_DIMENSION;
-    if (row >= TOKEN_COUNT) return;
-    uint token = token_ids[row];
-    if (token >= VOCABULARY_SIZE) { output_values[index] = uintBitsToFloat(0x7fc00000u); return; }
-    uint column = index % EMBEDDING_DIMENSION;
-    output_values[index] = weights[token * EMBEDDING_DIMENSION + column];
-}
-)glsl";
 constexpr char kAddF32Glsl[] = R"glsl(#version 310 es
 precision highp float;
 layout(local_size_x = 64) in;
@@ -312,46 +244,6 @@ void main() {
         float x = input_values[index];
         output_values[index] = x / (1.0 + exp(-x));
     }
-}
-)glsl";
-
-constexpr char kRopeF32Glsl[] = R"glsl(#version 310 es
-precision highp float;
-layout(local_size_x = 64) in;
-layout(std430, binding = 0) readonly buffer Input { float input_values[]; };
-layout(std430, binding = 1) writeonly buffer Output { float output_values[]; };
-const uint TOTAL_ELEMENTS = 1u;
-const uint HEADS = 1u;
-const uint HEAD_DIM = 2u;
-const uint ROTARY_DIM = 2u;
-const uint START_POSITION = 0u;
-const float THETA = 10000.0;
-const uint NEOX_STYLE = 0u;
-void main() {
-    uint index = gl_GlobalInvocationID.x;
-    if (index >= TOTAL_ELEMENTS) return;
-    uint dimension = index % HEAD_DIM;
-    if (dimension >= ROTARY_DIM) { output_values[index] = input_values[index]; return; }
-    uint token = index / (HEADS * HEAD_DIM);
-    uint half_dimension = ROTARY_DIM / 2u;
-    uint pair_index = dimension / 2u;
-    uint partner_dimension = dimension ^ 1u;
-    if (NEOX_STYLE == 1u) {
-        pair_index = dimension % half_dimension;
-        partner_dimension = dimension >= half_dimension ? dimension - half_dimension : dimension + half_dimension;
-    }
-    float exponent = 2.0 * float(pair_index) / float(ROTARY_DIM);
-    float inverse_frequency = pow(THETA, -exponent);
-    float angle = float(START_POSITION + token) * inverse_frequency;
-    float cosine = cos(angle);
-    float sine = sin(angle);
-    uint base = index - dimension;
-    float value = input_values[index];
-    float partner = input_values[base + partner_dimension];
-    if (NEOX_STYLE == 0u)
-        output_values[index] = (dimension & 1u) == 1u ? value * cosine + partner * sine : value * cosine - partner * sine;
-    else
-        output_values[index] = dimension >= half_dimension ? value * cosine + partner * sine : value * cosine - partner * sine;
 }
 )glsl";
 
@@ -907,6 +799,7 @@ Status build_embedding_f32_gles_candidate(const Tensor& embedding_weights,
         {"const uint VOCABULARY_SIZE = 1u;", "const uint VOCABULARY_SIZE = " + std::to_string(weights[0]) + "u;"},
         {"const uint EMBEDDING_DIMENSION = 1u;", "const uint EMBEDDING_DIMENSION = " + std::to_string(weights[1]) + "u;"},
         {"const uint TOKEN_COUNT = 1u;", "const uint TOKEN_COUNT = " + std::to_string(output_shape[0]) + "u;"},
+        {"const uint TOTAL_ELEMENTS = 1u;", "const uint TOTAL_ELEMENTS = " + std::to_string(output.element_count()) + "u;"},
     };
     for (const auto& constant : constants) {
         const size_t position = dispatch.glsl_source.find(constant.first);
@@ -1670,103 +1563,6 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     return registry.register_kernel(std::move(q8));
 }
 
-
-Status build_embedding_f32_gles_candidate(const Tensor& embedding_weights,
-                                          const std::shared_ptr<Buffer>& token_ids_buffer,
-                                          const std::vector<uint32_t>& validated_token_ids,
-                                          const Tensor& output,
-                                          ComputeDispatch& dispatch) {
-    Status status = build_embedding_f32_candidate(embedding_weights, token_ids_buffer,
-        validated_token_ids, output, dispatch);
-    if (!status.ok()) return status;
-    const auto& weights = embedding_weights.descriptor().shape;
-    const auto& out = output.descriptor().shape;
-    dispatch.backend = BackendKind::OpenGles;
-    dispatch.kernel_id = "gles-embedding-f32-generic-v1";
-    dispatch.label = "gles-embedding-f32-generic-unverified";
-    dispatch.wgsl_source.clear();
-    dispatch.glsl_source = kEmbeddingF32Glsl;
-    const std::pair<std::string, std::string> constants[] = {
-        {"const uint VOCABULARY_SIZE = 1u;", "const uint VOCABULARY_SIZE = " + std::to_string(weights[0]) + "u;"},
-        {"const uint EMBEDDING_DIMENSION = 1u;", "const uint EMBEDDING_DIMENSION = " + std::to_string(weights[1]) + "u;"},
-        {"const uint TOKEN_COUNT = 1u;", "const uint TOKEN_COUNT = " + std::to_string(out[0]) + "u;"},
-        {"const uint TOTAL_ELEMENTS = 1u;", "const uint TOTAL_ELEMENTS = " + std::to_string(output.element_count()) + "u;"},
-    };
-    for (const auto& item : constants) {
-        const size_t pos = dispatch.glsl_source.find(item.first);
-        if (pos == std::string::npos) return {StatusCode::BackendFailure, "GLES Embedding shader constant missing"};
-        dispatch.glsl_source.replace(pos, item.first.size(), item.second);
-    }
-    return Status::success();
-}
-
-Status build_rope_f32_gles_candidate(const Tensor& input, const Tensor& output,
-                                     const RopeConfig& config, ComputeDispatch& dispatch) {
-    Status status = build_rope_f32_candidate(input, output, config, dispatch);
-    if (!status.ok()) return status;
-    const auto& shape = input.descriptor().shape;
-    dispatch.backend = BackendKind::OpenGles;
-    dispatch.kernel_id = "gles-rope-f32-generic-v1";
-    dispatch.label = "gles-rope-f32-generic-unverified";
-    dispatch.wgsl_source.clear();
-    dispatch.glsl_source = kRopeF32Glsl;
-    const std::pair<std::string, std::string> constants[] = {
-        {"const uint TOTAL_ELEMENTS = 1u;", "const uint TOTAL_ELEMENTS = " + std::to_string(input.element_count()) + "u;"},
-        {"const uint HEADS = 1u;", "const uint HEADS = " + std::to_string(shape[1]) + "u;"},
-        {"const uint HEAD_DIM = 2u;", "const uint HEAD_DIM = " + std::to_string(shape[2]) + "u;"},
-        {"const uint ROTARY_DIM = 2u;", "const uint ROTARY_DIM = " + std::to_string(config.rotary_dimensions) + "u;"},
-        {"const uint START_POSITION = 0u;", "const uint START_POSITION = " + std::to_string(config.start_position) + "u;"},
-        {"const uint NEOX_STYLE = 0u;", std::string("const uint NEOX_STYLE = ") + (config.neox_style ? "1u;" : "0u;")},
-    };
-    for (const auto& item : constants) {
-        const size_t pos = dispatch.glsl_source.find(item.first);
-        if (pos == std::string::npos) return {StatusCode::BackendFailure, "GLES RoPE shader constant missing"};
-        dispatch.glsl_source.replace(pos, item.first.size(), item.second);
-    }
-    std::ostringstream theta;
-    theta << std::setprecision(9) << config.theta;
-    std::string theta_value = theta.str();
-    if (theta_value.find_first_of(".eE") == std::string::npos) theta_value += ".0";
-    const size_t theta_pos = dispatch.glsl_source.find("const float THETA = 10000.0;");
-    if (theta_pos == std::string::npos) return {StatusCode::BackendFailure, "GLES RoPE theta constant missing"};
-    dispatch.glsl_source.replace(theta_pos, std::string("const float THETA = 10000.0;").size(),
-        "const float THETA = " + theta_value + ";");
-    return Status::success();
-}
-
-Status build_attention_f32_gles_candidate(const Tensor& query, const Tensor& key,
-                                          const Tensor& value, const Tensor& output,
-                                          uint32_t past_length, ComputeDispatch& dispatch) {
-    Status status = build_attention_f32_candidate(query, key, value, output, past_length, dispatch);
-    if (!status.ok()) return status;
-    const auto& q = query.descriptor().shape;
-    const auto& k = key.descriptor().shape;
-    dispatch.backend = BackendKind::OpenGles;
-    dispatch.kernel_id = "gles-attention-f32-causal-gqa-v1";
-    dispatch.label = "gles-attention-f32-causal-gqa-unverified";
-    dispatch.wgsl_source.clear();
-    dispatch.glsl_source = kAttentionF32Glsl;
-    const double scale = 1.0 / std::sqrt(static_cast<double>(q[2]));
-    std::ostringstream scale_literal;
-    scale_literal << std::setprecision(12) << scale;
-    std::string scale_text = scale_literal.str();
-    if (scale_text.find_first_of(".eE") == std::string::npos) scale_text += ".0";
-    const std::pair<std::string, std::string> constants[] = {
-        {"const uint TOKENS = 1u;", "const uint TOKENS = " + std::to_string(q[0]) + "u;"},
-        {"const uint QUERY_HEADS = 1u;", "const uint QUERY_HEADS = " + std::to_string(q[1]) + "u;"},
-        {"const uint KV_HEADS = 1u;", "const uint KV_HEADS = " + std::to_string(k[1]) + "u;"},
-        {"const uint HEAD_DIM = 2u;", "const uint HEAD_DIM = " + std::to_string(q[2]) + "u;"},
-        {"const uint PAST_LENGTH = 0u;", "const uint PAST_LENGTH = " + std::to_string(past_length) + "u;"},
-        {"const uint SEQUENCE_LENGTH = 1u;", "const uint SEQUENCE_LENGTH = " + std::to_string(k[0]) + "u;"},
-        {"const float SCALE = 0.70710678118;", "const float SCALE = " + scale_text + ";"},
-    };
-    for (const auto& item : constants) {
-        const size_t pos = dispatch.glsl_source.find(item.first);
-        if (pos == std::string::npos) return {StatusCode::BackendFailure, "GLES Attention shader constant missing"};
-        dispatch.glsl_source.replace(pos, item.first.size(), item.second);
-    }
-    return Status::success();
-}
 
 Status register_builtin_gles_operator_candidates(OperatorRegistry& registry) {
     KernelDefinition add;
