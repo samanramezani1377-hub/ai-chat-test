@@ -194,6 +194,28 @@ private:
     std::vector<std::string> split(const std::string&s)const{
         std::vector<std::string> out;size_t i=0;const size_t digit_group=(desc_.pre_tokenizer=="qwen2"||desc_.pre_tokenizer=="qwen3")?1:3;
         while(i<s.size()){size_t n=0;uint32_t cp=codepoint(s,i,n);size_t start=i;
+            // GPT-2/Qwen-style pre-tokenizers keep common English contractions
+            // as independent pieces before byte-level BPE merge ranking.
+            if (s[i] == '\\'') {
+                static const char* contractions[] = {"'s", "'t", "'re", "'ve", "'m", "'ll", "'d"};
+                size_t contraction_length = 0;
+                for (const char* suffix : contractions) {
+                    const size_t length = std::char_traits<char>::length(suffix);
+                    if (i + length > s.size()) continue;
+                    bool matches = true;
+                    for (size_t j = 0; j < length; ++j) {
+                        const unsigned char actual = static_cast<unsigned char>(s[i + j]);
+                        const unsigned char expected = static_cast<unsigned char>(suffix[j]);
+                        if (std::tolower(actual) != std::tolower(expected)) { matches = false; break; }
+                    }
+                    if (matches) { contraction_length = length; break; }
+                }
+                if (contraction_length != 0) {
+                    out.emplace_back(s.substr(i, contraction_length));
+                    i += contraction_length;
+                    continue;
+                }
+            }
             if(cp==0x20 && i+n<s.size()){
                 size_t next_n=0;uint32_t next=codepoint(s,i+n,next_n);
                 if(!space(next)){

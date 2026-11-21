@@ -912,6 +912,20 @@ void test_tokenizer_engine_contracts() {
     assert((bpe_ids == std::vector<uint32_t>{2, 4}));
     std::string bpe_text;
     assert(bpe_adapter->decode(bpe, bpe_ids, bpe_text).ok() && bpe_text == "hi");
+
+    GgufTokenizerInfo bpe_contractions;
+    bpe_contractions.model = "gpt2";
+    bpe_contractions.pre_tokenizer = "gpt2";
+    bpe_contractions.tokens = {"w", "e", "'", "r", "'r", "'re", "we", "we're", "<unk>"};
+    bpe_contractions.merges = {"w e", "' r", "'r e", "we 're"};
+    bpe_contractions.token_types = {1, 1, 1, 1, 1, 1, 1, 1, 2};
+    bpe_contractions.unknown_token_id = 8;
+    auto contraction_adapter = builtins.find(bpe_contractions);
+    assert(contraction_adapter && contraction_adapter->validate_metadata(bpe_contractions).ok());
+    std::vector<uint32_t> contraction_ids;
+    assert(contraction_adapter->encode(bpe_contractions, "we're", contraction_ids).ok());
+    assert((contraction_ids == std::vector<uint32_t>{6, 5}));
+
     TokenizerEngine fail_closed_tokenizer(builtins);
     assert(fail_closed_tokenizer.encode(bpe, "hi", bpe_ids).code == StatusCode::Unsupported);
     assert(bpe_ids.empty());
