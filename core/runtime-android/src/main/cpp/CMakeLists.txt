@@ -114,6 +114,9 @@ FetchContent_MakeAvailable(llama_cpp)
 
 include("${AI_CHAT_NATIVE_CMAKE_DIR}/cmake/patch_webgpu_backend.cmake")
 
+# Trace and validate the per-layer recurrent state cache on the selected backend.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_recurrent_memory_diagnostics.cmake")
+
 # Do not silently ship a build where OpenMP was requested but FindOpenMP could
 # not enable it. This also catches NDK/runtime-linking regressions during CI.
 if (NOT GGML_OPENMP_ENABLED)
