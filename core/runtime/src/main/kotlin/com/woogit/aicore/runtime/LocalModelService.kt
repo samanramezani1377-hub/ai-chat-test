@@ -86,18 +86,19 @@ class LocalModelService(
                 val model = when (val result = repository.get(id)) {
                     is ModelResult.Success -> result.value
                     is ModelResult.Failure -> return@runtimeLock result
-                } ?: return@runtimeLock ModelResult.Failure(("Model is not registered"),
+                } ?: return@runtimeLock ModelResult.Failure(
+                    ModelError.InvalidModel("Model is not registered"),
                 )
 
                 if (model.format != ModelFormat.GGUF || model.validation != ValidationStatus.VALID) {
-                    return@withLock ModelResult.Failure(
+                    return@runtimeLock ModelResult.Failure(
                         ModelError.InvalidModel("Model is not valid for activation"),
                     )
                 }
 
                 try {
                     if (activeId == id) {
-                        return@withLock ModelResult.Success(
+                        return@runtimeLock ModelResult.Success(
                             model.copy(
                                 state = ModelState.ACTIVE,
                                 runtimeCompatibility = RuntimeCompatibility(true, null),
@@ -164,14 +165,14 @@ class LocalModelService(
             try {
                 currentCoroutineContext().ensureActive()
 
-                val activeModel = runtimeMutex.withLock {
-                    when (val result = repository.getActive()) {
-                        is ModelResult.Success -> result.value
-                        is ModelResult.Failure -> return@generationLock result
+                when (val result = runtimeMutex.withLock { repository.getActive() }) {
+                    is ModelResult.Failure -> return@generationLock result
+                    is ModelResult.Success -> if (result.value == null) {
+                        return@generationLock ModelResult.Failure(
+                            ModelError.RuntimeUnavailable("No model is active"),
+                        )
                     }
-                } ?: return@generationLock ModelResult.Failure(
-                    ModelError.RuntimeUnavailable("No model is active"),
-                )
+                }
 
                 // A stop request may arrive while the active-model record is read.
                 currentCoroutineContext().ensureActive()
@@ -247,7 +248,8 @@ class LocalModelService(
                 val model = when (val result = repository.get(id)) {
                     is ModelResult.Success -> result.value
                     is ModelResult.Failure -> return@runtimeLock result
-                } ?: return@runtimeLock ModelResult.Failure(("Model is not registered"),
+                } ?: return@runtimeLock ModelResult.Failure(
+                    ModelError.InvalidModel("Model is not registered"),
                 )
 
                 Files.deleteIfExists(model.path)
