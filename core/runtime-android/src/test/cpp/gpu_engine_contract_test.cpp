@@ -570,6 +570,8 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
            StatusCode::NumericalFailure);
     assert(validate_q5_1_matmul_kernel(backend, operators, quantizations).code ==
            StatusCode::NumericalFailure);
+    assert(validate_q5_0_embedding_kernel(backend, operators).code == StatusCode::NumericalFailure);
+    assert(validate_q5_1_embedding_kernel(backend, operators).code == StatusCode::NumericalFailure);
     FakeBackend dawn_backend(BackendKind::DawnWebGpu);
     OperatorRegistry dawn_operators;
     QuantizationRegistry dawn_quantizations;
@@ -602,6 +604,13 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     assert(!quantizations.can_execute_on_gpu(6, BackendKind::OpenGles));
     assert(!quantizations.can_execute_on_gpu(7, BackendKind::DawnWebGpu));
     assert(!quantizations.can_execute_on_gpu(7, BackendKind::OpenGles));
+    KernelDefinition q5_embedding_selected;
+    assert(operators.select_kernel("Embedding_Q5_0", BackendKind::OpenGles,
+        std::vector<DataType>{DataType::U32,DataType::U32}, DataType::F32, 2,
+        q5_embedding_selected).code == StatusCode::Unsupported);
+    assert(operators.select_kernel("Embedding_Q5_1", BackendKind::OpenGles,
+        std::vector<DataType>{DataType::U32,DataType::U32}, DataType::F32, 2,
+        q5_embedding_selected).code == StatusCode::Unsupported);
     assert(format != nullptr && format->gpu_kernel_state == SupportState::Unverified);
     assert(!quantizations.can_execute_on_gpu(8, BackendKind::DawnWebGpu));
     assert(!quantizations.can_execute_on_gpu(8, BackendKind::OpenGles));
@@ -1851,7 +1860,7 @@ void test_dense_model_plan_selects_q5_matmul_adapter(uint32_t q5_type_id, const 
     };
     for(const auto& item:tensors){
         GgufTensorInfo tensor;tensor.name=item.first;tensor.dimensions=item.second;
-        tensor.type_id=tensor.name=="blk.0.attn_q.weight"?q5_type_id:0u;
+        tensor.type_id=(tensor.name=="blk.0.attn_q.weight"||tensor.name=="token_embd.weight")?q5_type_id:0u;
         tensor.type=GgufReader::tensor_type_info(tensor.type_id);
         uint64_t elements=1;for(uint64_t dimension:tensor.dimensions)elements*=dimension;
         tensor.byte_size_known=true;
@@ -1865,6 +1874,10 @@ void test_dense_model_plan_selects_q5_matmul_adapter(uint32_t q5_type_id, const 
         [](const ModelPlanOperation& operation){return operation.id=="layer.0.q_proj";});
     assert(projection!=plan.operations.end());
     assert(projection->operator_name==expected_operator);
+    const auto embedding=std::find_if(plan.operations.begin(),plan.operations.end(),
+        [](const ModelPlanOperation& operation){return operation.id=="embedding";});
+    assert(embedding!=plan.operations.end());
+    assert(embedding->operator_name==(q5_type_id==6?"Embedding_Q5_0":"Embedding_Q5_1"));
 }
 
 void test_dense_model_plan_selects_q4_1_matmul_adapter() {
