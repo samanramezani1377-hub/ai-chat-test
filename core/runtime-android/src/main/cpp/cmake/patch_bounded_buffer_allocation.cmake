@@ -166,6 +166,7 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
     const size_t max_buffer_size = ctx->webgpu_global_ctx->capabilities.limits.maxBufferSize;
     const size_t max_storage_binding_size = ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize;
     if (aligned_size > max_buffer_size || aligned_size > max_storage_binding_size) {
+        ctx->webgpu_global_ctx->device_error.store(true);
         GGML_LOG_ERROR("ggml_webgpu: refusing oversized tensor buffer name=%s requested=%zu aligned=%zu maxBufferSize=%zu maxStorageBufferBindingSize=%zu\n",
             buf_name.c_str(), size, aligned_size, max_buffer_size, max_storage_binding_size);
         return nullptr;
@@ -176,6 +177,7 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
                               wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst,
                               buf_name.c_str());
     if (!buf) {
+        ctx->webgpu_global_ctx->device_error.store(true);
         GGML_LOG_ERROR("ggml_webgpu: Dawn did not create tensor buffer name=%s requested=%zu aligned=%zu\n",
             buf_name.c_str(), size, aligned_size);
         return nullptr;
@@ -184,6 +186,7 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
     ggml_backend_webgpu_buffer_context * buf_ctx =
         new (std::nothrow) ggml_backend_webgpu_buffer_context(buf, buf_name, ctx->webgpu_global_ctx);
     if (buf_ctx == nullptr) {
+        ctx->webgpu_global_ctx->device_error.store(true);
         GGML_LOG_ERROR("ggml_webgpu: host allocation failed for tensor buffer context name=%s bytes=%zu\n",
             buf_name.c_str(), size);
         return nullptr;
