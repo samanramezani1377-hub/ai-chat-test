@@ -1,0 +1,77 @@
+#pragma once
+
+#include "android_backends.h"
+#include "kv_cache.h"
+#include "memory_planner.h"
+#include "model_registry.h"
+#include "quantization.h"
+#include "sampler.h"
+#include "tokenizer.h"
+#include "weight_streamer.h"
+
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+
+namespace ai_chat::gpu_engine {
+
+// A deliberately fail-closed Dense Transformer inference session. It uses the
+// independent GPU engine for GPU execution; llama.cpp remains outside this class
+// and is available to the Android caller as the CPU fallback.
+class GpuInferenceSession {
+public:
+    using TextCallback = std::function<void(const std::string&)>;
+
+    GpuInferenceSession() = default;
+    ~GpuInferenceSession();
+
+    GpuInferenceSession(const GpuInferenceSession&) = delete;
+    GpuInferenceSession& operator=(const GpuInferenceSession&) = delete;
+
+    Status load_model(const std::string& path, uint32_t context_length,
+                      uint64_t memory_budget_bytes);
+    Status generate(const std::string& prompt, uint32_t max_new_tokens,
+                    SamplingConfig sampling, const TextCallback& on_text);
+    Status count_tokens(const std::string& text, uint32_t& out_count) const;
+    void cancel() noexcept;
+    void unload() noexcept;
+    bool loaded() const noexcept;
+    std::string diagnostics() const;
+
+private:
+    Status read_last_token_logits(std::vector<float>& logits);
+    Status run_model_step(uint64_t token_count);
+    void unload_locked() noexcept;
+    std::string backend_name() const;
+
+    mutable std::mutex mutex_;
+    std::atomic<bool> cancelled_{false};
+    std::unique_ptr<GpuEngine> engine_;
+    std::unique_ptr<OperatorRegistry> operators_;
+    std::unique_ptr<QuantizationRegistry> quantizations_;
+    std::unique_ptr<ArchitectureRegistry> architectures_;
+    std::unique_ptr<TokenizerRegistry> tokenizers_;
+    std::unique_ptr<ModelLoweringRegistry> lowerings_;
+    std::unique_ptr<GgufModelLoader> loader_;
+    std::unique_ptr<MemoryManager> memory_;
+    std::unique_ptr<KvCache> kv_cache_;
+    std::shared_ptr<const TokenizerAdapter> tokenizer_;
+    ModelExecutionPlan plan_;
+    ModelExecutionContext context_;
+    ModelGpuMemoryEstimateReport memory_estimate_;
+    uint32_t context_length_ = 0;
+    uint64_t memory_budget_bytes_ = 0;
+    uint64_t total_weight_bytes_ = 0;
+    uint64_t largest_weight_tensor_bytes_ = 0;
+    uint64_t kv_cache_bytes_ = 0;
+    uint64_t last_ttft_ms_ = 0;
+    double last_decode_tokens_per_second_ = 0.0;
+    std::string model_path_;
+    std::string last_error_;
+    bool loaded_ = false;
+};
+
+} // namespace ai_chat::gpu_engine
