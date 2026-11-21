@@ -557,36 +557,6 @@ Status build_q8_0_matmul_gles_candidate(const Tensor& activations,
     return Status::success();
 }
 
-Status build_q8_0_matmul_gles_candidate(const Tensor& activations,
-                                      const std::shared_ptr<Buffer>& quantized_weights,
-                                      uint64_t weight_bytes, const Tensor& output,
-                                      ComputeDispatch& dispatch) {
-    Status status = build_q8_0_matmul_candidate(activations, quantized_weights, weight_bytes, output, dispatch);
-    if (!status.ok()) return status;
-    const auto& a = activations.descriptor().shape;
-    const auto& o = output.descriptor().shape;
-    const uint64_t blocks_per_row = a[1] / 32;
-    dispatch.label = "gles-q8-0-matmul-f32-activation-unverified";
-    dispatch.kernel_id = "gles-q8-0-matmul-f32-activation-v1";
-    dispatch.backend = BackendKind::OpenGles;
-    dispatch.wgsl_source.clear();
-    dispatch.glsl_source = kQ8_0MatMulGlsl;
-    const std::pair<std::string, std::string> constants[] = {
-        {"const uint ROWS = 1u;", "const uint ROWS = " + std::to_string(a[0]) + "u;"},
-        {"const uint OUTPUT_CHANNELS = 1u;", "const uint OUTPUT_CHANNELS = " + std::to_string(o[1]) + "u;"},
-        {"const uint INNER = 32u;", "const uint INNER = " + std::to_string(a[1]) + "u;"},
-        {"const uint WEIGHT_ROW_BYTES = 34u;", "const uint WEIGHT_ROW_BYTES = " + std::to_string(blocks_per_row * 34) + "u;"},
-    };
-    for (const auto& constant : constants) {
-        const size_t position = dispatch.glsl_source.find(constant.first);
-        if (position == std::string::npos)
-            return {StatusCode::BackendFailure, "Q8_0 GLES MatMul GLSL placeholder is missing"};
-        dispatch.glsl_source.replace(position, constant.first.size(), constant.second);
-    }
-    dispatch.workgroup_size_x = 8;
-    dispatch.workgroup_size_y = 8;
-    return Status::success();
-}
 Status reference_q8_0_matmul(const float* activations, const uint8_t* quantized_weights,
                              uint64_t weight_bytes, float* output,
                              uint32_t rows, uint32_t output_channels, uint32_t inner) {
@@ -614,22 +584,6 @@ Status reference_q8_0_matmul(const float* activations, const uint8_t* quantized_
     return Status::success();
 }
 
-Status register_builtin_gles_quantization_candidates(OperatorRegistry& registry) {
-    KernelDefinition q8;
-    q8.operator_name = "Q8_0MatMul";
-    q8.backend = BackendKind::OpenGles;
-    q8.input_type = DataType::F32;
-    q8.input_types = {DataType::F32, DataType::U8};
-    q8.output_type = DataType::F32;
-    q8.min_input_count = 2;
-    q8.max_input_count = 2;
-    q8.min_rank = 2;
-    q8.max_rank = 2;
-    q8.validation = KernelValidation::Unverified;
-    q8.kernel_id = "gles-q8-0-matmul-f32-activation-v1";
-    q8.glsl_source = kQ8_0MatMulGlsl;
-    return registry.register_kernel(std::move(q8));
-}
 const char* q5_0_dequantize_wgsl_source() noexcept { return kQ5_0DequantizeWgsl; }
 
 Status build_q5_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
