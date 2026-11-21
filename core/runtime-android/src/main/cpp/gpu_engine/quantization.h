@@ -1,6 +1,7 @@
 #pragma once
 
 #include "model_registry.h"
+#include "execution_engine.h"
 
 #include <cstddef>
 #include <cstdint>

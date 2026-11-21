@@ -246,8 +246,8 @@ void test_q8_0_decoder_and_registry() {
 
     FakeBackend backend;
     BufferDesc encoded_desc{36, 4, MemoryDomain::Device, false, "q8-encoded"};
-    std::shared_ptr<Buffer> encoded;
-    assert(backend.allocate(encoded_desc, encoded).ok());
+    std::shared_ptr<Buffer> encoded_buffer;
+    assert(backend.allocate(encoded_desc, encoded_buffer).ok());
     BufferDesc output_desc{128, 4, MemoryDomain::Device, false, "q8-output"};
     std::shared_ptr<Buffer> output_buffer;
     assert(backend.allocate(output_desc, output_buffer).ok());
@@ -257,7 +257,7 @@ void test_q8_0_decoder_and_registry() {
     Tensor output_tensor;
     assert(Tensor::create(output_desc_tensor, output_buffer, 0, output_tensor).ok());
     ComputeDispatch dispatch;
-    assert(build_q8_0_dequantize_candidate(encoded, 34, output_tensor, dispatch).ok());
+    assert(build_q8_0_dequantize_candidate(encoded_buffer, 34, output_tensor, dispatch).ok());
     assert(dispatch.bindings.size() == 2);
     assert(dispatch.label.find("unverified") != std::string::npos);
     assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") == std::string::npos);
