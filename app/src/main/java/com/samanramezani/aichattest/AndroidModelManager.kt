@@ -166,8 +166,6 @@ class AndroidModelManager(
             ModelResult.Success(Unit)
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (cancelled: CancellationException) {
-            throw cancelled
         } catch (t: Throwable) {
             ModelResult.Failure(ModelError.Storage("Unable to save draft assignment", t))
         }
@@ -188,8 +186,6 @@ class AndroidModelManager(
             }
             Files.deleteIfExists(draft.path)
             draftRepository.unregister(id)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (t: Throwable) {
