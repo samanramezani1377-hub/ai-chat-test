@@ -247,7 +247,7 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
         });]=]
         [=[        [](const wgpu::Device & device, wgpu::ErrorType reason, wgpu::StringView message, void * userdata) {
             GGML_UNUSED(device);
-            auto * callback_ctx = static_cast<ggml_backend_webgpu_device_context *>(userdata);
+            auto * callback_ctx = static_cast<ggml_backend_webgpu_reg_context *>(userdata);
             callback_ctx->webgpu_global_ctx->device_error.store(true);
             GGML_LOG_ERROR("ggml_webgpu: uncaptured device error; disabling WebGPU backend for subsequent graph placement: reason=%d message=%s\\n",
                            static_cast<int>(reason), std::string(message).c_str());
