@@ -28,7 +28,8 @@ GpuMemoryPlanReport plan_gpu_memory(const GpuMemoryPlanInput& input) {
         return report;
     }
     report.resident_weight_bytes = input.stream_weights
-        ? input.streaming_chunk_bytes : input.total_weight_bytes;
+        ? (input.total_weight_bytes == 0 ? 0 : input.streaming_chunk_bytes)
+        : input.total_weight_bytes;
 
     if (input.safety_reserve_bytes >= input.device_budget_bytes) {
         report.blockers.emplace_back("GPU_MEMORY_RESERVE_EXCEEDS_BUDGET");
