@@ -6,6 +6,67 @@
 
 namespace ai_chat::gpu_engine {
 
+
+namespace {
+
+bool metadata_u64(const GgufFileInfo& model, const std::string& key, uint64_t& value) {
+    const auto found = model.metadata.find(key);
+    if (found == model.metadata.end()) return false;
+    if (const auto* unsigned_value = std::get_if<uint64_t>(&found->second)) {
+        value = *unsigned_value;
+        return true;
+    }
+    if (const auto* signed_value = std::get_if<int64_t>(&found->second)) {
+        if (*signed_value <= 0) return false;
+        value = static_cast<uint64_t>(*signed_value);
+        return true;
+    }
+    return false;
+}
+
+class LlamaDenseArchitectureAdapter final : public ArchitectureAdapter {
+public:
+    LlamaDenseArchitectureAdapter() {
+        descriptor_.name = "llama";
+        descriptor_.family = ArchitectureFamily::DenseTransformer;
+        descriptor_.required_operators = {"Embedding", "MatMul", "RMSNorm", "RoPE",
+                                          "Attention", "SiLU", "Add", "Softmax"};
+        descriptor_.uses_attention = true;
+        descriptor_.uses_kv_cache = true;
+        descriptor_.supports_dynamic_shapes = true;
+        descriptor_.validation = SupportState::Unverified;
+    }
+
+    const ArchitectureDescriptor& descriptor() const noexcept override { return descriptor_; }
+
+    Status validate_metadata(const GgufFileInfo& model) const override {
+        if (model.architecture != descriptor_.name)
+            return {StatusCode::InvalidArgument, "GGUF architecture does not match the llama adapter"};
+        uint64_t layers = 0, embedding = 0, heads = 0, kv_heads = 0, feed_forward = 0;
+        if (!metadata_u64(model, "llama.block_count", layers) ||
+            !metadata_u64(model, "llama.embedding_length", embedding) ||
+            !metadata_u64(model, "llama.attention.head_count", heads) ||
+            !metadata_u64(model, "llama.feed_forward_length", feed_forward)) {
+            return {StatusCode::InvalidArgument, "Llama GGUF is missing required layer, embedding, head or feed-forward metadata"};
+        }
+        if (!metadata_u64(model, "llama.attention.head_count_kv", kv_heads)) kv_heads = heads;
+        if (layers == 0 || embedding == 0 || heads == 0 || kv_heads == 0 || feed_forward == 0 ||
+            kv_heads > heads || embedding % heads != 0) {
+            return {StatusCode::InvalidArgument, "Llama GGUF contains inconsistent model dimensions"};
+        }
+        return Status::success();
+    }
+
+private:
+    ArchitectureDescriptor descriptor_;
+};
+
+} // namespace
+
+Status register_builtin_architecture_adapters(ArchitectureRegistry& registry) {
+    return registry.register_adapter(std::make_shared<LlamaDenseArchitectureAdapter>());
+}
+
 Status QuantizationRegistry::register_format(QuantizationFormat format) {
     if (format.name.empty() || format.block_elements == 0 || format.bytes_per_block == 0) {
         return {StatusCode::InvalidArgument, "Quantization format requires a name and valid block layout"};

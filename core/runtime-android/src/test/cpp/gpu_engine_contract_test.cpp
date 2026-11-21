@@ -450,6 +450,27 @@ void test_add_operator_candidate_and_reference() {
     assert(norm_dispatch.wgsl_source.find("params.") == std::string::npos);
 }
 
+
+void test_builtin_architecture_adapter_is_fail_closed() {
+    ArchitectureRegistry registry;
+    assert(register_builtin_architecture_adapters(registry).ok());
+    auto adapter = registry.find("llama");
+    assert(adapter);
+    assert(adapter->descriptor().validation == SupportState::Unverified);
+
+    GgufFileInfo model;
+    model.architecture = "llama";
+    model.metadata["llama.block_count"] = uint64_t{24};
+    model.metadata["llama.embedding_length"] = uint64_t{2048};
+    model.metadata["llama.attention.head_count"] = uint64_t{16};
+    model.metadata["llama.attention.head_count_kv"] = uint64_t{4};
+    model.metadata["llama.feed_forward_length"] = uint64_t{5632};
+    assert(adapter->validate_metadata(model).ok());
+
+    model.metadata["llama.attention.head_count_kv"] = uint64_t{32};
+    assert(adapter->validate_metadata(model).code == StatusCode::InvalidArgument);
+}
+
 void test_model_and_quantization_registry_fail_closed() {
     QuantizationRegistry quantizations;
     QuantizationFormat q4;
@@ -547,6 +568,7 @@ int main() {
     test_tensor_and_memory_lease();
     test_operator_registry_fail_closed();
     test_model_and_quantization_registry_fail_closed();
+    test_builtin_architecture_adapter_is_fail_closed();
     test_add_operator_candidate_and_reference();
     test_gpu_engine_lifecycle();
     test_gguf_weight_streaming();

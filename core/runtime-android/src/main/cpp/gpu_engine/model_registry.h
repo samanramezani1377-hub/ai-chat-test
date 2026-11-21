@@ -91,6 +91,8 @@ struct ModelPreflightReport {
     std::vector<std::string> blockers;
 };
 
+Status register_builtin_architecture_adapters(ArchitectureRegistry& registry);
+
 ModelPreflightReport evaluate_model_preflight(const GgufFileInfo& model,
                                               const ArchitectureRegistry& architectures,
                                               const QuantizationRegistry& quantizations);
