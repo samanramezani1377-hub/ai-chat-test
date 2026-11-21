@@ -120,6 +120,41 @@ Status register_q5_matmul_lowering(BackendKind backend, ModelLoweringRegistry& r
         });
 }
 
+
+Status register_q5_embedding_lowering(BackendKind backend,ModelLoweringRegistry& registry,bool q5_1){
+    const std::string type=q5_1?"Q5_1":"Q5_0",op=q5_1?"Embedding_Q5_1":"Embedding_Q5_0";
+    const uint32_t type_id=q5_1?7u:6u;
+    return registry.register_lowering(backend,op,[backend,type,type_id,q5_1](
+        const ModelPlanOperation& operation,const ModelExecutionContext& context,ComputeDispatch& dispatch){
+        if(!operation.inputs.empty()||operation.weight_tensors.size()!=1)
+            return Status{StatusCode::InvalidArgument,type+" Embedding requires one quantized weight and token IDs"};
+        const Tensor* output=nullptr;Status result=lookup_output(operation,context,output);if(!result.ok())return result;
+        const auto weight=context.quantized_weights.find(operation.weight_tensors.front());
+        if(weight==context.quantized_weights.end()||!weight->second.buffer||weight->second.byte_size==0||weight->second.file_type_id!=type_id)
+            return Status{StatusCode::InvalidArgument,type+" embedding weight binding is missing or has the wrong file type"};
+        const auto token_it=context.token_ids.find(operation.id);
+        if(token_it==context.token_ids.end()||token_it->second.empty())
+            return Status{StatusCode::InvalidArgument,type+" Embedding token IDs are missing"};
+        if(weight->second.dimensions.size()!=2||output->descriptor().shape.size()!=2)
+            return Status{StatusCode::InvalidArgument,type+" Embedding weight/output rank is invalid"};
+        const uint32_t vocabulary=static_cast<uint32_t>(weight->second.dimensions[1]);
+        const uint32_t dimension=static_cast<uint32_t>(weight->second.dimensions[0]);
+        if(weight->second.dimensions[0]>UINT32_MAX||weight->second.dimensions[1]>UINT32_MAX||
+           output->descriptor().shape[1]!=dimension||output->descriptor().shape[0]!=token_it->second.size())
+            return Status{StatusCode::InvalidArgument,type+" Embedding dimensions do not match token IDs and output"};
+        const uint64_t token_bytes=token_it->second.size()*sizeof(uint32_t);
+        BufferDesc token_desc{token_bytes,alignof(uint32_t),MemoryDomain::Device,false,"q5-embedding-token-ids"};
+        std::shared_ptr<Buffer> token_buffer;
+        result=context.backend->allocate(token_desc,token_buffer);if(!result.ok())return result;
+        result=context.backend->upload(token_buffer,0,token_it->second.data(),token_bytes);if(!result.ok())return result;
+        return backend==BackendKind::OpenGles
+            ?(q5_1?build_q5_1_embedding_gles_candidate(weight->second.buffer,weight->second.byte_size,vocabulary,dimension,token_buffer,token_it->second,*output,dispatch)
+                  :build_q5_0_embedding_gles_candidate(weight->second.buffer,weight->second.byte_size,vocabulary,dimension,token_buffer,token_it->second,*output,dispatch))
+            :(q5_1?build_q5_1_embedding_candidate(weight->second.buffer,weight->second.byte_size,vocabulary,dimension,token_buffer,token_it->second,*output,dispatch)
+                  :build_q5_0_embedding_candidate(weight->second.buffer,weight->second.byte_size,vocabulary,dimension,token_buffer,token_it->second,*output,dispatch));
+    });
+}
+
 } // namespace
 
 Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegistry& registry) {
@@ -242,6 +277,10 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
     status = register_q5_matmul_lowering(backend, registry, false);
     if (!status.ok()) return status;
     status = register_q5_matmul_lowering(backend, registry, true);
+    if (!status.ok()) return status;
+    status = register_q5_embedding_lowering(backend, registry, false);
+    if (!status.ok()) return status;
+    status = register_q5_embedding_lowering(backend, registry, true);
     if (!status.ok()) return status;
 
     status = registry.register_lowering(backend, "RMSNorm",

@@ -250,9 +250,9 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
                 (operation.operator_name == "MatMul_Q8_0" ||
                  operation.operator_name == "Embedding_Q8_0");
             const bool compatible_q5_0 = tensor->type.name == "Q5_0" &&
-                operation.operator_name == "MatMul_Q5_0";
+                (operation.operator_name == "MatMul_Q5_0" || operation.operator_name == "Embedding_Q5_0");
             const bool compatible_q5_1 = tensor->type.name == "Q5_1" &&
-                operation.operator_name == "MatMul_Q5_1";
+                (operation.operator_name == "MatMul_Q5_1" || operation.operator_name == "Embedding_Q5_1");
             if (tensor->type.name != "F32" &&
                 !compatible_q4_0 && !compatible_q4_1 && !compatible_q8_0 &&
                 !compatible_q5_0 && !compatible_q5_1) {
@@ -280,9 +280,13 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             } else if (type_id == 6) {
                 validation_status = validate_q5_0_matmul_kernel(
                     *engine_->active_backend(), *operators_, *quantizations_);
+                if (validation_status.ok()) validation_status = validate_q5_0_embedding_kernel(
+                    *engine_->active_backend(), *operators_);
             } else if (type_id == 7) {
                 validation_status = validate_q5_1_matmul_kernel(
                     *engine_->active_backend(), *operators_, *quantizations_);
+                if (validation_status.ok()) validation_status = validate_q5_1_embedding_kernel(
+                    *engine_->active_backend(), *operators_);
             } else {
                 validation_status = validate_q8_0_matmul_kernel(
                     *engine_->active_backend(), *operators_, *quantizations_);

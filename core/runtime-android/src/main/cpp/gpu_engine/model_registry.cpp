@@ -187,6 +187,10 @@ public:
                     operation.operator_name = "Embedding_Q4_1";
                 else if (found != model.tensors.end() && found->type.name == "Q8_0")
                     operation.operator_name = "Embedding_Q8_0";
+                else if (found != model.tensors.end() && found->type.name == "Q5_0")
+                    operation.operator_name = "Embedding_Q5_0";
+                else if (found != model.tensors.end() && found->type.name == "Q5_1")
+                    operation.operator_name = "Embedding_Q5_1";
             }
             if (operation.operator_name == "MatMul" && operation.weight_tensors.size() == 1) {
                 const auto found = std::find_if(model.tensors.begin(), model.tensors.end(),
