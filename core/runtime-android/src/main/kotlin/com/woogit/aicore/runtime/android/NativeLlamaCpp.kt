@@ -215,6 +215,10 @@ internal object NativeLlamaCpp {
         generationStopRequested.set(false)
         // The GPU session and llama.cpp each keep their own stop flag.
         if (useGpuEngine) nativeGpuEngineResetStop() else nativeResetStop()
+        // Re-apply a stop that raced the reset call before the JNI worker starts.
+        if (generationStopRequested.get()) {
+            if (useGpuEngine) nativeGpuEngineStop() else nativeStop()
+        }
         val activeGpuRuntime = AtomicBoolean(useGpuEngine)
         val worker = launch {
             val result = if (useGpuEngine) {
