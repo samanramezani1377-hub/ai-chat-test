@@ -106,7 +106,11 @@ class LocalModelService(
                         )
                     }
 
-                    if (activeId != null) runtime.unload()
+                    if (activeId != null) {
+                        // Clear advertised state before unload so cancellation cannot leave a stale active ID.
+                        activeId = null
+                        runtime.unload()
+                    }
                     runtime.load(model)
 
                     when (val persisted = repository.setActive(id)) {
