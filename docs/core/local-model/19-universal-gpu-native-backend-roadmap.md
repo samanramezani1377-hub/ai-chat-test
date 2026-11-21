@@ -1,6 +1,6 @@
 # Universal GPU Adapter → Native Android GPU Backend
 
-Status: architecture plan; implementation has not started.
+Status: Phase 1 started; GLES compute self-test implemented, device validation pending.
 Target branch: `new-kor`.
 Platform policy: Android `arm64-v8a`, OpenGL ES compute, no Vulkan.
 
@@ -46,7 +46,7 @@ The adapter should expose a narrow C++ interface to the GGML bridge. GGML intern
 - Keep CI checks aware of the extracted CMake modules.
 - No inference routing changes in this phase.
 
-**Status:** CMake modularization and the MatMul verification-variable fix are committed; CI for the new commits still needs confirmation.
+**Status:** CMake modularization and the MatMul verification-variable fix are committed. The most recently inspected completed Actions run passed all jobs, but CI for these newer commits still needs confirmation.
 
 ### Phase 1 — Native GLES compute foundation
 
@@ -59,7 +59,11 @@ Implement inside the Universal GPU Adapter:
 - a deterministic vector-add and reduction self-test against CPU results;
 - structured failure reporting and cleanup after partial initialization.
 
-**Acceptance:** tests pass on at least two distinct Android GPU families; repeated init/teardown and concurrent app rendering do not crash or leak EGL state. No model operations are routed to this backend yet.
+**Current progress:** the temporary probe context now compiles and dispatches a baseline integer compute shader, writes to an SSBO, applies a memory barrier, reads the result back, and checks the exact CPU reference output. GPU selection now requires this self-test to pass; raw GLES 3.1 capability detection alone is insufficient.
+
+**Remaining:** persistent context ownership, dedicated worker-thread lifecycle, repeatable init/teardown tests, and physical-device validation. No model operations are routed to this backend yet.
+
+**Acceptance:** tests pass on at least two distinct Android GPU families; repeated init/teardown and concurrent app rendering do not crash or leak EGL state.
 
 ### Phase 2 — Custom GGML backend shell
 
