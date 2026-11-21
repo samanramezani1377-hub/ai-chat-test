@@ -19,7 +19,7 @@ bool multiply_overflow(uint64_t a, uint64_t b, uint64_t& result) {
 std::string normalize_kernel_specialization(const std::string& source) {
     static const std::unordered_set<std::string> kSpecializableConstants = {
         "VOCABULARY_SIZE", "EMBEDDING_DIMENSION", "TOKEN_COUNT", "TOTAL_ELEMENTS",
-        "TOKENS", "QUERY_HEADS", "KV_HEADS", "HEAD_DIM", "PAST_LENGTH",
+        "ELEMENT_COUNT", "TOKENS", "QUERY_HEADS", "KV_HEADS", "HEAD_DIM", "PAST_LENGTH",
         "SEQUENCE_LENGTH", "SCALE", "HEADS", "ROTARY_DIM", "START_POSITION",
         "THETA", "NEOX_STYLE", "ROWS", "COLUMNS", "INNER", "EPSILON",
         "OUTPUT_CHANNELS", "WEIGHT_ROW_BYTES"
