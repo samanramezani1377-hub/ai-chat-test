@@ -11,6 +11,8 @@ FIND_DAWN="$ROOT/core/runtime-android/src/main/cpp/cmake/FindDawn.cmake"
 GRADLE="$ROOT/core/runtime-android/build.gradle.kts"
 NATIVE="$ROOT/core/runtime-android/src/main/cpp/native_runtime_android_safe.cpp"
 ADAPTER="$ROOT/core/runtime-android/src/main/kotlin/com/woogit/aicore/runtime/android/LlamaCppAndroidRuntimeAdapter.kt"
+GPU_ADAPTER_CPP="$ROOT/core/runtime-android/src/main/cpp/universal_gpu_adapter.cpp"
+GPU_ADAPTER_H="$ROOT/core/runtime-android/src/main/cpp/universal_gpu_adapter.h"
 DIAGNOSTICS="$ROOT/core/runtime/src/main/kotlin/com/woogit/aicore/runtime/RuntimeDiagnostics.kt"
 
 fail() {
@@ -42,6 +44,13 @@ grep -q 'extractWebGpuDawnMetadata' "$GRADLE" || fail "Gradle must extract Dawn 
 ! grep -q 'implementation("androidx.webgpu:webgpu:' "$GRADLE" || fail "JNI-only AndroidX Dawn library must not be packaged into the app"
 ! grep -q 'AI_CHAT_WEBGPU_LIBRARY' "$GRADLE" || fail "Gradle must not pass the JNI-only AAR library to native linking"
 grep -q 'AI_CHAT_DAWN_METADATA_FILE' "$GRADLE" || fail "Gradle must pass the extracted Dawn metadata path to CMake"
+
+# The universal adapter must prove real GLES compute, not just EGL context creation.
+grep -q 'gles_compute_self_test_passed' "$GPU_ADAPTER_H" || fail "GLES compute self-test result must be represented in capabilities"
+grep -q 'glDispatchCompute' "$GPU_ADAPTER_CPP" || fail "GLES compute self-test must dispatch a shader"
+grep -q 'glMemoryBarrier' "$GPU_ADAPTER_CPP" || fail "GLES compute self-test must synchronize shader writes"
+grep -q 'glMapBufferRange' "$GPU_ADAPTER_CPP" || fail "GLES compute self-test must read back GPU results"
+grep -q 'gles_compute_supported &&' "$ROOT/core/runtime-android/src/main/cpp/native_runtime.cpp" || fail "GPU selection must require the verified GLES compute self-test"
 
 # The selected inference backend is WebGPU. OpenCL remains a separate legacy
 # diagnostic path and must not be reported as the active WebGPU execution path.
