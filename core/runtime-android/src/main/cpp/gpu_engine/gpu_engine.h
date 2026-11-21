@@ -53,6 +53,9 @@ struct DeviceLimits {
     uint32_t max_compute_workgroup_size_z = 0;
     uint32_t max_compute_workgroup_invocations = 0;
     uint32_t max_compute_workgroup_storage_bytes = 0;
+    uint32_t max_compute_workgroups_per_dimension = 0;
+    uint32_t max_storage_buffers_per_shader_stage = 0;
+    uint32_t min_storage_buffer_offset_alignment = 1;
 };
 
 struct DeviceInfo {

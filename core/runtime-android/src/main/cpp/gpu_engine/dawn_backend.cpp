@@ -38,8 +38,8 @@ private:
 
 class DawnCommandBatch final : public CommandBatch {
 public:
-    explicit DawnCommandBatch(wgpu::Device device)
-        : device_(std::move(device)), encoder_(device_.CreateCommandEncoder()) {}
+    explicit DawnCommandBatch(wgpu::Device device, DeviceLimits limits)
+        : device_(std::move(device)), limits_(limits), encoder_(device_.CreateCommandEncoder()) {}
 
     bool valid() const noexcept { return encoder_ != nullptr; }
 
@@ -66,6 +66,16 @@ public:
             dispatch.bindings.empty()) {
             return {StatusCode::InvalidArgument, "Compute dispatch requires WGSL, entry point, bindings and non-zero workgroups"};
         }
+        if (limits_.max_compute_workgroups_per_dimension != 0 &&
+            (dispatch.workgroups_x > limits_.max_compute_workgroups_per_dimension ||
+             dispatch.workgroups_y > limits_.max_compute_workgroups_per_dimension ||
+             dispatch.workgroups_z > limits_.max_compute_workgroups_per_dimension)) {
+            return {StatusCode::Unsupported, "Compute dispatch exceeds Dawn workgroup-count limits"};
+        }
+        if (limits_.max_storage_buffers_per_shader_stage != 0 &&
+            dispatch.bindings.size() > limits_.max_storage_buffers_per_shader_stage) {
+            return {StatusCode::Unsupported, "Compute dispatch exceeds Dawn storage-buffer binding count"};
+        }
 
         wgpu::ShaderSourceWGSL wgsl{};
         wgsl.code = dispatch.wgsl_source.c_str();
@@ -87,6 +97,8 @@ public:
 
         std::vector<wgpu::BindGroupEntry> entries;
         entries.reserve(dispatch.bindings.size());
+        std::vector<uint32_t> seen_bindings;
+        seen_bindings.reserve(dispatch.bindings.size());
         for (const auto& binding : dispatch.bindings) {
             auto* buffer = dynamic_cast<DawnBuffer*>(binding.buffer.get());
             if (!buffer || binding.offset_bytes > buffer->size_bytes()) {
@@ -94,9 +106,17 @@ public:
             }
             const uint64_t size = binding.size_bytes == 0
                 ? buffer->size_bytes() - binding.offset_bytes : binding.size_bytes;
-            if (size == 0 || size > buffer->size_bytes() - binding.offset_bytes) {
-                return {StatusCode::InvalidArgument, "Compute dispatch buffer range is invalid"};
+            const uint32_t offset_alignment = std::max(1u, limits_.min_storage_buffer_offset_alignment);
+            if (size == 0 || size > buffer->size_bytes() - binding.offset_bytes ||
+                (binding.offset_bytes % offset_alignment) != 0 || (size % 4) != 0 ||
+                (limits_.max_storage_buffer_binding_size != 0 &&
+                 size > limits_.max_storage_buffer_binding_size)) {
+                return {StatusCode::InvalidArgument, "Compute dispatch buffer range exceeds Dawn alignment or storage limits"};
             }
+            if (std::find(seen_bindings.begin(), seen_bindings.end(), binding.binding) != seen_bindings.end()) {
+                return {StatusCode::InvalidArgument, "Compute dispatch contains a duplicate binding index"};
+            }
+            seen_bindings.push_back(binding.binding);
             wgpu::BindGroupEntry entry{};
             entry.binding = binding.binding;
             entry.buffer = buffer->handle();
@@ -127,6 +147,7 @@ public:
 
 private:
     wgpu::Device device_;
+    DeviceLimits limits_;
     wgpu::CommandEncoder encoder_;
 };
 
@@ -172,6 +193,7 @@ public:
         adapter_.GetInfo(&info);
         wgpu::Limits supported{};
         const bool has_limits = adapter_.GetLimits(&supported);
+        device_limits_ = DeviceLimits{};
 
         DeviceInfo device;
         device.backend = BackendKind::DawnWebGpu;
@@ -185,6 +207,16 @@ public:
         device.compute_self_test_passed = false;
         device.inference_ready = false;
         if (has_limits) {
+            device_limits_.max_buffer_size = supported.maxBufferSize;
+            device_limits_.max_storage_buffer_binding_size = supported.maxStorageBufferBindingSize;
+            device_limits_.max_compute_workgroup_size_x = supported.maxComputeWorkgroupSizeX;
+            device_limits_.max_compute_workgroup_size_y = supported.maxComputeWorkgroupSizeY;
+            device_limits_.max_compute_workgroup_size_z = supported.maxComputeWorkgroupSizeZ;
+            device_limits_.max_compute_workgroup_invocations = supported.maxComputeInvocationsPerWorkgroup;
+            device_limits_.max_compute_workgroup_storage_bytes = supported.maxComputeWorkgroupStorageSize;
+            device_limits_.max_compute_workgroups_per_dimension = supported.maxComputeWorkgroupsPerDimension;
+            device_limits_.max_storage_buffers_per_shader_stage = supported.maxStorageBuffersPerShaderStage;
+            device_limits_.min_storage_buffer_offset_alignment = supported.minStorageBufferOffsetAlignment;
             device.limits.max_buffer_size = supported.maxBufferSize;
             max_buffer_size_ = supported.maxBufferSize;
             device.limits.max_storage_buffer_binding_size = supported.maxStorageBufferBindingSize;
@@ -193,6 +225,9 @@ public:
             device.limits.max_compute_workgroup_size_z = supported.maxComputeWorkgroupSizeZ;
             device.limits.max_compute_workgroup_invocations = supported.maxComputeInvocationsPerWorkgroup;
             device.limits.max_compute_workgroup_storage_bytes = supported.maxComputeWorkgroupStorageSize;
+            device.limits.max_compute_workgroups_per_dimension = supported.maxComputeWorkgroupsPerDimension;
+            device.limits.max_storage_buffers_per_shader_stage = supported.maxStorageBuffersPerShaderStage;
+            device.limits.min_storage_buffer_offset_alignment = supported.minStorageBufferOffsetAlignment;
         }
         if (adapter_.HasFeature(wgpu::FeatureName::ShaderF16)) device.features.emplace_back("shader-f16");
         if (adapter_.HasFeature(wgpu::FeatureName::Subgroups)) device.features.emplace_back("subgroups");
@@ -280,7 +315,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         out.reset();
         if (!device_ || !healthy()) return {StatusCode::DeviceLost, "Dawn device is not ready"};
-        auto batch = std::make_unique<DawnCommandBatch>(device_);
+        auto batch = std::make_unique<DawnCommandBatch>(device_, device_limits_);
         if (!batch->valid()) return backend_error("CreateCommandEncoder", "Dawn returned an empty encoder");
         out = std::move(batch);
         return Status::success();
@@ -486,6 +521,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     wgpu::Queue queue_;
     std::shared_ptr<std::atomic<bool>> health_ = std::make_shared<std::atomic<bool>>(false);
     uint64_t max_buffer_size_ = std::numeric_limits<uint64_t>::max();
+    DeviceLimits device_limits_;
 };
 
 } // namespace
