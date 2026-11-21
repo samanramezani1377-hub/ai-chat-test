@@ -90,7 +90,7 @@ if (NOT _memory MATCHES "AI_CHAT_RECURRENT_MEMORY_ALLOCATION_V3")
         "            ggml_context * ctx = ggml_init(params);\n            if (!ctx) {\n                return nullptr;\n            }"
         "            ggml_context * ctx = ggml_init(params);\n            if (!ctx) {\n                LLAMA_LOG_ERROR(\\"AI_CHAT_RECURRENT_CONTEXT_CREATE_FAILED buft=%s metadataBytes=%zu\\n\\", ggml_backend_buft_name(buft), params.mem_size);\n                return nullptr;\n            }"
         "report recurrent metadata context allocation failure")
-    string(APPEND _memory "\\n// AI_CHAT_RECURRENT_MEMORY_ALLOCATION_V3\\n")
+    string(APPEND _memory "\n// AI_CHAT_RECURRENT_MEMORY_ALLOCATION_V3\n")
     file(WRITE "${_memory_file}" "${_memory}")
 endif()
 
