@@ -71,6 +71,8 @@ grep -q 'AI_CHAT_WEBGPU_GRAPH_ERROR_STATE_V1' "$WEBGPU_FAILURE_PATCH" || fail "T
 grep -q 'AI_CHAT_WEBGPU_READBACK_GUARDS_V2' "$WEBGPU_FAILURE_PATCH" || fail "Failed MapAsync must not be followed by mapped-range access"
 grep -q 'AI_CHAT_WEBGPU_UNCAPTURED_ERROR' "$WEBGPU_FAILURE_PATCH" || fail "Uncaptured Dawn errors must be persisted without GGML_ABORT"
 grep -q 'min_size > alloc->max_chunk_size' "$ALLOC_PATCH" || fail "Oversized tensors must not create virtual chunks beyond backend limits"
+grep -q 'AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V2' "$ALLOC_PATCH" || fail "Cached allocator source trees must receive strict chunk limits"
+grep -q 'AI_CHAT_WEBGPU_TRANSIENT_ALLOC_ERRORS_V1' "$ALLOC_PATCH" || fail "Model allocation failures must not permanently disable WebGPU"
 
 # The universal adapter must prove real GLES compute, not just EGL context creation.
 grep -q 'gles_compute_self_test_passed' "$GPU_ADAPTER_H" || fail "GLES compute self-test result must be represented in capabilities"
