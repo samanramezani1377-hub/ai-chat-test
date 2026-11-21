@@ -57,12 +57,6 @@ private:
     std::shared_ptr<State> state_;
 };
 
-enum class KernelValidation : uint8_t {
-    Unverified = 0,
-    Validated,
-    Rejected,
-};
-
 struct KernelDefinition {
     std::string operator_name;
     BackendKind backend = BackendKind::Unknown;
@@ -85,6 +79,8 @@ public:
                          DataType input_type, DataType output_type,
                          uint32_t input_count, uint32_t rank,
                          KernelDefinition& out) const;
+    Status authorize_dispatch(const std::string& kernel_id, BackendKind backend,
+                              ComputeDispatch& dispatch) const;
     std::vector<std::string> registered_operators() const;
 
 private:

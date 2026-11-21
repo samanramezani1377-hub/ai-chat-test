@@ -87,6 +87,12 @@ enum class DataType : uint8_t {
     U32,
 };
 
+enum class KernelValidation : uint8_t {
+    Unverified = 0,
+    Validated,
+    Rejected,
+};
+
 enum class MemoryDomain : uint8_t {
     Host = 0,
     Device,
@@ -132,6 +138,8 @@ struct BufferBinding {
 
 struct ComputeDispatch {
     std::string label;
+    std::string kernel_id;
+    KernelValidation validation = KernelValidation::Unverified;
     std::string wgsl_source;
     std::string entry_point = "main";
     std::vector<BufferBinding> bindings;

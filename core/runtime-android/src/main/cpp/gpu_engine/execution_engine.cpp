@@ -199,6 +199,22 @@ Status OperatorRegistry::select_kernel(const std::string& operator_name, Backend
     return Status::success();
 }
 
+
+Status OperatorRegistry::authorize_dispatch(const std::string& kernel_id, BackendKind backend,
+                                             ComputeDispatch& dispatch) const {
+    const auto found = std::find_if(kernels_.begin(), kernels_.end(),
+        [&kernel_id, backend](const KernelDefinition& definition) {
+            return definition.kernel_id == kernel_id && definition.backend == backend &&
+                   definition.validation == KernelValidation::Validated;
+        });
+    if (found == kernels_.end())
+        return {StatusCode::Unsupported, "Kernel is not registered as validated for this backend"};
+    if (dispatch.wgsl_source.empty() || dispatch.kernel_id != kernel_id)
+        return {StatusCode::InvalidArgument, "Dispatch does not match the requested registered kernel"};
+    dispatch.validation = KernelValidation::Validated;
+    return Status::success();
+}
+
 std::vector<std::string> OperatorRegistry::registered_operators() const {
     std::vector<std::string> result;
     for (const auto& kernel : kernels_) {
