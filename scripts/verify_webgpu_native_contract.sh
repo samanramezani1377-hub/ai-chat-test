@@ -59,9 +59,10 @@ grep -q 'AI_CHAT_RECURRENT_MEMORY_ALLOCATION_V3' "$RECURRENT_PATCH" || fail "Rec
 grep -q 'AI_CHAT_GRAPH_SPLIT_BEGIN' "$GRAPH_PATCH" || fail "Graph splitting must have a pre-stage checkpoint"
 grep -q 'AI_CHAT_GRAPH_ALLOCATOR_RESERVE_BEGIN' "$GRAPH_PATCH" || fail "Graph allocator reservation must have a pre-stage checkpoint"
 grep -q 'AI_CHAT_WEBGPU_WAIT_RESULT_V2' "$WEBGPU_FAILURE_PATCH" || fail "Dawn callbacks must use heap-owned wait result state"
-grep -q 'std::shared_ptr<ai_chat_webgpu_wait_result>' "$WEBGPU_FAILURE_PATCH" || fail "AllowSpontaneous callbacks must not capture stack-owned result state"
+grep -q 'std::make_shared<ai_chat_webgpu_wait_result>' "$WEBGPU_FAILURE_PATCH" || fail "AllowSpontaneous callbacks must not capture stack-owned result state"
 grep -q 'AI_CHAT_WEBGPU_GRAPH_FAILURE_PROPAGATION_V2' "$WEBGPU_FAILURE_PATCH" || fail "WebGPU execution errors must propagate as GGML_STATUS_FAILED"
 grep -q 'AI_CHAT_WEBGPU_GRAPH_ERROR_STATE_V1' "$WEBGPU_FAILURE_PATCH" || fail "Transient graph errors must be separated from terminal device loss"
+grep -q 'AI_CHAT_WEBGPU_READBACK_GUARDS_V1' "$WEBGPU_FAILURE_PATCH" || fail "Failed MapAsync must not be followed by mapped-range access"
 grep -q 'AI_CHAT_WEBGPU_UNCAPTURED_ERROR' "$WEBGPU_FAILURE_PATCH" || fail "Uncaptured Dawn errors must be persisted without GGML_ABORT"
 grep -q 'min_size > alloc->max_chunk_size' "$ALLOC_PATCH" || fail "Oversized tensors must not create virtual chunks beyond backend limits"
 
