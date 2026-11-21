@@ -2,6 +2,7 @@
 #include <vector>
 #include <cstdint>
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <string>
 #include <unordered_map>
@@ -11,6 +12,8 @@
 #include <iomanip>
 #include <sstream>
 #include <cstring>
+#include <limits>
+#include <utility>
 
 // Tokens represented by the resident prompt prefix in the native KV cache.
 static std::vector<llama_token> g_cached_prompt_tokens;
