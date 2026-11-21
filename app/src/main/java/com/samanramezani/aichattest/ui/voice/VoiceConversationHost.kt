@@ -45,8 +45,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -821,6 +819,9 @@ internal class VoiceConversationController(
         acknowledgeWake: Boolean = false,
         speechStartGate: CompletableDeferred<Unit>? = null,
     ) {
+        // stop() advances the epoch; barge-in cancellation deliberately does not.
+        // This lets a replacement utterance survive cancellation of the previous turn.
+        val turnEpoch = lifecycleEpoch.get()
         // A cancelled native TTS call may finish its current ONNX inference before returning.
         // Never enter the same native TTS object concurrently for a barge-in replacement turn.
         speechJob?.takeIf { !it.isCompleted }?.join()
@@ -1053,10 +1054,9 @@ internal class VoiceConversationController(
             if (speechJob === activeSpeechJob && activeSpeechJob.isCompleted) speechJob = null
             turnRunning.set(false)
             bargeInTriggered.set(false)
-            val pending = pendingUtterances.poll()
-            if (!closed && currentCoroutineContext().isActive && pending != null &&
-                turnRunning.compareAndSet(false, true)
-            ) {
+            val canContinueSession = !closed && lifecycleEpoch.get() == turnEpoch
+            val pending = if (canContinueSession) pendingUtterances.poll() else null
+            if (canContinueSession && pending != null && turnRunning.compareAndSet(false, true)) {
                 onStatus("در حال پردازش گفتار جدید…")
                 turnJob = scope.launch { processTurn(pending) }
             }
@@ -1155,6 +1155,7 @@ internal class VoiceConversationController(
 
     fun stop(): Job {
         lifecycleEpoch.incrementAndGet()
+        pendingUtterances.clear()
         val oldFrameJob = frameJob
         frameJob = null
         oldFrameJob?.cancel()
