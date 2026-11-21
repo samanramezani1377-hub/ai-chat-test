@@ -36,7 +36,6 @@ void GpuInferenceSession::unload_locked() noexcept {
     kv_cache_.reset();
     memory_.reset();
     loader_.reset();
-    tokenizer_.reset();
     lowerings_.reset();
     tokenizers_.reset();
     architectures_.reset();
@@ -129,13 +128,6 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         unload_locked();
         return {StatusCode::Unsupported, last_error_};
     }
-    tokenizer_ = tokenizers_->find(model.tokenizer);
-    if (!tokenizer_) {
-        last_error_ = "Validated tokenizer adapter disappeared after preflight";
-        unload_locked();
-        return {StatusCode::NotReady, last_error_};
-    }
-
     const auto architecture = architectures_->find(model.architecture);
     if (!architecture) {
         last_error_ = "Unsupported model architecture: " + model.architecture;

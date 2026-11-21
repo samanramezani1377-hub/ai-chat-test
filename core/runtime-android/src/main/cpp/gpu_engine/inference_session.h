@@ -59,7 +59,6 @@ private:
     std::unique_ptr<GgufModelLoader> loader_;
     std::unique_ptr<MemoryManager> memory_;
     std::unique_ptr<KvCache> kv_cache_;
-    std::shared_ptr<const TokenizerAdapter> tokenizer_;
     ModelExecutionPlan plan_;
     ModelExecutionContext context_;
     ModelGpuMemoryEstimateReport memory_estimate_;
