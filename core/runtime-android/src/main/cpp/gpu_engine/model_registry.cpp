@@ -173,30 +173,40 @@ public:
 
     Status validate_metadata(const GgufFileInfo& model) const override {
         if (model.architecture != descriptor_.name)
-            return {StatusCode::InvalidArgument, "GGUF architecture does not match the llama adapter"};
+            return {StatusCode::InvalidArgument, "GGUF architecture does not match the dense transformer adapter"};
+        const std::string metadata_prefix = architecture_name_ + ".";
         uint64_t layers = 0, embedding = 0, heads = 0, kv_heads = 0, feed_forward = 0;
-        if (!metadata_u64(model, "llama.block_count", layers) ||
-            !metadata_u64(model, "llama.embedding_length", embedding) ||
-            !metadata_u64(model, "llama.attention.head_count", heads) ||
-            !metadata_u64(model, "llama.feed_forward_length", feed_forward)) {
-            return {StatusCode::InvalidArgument, "Llama GGUF is missing required layer, embedding, head or feed-forward metadata"};
+        if (!metadata_u64(model, metadata_prefix + "block_count", layers) ||
+            !metadata_u64(model, metadata_prefix + "embedding_length", embedding) ||
+            !metadata_u64(model, metadata_prefix + "attention.head_count", heads) ||
+            !metadata_u64(model, metadata_prefix + "feed_forward_length", feed_forward)) {
+            return {StatusCode::InvalidArgument, "Dense transformer GGUF is missing required layer, embedding, head or feed-forward metadata"};
         }
-        if (!metadata_u64(model, "llama.attention.head_count_kv", kv_heads)) kv_heads = heads;
+        if (!metadata_u64(model, metadata_prefix + "attention.head_count_kv", kv_heads)) kv_heads = heads;
         if (layers == 0 || embedding == 0 || heads == 0 || kv_heads == 0 || feed_forward == 0 ||
             kv_heads > heads || embedding % heads != 0) {
-            return {StatusCode::InvalidArgument, "Llama GGUF contains inconsistent model dimensions"};
+            return {StatusCode::InvalidArgument, "Dense transformer GGUF contains inconsistent model dimensions"};
         }
         return Status::success();
     }
 
 private:
+    std::string architecture_name_;
+    bool uses_qk_norm_ = false;
     ArchitectureDescriptor descriptor_;
 };
 
 } // namespace
 
 Status register_builtin_architecture_adapters(ArchitectureRegistry& registry) {
-    return registry.register_adapter(std::make_shared<LlamaDenseArchitectureAdapter>());
+    Status status = registry.register_adapter(
+        std::make_shared<DenseTransformerArchitectureAdapter>("llama", false));
+    if (!status.ok()) return status;
+    status = registry.register_adapter(
+        std::make_shared<DenseTransformerArchitectureAdapter>("qwen2", false));
+    if (!status.ok()) return status;
+    return registry.register_adapter(
+        std::make_shared<DenseTransformerArchitectureAdapter>("qwen3", true));
 }
 
 Status QuantizationRegistry::register_format(QuantizationFormat format) {
