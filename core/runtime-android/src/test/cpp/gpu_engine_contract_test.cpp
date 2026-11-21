@@ -243,6 +243,24 @@ void test_q8_0_decoder_and_registry() {
     assert(register_builtin_quantization_formats(registry).ok());
     assert(registry.can_decode(8));
     assert(!registry.can_execute_on_gpu(8));
+
+    FakeBackend backend;
+    BufferDesc encoded_desc{36, 4, MemoryDomain::Device, false, "q8-encoded"};
+    std::shared_ptr<Buffer> encoded;
+    assert(backend.allocate(encoded_desc, encoded).ok());
+    BufferDesc output_desc{128, 4, MemoryDomain::Device, false, "q8-output"};
+    std::shared_ptr<Buffer> output_buffer;
+    assert(backend.allocate(output_desc, output_buffer).ok());
+    TensorDesc output_desc_tensor;
+    output_desc_tensor.shape = {32};
+    output_desc_tensor.data_type = DataType::F32;
+    Tensor output_tensor;
+    assert(Tensor::create(output_desc_tensor, output_buffer, 0, output_tensor).ok());
+    ComputeDispatch dispatch;
+    assert(build_q8_0_dequantize_candidate(encoded, 34, output_tensor, dispatch).ok());
+    assert(dispatch.bindings.size() == 2);
+    assert(dispatch.label.find("unverified") != std::string::npos);
+    assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") == std::string::npos);
 }
 
 void test_independent_sampler_and_stop_controller() {

@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
 namespace ai_chat::gpu_engine {
 
@@ -13,5 +14,10 @@ Status decode_q8_0_blocks(const uint8_t* source, size_t source_bytes,
                           float* destination, size_t destination_elements);
 
 Status register_builtin_quantization_formats(QuantizationRegistry& registry);
+const char* q8_0_dequantize_wgsl_source() noexcept;
+Status build_q8_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
+                                       uint64_t encoded_bytes,
+                                       const Tensor& output,
+                                       ComputeDispatch& dispatch);
 
 } // namespace ai_chat::gpu_engine

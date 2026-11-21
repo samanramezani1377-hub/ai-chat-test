@@ -303,7 +303,22 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     rms.validation = KernelValidation::Unverified;
     rms.kernel_id = "dawn-rms-norm-f32-generic-v1";
     rms.wgsl_source = kRmsNormF32Wgsl;
-    return registry.register_kernel(std::move(rms));
+    status = registry.register_kernel(std::move(rms));
+    if (!status.ok()) return status;
+
+    KernelDefinition q8;
+    q8.operator_name = "Dequantize_Q8_0";
+    q8.backend = BackendKind::DawnWebGpu;
+    q8.input_type = DataType::U32;
+    q8.output_type = DataType::F32;
+    q8.min_input_count = 1;
+    q8.max_input_count = 1;
+    q8.min_rank = 1;
+    q8.max_rank = 16;
+    q8.validation = KernelValidation::Unverified;
+    q8.kernel_id = "dawn-q8-0-dequantize-generic-v1";
+    q8.wgsl_source = q8_0_dequantize_wgsl_source();
+    return registry.register_kernel(std::move(q8));
 }
 
 } // namespace ai_chat::gpu_engine

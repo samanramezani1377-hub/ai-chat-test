@@ -4,9 +4,39 @@
 #include <cstring>
 #include <limits>
 #include <utility>
+#include <string>
 
 namespace ai_chat::gpu_engine {
 namespace {
+
+constexpr char kQ8_0DequantizeWgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> encoded: array<u32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+const ELEMENT_COUNT: u32 = 32u;
+fn read_u8(byte_offset: u32) -> u32 {
+    let word = encoded[byte_offset >> 2u];
+    let shift = (byte_offset & 3u) * 8u;
+    return (word >> shift) & 255u;
+}
+fn read_u16(byte_offset: u32) -> u32 {
+    let word = encoded[byte_offset >> 2u];
+    let shift = (byte_offset & 3u) * 8u;
+    return (word >> shift) & 65535u;
+}
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= ELEMENT_COUNT) { return; }
+    let block_index = gid.x / 32u;
+    let within_block = gid.x % 32u;
+    let block_offset = block_index * 34u;
+    let scale_bits = read_u16(block_offset);
+    let scale = unpack2x16float(vec2<u32>(scale_bits, 0u)).x;
+    let raw = read_u8(block_offset + 2u + within_block);
+    let signed_value = select(i32(raw), i32(raw) - 256, raw >= 128u);
+    output[gid.x] = scale * f32(signed_value);
+}
+)wgsl";
+
 
 float half_to_float(uint16_t half) {
     const uint32_t sign = static_cast<uint32_t>(half & 0x8000u) << 16;
@@ -66,6 +96,53 @@ Status decode_q8_0_blocks(const uint8_t* source, size_t source_bytes,
             destination[block * kElementsPerBlock + i] = scale * static_cast<float>(quantized);
         }
     }
+    return Status::success();
+}
+
+
+const char* q8_0_dequantize_wgsl_source() noexcept { return kQ8_0DequantizeWgsl; }
+
+Status build_q8_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
+                                       uint64_t encoded_bytes,
+                                       const Tensor& output,
+                                       ComputeDispatch& dispatch) {
+    dispatch = ComputeDispatch{};
+    if (!encoded || !output.buffer() || output.descriptor().data_type != DataType::F32 ||
+        output.descriptor().layout != TensorLayout::Contiguous ||
+        output.descriptor().memory == MemoryDomain::Host || output.descriptor().shape.empty()) {
+        return {StatusCode::Unsupported, "Q8_0 GPU decoder requires a device/shared encoded buffer and contiguous F32 output"};
+    }
+    constexpr uint64_t kBlockElements = 32;
+    constexpr uint64_t kBlockBytes = 34;
+    if (output.element_count() == 0 || output.element_count() % kBlockElements != 0 ||
+        output.element_count() > UINT32_MAX) {
+        return {StatusCode::InvalidArgument, "Q8_0 output must contain complete blocks and fit the WGSL index range"};
+    }
+    const uint64_t blocks = output.element_count() / kBlockElements;
+    if (blocks > UINT64_MAX / kBlockBytes || encoded_bytes != blocks * kBlockBytes ||
+        encoded_bytes > UINT64_MAX - 3) {
+        return {StatusCode::InvalidArgument, "Q8_0 encoded byte count does not match the output tensor"};
+    }
+    const uint64_t padded_bytes = (encoded_bytes + 3) & ~uint64_t{3};
+    if (encoded->size_bytes() < padded_bytes ||
+        output.byte_size() != output.element_count() * sizeof(float) ||
+        encoded.get() == output.buffer().get()) {
+        return {StatusCode::InvalidArgument, "Q8_0 input/output buffer ranges are inconsistent"};
+    }
+    dispatch.label = "q8-0-dequantize-generic-unverified";
+    dispatch.wgsl_source = kQ8_0DequantizeWgsl;
+    const std::string placeholder = "const ELEMENT_COUNT: u32 = 32u;";
+    const std::string replacement = "const ELEMENT_COUNT: u32 = " +
+                                    std::to_string(output.element_count()) + "u;";
+    const size_t position = dispatch.wgsl_source.find(placeholder);
+    if (position == std::string::npos)
+        return {StatusCode::BackendFailure, "Q8_0 WGSL element-count placeholder is missing"};
+    dispatch.wgsl_source.replace(position, placeholder.size(), replacement);
+    dispatch.workgroups_x = static_cast<uint32_t>((output.element_count() + 63) / 64);
+    dispatch.bindings = {
+        {0, encoded, 0, padded_bytes},
+        {1, output.buffer(), output.byte_offset(), output.byte_size()},
+    };
     return Status::success();
 }
 
