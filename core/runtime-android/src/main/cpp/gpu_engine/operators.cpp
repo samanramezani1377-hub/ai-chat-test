@@ -1391,7 +1391,7 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     gles_embedding.min_rank = 2;
     gles_embedding.max_rank = 2;
     gles_embedding.validation = KernelValidation::Unverified;
-    gles_embedding.kernel_id = "gles-gles_embedding-f32-generic-v1";
+    gles_embedding.kernel_id = "gles-embedding-f32-generic-v1";
     gles_embedding.glsl_source = kEmbeddingF32Glsl;
     status = registry.register_kernel(std::move(gles_embedding));
     if (!status.ok()) return status;
@@ -1406,7 +1406,7 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     gles_rope.min_rank = 3;
     gles_rope.max_rank = 3;
     gles_rope.validation = KernelValidation::Unverified;
-    gles_rope.kernel_id = "gles-gles_rope-f32-generic-v1";
+    gles_rope.kernel_id = "gles-rope-f32-generic-v1";
     gles_rope.glsl_source = kRopeF32Glsl;
     status = registry.register_kernel(std::move(gles_rope));
     if (!status.ok()) return status;
@@ -1421,7 +1421,7 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     gles_attention.min_rank = 3;
     gles_attention.max_rank = 3;
     gles_attention.validation = KernelValidation::Unverified;
-    gles_attention.kernel_id = "gles-gles_attention-f32-causal-gqa-v1";
+    gles_attention.kernel_id = "gles-attention-f32-causal-gqa-v1";
     gles_attention.glsl_source = kAttentionF32Glsl;
     status = registry.register_kernel(std::move(gles_attention));
     if (!status.ok()) return status;
