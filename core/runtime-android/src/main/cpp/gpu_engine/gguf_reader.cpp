@@ -395,8 +395,9 @@ Status GgufReader::open(const std::string& path, GgufReader& out) {
     for (size_t sorted_index : offset_order) {
         GgufTensorInfo& tensor = info.tensors[sorted_index];
         if (tensor.relative_offset > data_bytes ||
-            tensor.relative_offset > std::numeric_limits<uint64_t>::max() - info.data_section_offset) {
-            return {StatusCode::InvalidArgument, "GGUF tensor offset is outside the data section"};
+            tensor.relative_offset > std::numeric_limits<uint64_t>::max() - info.data_section_offset ||
+            (tensor.relative_offset % info.alignment) != 0) {
+            return {StatusCode::InvalidArgument, "GGUF tensor offset is outside the data section or violates alignment"};
         }
         tensor.absolute_offset = info.data_section_offset + tensor.relative_offset;
 
