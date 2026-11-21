@@ -75,13 +75,27 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
                 inputs_ready = false;
             }
         }
+        for (const auto& control_input : operation.control_inputs) {
+            const auto producer = producers.find(control_input);
+            if (producer == producers.end()) {
+                report.unresolved_inputs.push_back(operation.id + ":CONTROL:" + control_input);
+                inputs_ready = false;
+            } else if (std::find(dependencies.begin(), dependencies.end(), producer->second) == dependencies.end()) {
+                dependencies.push_back(producer->second);
+            }
+        }
         for (const auto& weight : operation.weight_tensors) {
             if (context.tensors.find(weight) == context.tensors.end()) {
                 report.missing_weight_tensors.push_back(operation.id + ":" + weight);
                 inputs_ready = false;
             }
         }
-        if (context.tensors.find(operation.output) == context.tensors.end()) {
+        if (operation.side_effect) {
+            if (operation.output.empty()) {
+                report.errors.push_back(operation.id + ":SIDE_EFFECT_OUTPUT_ID_REQUIRED");
+                inputs_ready = false;
+            }
+        } else if (context.tensors.find(operation.output) == context.tensors.end()) {
             report.errors.push_back(operation.id + ":UNBOUND_OUTPUT:" + operation.output);
             inputs_ready = false;
         }
@@ -98,14 +112,16 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
             report.errors.push_back(operation.id + ":" + status.message);
             continue;
         }
-        if (dispatch.backend != backend || dispatch.kernel_id.empty()) {
+        if (dispatch.backend != backend || (!dispatch.copy_only && dispatch.kernel_id.empty())) {
             report.errors.push_back(operation.id + ":LOWERING_RETURNED_WRONG_BACKEND_OR_EMPTY_KERNEL_ID");
             continue;
         }
-        status = operators.authorize_dispatch(dispatch.kernel_id, backend, dispatch);
-        if (!status.ok()) {
-            report.errors.push_back(operation.id + ":" + status.message);
-            continue;
+        if (!dispatch.copy_only) {
+            status = operators.authorize_dispatch(dispatch.kernel_id, backend, dispatch);
+            if (!status.ok()) {
+                report.errors.push_back(operation.id + ":" + status.message);
+                continue;
+            }
         }
         GraphNode node;
         node.name = operation.id;

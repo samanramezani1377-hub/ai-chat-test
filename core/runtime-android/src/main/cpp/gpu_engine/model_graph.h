@@ -14,12 +14,14 @@ namespace ai_chat::gpu_engine {
 
 class OperatorRegistry;
 class ComputeGraph;
+class KvCache;
 using ModelTensorBindings = std::unordered_map<std::string, Tensor>;
 
 struct ModelExecutionContext {
     ModelTensorBindings tensors;
     Backend* backend = nullptr;
     std::vector<uint32_t> token_ids;
+    KvCache* kv_cache = nullptr;
     uint64_t past_length = 0;
     uint64_t sequence_length = 0;
     uint64_t context_length = 0;
@@ -31,7 +33,9 @@ struct ModelPlanOperation {
     std::string operator_name;
     std::vector<std::string> inputs;
     std::vector<std::string> weight_tensors;
+    std::vector<std::string> control_inputs;
     std::string output;
+    bool side_effect = false;
     // A leading zero denotes the dynamic token/sequence dimension.
     std::vector<uint64_t> output_shape;
     std::unordered_map<std::string, double> float_attributes;
