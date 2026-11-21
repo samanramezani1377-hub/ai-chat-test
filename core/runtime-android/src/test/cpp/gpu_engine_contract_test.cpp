@@ -830,6 +830,10 @@ void test_operator_registry_fail_closed() {
     definition.backend = BackendKind::DawnWebGpu;
     definition.input_type = DataType::F32;
     definition.output_type = DataType::F32;
+    definition.min_input_count = 2;
+    definition.max_input_count = 2;
+    definition.min_rank = 2;
+    definition.max_rank = 2;
     definition.wgsl_source = "@compute @workgroup_size(1) fn main() {}";
     assert(registry.register_kernel(definition).ok());
 
