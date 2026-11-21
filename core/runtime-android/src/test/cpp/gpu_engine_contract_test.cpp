@@ -703,6 +703,15 @@ void test_add_operator_candidate_and_reference() {
     assert(std::abs(attention_output[0] - 2.0f) < 1e-6f &&
            std::abs(attention_output[1] - 4.0f) < 1e-6f);
 
+    const float gqa_query[] = {1, 0, 0, 1};
+    const float gqa_key[] = {1, 0, 0, 1};
+    const float gqa_value[] = {2, 4, 6, 8};
+    float gqa_output[4] = {};
+    assert(reference_attention_f32(gqa_query, gqa_key, gqa_value, gqa_output,
+                                   1, 2, 1, 2, 1).ok());
+    assert(std::abs(gqa_output[0] - 2.0f) < 1.0f);
+    assert(std::abs(gqa_output[3] - 8.0f) < 1.0f);
+
     BufferDesc attention_desc{8, 4, MemoryDomain::Device, false, "attention"};
     std::shared_ptr<Buffer> q_buffer, k_buffer, v_buffer, attention_output_buffer;
     assert(backend.allocate(attention_desc, q_buffer).ok());

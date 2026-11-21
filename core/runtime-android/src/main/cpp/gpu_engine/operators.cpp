@@ -31,7 +31,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let query_head = head_task % QUERY_HEADS;
     let kv_head = query_head / (QUERY_HEADS / KV_HEADS);
     let query_base = head_task * HEAD_DIM;
-    let kv_base = kv_head * SEQUENCE_LENGTH * HEAD_DIM;
+    let kv_head_offset = kv_head * HEAD_DIM;
     var accumulator: array<f32, 256>;
     for (var d = 0u; d < HEAD_DIM; d = d + 1u) { accumulator[d] = 0.0; }
     var maximum = -3.402823466e+38;
@@ -41,7 +41,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         var score = 0.0;
         for (var d = 0u; d < HEAD_DIM; d = d + 1u) {
             score = score + query[query_base + d] *
-                    key[kv_base + sequence * HEAD_DIM + d];
+                    key[sequence * KV_HEADS * HEAD_DIM + kv_head_offset + d];
         }
         score = score * SCALE;
         let next_maximum = max(maximum, score);
@@ -50,7 +50,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         denominator = denominator * old_weight + new_weight;
         for (var d = 0u; d < HEAD_DIM; d = d + 1u) {
             accumulator[d] = accumulator[d] * old_weight +
-                value[kv_base + sequence * HEAD_DIM + d] * new_weight;
+                value[sequence * KV_HEADS * HEAD_DIM + kv_head_offset + d] * new_weight;
         }
         maximum = next_maximum;
     }
@@ -385,14 +385,14 @@ Status reference_attention_f32(const float* query, const float* key, const float
         for (uint32_t head = 0; head < query_heads; ++head) {
             const uint32_t kv_head = head / (query_heads / kv_heads);
             const uint64_t qbase = (static_cast<uint64_t>(token) * query_heads + head) * head_dimension;
-            const uint64_t kvbase = static_cast<uint64_t>(kv_head) * sequence_length * head_dimension;
+            const uint64_t kvhead_offset = static_cast<uint64_t>(kv_head) * head_dimension;
             std::fill(accumulator.begin(), accumulator.end(), 0.0f);
             float maximum = -std::numeric_limits<float>::infinity();
             float denominator = 0.0f;
             for (uint32_t position = 0; position <= past_length + token; ++position) {
                 float score = 0.0f;
                 for (uint32_t d = 0; d < head_dimension; ++d)
-                    score += query[qbase + d] * key[kvbase + static_cast<uint64_t>(position) * head_dimension + d];
+                    score += query[qbase + d] * key[static_cast<uint64_t>(position) * kv_heads * head_dimension + kvhead_offset + d];
                 score *= scale;
                 const float next_maximum = std::max(maximum, score);
                 const float old_weight = std::exp(maximum - next_maximum);
@@ -400,7 +400,7 @@ Status reference_attention_f32(const float* query, const float* key, const float
                 denominator = denominator * old_weight + new_weight;
                 for (uint32_t d = 0; d < head_dimension; ++d)
                     accumulator[d] = accumulator[d] * old_weight +
-                        value[kvbase + static_cast<uint64_t>(position) * head_dimension + d] * new_weight;
+                        value[static_cast<uint64_t>(position) * kv_heads * head_dimension + kvhead_offset + d] * new_weight;
                 maximum = next_maximum;
             }
             const uint64_t out_base = (static_cast<uint64_t>(token) * query_heads + head) * head_dimension;
