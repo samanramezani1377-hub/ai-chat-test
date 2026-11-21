@@ -1,6 +1,8 @@
 #include "model_graph.h"
 #include "kv_cache.h"
 #include "execution_engine.h"
+#include "memory_planner.h"
+#include "weight_streamer.h"
 
 #include <algorithm>
 #include <unordered_set>
@@ -86,7 +88,9 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
             }
         }
         for (const auto& weight : operation.weight_tensors) {
-            if (context.tensors.find(weight) == context.tensors.end()) {
+            const bool dense_bound = context.tensors.find(weight) != context.tensors.end();
+            const bool quantized_bound = context.quantized_weights.find(weight) != context.quantized_weights.end();
+            if (!dense_bound && !quantized_bound) {
                 report.missing_weight_tensors.push_back(operation.id + ":" + weight);
                 inputs_ready = false;
             }
@@ -209,6 +213,173 @@ Status execute_model_execution_plan(ModelExecutionPlan& plan, Backend& backend,
 }
 
 
+
+Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& backend,
+                                    const ModelLoweringRegistry& lowerings,
+                                    const OperatorRegistry& operators,
+                                    const std::vector<std::string>& external_inputs,
+                                    const GgufReader& reader, MemoryManager& memory,
+                                    const DeviceInfo& device, uint64_t token_count,
+                                    const std::atomic<bool>* cancellation,
+                                    ModelExecutionContext& context,
+                                    ModelGraphCompileReport& report) {
+    report = ModelGraphCompileReport{};
+    plan.graph_compiled = false;
+    plan.execution_validated = false;
+    plan.gpu_ready = false;
+    if (!plan.structurally_validated || !plan.operator_coverage_validated ||
+        backend.kind() == BackendKind::Unknown || !backend.healthy() || token_count == 0)
+        return {StatusCode::NotReady, "Streamed execution requires a validated plan, healthy backend and non-zero token count"};
+    context.backend = &backend;
+    if (context.token_ids.size() != token_count)
+        return {StatusCode::InvalidArgument, "Streamed execution token count does not match the bound token IDs"};
+
+    std::unordered_map<std::string, size_t> producer_indices;
+    for (size_t index = 0; index < plan.operations.size(); ++index) {
+        const auto& operation = plan.operations[index];
+        for (const auto& input : operation.inputs) {
+            const auto producer = producer_indices.find(input);
+            if (producer != producer_indices.end() && producer->second >= index)
+                return {StatusCode::InvalidArgument, "Streamed model plan is not in dependency order: " + operation.id};
+        }
+        for (const auto& control : operation.control_inputs) {
+            const auto producer = producer_indices.find(control);
+            if (producer == producer_indices.end() || producer->second >= index)
+                return {StatusCode::InvalidArgument, "Streamed model plan has an unresolved or forward control dependency: " + operation.id};
+        }
+        producer_indices[operation.output] = index;
+    }
+
+    Status status = allocate_model_activation_tensors(plan, memory, token_count, context);
+    if (!status.ok()) return status;
+    const bool has_attention = std::any_of(plan.operations.begin(), plan.operations.end(),
+        [](const ModelPlanOperation& operation) { return operation.operator_name == "Attention"; });
+    if (has_attention) {
+        if (!context.kv_cache || context.sequence_length == 0)
+            return {StatusCode::NotReady, "Streamed attention execution requires a bound KV cache and sequence length"};
+        status = bind_model_kv_cache_views(plan, *context.kv_cache, context.past_length,
+                                           context.sequence_length, context);
+        if (!status.ok()) return status;
+    }
+
+    ExecutionScheduler scheduler;
+    for (const auto& original_operation : plan.operations) {
+        if (cancellation && cancellation->load(std::memory_order_relaxed)) {
+            report.errors.emplace_back("STREAMED_EXECUTION_CANCELLED");
+            return {StatusCode::Cancelled, "Streamed model execution was cancelled"};
+        }
+        if (!backend.healthy()) {
+            report.errors.emplace_back("STREAMED_BACKEND_DEVICE_LOST");
+            return {StatusCode::DeviceLost, "GPU backend became unavailable during streamed execution"};
+        }
+
+        ModelPlanOperation operation = original_operation;
+        // Operations are executed serially in the already-validated plan order;
+        // their control dependencies are therefore satisfied by prior submits.
+        operation.control_inputs.clear();
+        ModelExecutionPlan single;
+        single.structurally_validated = true;
+        single.operator_coverage_validated = true;
+        single.external_inputs = external_inputs;
+        single.operations.push_back(operation);
+
+        ModelExecutionContext operation_context;
+        operation_context.tensors = context.tensors;
+        operation_context.backend = &backend;
+        operation_context.token_ids = context.token_ids;
+        operation_context.kv_cache = context.kv_cache;
+        operation_context.past_length = context.past_length;
+        operation_context.sequence_length = context.sequence_length;
+        operation_context.context_length = context.context_length;
+        operation_context.prefill = context.prefill;
+
+        if (!operation.weight_tensors.empty()) {
+            status = load_model_execution_weights(reader, single, backend, memory,
+                                                  device, operation_context);
+            if (!status.ok()) {
+                report.errors.push_back(operation.id + ":WEIGHT_STREAM_FAILED:" + status.message);
+                for (const auto& name : operation.weight_tensors) {
+                    operation_context.tensors.erase(name);
+                    operation_context.quantized_weights.erase(name);
+                }
+                operation_context.weight_leases.clear();
+                return status;
+            }
+        }
+
+        {
+            ComputeGraph graph;
+            ModelGraphCompileReport compile_report;
+            status = compile_model_execution_plan(single, backend.kind(), lowerings,
+                operators, external_inputs, operation_context, graph, compile_report);
+            report.missing_lowerings.insert(report.missing_lowerings.end(),
+                compile_report.missing_lowerings.begin(), compile_report.missing_lowerings.end());
+            report.unresolved_inputs.insert(report.unresolved_inputs.end(),
+                compile_report.unresolved_inputs.begin(), compile_report.unresolved_inputs.end());
+            report.missing_weight_tensors.insert(report.missing_weight_tensors.end(),
+                compile_report.missing_weight_tensors.begin(), compile_report.missing_weight_tensors.end());
+            report.errors.insert(report.errors.end(), compile_report.errors.begin(), compile_report.errors.end());
+            if (!status.ok()) {
+                for (const auto& name : operation.weight_tensors) {
+                    operation_context.tensors.erase(name);
+                    operation_context.quantized_weights.erase(name);
+                }
+                operation_context.weight_leases.clear();
+                return status;
+            }
+            status = scheduler.execute(backend, graph, cancellation);
+            if (!status.ok()) {
+                report.errors.push_back(operation.id + ":STREAMED_DISPATCH_FAILED:" + status.message);
+                for (const auto& name : operation.weight_tensors) {
+                    operation_context.tensors.erase(name);
+                    operation_context.quantized_weights.erase(name);
+                }
+                operation_context.weight_leases.clear();
+                return status;
+            }
+            ++report.compiled_nodes;
+        }
+
+        // Drop every temporary weight reference before releasing its lease so
+        // MemoryManager can reclaim it without aliasing a still-live Tensor.
+        for (const auto& name : operation.weight_tensors) {
+            operation_context.tensors.erase(name);
+            operation_context.quantized_weights.erase(name);
+        }
+        operation_context.weight_leases.clear();
+    }
+
+    for (const auto& operation : plan.operations) {
+        if (operation.operator_name != "KVCacheAppend") continue;
+        if (!context.kv_cache || operation.inputs.size() != 2) {
+            report.errors.push_back(operation.id + ":KV_CACHE_COMMIT_CONTEXT_INVALID");
+            return {StatusCode::InvalidArgument, "KV cache append commit context is invalid"};
+        }
+        const auto layer = operation.integer_attributes.find("layer_index");
+        const auto keys = context.tensors.find(operation.inputs[0]);
+        if (layer == operation.integer_attributes.end() || layer->second > UINT32_MAX ||
+            keys == context.tensors.end() || keys->second.descriptor().shape.empty() ||
+            keys->second.descriptor().shape[0] > UINT32_MAX) {
+            report.errors.push_back(operation.id + ":KV_CACHE_COMMIT_METADATA_INVALID");
+            return {StatusCode::InvalidArgument, "KV cache append commit metadata is invalid"};
+        }
+        status = context.kv_cache->commit_device_append(static_cast<uint32_t>(layer->second),
+            static_cast<uint32_t>(context.past_length),
+            static_cast<uint32_t>(keys->second.descriptor().shape[0]));
+        if (!status.ok()) {
+            report.errors.push_back(operation.id + ":KV_CACHE_COMMIT_FAILED:" + status.message);
+            return status;
+        }
+    }
+
+    report.compiled = true;
+    report.executed = true;
+    plan.graph_compiled = true;
+    plan.execution_validated = true;
+    // Streaming is a valid execution strategy, not a model-family certification.
+    plan.gpu_ready = false;
+    return Status::success();
+}
 
 Status bind_model_kv_cache_views(const ModelExecutionPlan& plan, KvCache& cache,
                                  uint64_t past_length, uint64_t sequence_length,

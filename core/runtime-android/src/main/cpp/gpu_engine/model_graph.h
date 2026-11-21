@@ -110,6 +110,16 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
                                     const std::vector<std::string>& external_inputs,
                                     const ModelExecutionContext& context,
                                     ComputeGraph& graph, ModelGraphCompileReport& report);
+Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& backend,
+                                    const ModelLoweringRegistry& lowerings,
+                                    const OperatorRegistry& operators,
+                                    const std::vector<std::string>& external_inputs,
+                                    const GgufReader& reader, MemoryManager& memory,
+                                    const DeviceInfo& device, uint64_t token_count,
+                                    const std::atomic<bool>* cancellation,
+                                    ModelExecutionContext& context,
+                                    ModelGraphCompileReport& report);
+
 Status execute_model_execution_plan(ModelExecutionPlan& plan, Backend& backend,
                                     const ModelLoweringRegistry& lowerings,
                                     const OperatorRegistry& operators,
