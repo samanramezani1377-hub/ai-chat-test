@@ -167,7 +167,45 @@ internal fun MainScreen(container: AppContainer, initialSettingsSection: String?
             }
         }
     }
-    fun activateModel(id: String) { val m = manager ?: return; if (generating || approvalBusy || importBusy || activationBusy) return; activationBusy = true; runtimeStatus = "در حال فعال‌سازی…"; diagnostic = null; scope.launch(Dispatchers.Default) { container.providerStore?.selectMode(InferenceProviderMode.LOCAL); val result = m.activate(id); withContext(Dispatchers.Main) { activationBusy = false; when (result) { is ModelResult.Success -> { activeModel = result.value; runtimeStatus = "آماده"; diagnostic = null }; is ModelResult.Failure -> { runtimeStatus = "خطا"; diagnostic = result.error.message } }; refreshModels() } } }
+    fun activateModel(id: String) {
+        val modelManager = manager ?: return
+        if (generating || approvalBusy || importBusy || activationBusy) return
+        activationBusy = true
+        runtimeStatus = "در حال فعال‌سازی…"
+        diagnostic = null
+
+        scope.launch(Dispatchers.Default) {
+            try {
+                container.providerStore?.selectMode(InferenceProviderMode.LOCAL)
+                when (val result = modelManager.activate(id)) {
+                    is ModelResult.Success -> withContext(Dispatchers.Main) {
+                        activeModel = result.value
+                        runtimeStatus = "آماده"
+                        diagnostic = null
+                        refreshModels()
+                    }
+                    is ModelResult.Failure -> withContext(Dispatchers.Main) {
+                        runtimeStatus = "خطا"
+                        diagnostic = result.error.message
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                withContext(NonCancellable + Dispatchers.Main) {
+                    runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"
+                    refreshModels()
+                }
+                throw cancelled
+            } catch (error: Throwable) {
+                withContext(Dispatchers.Main) {
+                    runtimeStatus = "خطا"
+                    diagnostic = formatDiagnostic(error.message ?: "Model activation failed", "فعال‌سازی مدل")
+                }
+            } finally {
+                withContext(NonCancellable + Dispatchers.Main) { activationBusy = false }
+            }
+        }
+    }
+
     fun updateStreamMessage(streamId: String, append: String? = null, replace: String? = null) { if (activeStreamId != streamId) return; messages = messages.map { message -> if (message.id != streamId) message else message.copy(text = replace ?: (message.text + append.orEmpty())) } }
     fun send() {
         val record = current ?: return
@@ -398,8 +436,101 @@ internal fun MainScreen(container: AppContainer, initialSettingsSection: String?
     }
 
     fun approveExecution() { val record = current ?: return; val pending = execution ?: return; if (!pending.approvalRequired || approvalBusy) return; approvalBusy = true; generating = true; runtimeStatus = "در حال تأیید عملیات"; diagnostic = null; execution = pending.copy(status = "در حال تأیید"); val streamId = UUID.randomUUID().toString(); activeStreamId = streamId; messages = messages + UiMessage(ChatMessage.Role.ASSISTANT, "", streamId); scope.launch(Dispatchers.Default) { try { val outcome = container.approveAndExecute(pending.id); if (!outcome.success) { withContext(Dispatchers.Main) { approvalBusy = false; generating = false; activeStreamId = null; runtimeStatus = "خطا"; diagnostic = formatDiagnostic(outcome.message); execution = pending.copy(status = "ناموفق", error = outcome.message, finishedAt = System.currentTimeMillis()) }; return@launch }; val session = container.createAgentSession(record.id) { event -> withContext(Dispatchers.Main.immediate) { when (event) { AgentEvent.Started -> runtimeStatus = "در حال دریافت پاسخ نهایی"; is AgentEvent.Token -> updateStreamMessage(streamId, append = event.value); is AgentEvent.Failed -> diagnostic = formatDiagnostic(event.message); else -> Unit } } } ?: error("Agent Session در دسترس نیست."); val result = run { val inferenceSettings = InferenceSettingsAccess.load(context); session.resumeApproved(pending.id, outcome, inferenceSettings, requestedRecentMessages = maxOf(1, inferenceSettings.recentMessages)) }; withContext(Dispatchers.Main) { updateStreamMessage(streamId, replace = result.generation.text); approvalBusy = false; generating = false; activeStreamId = null; runtimeStatus = "آماده"; execution = pending.copy(status = "عملیات تأیید و تکمیل شد", finishedAt = System.currentTimeMillis(), resultPreview = result.generation.text.take(240), approvalRequired = false); conversations = history.recent(recentLimit); history.recent(recentLimit).firstOrNull { it.id == record.id }?.let { current = it } } } catch (cancelled: CancellationException) { withContext(NonCancellable + Dispatchers.Main) { approvalBusy = false; generating = false; activeStreamId = null; runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"; execution = pending.copy(status = "ادامه عملیات لغو شد؛ وضعیت اقدام را بررسی کن", approvalRequired = false, finishedAt = System.currentTimeMillis()) }; throw cancelled } catch (t: Throwable) { withContext(Dispatchers.Main) { approvalBusy = false; generating = false; activeStreamId = null; runtimeStatus = "خطا"; diagnostic = formatDiagnostic(t.message ?: "Approval continuation failed", "ادامه عملیات تأییدشده"); execution = pending.copy(status = "ناموفق", error = diagnostic, finishedAt = System.currentTimeMillis()) } } } }
-    fun rejectExecution() { val pending = execution ?: return; if (!pending.approvalRequired || approvalBusy) return; approvalBusy = true; runtimeStatus = "در حال رد عملیات"; execution = pending.copy(status = "در حال رد"); scope.launch(Dispatchers.Default) { val rejected = container.reject(pending.id); withContext(Dispatchers.Main) { approvalBusy = false; generating = false; activeStreamId = null; if (rejected) { runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"; execution = pending.copy(status = "رد شد", approvalRequired = false, finishedAt = System.currentTimeMillis()) } else { runtimeStatus = "خطا"; diagnostic = formatDiagnostic("رد عملیات انجام نشد. وضعیت Execution را بررسی کنید.", "رد عملیات"); execution = pending.copy(status = "ناموفق", error = diagnostic, finishedAt = System.currentTimeMillis()) } } } }
-    fun stop() { if (!generating || approvalBusy) return; activeStreamId = null; scope.launch(Dispatchers.Default) { container.modelRuntime.stopGeneration() }; generating = false; runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"; execution = execution?.copy(status = "متوقف شد", finishedAt = System.currentTimeMillis()) }
+    fun rejectExecution() {
+        val pending = execution ?: return
+        if (!pending.approvalRequired || approvalBusy) return
+        approvalBusy = true
+        runtimeStatus = "در حال رد عملیات"
+        execution = pending.copy(status = "در حال رد")
+
+        scope.launch(Dispatchers.Default) {
+            try {
+                val rejected = container.reject(pending.id)
+                withContext(Dispatchers.Main) {
+                    approvalBusy = false
+                    generating = false
+                    activeStreamId = null
+                    if (rejected) {
+                        runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"
+                        execution = pending.copy(
+                            status = "رد شد",
+                            approvalRequired = false,
+                            finishedAt = System.currentTimeMillis(),
+                        )
+                    } else {
+                        runtimeStatus = "خطا"
+                        diagnostic = formatDiagnostic(
+                            "رد عملیات انجام نشد. وضعیت Execution را بررسی کنید.",
+                            "رد عملیات",
+                        )
+                        execution = pending.copy(
+                            status = "ناموفق",
+                            error = diagnostic,
+                            finishedAt = System.currentTimeMillis(),
+                        )
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                withContext(NonCancellable + Dispatchers.Main) {
+                    approvalBusy = false
+                    generating = false
+                    activeStreamId = null
+                    runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"
+                    if (execution?.status == "در حال رد") {
+                        execution = pending.copy(status = "رد عملیات لغو شد")
+                    }
+                }
+                throw cancelled
+            } catch (error: Throwable) {
+                withContext(Dispatchers.Main) {
+                    approvalBusy = false
+                    generating = false
+                    activeStreamId = null
+                    runtimeStatus = "خطا"
+                    diagnostic = formatDiagnostic(error.message ?: "Reject operation failed", "رد عملیات")
+                    execution = pending.copy(
+                        status = "ناموفق",
+                        error = diagnostic,
+                        finishedAt = System.currentTimeMillis(),
+                    )
+                }
+            }
+        }
+    }
+
+    fun deactivateModel() {
+        val modelManager = manager ?: return
+        if (activeModel == null) return
+
+        scope.launch(Dispatchers.Default) {
+            try {
+                when (val result = modelManager.deactivate()) {
+                    is ModelResult.Success -> withContext(Dispatchers.Main) {
+                        activeModel = null
+                        runtimeStatus = "آماده"
+                        diagnostic = null
+                        refreshModels()
+                    }
+                    is ModelResult.Failure -> withContext(Dispatchers.Main) {
+                        runtimeStatus = "خطا"
+                        diagnostic = result.error.message
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                withContext(NonCancellable + Dispatchers.Main) {
+                    runtimeStatus = if (activeModel != null) "آماده" else "خارج از دسترس"
+                    refreshModels()
+                }
+                throw cancelled
+            } catch (error: Throwable) {
+                withContext(Dispatchers.Main) {
+                    runtimeStatus = "خطا"
+                    diagnostic = formatDiagnostic(error.message ?: "Model deactivation failed", "غیرفعال‌سازی مدل")
+                }
+            }
+        }
+    }
+
     fun deactivateModel() { val m = manager ?: return; if (activeModel == null) return; scope.launch(Dispatchers.Default) { val result = m.deactivate(); withContext(Dispatchers.Main) { when (result) { is ModelResult.Success -> { activeModel = null; runtimeStatus = "خارج از دسترس"; diagnostic = null; refreshModels() }; is ModelResult.Failure -> { runtimeStatus = "خطا"; diagnostic = result.error.message } } } } }
     fun createConversation() { scope.launch(Dispatchers.Default) { val record = history.create("گفت‌وگوی جدید"); withContext(Dispatchers.Main) { current = record; messages = emptyList(); composer = ""; refreshHistory(); destination = AppDestination.CHAT; sidebarOpen = false } } }
     fun openConversation(record: ConversationRecord) { loadConversation(record); destination = AppDestination.CHAT; sidebarOpen = false }
