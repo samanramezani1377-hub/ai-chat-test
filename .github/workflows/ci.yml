@@ -34,6 +34,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Verify standalone GPU engine contracts
+        run: bash scripts/test_gpu_engine_contracts.sh
+
       - name: Set up JDK
         uses: actions/setup-java@v5
         with:

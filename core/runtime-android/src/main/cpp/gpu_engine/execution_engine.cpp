@@ -1,6 +1,7 @@
 #include "execution_engine.h"
 
 #include <algorithm>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <unordered_set>

@@ -1,0 +1,194 @@
+#include "execution_engine.h"
+
+#include <cassert>
+#include <cstring>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+using namespace ai_chat::gpu_engine;
+
+namespace {
+
+class FakeBuffer final : public Buffer {
+public:
+    explicit FakeBuffer(const BufferDesc& desc)
+        : bytes(desc.size_bytes), domain(desc.memory) {}
+    uint64_t size_bytes() const noexcept override { return bytes.size(); }
+    MemoryDomain memory_domain() const noexcept override { return domain; }
+    std::vector<uint8_t> bytes;
+    MemoryDomain domain;
+};
+
+class FakeBatch final : public CommandBatch {
+public:
+    Status copy_buffer(const std::shared_ptr<Buffer>& source, uint64_t source_offset,
+                       const std::shared_ptr<Buffer>& destination, uint64_t destination_offset,
+                       uint64_t size_bytes) override {
+        auto src = std::dynamic_pointer_cast<FakeBuffer>(source);
+        auto dst = std::dynamic_pointer_cast<FakeBuffer>(destination);
+        if (!src || !dst || source_offset + size_bytes > src->bytes.size() ||
+            destination_offset + size_bytes > dst->bytes.size()) {
+            return {StatusCode::InvalidArgument, "fake copy range invalid"};
+        }
+        std::memcpy(dst->bytes.data() + destination_offset,
+                    src->bytes.data() + source_offset, static_cast<size_t>(size_bytes));
+        return Status::success();
+    }
+
+    Status dispatch_compute(const ComputeDispatch& dispatch) override {
+        if (dispatch.label.empty()) return {StatusCode::InvalidArgument, "dispatch label missing"};
+        labels.push_back(dispatch.label);
+        return Status::success();
+    }
+
+    std::vector<std::string> labels;
+};
+
+class FakeBackend final : public Backend {
+public:
+    BackendKind kind() const noexcept override { return BackendKind::OpenGles; }
+    Status enumerate_devices(std::vector<DeviceInfo>& out) override {
+        out.clear();
+        return Status::success();
+    }
+    Status initialize(const DeviceInfo&) override { ready = true; return Status::success(); }
+    Status allocate(const BufferDesc& desc, std::shared_ptr<Buffer>& out) override {
+        out = std::make_shared<FakeBuffer>(desc);
+        return Status::success();
+    }
+    Status begin_commands(std::unique_ptr<CommandBatch>& out) override {
+        out = std::make_unique<FakeBatch>();
+        return Status::success();
+    }
+    Status submit(std::unique_ptr<CommandBatch> commands) override {
+        auto* batch = dynamic_cast<FakeBatch*>(commands.get());
+        if (!batch) return {StatusCode::InvalidArgument, "wrong fake command batch"};
+        submitted = batch->labels;
+        ++submit_count;
+        return Status::success();
+    }
+    Status synchronize() override { ++sync_count; return Status::success(); }
+    Status upload(const std::shared_ptr<Buffer>& destination, uint64_t offset,
+                  const void* source, uint64_t size) override {
+        auto buffer = std::dynamic_pointer_cast<FakeBuffer>(destination);
+        if (!buffer || !source || offset + size > buffer->bytes.size())
+            return {StatusCode::InvalidArgument, "fake upload range invalid"};
+        std::memcpy(buffer->bytes.data() + offset, source, static_cast<size_t>(size));
+        return Status::success();
+    }
+    Status readback(const std::shared_ptr<Buffer>& source, uint64_t offset,
+                    void* destination, uint64_t size) override {
+        auto buffer = std::dynamic_pointer_cast<FakeBuffer>(source);
+        if (!buffer || !destination || offset + size > buffer->bytes.size())
+            return {StatusCode::InvalidArgument, "fake readback range invalid"};
+        std::memcpy(destination, buffer->bytes.data() + offset, static_cast<size_t>(size));
+        return Status::success();
+    }
+    Status shutdown() override { ready = false; return Status::success(); }
+    bool healthy() const noexcept override { return ready; }
+
+    bool ready = true;
+    int submit_count = 0;
+    int sync_count = 0;
+    std::vector<std::string> submitted;
+};
+
+void test_tensor_and_memory_lease() {
+    FakeBackend backend;
+    MemoryManager memory(backend, 128);
+    BufferDesc allocation{64, 4, MemoryDomain::Device, false, "test"};
+    MemoryLease lease;
+    assert(memory.allocate(allocation, lease).ok());
+    assert(memory.allocated_bytes() == 64);
+    auto backing = lease.buffer();
+
+    TensorDesc desc;
+    desc.shape = {2, 3};
+    desc.data_type = DataType::F32;
+    desc.memory = MemoryDomain::Device;
+    desc.alignment = 4;
+    Tensor tensor;
+    assert(Tensor::create(desc, backing, 0, tensor).ok());
+    assert(tensor.element_count() == 6);
+    assert(tensor.byte_size() == 24);
+
+    lease = MemoryLease{};
+    assert(memory.allocated_bytes() == 64); // aliased buffer keeps the lease alive
+    backing.reset();
+    assert(memory.allocated_bytes() == 0);
+
+    desc.shape = {UINT64_MAX, 8};
+    uint64_t bytes = 0;
+    assert(Tensor::required_bytes(desc, bytes).code == StatusCode::InvalidArgument);
+}
+
+void test_operator_registry_fail_closed() {
+    OperatorRegistry registry;
+    KernelDefinition definition;
+    definition.operator_name = "Add";
+    definition.kernel_id = "add-f32-v1";
+    definition.backend = BackendKind::DawnWebGpu;
+    definition.input_type = DataType::F32;
+    definition.output_type = DataType::F32;
+    definition.wgsl_source = "@compute @workgroup_size(1) fn main() {}";
+    assert(registry.register_kernel(definition).ok());
+
+    KernelDefinition selected;
+    assert(registry.select_kernel("Add", BackendKind::DawnWebGpu, DataType::F32,
+                                  DataType::F32, 2, 2, selected).code == StatusCode::Unsupported);
+    definition.kernel_id = "add-f32-validated-v1";
+    definition.validation = KernelValidation::Validated;
+    assert(registry.register_kernel(definition).ok());
+    assert(registry.select_kernel("Add", BackendKind::DawnWebGpu, DataType::F32,
+                                  DataType::F32, 2, 2, selected).ok());
+}
+
+void test_graph_scheduler_order_and_cancel() {
+    FakeBackend backend;
+    ComputeGraph graph;
+    size_t index = 0;
+    GraphNode first;
+    first.name = "first";
+    first.dispatch.label = "first";
+    assert(graph.add_node(first, index).ok());
+
+    GraphNode second;
+    second.name = "second";
+    second.dependencies = {0};
+    second.dispatch.label = "second";
+    assert(graph.add_node(second, index).ok());
+
+    GraphNode independent;
+    independent.name = "independent";
+    independent.dispatch.label = "independent";
+    assert(graph.add_node(independent, index).ok());
+
+    std::vector<size_t> order;
+    assert(graph.topological_order(order).ok());
+    auto first_pos = std::find(order.begin(), order.end(), 0);
+    auto second_pos = std::find(order.begin(), order.end(), 1);
+    assert(first_pos < second_pos);
+
+    ExecutionScheduler scheduler;
+    assert(scheduler.execute(backend, graph).ok());
+    assert(backend.submit_count == 1);
+    assert(backend.sync_count == 1);
+    assert(backend.submitted.size() == 3);
+
+    std::atomic<bool> cancelled{true};
+    assert(scheduler.execute(backend, graph, &cancelled).code == StatusCode::Cancelled);
+    assert(backend.submit_count == 1); // cancelled work was never submitted
+}
+
+} // namespace
+
+int main() {
+    test_tensor_and_memory_lease();
+    test_operator_registry_fail_closed();
+    test_graph_scheduler_order_and_cancel();
+    std::cout << "GPU engine contract tests passed\n";
+    return 0;
+}
