@@ -85,7 +85,6 @@ ModelPreflightReport evaluate_model_preflight(const GgufFileInfo& model,
         report.blockers.emplace_back("UNSUPPORTED_ARCHITECTURE:" + model.architecture);
     } else if (adapter->descriptor().validation != SupportState::Validated) {
         report.blockers.emplace_back("UNVERIFIED_ARCHITECTURE_ADAPTER:" + model.architecture);
-        report.all_quantization_decoders_validated = false;
     } else {
         const Status metadata_status = adapter->validate_metadata(model);
         if (!metadata_status.ok()) {
@@ -123,10 +122,10 @@ ModelPreflightReport evaluate_model_preflight(const GgufFileInfo& model,
         }
     }
 
-    report.gpu_execution_ready = report.architecture_known &&
-        adapter->descriptor().validation == SupportState::Validated &&
-        report.all_tensor_storage_known && report.all_quantization_decoders_validated &&
-        report.blockers.empty();
+    // Preflight is necessary but not sufficient: model-specific graph construction,
+    // operator/kernel coverage and numerical validation have not been completed here.
+    report.blockers.emplace_back("MODEL_GRAPH_AND_KERNEL_VALIDATION_PENDING");
+    report.gpu_execution_ready = false;
     return report;
 }
 
