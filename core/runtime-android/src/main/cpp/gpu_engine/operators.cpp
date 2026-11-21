@@ -24,6 +24,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 )wgsl";
 
+constexpr char kMultiplyF32Wgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> lhs: array<f32>;
+@group(0) @binding(1) var<storage, read> rhs: array<f32>;
+@group(0) @binding(2) var<storage, read_write> output: array<f32>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x < arrayLength(&output)) {
+        output[gid.x] = lhs[gid.x] * rhs[gid.x];
+    }
+}
+)wgsl";
+
 constexpr char kSiluF32Wgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
@@ -194,46 +206,57 @@ bool is_contiguous_f32(const Tensor& tensor) {
            desc.memory != MemoryDomain::Host;
 }
 
+Status build_binary_f32_candidate(const Tensor& lhs, const Tensor& rhs,
+                                    const Tensor& output, ComputeDispatch& dispatch,
+                                    const char* label, const char* shader) {
+    dispatch = ComputeDispatch{};
+    if (!is_contiguous_f32(lhs) || !is_contiguous_f32(rhs) || !is_contiguous_f32(output))
+        return {StatusCode::Unsupported, "Binary F32 operator requires contiguous device/shared tensors"};
+    if (lhs.descriptor().shape != rhs.descriptor().shape ||
+        lhs.descriptor().shape != output.descriptor().shape ||
+        lhs.element_count() == 0 || lhs.element_count() > UINT32_MAX ||
+        lhs.element_count() != rhs.element_count() || lhs.element_count() != output.element_count())
+        return {StatusCode::InvalidArgument, "Binary F32 operator tensor shapes or element counts do not match"};
+    if (!lhs.buffer() || !rhs.buffer() || !output.buffer() ||
+        output.buffer().get() == lhs.buffer().get() || output.buffer().get() == rhs.buffer().get())
+        return {StatusCode::Unsupported, "Binary F32 output must use a distinct valid buffer"};
+    if (lhs.byte_size() != rhs.byte_size() || lhs.byte_size() != output.byte_size() ||
+        lhs.byte_size() != lhs.element_count() * sizeof(float))
+        return {StatusCode::InvalidArgument, "Binary F32 tensor byte ranges are inconsistent"};
+    dispatch.label = label;
+    dispatch.wgsl_source = shader;
+    dispatch.workgroups_x = static_cast<uint32_t>((lhs.element_count() + 63) / 64);
+    dispatch.bindings = {
+        {0, lhs.buffer(), lhs.byte_offset(), lhs.byte_size()},
+        {1, rhs.buffer(), rhs.byte_offset(), rhs.byte_size()},
+        {2, output.buffer(), output.byte_offset(), output.byte_size()},
+    };
+    return Status::success();
+}
+
 } // namespace
 
 const char* add_f32_wgsl_source() noexcept { return kAddF32Wgsl; }
 
 Status build_add_f32_candidate(const Tensor& lhs, const Tensor& rhs,
                                const Tensor& output, ComputeDispatch& dispatch) {
-    dispatch = ComputeDispatch{};
-    if (!is_contiguous_f32(lhs) || !is_contiguous_f32(rhs) || !is_contiguous_f32(output)) {
-        return {StatusCode::Unsupported, "Generic Add kernel currently requires contiguous device/shared F32 tensors"};
-    }
-    if (lhs.descriptor().shape != rhs.descriptor().shape ||
-        lhs.descriptor().shape != output.descriptor().shape ||
-        lhs.element_count() != rhs.element_count() ||
-        lhs.element_count() != output.element_count()) {
-        return {StatusCode::InvalidArgument, "Add tensor shapes must match exactly"};
-    }
-    if (!lhs.buffer() || !rhs.buffer() || !output.buffer() ||
-        output.buffer().get() == lhs.buffer().get() ||
-        output.buffer().get() == rhs.buffer().get()) {
-        return {StatusCode::Unsupported, "Add output must use a distinct valid buffer until aliasing is validated"};
-    }
-    if (lhs.byte_size() != rhs.byte_size() || lhs.byte_size() != output.byte_size() ||
-        lhs.byte_size() != lhs.element_count() * sizeof(float)) {
-        return {StatusCode::InvalidArgument, "Add tensor byte ranges are inconsistent"};
-    }
-    constexpr uint64_t kWorkgroupSize = 64;
-    const uint64_t groups = 1 + (lhs.element_count() - 1) / kWorkgroupSize;
-    if (groups == 0 || groups > std::numeric_limits<uint32_t>::max()) {
-        return {StatusCode::Unsupported, "Add tensor exceeds the generic dispatch workgroup range"};
-    }
+    return build_binary_f32_candidate(lhs, rhs, output, dispatch,
+                                      "add-f32-generic-unverified", kAddF32Wgsl);
+}
 
-    dispatch.label = "add-f32-generic-unverified";
-    dispatch.wgsl_source = kAddF32Wgsl;
-    dispatch.entry_point = "main";
-    dispatch.workgroups_x = static_cast<uint32_t>(groups);
-    dispatch.bindings = {
-        {0, lhs.buffer(), lhs.byte_offset(), lhs.byte_size()},
-        {1, rhs.buffer(), rhs.byte_offset(), rhs.byte_size()},
-        {2, output.buffer(), output.byte_offset(), output.byte_size()},
-    };
+const char* multiply_f32_wgsl_source() noexcept { return kMultiplyF32Wgsl; }
+
+Status build_multiply_f32_candidate(const Tensor& lhs, const Tensor& rhs,
+                                    const Tensor& output, ComputeDispatch& dispatch) {
+    return build_binary_f32_candidate(lhs, rhs, output, dispatch,
+                                      "multiply-f32-generic-unverified", kMultiplyF32Wgsl);
+}
+
+Status reference_multiply_f32(const float* lhs, const float* rhs, float* output,
+                              uint64_t element_count) {
+    if ((!lhs || !rhs || !output) && element_count != 0)
+        return {StatusCode::InvalidArgument, "Multiply reference received a null pointer"};
+    for (uint64_t i = 0; i < element_count; ++i) output[i] = lhs[i] * rhs[i];
     return Status::success();
 }
 
@@ -553,6 +576,21 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     add.wgsl_source = kAddF32Wgsl;
     add.entry_point = "main";
     Status status = registry.register_kernel(std::move(add));
+    if (!status.ok()) return status;
+
+    KernelDefinition multiply;
+    multiply.operator_name = "Multiply";
+    multiply.backend = BackendKind::DawnWebGpu;
+    multiply.input_type = DataType::F32;
+    multiply.output_type = DataType::F32;
+    multiply.min_input_count = 2;
+    multiply.max_input_count = 2;
+    multiply.min_rank = 1;
+    multiply.max_rank = 16;
+    multiply.validation = KernelValidation::Unverified;
+    multiply.kernel_id = "dawn-multiply-f32-generic-v1";
+    multiply.wgsl_source = kMultiplyF32Wgsl;
+    status = registry.register_kernel(std::move(multiply));
     if (!status.ok()) return status;
 
     KernelDefinition matmul;

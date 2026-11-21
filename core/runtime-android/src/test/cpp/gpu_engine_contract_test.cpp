@@ -480,6 +480,9 @@ void test_add_operator_candidate_and_reference() {
     float result[] = {0, 0, 0};
     assert(reference_add_f32(left, right, result, 3).ok());
     assert(result[0] == 5 && result[1] == 7 && result[2] == 9);
+    float multiplied[] = {};
+    assert(reference_multiply_f32(left, right, multiplied, 3).ok());
+    assert(multiplied[0] == 4.0f && multiplied[1] == 10.0f && multiplied[2] == 18.0f);
 
     const float matrix_a[] = {1, 2, 3, 4, 5, 6};
     const float matrix_b[] = {7, 8, 9, 10, 11, 12};
