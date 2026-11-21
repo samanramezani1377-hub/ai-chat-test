@@ -48,6 +48,7 @@ void GpuInferenceSession::unload_locked() noexcept {
     memory_budget_bytes_ = 0;
     total_weight_bytes_ = 0;
     largest_weight_tensor_bytes_ = 0;
+    peak_operation_weight_bytes_ = 0;
     kv_cache_bytes_ = 0;
     last_ttft_ms_ = 0;
     last_decode_tokens_per_second_ = 0.0;
@@ -201,6 +202,38 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         return {StatusCode::Unsupported, last_error_};
     }
 
+    // We load only the current operation's weights, but all weights attached
+    // to that operation coexist until its dispatch completes. Estimate that
+    // peak set rather than only the largest individual tensor.
+    peak_operation_weight_bytes_ = 0;
+    for (const auto& operation : plan_.operations) {
+        uint64_t operation_weight_bytes = 0;
+        std::unordered_set<std::string> operation_weights;
+        for (const auto& name : operation.weight_tensors) {
+            if (!operation_weights.insert(name).second) continue;
+            const GgufTensorInfo* tensor = reader.find_tensor(name);
+            if (!tensor || !tensor->byte_size_known) {
+                last_error_ = "Operation weight storage size is unknown: " + name;
+                unload_locked();
+                return {StatusCode::Unsupported, last_error_};
+            }
+            if (tensor->byte_size > UINT64_MAX - 3) {
+                last_error_ = "Operation weight alignment size overflowed: " + name;
+                unload_locked();
+                return {StatusCode::InvalidArgument, last_error_};
+            }
+            const uint64_t padded_bytes = (tensor->byte_size + 3) & ~uint64_t{3};
+            uint64_t next_operation_bytes = 0;
+            if (add_overflow(operation_weight_bytes, padded_bytes, next_operation_bytes)) {
+                last_error_ = "Peak per-operation weight set size overflowed";
+                unload_locked();
+                return {StatusCode::InvalidArgument, last_error_};
+            }
+            operation_weight_bytes = next_operation_bytes;
+        }
+        peak_operation_weight_bytes_ = std::max(peak_operation_weight_bytes_, operation_weight_bytes);
+    }
+
     for (const auto& operation : plan_.operations) {
         for (const auto& name : operation.weight_tensors) {
             const GgufTensorInfo* tensor = reader.find_tensor(name);
@@ -288,7 +321,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     memory_budget_bytes_ = memory_budget_bytes;
     ModelGpuMemoryEstimateInput estimate_input;
     estimate_input.total_weight_bytes = total_weight_bytes_;
-    estimate_input.streaming_chunk_bytes = padded_largest_weight_bytes;
+    estimate_input.streaming_chunk_bytes = peak_operation_weight_bytes_;
     estimate_input.token_count = context_length_;
     estimate_input.context_length = context_length_;
     estimate_input.bytes_per_element = sizeof(float);
@@ -522,6 +555,7 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";model=" << (model_path_.empty() ? "unknown" : model_path_)
            << ";weight_bytes=" << total_weight_bytes_
            << ";largest_weight_tensor_bytes=" << largest_weight_tensor_bytes_
+           << ";peak_operation_weight_bytes=" << peak_operation_weight_bytes_
            << ";kv_cache_bytes=" << kv_cache_bytes_
            << ";memory_budget_bytes=" << memory_budget_bytes_
            << ";memory_required_bytes=" << memory_estimate_.plan.required_bytes

@@ -66,6 +66,7 @@ private:
     uint64_t memory_budget_bytes_ = 0;
     uint64_t total_weight_bytes_ = 0;
     uint64_t largest_weight_tensor_bytes_ = 0;
+    uint64_t peak_operation_weight_bytes_ = 0;
     uint64_t kv_cache_bytes_ = 0;
     uint64_t last_ttft_ms_ = 0;
     double last_decode_tokens_per_second_ = 0.0;
