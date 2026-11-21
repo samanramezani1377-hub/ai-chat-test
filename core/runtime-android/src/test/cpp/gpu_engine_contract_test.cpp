@@ -655,6 +655,49 @@ void test_tokenizer_engine_contracts() {
     assert(!report.metadata_valid && !report.ready);
     assert(std::find(report.blockers.begin(), report.blockers.end(),
                      "TOKENIZER_SPECIAL_TOKEN_ID_OUT_OF_RANGE") != report.blockers.end());
+
+    TokenizerRegistry builtins;
+    assert(register_builtin_tokenizer_adapters(builtins).ok());
+    GgufTokenizerInfo sentencepiece;
+    sentencepiece.model = "llama";
+    sentencepiece.pre_tokenizer = "default";
+    sentencepiece.tokens = {"<unk>", "▁", "a", "b", "▁a", "ab", "▁ab", "<s>", "</s>"};
+    sentencepiece.scores = {-10.0f, -5.0f, -4.0f, -4.0f, 2.0f, 3.0f, 4.0f, 0.0f, 0.0f};
+    sentencepiece.token_types = {2, 1, 1, 1, 1, 1, 1, 3, 3};
+    sentencepiece.unknown_token_id = 0;
+    sentencepiece.bos_token_id = 7;
+    sentencepiece.eos_token_id = 8;
+    sentencepiece.add_bos_token = true;
+    sentencepiece.add_eos_token = true;
+    sentencepiece.add_space_prefix = true;
+    auto spm = builtins.find(sentencepiece);
+    assert(spm && spm->descriptor().validation == SupportState::Unverified);
+    assert(spm->validate_metadata(sentencepiece).ok());
+    std::vector<uint32_t> spm_ids;
+    assert(spm->encode(sentencepiece, "ab", spm_ids).ok());
+    assert((spm_ids == std::vector<uint32_t>{7, 6, 8}));
+    std::string spm_text;
+    assert(spm->decode(sentencepiece, spm_ids, spm_text).ok() && spm_text == "ab");
+    auto spm_report = evaluate_tokenizer_preflight(sentencepiece, builtins);
+    assert(spm_report.metadata_valid && spm_report.adapter_registered && !spm_report.adapter_validated && !spm_report.ready);
+
+    GgufTokenizerInfo bpe;
+    bpe.model = "gpt2";
+    bpe.pre_tokenizer = "gpt2";
+    bpe.tokens = {"h", "i", "hi", "<unk>", "<|special|>"};
+    bpe.merges = {"h i"};
+    bpe.token_types = {1, 1, 1, 2, 3};
+    bpe.unknown_token_id = 3;
+    auto bpe_adapter = builtins.find(bpe);
+    assert(bpe_adapter && bpe_adapter->validate_metadata(bpe).ok());
+    std::vector<uint32_t> bpe_ids;
+    assert(bpe_adapter->encode(bpe, "hi<|special|>", bpe_ids).ok());
+    assert((bpe_ids == std::vector<uint32_t>{2, 4}));
+    std::string bpe_text;
+    assert(bpe_adapter->decode(bpe, bpe_ids, bpe_text).ok() && bpe_text == "hi");
+    TokenizerEngine fail_closed_tokenizer(builtins);
+    assert(fail_closed_tokenizer.encode(bpe, "hi", bpe_ids).code == StatusCode::Unsupported);
+    assert(bpe_ids.empty());
 }
 
 void test_independent_sampler_and_stop_controller() {
