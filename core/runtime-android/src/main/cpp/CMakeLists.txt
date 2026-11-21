@@ -151,6 +151,18 @@ target_include_directories(ai_chat_gpu_engine PUBLIC
 )
 target_compile_features(ai_chat_gpu_engine PUBLIC cxx_std_17)
 
+# Dawn is isolated in its own backend target. The backend-neutral engine core
+# has no Dawn, llama.cpp or GGML dependency.
+if (NOT TARGET dawn::webgpu_dawn)
+    message(FATAL_ERROR "The standalone GPU engine requires the pinned Dawn target")
+endif()
+add_library(ai_chat_gpu_backend_dawn STATIC gpu_engine/dawn_backend.cpp)
+target_include_directories(ai_chat_gpu_backend_dawn PUBLIC
+    ${CMAKE_CURRENT_LIST_DIR}
+)
+target_compile_features(ai_chat_gpu_backend_dawn PUBLIC cxx_std_17)
+target_link_libraries(ai_chat_gpu_backend_dawn PUBLIC ai_chat_gpu_engine PRIVATE dawn::webgpu_dawn)
+
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp vision_runtime_android.cpp universal_gpu_adapter.cpp)
 
 # native_runtime.cpp intentionally includes llama.cpp/ggml internal headers for
@@ -186,7 +198,7 @@ target_link_options(ai_chat_runtime PRIVATE
 if (NOT TARGET ggml-webgpu)
     message(FATAL_ERROR "GGML_WEBGPU=ON was requested, but ggml-webgpu target was not created")
 endif()
-target_link_libraries(ai_chat_runtime PRIVATE ai_chat_gpu_engine llama llama-common mtmd ggml-opencl ggml-webgpu android log OpenCL EGL GLESv3)
+target_link_libraries(ai_chat_runtime PRIVATE ai_chat_gpu_engine ai_chat_gpu_backend_dawn llama llama-common mtmd ggml-opencl ggml-webgpu android log OpenCL EGL GLESv3)
 
 target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"

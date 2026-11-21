@@ -1,0 +1,398 @@
+#include "gpu_engine.h"
+
+#include <webgpu/webgpu_cpp.h>
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstring>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace ai_chat::gpu_engine {
+namespace {
+
+Status backend_error(const char* operation, const std::string& detail) {
+    return {StatusCode::BackendFailure, std::string(operation) + ": " + detail};
+}
+
+class DawnBuffer final : public Buffer {
+public:
+    DawnBuffer(wgpu::Buffer buffer, uint64_t size, MemoryDomain domain)
+        : buffer_(std::move(buffer)), size_(size), domain_(domain) {}
+
+    uint64_t size_bytes() const noexcept override { return size_; }
+    MemoryDomain memory_domain() const noexcept override { return domain_; }
+    wgpu::Buffer& handle() noexcept { return buffer_; }
+
+private:
+    wgpu::Buffer buffer_;
+    uint64_t size_ = 0;
+    MemoryDomain domain_ = MemoryDomain::Device;
+};
+
+class DawnCommandBatch final : public CommandBatch {
+public:
+    explicit DawnCommandBatch(wgpu::Device device)
+        : device_(std::move(device)), encoder_(device_.CreateCommandEncoder()) {}
+
+    bool valid() const noexcept { return encoder_ != nullptr; }
+
+    Status copy_buffer(const std::shared_ptr<Buffer>& source,
+                       uint64_t source_offset,
+                       const std::shared_ptr<Buffer>& destination,
+                       uint64_t destination_offset,
+                       uint64_t size_bytes) override {
+        auto* src = dynamic_cast<DawnBuffer*>(source.get());
+        auto* dst = dynamic_cast<DawnBuffer*>(destination.get());
+        if (!src || !dst || size_bytes == 0 ||
+            source_offset > src->size_bytes() || size_bytes > src->size_bytes() - source_offset ||
+            destination_offset > dst->size_bytes() || size_bytes > dst->size_bytes() - destination_offset ||
+            (source_offset % 4) != 0 || (destination_offset % 4) != 0 || (size_bytes % 4) != 0) {
+            return {StatusCode::InvalidArgument, "Invalid Dawn buffer copy range or backend buffer"};
+        }
+        encoder_.CopyBufferToBuffer(src->handle(), source_offset, dst->handle(), destination_offset, size_bytes);
+        return Status::success();
+    }
+
+    Status dispatch_compute(const ComputeDispatch& dispatch) override {
+        if (dispatch.wgsl_source.empty() || dispatch.entry_point.empty() ||
+            dispatch.workgroups_x == 0 || dispatch.workgroups_y == 0 || dispatch.workgroups_z == 0 ||
+            dispatch.bindings.empty()) {
+            return {StatusCode::InvalidArgument, "Compute dispatch requires WGSL, entry point, bindings and non-zero workgroups"};
+        }
+
+        wgpu::ShaderSourceWGSL wgsl{};
+        wgsl.code = dispatch.wgsl_source.c_str();
+        wgpu::ShaderModuleDescriptor module_desc{};
+        module_desc.nextInChain = &wgsl.chain;
+        module_desc.label = dispatch.label.c_str();
+        wgpu::ShaderModule module = device_.CreateShaderModule(&module_desc);
+        if (!module) return backend_error("CreateShaderModule", dispatch.label);
+
+        wgpu::ComputePipelineDescriptor pipeline_desc{};
+        pipeline_desc.label = dispatch.label.c_str();
+        pipeline_desc.compute.module = module;
+        pipeline_desc.compute.entryPoint = dispatch.entry_point.c_str();
+        wgpu::ComputePipeline pipeline = device_.CreateComputePipeline(&pipeline_desc);
+        if (!pipeline) return backend_error("CreateComputePipeline", dispatch.label);
+
+        wgpu::BindGroupLayout layout = pipeline.GetBindGroupLayout(0);
+        if (!layout) return backend_error("GetBindGroupLayout", dispatch.label);
+
+        std::vector<wgpu::BindGroupEntry> entries;
+        entries.reserve(dispatch.bindings.size());
+        for (const auto& binding : dispatch.bindings) {
+            auto* buffer = dynamic_cast<DawnBuffer*>(binding.buffer.get());
+            if (!buffer || binding.offset_bytes > buffer->size_bytes()) {
+                return {StatusCode::InvalidArgument, "Compute dispatch contains a non-Dawn buffer or invalid offset"};
+            }
+            const uint64_t size = binding.size_bytes == 0
+                ? buffer->size_bytes() - binding.offset_bytes : binding.size_bytes;
+            if (size == 0 || size > buffer->size_bytes() - binding.offset_bytes) {
+                return {StatusCode::InvalidArgument, "Compute dispatch buffer range is invalid"};
+            }
+            wgpu::BindGroupEntry entry{};
+            entry.binding = binding.binding;
+            entry.buffer = buffer->handle();
+            entry.offset = binding.offset_bytes;
+            entry.size = size;
+            entries.push_back(entry);
+        }
+
+        wgpu::BindGroupDescriptor bind_group_desc{};
+        bind_group_desc.layout = layout;
+        bind_group_desc.entryCount = static_cast<uint32_t>(entries.size());
+        bind_group_desc.entries = entries.data();
+        wgpu::BindGroup bind_group = device_.CreateBindGroup(&bind_group_desc);
+        if (!bind_group) return backend_error("CreateBindGroup", dispatch.label);
+
+        wgpu::ComputePassEncoder pass = encoder_.BeginComputePass();
+        if (!pass) return backend_error("BeginComputePass", dispatch.label);
+        pass.SetPipeline(pipeline);
+        pass.SetBindGroup(0, bind_group);
+        pass.DispatchWorkgroups(dispatch.workgroups_x, dispatch.workgroups_y, dispatch.workgroups_z);
+        pass.End();
+        return Status::success();
+    }
+
+    wgpu::CommandEncoder finish() {
+        return std::move(encoder_);
+    }
+
+private:
+    wgpu::Device device_;
+    wgpu::CommandEncoder encoder_;
+};
+
+class DawnBackend final : public Backend {
+public:
+    BackendKind kind() const noexcept override { return BackendKind::DawnWebGpu; }
+
+    Status enumerate_devices(std::vector<DeviceInfo>& out) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        out.clear();
+        if (!instance_) {
+            wgpu::InstanceDescriptor descriptor{};
+            const wgpu::InstanceFeatureName required[] = {wgpu::InstanceFeatureName::TimedWaitAny};
+            descriptor.requiredFeatures = required;
+            descriptor.requiredFeatureCount = 1;
+            instance_ = wgpu::CreateInstance(&descriptor);
+        }
+        if (!instance_) return backend_error("CreateInstance", "Dawn instance creation failed");
+
+        wgpu::RequestAdapterOptions options{};
+        options.backendType = wgpu::BackendType::OpenGLES;
+        options.featureLevel = wgpu::FeatureLevel::Compatibility;
+
+        wgpu::RequestAdapterStatus callback_status = wgpu::RequestAdapterStatus::Error;
+        std::string callback_message;
+        wgpu::Adapter requested_adapter;
+        const wgpu::Future future = instance_.RequestAdapter(
+            &options, wgpu::CallbackMode::AllowSpontaneous,
+            [&requested_adapter, &callback_status, &callback_message](
+                wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message) {
+                callback_status = status;
+                callback_message = std::string(message);
+                if (status == wgpu::RequestAdapterStatus::Success) requested_adapter = std::move(adapter);
+            });
+        const wgpu::WaitStatus wait = instance_.WaitAny(future, std::numeric_limits<uint64_t>::max());
+        if (wait != wgpu::WaitStatus::Success || callback_status != wgpu::RequestAdapterStatus::Success ||
+            !requested_adapter) {
+            return backend_error("RequestAdapter", callback_message.empty() ? "No OpenGL ES WebGPU adapter" : callback_message);
+        }
+        adapter_ = std::move(requested_adapter);
+
+        wgpu::AdapterInfo info{};
+        adapter_.GetInfo(&info);
+        wgpu::SupportedLimits supported{};
+        const bool has_limits = adapter_.GetLimits(&supported);
+
+        DeviceInfo device;
+        device.backend = BackendKind::DawnWebGpu;
+        device.state = CapabilityState::Discovered;
+        device.name = std::string(info.device);
+        device.vendor = std::string(info.vendor);
+        device.architecture = std::string(info.architecture);
+        device.driver = std::string(info.driver);
+        device.api_version = "WebGPU/Dawn Compatibility";
+        device.compute_available = true;
+        device.compute_self_test_passed = false;
+        device.inference_ready = false;
+        if (has_limits) {
+            device.limits.max_buffer_size = supported.limits.maxBufferSize;
+            device.limits.max_storage_buffer_binding_size = supported.limits.maxStorageBufferBindingSize;
+            device.limits.max_compute_workgroup_size_x = supported.limits.maxComputeWorkgroupSizeX;
+            device.limits.max_compute_workgroup_size_y = supported.limits.maxComputeWorkgroupSizeY;
+            device.limits.max_compute_workgroup_size_z = supported.limits.maxComputeWorkgroupSizeZ;
+            device.limits.max_compute_workgroup_invocations = supported.limits.maxComputeInvocationsPerWorkgroup;
+            device.limits.max_compute_workgroup_storage_bytes = supported.limits.maxComputeWorkgroupStorageSize;
+        }
+        if (adapter_.HasFeature(wgpu::FeatureName::ShaderF16)) device.features.emplace_back("shader-f16");
+        if (adapter_.HasFeature(wgpu::FeatureName::Subgroups)) device.features.emplace_back("subgroups");
+        if (adapter_.HasFeature(wgpu::FeatureName::TimestampQuery)) device.features.emplace_back("timestamp-query");
+        device.diagnostic = "source=DawnAdapterDiscovery backend=OpenGLES featureLevel=Compatibility inferenceReady=0";
+        out.push_back(std::move(device));
+        return Status::success();
+    }
+
+    Status initialize(const DeviceInfo& requested) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (requested.backend != BackendKind::DawnWebGpu) {
+            return {StatusCode::InvalidArgument, "Dawn backend received a device from another backend"};
+        }
+        if (!instance_ || !adapter_) {
+            return {StatusCode::NotReady, "Dawn adapter must be enumerated before device initialization"};
+        }
+        if (device_) return Status::success();
+
+        auto health = health_;
+        wgpu::DeviceDescriptor descriptor{};
+        descriptor.SetDeviceLostCallback(
+            wgpu::CallbackMode::AllowSpontaneous,
+            [health](const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView) {
+                if (reason != wgpu::DeviceLostReason::Destroyed) health->store(false, std::memory_order_relaxed);
+            });
+        descriptor.SetUncapturedErrorCallback(
+            [health](const wgpu::Device&, wgpu::ErrorType, wgpu::StringView) {
+                health->store(false, std::memory_order_relaxed);
+            });
+
+        wgpu::RequestDeviceStatus callback_status = wgpu::RequestDeviceStatus::Error;
+        std::string callback_message;
+        wgpu::Device requested_device;
+        const wgpu::Future future = adapter_.RequestDevice(
+            &descriptor, wgpu::CallbackMode::AllowSpontaneous,
+            [&requested_device, &callback_status, &callback_message](
+                wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message) {
+                callback_status = status;
+                callback_message = std::string(message);
+                if (status == wgpu::RequestDeviceStatus::Success) requested_device = std::move(device);
+            });
+        const wgpu::WaitStatus wait = instance_.WaitAny(future, std::numeric_limits<uint64_t>::max());
+        if (wait != wgpu::WaitStatus::Success || callback_status != wgpu::RequestDeviceStatus::Success ||
+            !requested_device) {
+            return backend_error("RequestDevice", callback_message.empty() ? "Dawn device creation failed" : callback_message);
+        }
+        device_ = std::move(requested_device);
+        queue_ = device_.GetQueue();
+        health_->store(true, std::memory_order_relaxed);
+        return Status::success();
+    }
+
+    Status allocate(const BufferDesc& desc, std::shared_ptr<Buffer>& out) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        out.reset();
+        if (!device_ || !healthy()) return {StatusCode::DeviceLost, "Dawn device is not ready"};
+        if (desc.size_bytes == 0 || desc.size_bytes > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+            desc.size_bytes > max_buffer_size_) {
+            return {StatusCode::InvalidArgument, "Dawn buffer size is zero or exceeds the validated device limit"};
+        }
+        if ((desc.size_bytes % 4) != 0) {
+            return {StatusCode::InvalidArgument, "Dawn buffer size must be aligned to four bytes"};
+        }
+        wgpu::BufferDescriptor descriptor{};
+        descriptor.label = desc.label.c_str();
+        descriptor.size = desc.size_bytes;
+        descriptor.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst;
+        descriptor.mappedAtCreation = false;
+        wgpu::Buffer buffer = device_.CreateBuffer(&descriptor);
+        if (!buffer) return {StatusCode::OutOfMemory, "Dawn CreateBuffer returned an empty buffer"};
+        out = std::make_shared<DawnBuffer>(std::move(buffer), desc.size_bytes, desc.memory);
+        return Status::success();
+    }
+
+    Status begin_commands(std::unique_ptr<CommandBatch>& out) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        out.reset();
+        if (!device_ || !healthy()) return {StatusCode::DeviceLost, "Dawn device is not ready"};
+        auto batch = std::make_unique<DawnCommandBatch>(device_);
+        if (!batch->valid()) return backend_error("CreateCommandEncoder", "Dawn returned an empty encoder");
+        out = std::move(batch);
+        return Status::success();
+    }
+
+    Status submit(std::unique_ptr<CommandBatch> commands) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!device_ || !healthy()) return {StatusCode::DeviceLost, "Dawn device is not ready"};
+        auto* batch = dynamic_cast<DawnCommandBatch*>(commands.get());
+        if (!batch) return {StatusCode::InvalidArgument, "Command batch belongs to another backend"};
+        wgpu::CommandEncoder encoder = batch->finish();
+        if (!encoder) return backend_error("FinishCommandEncoder", "Dawn encoder is empty");
+        wgpu::CommandBuffer command_buffer = encoder.Finish();
+        if (!command_buffer) return backend_error("FinishCommandBuffer", "Dawn command buffer is empty");
+        queue_.Submit(1, &command_buffer);
+        return healthy() ? Status::success() : Status{StatusCode::DeviceLost, "Dawn device was lost during submit"};
+    }
+
+    Status synchronize() override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!device_ || !healthy()) return {StatusCode::DeviceLost, "Dawn device is not ready"};
+        wgpu::QueueWorkDoneStatus callback_status = wgpu::QueueWorkDoneStatus::Error;
+        std::string callback_message;
+        const wgpu::Future future = queue_.OnSubmittedWorkDone(
+            wgpu::CallbackMode::AllowSpontaneous,
+            [&callback_status, &callback_message](wgpu::QueueWorkDoneStatus status, wgpu::StringView message) {
+                callback_status = status;
+                callback_message = std::string(message);
+            });
+        const wgpu::WaitStatus wait = instance_.WaitAny(future, std::numeric_limits<uint64_t>::max());
+        if (wait != wgpu::WaitStatus::Success || callback_status != wgpu::QueueWorkDoneStatus::Success) {
+            return backend_error("QueueWorkDone", callback_message.empty() ? "Dawn queue wait failed" : callback_message);
+        }
+        return Status::success();
+    }
+
+    Status upload(const std::shared_ptr<Buffer>& destination, uint64_t destination_offset,
+                  const void* source, uint64_t size_bytes) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto* buffer = dynamic_cast<DawnBuffer*>(destination.get());
+        if (!device_ || !healthy()) return {StatusCode::DeviceLost, "Dawn device is not ready"};
+        if (!buffer || !source || size_bytes == 0 || (destination_offset % 4) != 0 || (size_bytes % 4) != 0 ||
+            destination_offset > buffer->size_bytes() || size_bytes > buffer->size_bytes() - destination_offset) {
+            return {StatusCode::InvalidArgument, "Invalid Dawn upload buffer or range"};
+        }
+        queue_.WriteBuffer(buffer->handle(), destination_offset, source, size_bytes);
+        return healthy() ? Status::success() : Status{StatusCode::BackendFailure, "Dawn upload failed"};
+    }
+
+    Status readback(const std::shared_ptr<Buffer>& source, uint64_t source_offset,
+                    void* destination, uint64_t size_bytes) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto* buffer = dynamic_cast<DawnBuffer*>(source.get());
+        if (!device_ || !healthy()) return {StatusCode::DeviceLost, "Dawn device is not ready"};
+        if (!buffer || !destination || size_bytes == 0 || (source_offset % 4) != 0 || (size_bytes % 4) != 0 ||
+            source_offset > buffer->size_bytes() || size_bytes > buffer->size_bytes() - source_offset) {
+            return {StatusCode::InvalidArgument, "Invalid Dawn readback buffer or range"};
+        }
+
+        wgpu::BufferDescriptor staging_desc{};
+        staging_desc.size = size_bytes;
+        staging_desc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+        wgpu::Buffer staging = device_.CreateBuffer(&staging_desc);
+        if (!staging) return {StatusCode::OutOfMemory, "Dawn readback staging allocation failed"};
+
+        wgpu::CommandEncoder encoder = device_.CreateCommandEncoder();
+        encoder.CopyBufferToBuffer(buffer->handle(), source_offset, staging, 0, size_bytes);
+        wgpu::CommandBuffer command_buffer = encoder.Finish();
+        if (!command_buffer) return backend_error("ReadbackCommand", "Dawn command buffer creation failed");
+        queue_.Submit(1, &command_buffer);
+
+        wgpu::MapAsyncStatus map_status = wgpu::MapAsyncStatus::Error;
+        std::string map_message;
+        const wgpu::Future future = staging.MapAsync(
+            wgpu::MapMode::Read, 0, size_bytes, wgpu::CallbackMode::AllowSpontaneous,
+            [&map_status, &map_message](wgpu::MapAsyncStatus status, wgpu::StringView message) {
+                map_status = status;
+                map_message = std::string(message);
+            });
+        const wgpu::WaitStatus wait = instance_.WaitAny(future, std::numeric_limits<uint64_t>::max());
+        if (wait != wgpu::WaitStatus::Success || map_status != wgpu::MapAsyncStatus::Success) {
+            return backend_error("MapReadback", map_message.empty() ? "Dawn staging map failed" : map_message);
+        }
+        const void* mapped = staging.GetConstMappedRange(0, size_bytes);
+        if (!mapped) {
+            staging.Unmap();
+            return backend_error("MapReadback", "Dawn returned a null mapped range");
+        }
+        std::memcpy(destination, mapped, static_cast<size_t>(size_bytes));
+        staging.Unmap();
+        return healthy() ? Status::success() : Status{StatusCode::DeviceLost, "Dawn device was lost during readback"};
+    }
+
+    Status shutdown() override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (device_) device_.Destroy();
+        queue_ = nullptr;
+        device_ = nullptr;
+        adapter_ = nullptr;
+        instance_ = nullptr;
+        health_->store(false, std::memory_order_relaxed);
+        return Status::success();
+    }
+
+    bool healthy() const noexcept override {
+        return health_->load(std::memory_order_relaxed);
+    }
+
+private:
+    mutable std::mutex mutex_;
+    wgpu::Instance instance_;
+    wgpu::Adapter adapter_;
+    wgpu::Device device_;
+    wgpu::Queue queue_;
+    std::shared_ptr<std::atomic<bool>> health_ = std::make_shared<std::atomic<bool>>(false);
+    uint64_t max_buffer_size_ = std::numeric_limits<uint64_t>::max();
+};
+
+} // namespace
+
+std::shared_ptr<Backend> create_dawn_backend() {
+    return std::make_shared<DawnBackend>();
+}
+
+} // namespace ai_chat::gpu_engine

@@ -119,9 +119,32 @@ public:
     virtual MemoryDomain memory_domain() const noexcept = 0;
 };
 
+struct BufferBinding {
+    uint32_t binding = 0;
+    std::shared_ptr<Buffer> buffer;
+    uint64_t offset_bytes = 0;
+    uint64_t size_bytes = 0;
+};
+
+struct ComputeDispatch {
+    std::string label;
+    std::string wgsl_source;
+    std::string entry_point = "main";
+    std::vector<BufferBinding> bindings;
+    uint32_t workgroups_x = 1;
+    uint32_t workgroups_y = 1;
+    uint32_t workgroups_z = 1;
+};
+
 class CommandBatch {
 public:
     virtual ~CommandBatch() = default;
+    virtual Status copy_buffer(const std::shared_ptr<Buffer>& source,
+                               uint64_t source_offset,
+                               const std::shared_ptr<Buffer>& destination,
+                               uint64_t destination_offset,
+                               uint64_t size_bytes) = 0;
+    virtual Status dispatch_compute(const ComputeDispatch& dispatch) = 0;
 };
 
 class Backend {
@@ -145,6 +168,10 @@ public:
     virtual Status shutdown() = 0;
     virtual bool healthy() const noexcept = 0;
 };
+
+// Creates the first native Dawn/WebGPU backend. Device execution is still
+// opt-in until the runtime router has validated model/operator support.
+std::shared_ptr<Backend> create_dawn_backend();
 
 class BackendRegistry {
 public:
