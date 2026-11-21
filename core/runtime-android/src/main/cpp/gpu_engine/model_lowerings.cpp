@@ -125,8 +125,17 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
             if (!result.ok()) return result;
             const auto weight = context.quantized_weights.find(operation.weight_tensors.front());
             if (weight == context.quantized_weights.end() || !weight->second.buffer ||
-                weight->second.byte_size == 0)
-                return Status{StatusCode::InvalidArgument, "Q8_0 weight binding is missing from the model execution context"};
+                weight->second.byte_size == 0 ||
+                GgufReader::tensor_type_info(weight->second.file_type_id).name != "Q8_0")
+                return Status{StatusCode::InvalidArgument, "Q8_0 weight binding is missing or has the wrong file type"};
+            if (input->descriptor().shape.size() != 2 ||
+                (output->descriptor().shape.size() != 2 && output->descriptor().shape.size() != 3))
+                return Status{StatusCode::Unsupported, "Q8_0 MatMul requires [M,K] activations and [M,N] or [M,H,D] output"};
+            const uint64_t output_channels = output->element_count() / input->descriptor().shape[0];
+            if (weight->second.dimensions.size() != 2 ||
+                weight->second.dimensions[0] != input->descriptor().shape[1] ||
+                weight->second.dimensions[1] != output_channels)
+                return Status{StatusCode::InvalidArgument, "Q8_0 weight tensor dimensions do not match activation and output shapes"};
             return backend == BackendKind::OpenGles
                 ? build_q8_0_matmul_gles_candidate(*input, weight->second.buffer,
                     weight->second.byte_size, *output, dispatch)
