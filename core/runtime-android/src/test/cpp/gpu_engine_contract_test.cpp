@@ -924,6 +924,20 @@ void test_tokenizer_engine_contracts() {
     std::vector<uint32_t> spm_ids;
     assert(spm->encode(sentencepiece, "ab", spm_ids).ok());
     assert((spm_ids == std::vector<uint32_t>{7, 6, 8}));
+    GgufTokenizerInfo unigram_choice = sentencepiece;
+    unigram_choice.tokens = {"<unk>", "▁", "a", "b", "▁a", "ab", "▁ab"};
+    unigram_choice.scores = {-100.0f, -20.0f, -20.0f, 4.0f, 4.0f, 6.0f, 7.0f};
+    unigram_choice.token_types = {2, 1, 1, 1, 1, 1, 1};
+    unigram_choice.bos_token_id = -1;
+    unigram_choice.eos_token_id = -1;
+    unigram_choice.add_bos_token = false;
+    unigram_choice.add_eos_token = false;
+    auto unigram_adapter = builtins.find(unigram_choice);
+    assert(unigram_adapter && unigram_adapter->validate_metadata(unigram_choice).ok());
+    std::vector<uint32_t> unigram_ids;
+    assert(unigram_adapter->encode(unigram_choice, "ab", unigram_ids).ok());
+    assert((unigram_ids == std::vector<uint32_t>{4, 3}));
+
     std::string spm_text;
     assert(spm->decode(sentencepiece, spm_ids, spm_text).ok() && spm_text == "ab");
     auto spm_report = evaluate_tokenizer_preflight(sentencepiece, builtins);

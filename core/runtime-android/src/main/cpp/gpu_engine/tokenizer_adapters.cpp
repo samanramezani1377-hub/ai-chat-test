@@ -111,6 +111,10 @@ public:
     Status validate_metadata(const GgufTokenizerInfo&m)const override{
         Status s=validate_ids(m); if(!s.ok())return s;
         if(m.scores.empty())return {StatusCode::Unsupported,"SentencePiece scores are required"};
+        for (float score : m.scores) {
+            if (!std::isfinite(score))
+                return {StatusCode::InvalidArgument,"SentencePiece scores must all be finite"};
+        }
         return Status::success();
     }
     Status encode(const GgufTokenizerInfo&m,const std::string& text,std::vector<uint32_t>& out)const override{
@@ -139,20 +143,74 @@ public:
 private:
     Status encode_plain(const GgufTokenizerInfo&m,const std::unordered_map<std::string,uint32_t>&map,
                         const std::string&input,std::vector<uint32_t>&out)const{
+        // SentencePiece's Unigram model is a maximum-score segmentation problem.
+        // Greedy adjacent-pair merging is BPE behavior and can select a lower
+        // total-score path, so use Viterbi over UTF-8 byte offsets instead.
         std::string norm;bool pending=false;
         for(unsigned char c:input){if(m.remove_extra_whitespaces&&std::isspace(c)){pending=!norm.empty();continue;}
             if(pending){norm.push_back(' ');pending=false;}
             if(m.escape_whitespaces&&c==' ')norm+="\xe2\x96\x81";else norm.push_back(static_cast<char>(c));}
         if(m.add_space_prefix&&!norm.empty()&&norm.rfind("\xe2\x96\x81",0)!=0)norm.insert(0,"\xe2\x96\x81");
-        std::vector<std::string> symbols;
-        for(size_t i=0;i<norm.size();){size_t n=char_size(norm,i);symbols.emplace_back(norm.substr(i,n));i+=n;}
-        while(symbols.size()>1){double best=-std::numeric_limits<double>::infinity();size_t at=symbols.size();
-            for(size_t i=0;i+1<symbols.size();++i){auto it=map.find(symbols[i]+symbols[i+1]);if(it!=map.end()&&m.scores[it->second]>best){best=m.scores[it->second];at=i;}}
-            if (at == symbols.size()) break;
-            symbols[at] += symbols[at + 1];
-            symbols.erase(symbols.begin() + static_cast<std::ptrdiff_t>(at + 1));
+        if (norm.empty()) return Status::success();
+
+        size_t max_piece_bytes = 1;
+        for (const auto& token : m.tokens) {
+            if (!token.empty() && !special_type(m, static_cast<uint32_t>(&token - m.tokens.data())))
+                max_piece_bytes = std::max(max_piece_bytes, token.size());
         }
-        for(const auto&piece:symbols){Status s=append_piece(m,map,piece,out);if(!s.ok())return s;}return Status::success();
+        const size_t n = norm.size();
+        const double unreachable = -std::numeric_limits<double>::infinity();
+        std::vector<double> best(n + 1, unreachable);
+        std::vector<size_t> previous(n + 1, n + 1);
+        std::vector<uint32_t> previous_token(n + 1, UINT32_MAX);
+        best[0] = 0.0;
+
+        auto relax = [&](size_t from, size_t to, uint32_t token_id) {
+            if (token_id >= m.scores.size() || !std::isfinite(m.scores[token_id])) return;
+            const double score = best[from] + static_cast<double>(m.scores[token_id]);
+            if (score > best[to]) {
+                best[to] = score;
+                previous[to] = from;
+                previous_token[to] = token_id;
+            }
+        };
+
+        static constexpr char hex[] = "0123456789ABCDEF";
+        for (size_t start = 0; start < n; ++start) {
+            if (!std::isfinite(best[start])) continue;
+            const size_t limit = std::min(n, start + max_piece_bytes);
+            for (size_t end = start + 1; end <= limit; ++end) {
+                const auto found = map.find(norm.substr(start, end - start));
+                if (found != map.end() && !special_type(m, found->second))
+                    relax(start, end, found->second);
+            }
+
+            // SentencePiece byte fallback uses explicit <0xHH> vocabulary pieces.
+            const unsigned char byte = static_cast<unsigned char>(norm[start]);
+            std::string byte_piece = "<0x00>";
+            byte_piece[3] = hex[byte >> 4];
+            byte_piece[4] = hex[byte & 15];
+            const auto byte_found = map.find(byte_piece);
+            if (byte_found != map.end() && !special_type(m, byte_found->second))
+                relax(start, start + 1, byte_found->second);
+            else if (m.unknown_token_id >= 0) {
+                const size_t width = char_size(norm, start);
+                relax(start, std::min(n, start + width),
+                      static_cast<uint32_t>(m.unknown_token_id));
+            }
+        }
+
+        if (!std::isfinite(best[n]))
+            return {StatusCode::Unsupported,"SentencePiece text cannot be segmented by the vocabulary"};
+        std::vector<uint32_t> reversed;
+        for (size_t position = n; position > 0;) {
+            if (previous[position] >= position || previous_token[position] == UINT32_MAX)
+                return {StatusCode::BackendFailure,"SentencePiece Viterbi backtrace is inconsistent"};
+            reversed.push_back(previous_token[position]);
+            position = previous[position];
+        }
+        out.insert(out.end(), reversed.rbegin(), reversed.rend());
+        return Status::success();
     }
     TokenizerDescriptor desc_;
 };
