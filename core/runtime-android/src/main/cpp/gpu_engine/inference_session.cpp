@@ -674,10 +674,11 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";ttft_ms=" << last_ttft_ms_
            << ";decode_tokens_per_second=" << last_decode_tokens_per_second_
            << ";cpu_fallback_available=true"
-           << ";gpu_memory_total=unknown"
-           << ";gpu_memory_free=unknown"
-           << ";gpu_feature_count=" << (device ? device->features.size() : 0)
-           << ";last_error=" << (last_error_.empty() ? "none" : last_error_);
+           << ";gpu_feature_count=" << (device ? device->features.size() : 0);
+    if (device) {
+        for (const auto& feature : device->features) report << ";gpu_feature=" << feature;
+    }
+    report << ";last_error=" << (last_error_.empty() ? "none" : last_error_);
     return report.str();
 }
 
