@@ -19,8 +19,6 @@ Status build_add_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
 const char* multiply_f32_wgsl_source() noexcept;
 Status build_multiply_f32_candidate(const Tensor& lhs, const Tensor& rhs,
                                     const Tensor& output, ComputeDispatch& dispatch);
-Status build_add_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
-                                    const Tensor& output, ComputeDispatch& dispatch);
 Status build_multiply_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
                                          const Tensor& output, ComputeDispatch& dispatch);
 Status register_builtin_gles_operator_candidates(OperatorRegistry& registry);

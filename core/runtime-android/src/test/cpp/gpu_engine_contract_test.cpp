@@ -620,7 +620,11 @@ void test_gpu_engine_lifecycle() {
         definition.input_type = DataType::F32;
         definition.output_type = DataType::F32;
         definition.validation = KernelValidation::Validated;
-        definition.wgsl_source = "@compute @workgroup_size(1) fn main() {}";
+        if (backend == BackendKind::OpenGles) {
+            definition.glsl_source = "#version 310 es\\nlayout(local_size_x=1) in; void main() {}";
+        } else {
+            definition.wgsl_source = "@compute @workgroup_size(1) fn main() {}";
+        }
         return test_registry.register_kernel(std::move(definition));
     };
     ComputeGraph graph;
