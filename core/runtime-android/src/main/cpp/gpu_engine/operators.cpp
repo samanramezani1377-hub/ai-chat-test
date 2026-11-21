@@ -1,6 +1,7 @@
 #include "operators.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <iomanip>
 #include <sstream>
@@ -36,9 +37,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (row >= ROWS || column >= COLUMNS) { return; }
     var sum = 0.0;
     for (var k = 0u; k < INNER; k = k + 1u) {
-        sum = sum + lhs[row * params.inner + k] * rhs[k * COLUMNS + column];
+        sum = sum + lhs[row * INNER + k] * rhs[k * COLUMNS + column];
     }
-    output[row * params.columns + column] = sum;
+    output[row * COLUMNS + column] = sum;
 }
 )wgsl";
 
@@ -54,8 +55,8 @@ fn main(@builtin(workgroup_id) group: vec3<u32>,
         @builtin(local_invocation_id) local: vec3<u32>) {
     let row = group.x;
     var sum = 0.0;
-    for (var column = local.x; column < params.columns; column = column + 64u) {
-        let value = input[row * params.columns + column];
+    for (var column = local.x; column < COLUMNS; column = column + 64u) {
+        let value = input[row * COLUMNS + column];
         sum = sum + value * value;
     }
     partial[local.x] = sum;
@@ -67,10 +68,10 @@ fn main(@builtin(workgroup_id) group: vec3<u32>,
         workgroupBarrier();
         stride = stride / 2u;
     }
-    let inverse = inverseSqrt(partial[0] / f32(params.columns) + EPSILON);
-    for (var column = local.x; column < params.columns; column = column + 64u) {
-        output[row * params.columns + column] =
-            input[row * params.columns + column] * inverse * weight[column];
+    let inverse = inverseSqrt(partial[0] / f32(COLUMNS) + EPSILON);
+    for (var column = local.x; column < COLUMNS; column = column + 64u) {
+        output[row * COLUMNS + column] =
+            input[row * COLUMNS + column] * inverse * weight[column];
     }
 }
 )wgsl";

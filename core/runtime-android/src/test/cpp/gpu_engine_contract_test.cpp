@@ -410,6 +410,7 @@ void test_add_operator_candidate_and_reference() {
     assert(build_matmul_f32_candidate(a_tensor, b_tensor, c_tensor, mat_dispatch).ok());
     assert(mat_dispatch.bindings.size() == 3);
     assert(mat_dispatch.wgsl_source.find("@binding(3)") == std::string::npos);
+    assert(mat_dispatch.wgsl_source.find("params.") == std::string::npos);
     assert(mat_dispatch.wgsl_source.find("const ROWS: u32 = 2u;") != std::string::npos);
 
     BufferDesc norm_x_desc{16, 4, MemoryDomain::Device, false, "norm-x"};
@@ -428,6 +429,7 @@ void test_add_operator_candidate_and_reference() {
     assert(build_rms_norm_f32_candidate(nx, nw, ny, 1e-5f, norm_dispatch).ok());
     assert(norm_dispatch.bindings.size() == 3);
     assert(norm_dispatch.wgsl_source.find("@binding(3)") == std::string::npos);
+    assert(norm_dispatch.wgsl_source.find("params.") == std::string::npos);
 }
 
 void test_model_and_quantization_registry_fail_closed() {
