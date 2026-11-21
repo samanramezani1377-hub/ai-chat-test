@@ -185,24 +185,13 @@ class UniversalGlesBackend final : public Backend {
 public:
     BackendKind kind() const noexcept override { return BackendKind::OpenGles; }
     Status enumerate_devices(std::vector<DeviceInfo>& out) override {
-        out.clear(); caps_=ai_chat::gpu::probe_universal_gpu_adapter();
-        if(!caps_.egl_context_created || !caps_.gles_compute_supported || !caps_.gles_compute_self_test_passed)
-            return {StatusCode::Unsupported,caps_.failure_reason.empty()?"Universal GPU Adapter GLES self-test failed":caps_.failure_reason};
-        DeviceInfo d; d.backend=BackendKind::OpenGles; d.state=CapabilityState::SelfTested;
-        d.name=caps_.renderer.empty()?"unknown":caps_.renderer; d.vendor=caps_.vendor.empty()?"unknown":caps_.vendor;
-        d.api_version=caps_.version.empty()?"unknown":caps_.version; d.compute_available=true; d.compute_self_test_passed=true;
-        d.inference_ready=false;
-        d.limits.max_storage_buffer_binding_size=static_cast<uint64_t>(std::max<int64_t>(0,caps_.max_shader_storage_block_bytes));
-        d.limits.max_buffer_size=d.limits.max_storage_buffer_binding_size;
-        d.limits.max_compute_workgroup_size_x=static_cast<uint32_t>(std::max(0,caps_.max_compute_workgroup_size_x));
-        d.limits.max_compute_workgroup_size_y=static_cast<uint32_t>(std::max(0,caps_.max_compute_workgroup_size_y));
-        d.limits.max_compute_workgroup_size_z=static_cast<uint32_t>(std::max(0,caps_.max_compute_workgroup_size_z));
-        d.limits.max_compute_workgroup_invocations=static_cast<uint32_t>(std::max(0,caps_.max_compute_invocations));
-        d.limits.max_compute_workgroup_storage_bytes=static_cast<uint32_t>(std::max(0,caps_.max_compute_shared_memory_bytes));
-        d.limits.max_compute_workgroups_per_dimension=static_cast<uint32_t>(std::min({std::max(0,caps_.max_compute_workgroup_count_x),std::max(0,caps_.max_compute_workgroup_count_y),std::max(0,caps_.max_compute_workgroup_count_z)}));
-        d.limits.max_storage_buffers_per_shader_stage=static_cast<uint32_t>(std::max(0,caps_.max_shader_storage_buffer_bindings));
-        d.limits.min_storage_buffer_offset_alignment=static_cast<uint32_t>(std::max(4,caps_.min_shader_storage_buffer_offset_alignment));
-        d.diagnostic=caps_.diagnostic_line()+" inferenceReady=0"; out.push_back(std::move(d)); return Status::success();
+        out.clear();
+        caps_ = ai_chat::gpu::probe_universal_gpu_adapter();
+        if (!caps_.egl_context_created || !caps_.gles_compute_supported || !caps_.gles_compute_self_test_passed)
+            return {StatusCode::Unsupported, caps_.failure_reason.empty() ? "Universal GPU Adapter GLES self-test failed" : caps_.failure_reason};
+        DeviceInfo device = device_info_from_universal_adapter(caps_);
+        out.push_back(std::move(device));
+        return Status::success();
     }
     Status initialize(const DeviceInfo& d) override {
         if(d.backend!=BackendKind::OpenGles) return {StatusCode::InvalidArgument,"GLES backend received foreign device"};
