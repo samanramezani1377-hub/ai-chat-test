@@ -24,6 +24,12 @@ Status decode_q4_1_blocks(const uint8_t* source, size_t source_bytes,
 Status decode_q8_0_blocks(const uint8_t* source, size_t source_bytes,
                           float* destination, size_t destination_elements);
 const char* q8_0_matmul_wgsl_source() noexcept;
+const char* q4_0_matmul_wgsl_source() noexcept;
+const char* q4_0_matmul_glsl_source() noexcept;
+Status build_q4_0_matmul_candidate(const Tensor& activations, const std::shared_ptr<Buffer>& quantized_weights, uint64_t weight_bytes, const Tensor& output, ComputeDispatch& dispatch);
+Status build_q4_0_matmul_gles_candidate(const Tensor& activations, const std::shared_ptr<Buffer>& quantized_weights, uint64_t weight_bytes, const Tensor& output, ComputeDispatch& dispatch);
+Status reference_q4_0_matmul(const float* activations, const uint8_t* quantized_weights, uint64_t weight_bytes, float* output, uint32_t rows, uint32_t output_channels, uint32_t inner);
+Status validate_q4_0_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
 // Candidate only: remains UNVERIFIED until GLES numerical parity tests pass.
 const char* q8_0_matmul_glsl_source() noexcept;
 Status validate_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
