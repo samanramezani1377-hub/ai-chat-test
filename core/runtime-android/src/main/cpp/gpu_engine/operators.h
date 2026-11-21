@@ -27,6 +27,17 @@ Status build_rms_norm_f32_candidate(const Tensor& input, const Tensor& weight,
 Status reference_rms_norm_f32(const float* input, const float* weight, float* output,
                               uint64_t rows, uint64_t columns, float epsilon);
 
+const char* silu_f32_wgsl_source() noexcept;
+Status build_silu_f32_candidate(const Tensor& input, const Tensor& output,
+                                ComputeDispatch& dispatch);
+Status reference_silu_f32(const float* input, float* output, uint64_t elements);
+
+const char* softmax_f32_wgsl_source() noexcept;
+Status build_softmax_f32_candidate(const Tensor& input, const Tensor& output,
+                                   ComputeDispatch& dispatch);
+Status reference_softmax_f32(const float* input, float* output,
+                             uint64_t rows, uint64_t columns);
+
 Status register_builtin_operator_candidates(OperatorRegistry& registry);
 
 } // namespace ai_chat::gpu_engine

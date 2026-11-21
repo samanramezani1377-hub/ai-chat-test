@@ -410,6 +410,18 @@ void test_add_operator_candidate_and_reference() {
     assert(std::abs(norm_output[0] - 0.63245f) < 1e-4f);
     assert(std::abs(norm_output[1] - 1.26491f) < 1e-4f);
 
+    const float activation_input[] = {-2.0f, 0.0f, 2.0f};
+    float activation_output[3] = {};
+    assert(reference_silu_f32(activation_input, activation_output, 3).ok());
+    assert(activation_output[1] == 0.0f);
+    assert(std::abs(activation_output[2] - 1.76159f) < 1e-4f);
+
+    const float softmax_input[] = {1.0f, 2.0f, 3.0f, 0.0f};
+    float softmax_output[4] = {};
+    assert(reference_softmax_f32(softmax_input, softmax_output, 2, 2).ok());
+    assert(std::abs(softmax_output[0] + softmax_output[1] - 1.0f) < 1e-6f);
+    assert(std::abs(softmax_output[2] + softmax_output[3] - 1.0f) < 1e-6f);
+
     BufferDesc mat_a_desc{24, 4, MemoryDomain::Device, false, "mat-a"};
     BufferDesc mat_b_desc{24, 4, MemoryDomain::Device, false, "mat-b"};
     BufferDesc mat_out_desc{16, 4, MemoryDomain::Device, false, "mat-out"};

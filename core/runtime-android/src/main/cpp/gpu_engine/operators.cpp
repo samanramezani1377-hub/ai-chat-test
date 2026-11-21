@@ -23,6 +23,62 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 )wgsl";
 
+constexpr char kSiluF32Wgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+const ELEMENT_COUNT: u32 = 1u;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x < ELEMENT_COUNT) {
+        let value = input[gid.x];
+        output[gid.x] = value / (1.0 + exp(-value));
+    }
+}
+)wgsl";
+
+constexpr char kSoftmaxF32Wgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+const COLUMNS: u32 = 1u;
+var<workgroup> partial: array<f32, 64>;
+@compute @workgroup_size(64)
+fn main(@builtin(workgroup_id) group: vec3<u32>,
+        @builtin(local_invocation_id) local: vec3<u32>) {
+    let row = group.x;
+    var local_max = -3.402823466e+38;
+    for (var column = local.x; column < COLUMNS; column = column + 64u) {
+        local_max = max(local_max, input[row * COLUMNS + column]);
+    }
+    partial[local.x] = local_max;
+    workgroupBarrier();
+    var stride = 32u;
+    loop {
+        if (stride == 0u) { break; }
+        if (local.x < stride) { partial[local.x] = max(partial[local.x], partial[local.x + stride]); }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    let maximum = partial[0];
+    var local_sum = 0.0;
+    for (var column = local.x; column < COLUMNS; column = column + 64u) {
+        local_sum = local_sum + exp(input[row * COLUMNS + column] - maximum);
+    }
+    partial[local.x] = local_sum;
+    workgroupBarrier();
+    stride = 32u;
+    loop {
+        if (stride == 0u) { break; }
+        if (local.x < stride) { partial[local.x] = partial[local.x] + partial[local.x + stride]; }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    let denominator = partial[0];
+    for (var column = local.x; column < COLUMNS; column = column + 64u) {
+        output[row * COLUMNS + column] = exp(input[row * COLUMNS + column] - maximum) / denominator;
+    }
+}
+)wgsl";
+
 constexpr char kMatMulF32Wgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> lhs: array<f32>;
 @group(0) @binding(1) var<storage, read> rhs: array<f32>;
@@ -250,6 +306,98 @@ Status reference_rms_norm_f32(const float* input, const float* weight, float* ou
     return Status::success();
 }
 
+
+const char* silu_f32_wgsl_source() noexcept { return kSiluF32Wgsl; }
+
+Status build_silu_f32_candidate(const Tensor& input, const Tensor& output,
+                                ComputeDispatch& dispatch) {
+    dispatch = ComputeDispatch{};
+    if (!is_contiguous_f32(input) || !is_contiguous_f32(output))
+        return {StatusCode::Unsupported, "SiLU requires contiguous device/shared F32 tensors"};
+    if (input.descriptor().shape != output.descriptor().shape ||
+        input.element_count() == 0 || input.element_count() > UINT32_MAX ||
+        !input.buffer() || !output.buffer() || input.buffer().get() == output.buffer().get())
+        return {StatusCode::InvalidArgument, "SiLU input/output shape, size or buffer is invalid"};
+    dispatch.label = "silu-f32-generic-unverified";
+    dispatch.wgsl_source = kSiluF32Wgsl;
+    const std::string placeholder = "const ELEMENT_COUNT: u32 = 1u;";
+    const std::string replacement = "const ELEMENT_COUNT: u32 = " +
+                                    std::to_string(input.element_count()) + "u;";
+    const size_t position = dispatch.wgsl_source.find(placeholder);
+    if (position == std::string::npos)
+        return {StatusCode::BackendFailure, "SiLU WGSL element-count placeholder is missing"};
+    dispatch.wgsl_source.replace(position, placeholder.size(), replacement);
+    dispatch.workgroups_x = static_cast<uint32_t>((input.element_count() + 63) / 64);
+    dispatch.bindings = {
+        {0, input.buffer(), input.byte_offset(), input.byte_size()},
+        {1, output.buffer(), output.byte_offset(), output.byte_size()},
+    };
+    return Status::success();
+}
+
+Status reference_silu_f32(const float* input, float* output, uint64_t elements) {
+    if ((!input || !output) && elements != 0)
+        return {StatusCode::InvalidArgument, "SiLU reference received a null pointer"};
+    for (uint64_t i = 0; i < elements; ++i)
+        output[i] = input[i] / (1.0f + std::exp(-input[i]));
+    return Status::success();
+}
+
+const char* softmax_f32_wgsl_source() noexcept { return kSoftmaxF32Wgsl; }
+
+Status build_softmax_f32_candidate(const Tensor& input, const Tensor& output,
+                                   ComputeDispatch& dispatch) {
+    dispatch = ComputeDispatch{};
+    if (!is_contiguous_f32(input) || !is_contiguous_f32(output))
+        return {StatusCode::Unsupported, "Softmax requires contiguous device/shared F32 tensors"};
+    const auto& shape = input.descriptor().shape;
+    if (shape.size() != 2 || output.descriptor().shape != shape ||
+        shape[0] == 0 || shape[1] == 0 || shape[0] > UINT32_MAX ||
+        shape[1] > UINT32_MAX || input.element_count() > UINT32_MAX ||
+        !input.buffer() || !output.buffer() || input.buffer().get() == output.buffer().get())
+        return {StatusCode::InvalidArgument, "Softmax expects valid [rows,columns] input/output tensors"};
+    dispatch.label = "softmax-f32-generic-unverified";
+    dispatch.wgsl_source = kSoftmaxF32Wgsl;
+    const std::string placeholder = "const COLUMNS: u32 = 1u;";
+    const std::string replacement = "const COLUMNS: u32 = " + std::to_string(shape[1]) + "u;";
+    const size_t position = dispatch.wgsl_source.find(placeholder);
+    if (position == std::string::npos)
+        return {StatusCode::BackendFailure, "Softmax WGSL columns placeholder is missing"};
+    dispatch.wgsl_source.replace(position, placeholder.size(), replacement);
+    dispatch.workgroups_x = static_cast<uint32_t>(shape[0]);
+    dispatch.bindings = {
+        {0, input.buffer(), input.byte_offset(), input.byte_size()},
+        {1, output.buffer(), output.byte_offset(), output.byte_size()},
+    };
+    return Status::success();
+}
+
+Status reference_softmax_f32(const float* input, float* output,
+                             uint64_t rows, uint64_t columns) {
+    if ((!input || !output) && rows && columns)
+        return {StatusCode::InvalidArgument, "Softmax reference received a null pointer"};
+    if (rows == 0 || columns == 0)
+        return {StatusCode::InvalidArgument, "Softmax dimensions must be non-zero"};
+    for (uint64_t row = 0; row < rows; ++row) {
+        float maximum = -std::numeric_limits<float>::infinity();
+        for (uint64_t column = 0; column < columns; ++column) {
+            const float value = input[row * columns + column];
+            if (!std::isfinite(value))
+                return {StatusCode::NumericalFailure, "Softmax input contains NaN or infinity"};
+            maximum = std::max(maximum, value);
+        }
+        double sum = 0.0;
+        for (uint64_t column = 0; column < columns; ++column)
+            sum += std::exp(static_cast<double>(input[row * columns + column] - maximum));
+        if (!std::isfinite(sum) || sum <= 0.0)
+            return {StatusCode::NumericalFailure, "Softmax normalization failed"};
+        for (uint64_t column = 0; column < columns; ++column)
+            output[row * columns + column] = static_cast<float>(
+                std::exp(static_cast<double>(input[row * columns + column] - maximum)) / sum);
+    }
+    return Status::success();
+}
+
 Status reference_add_f32(const float* lhs, const float* rhs, float* output,
                          uint64_t element_count) {
     if ((!lhs || !rhs || !output) && element_count != 0) {
@@ -304,6 +452,36 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     rms.kernel_id = "dawn-rms-norm-f32-generic-v1";
     rms.wgsl_source = kRmsNormF32Wgsl;
     status = registry.register_kernel(std::move(rms));
+    if (!status.ok()) return status;
+
+    KernelDefinition silu;
+    silu.operator_name = "SiLU";
+    silu.backend = BackendKind::DawnWebGpu;
+    silu.input_type = DataType::F32;
+    silu.output_type = DataType::F32;
+    silu.min_input_count = 1;
+    silu.max_input_count = 1;
+    silu.min_rank = 1;
+    silu.max_rank = 16;
+    silu.validation = KernelValidation::Unverified;
+    silu.kernel_id = "dawn-silu-f32-generic-v1";
+    silu.wgsl_source = kSiluF32Wgsl;
+    status = registry.register_kernel(std::move(silu));
+    if (!status.ok()) return status;
+
+    KernelDefinition softmax;
+    softmax.operator_name = "Softmax";
+    softmax.backend = BackendKind::DawnWebGpu;
+    softmax.input_type = DataType::F32;
+    softmax.output_type = DataType::F32;
+    softmax.min_input_count = 1;
+    softmax.max_input_count = 1;
+    softmax.min_rank = 2;
+    softmax.max_rank = 2;
+    softmax.validation = KernelValidation::Unverified;
+    softmax.kernel_id = "dawn-softmax-f32-generic-v1";
+    softmax.wgsl_source = kSoftmaxF32Wgsl;
+    status = registry.register_kernel(std::move(softmax));
     if (!status.ok()) return status;
 
     KernelDefinition q8;
