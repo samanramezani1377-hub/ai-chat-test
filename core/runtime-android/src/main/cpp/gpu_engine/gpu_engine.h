@@ -183,7 +183,19 @@ private:
     std::vector<std::shared_ptr<Backend>> backends_;
 };
 
-struct RuntimeDiagnostics;
+struct RuntimeDiagnostics {
+    std::string runtime_name = "AIChatGpuEngine";
+    std::string runtime_version = "0.1.0";
+    BackendKind selected_backend = BackendKind::Unknown;
+    CapabilityState capability_state = CapabilityState::Unknown;
+    std::string device_name = "unknown";
+    std::string model_architecture = "unknown";
+    std::string quantization = "unknown";
+    uint64_t host_memory_bytes = 0;
+    uint64_t device_memory_bytes = 0;
+    bool cpu_fallback_available = true;
+    std::string last_error;
+};
 
 class GpuEngine {
 public:
@@ -203,18 +215,5 @@ private:
     RuntimeDiagnostics diagnostics_;
 };
 
-struct RuntimeDiagnostics {
-    std::string runtime_name = "AIChatGpuEngine";
-    std::string runtime_version = "0.1.0";
-    BackendKind selected_backend = BackendKind::Unknown;
-    CapabilityState capability_state = CapabilityState::Unknown;
-    std::string device_name = "unknown";
-    std::string model_architecture = "unknown";
-    std::string quantization = "unknown";
-    uint64_t host_memory_bytes = 0;
-    uint64_t device_memory_bytes = 0;
-    bool cpu_fallback_available = true;
-    std::string last_error;
-};
 
 } // namespace ai_chat::gpu_engine
