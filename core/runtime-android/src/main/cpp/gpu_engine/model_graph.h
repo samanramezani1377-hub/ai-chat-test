@@ -33,14 +33,14 @@ struct ModelPlanOperation {
     std::string operator_name;
     std::vector<std::string> inputs;
     std::vector<std::string> weight_tensors;
-    std::vector<std::string> control_inputs;
     std::string output;
-    bool side_effect = false;
     // A leading zero denotes the dynamic token/sequence dimension.
     std::vector<uint64_t> output_shape;
     std::unordered_map<std::string, double> float_attributes;
     std::unordered_map<std::string, uint64_t> integer_attributes;
     std::unordered_map<std::string, bool> bool_attributes;
+    std::vector<std::string> control_inputs;
+    bool side_effect = false;
 };
 
 struct ModelExecutionPlan {
