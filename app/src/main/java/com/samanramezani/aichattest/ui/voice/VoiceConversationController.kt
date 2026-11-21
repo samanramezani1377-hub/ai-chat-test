@@ -678,8 +678,10 @@ internal class VoiceConversationController(
         speaking.set(false)
         val oldMicrophone = microphone
         microphone = null
-        oldMicrophone?.stop()
         return scope.launch {
+            // AudioRecord.stop() and joining its capture thread can block; never do
+            // that on the UI caller of stop().
+            withContext(Dispatchers.IO) { oldMicrophone?.stop() }
             listOfNotNull(oldFrameJob, oldTurnJob, oldSpeechJob).joinAll()
             cleanupEngines()
             restoreAudioMode()

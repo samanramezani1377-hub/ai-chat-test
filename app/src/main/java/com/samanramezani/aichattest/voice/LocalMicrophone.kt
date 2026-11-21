@@ -22,6 +22,7 @@ class LocalMicrophone {
     // AudioRecord construction/startRecording are permission-gated by Android. Both calls below
     // explicitly translate SecurityException into VOICE-MIC-004, including permission revocation races.
     @SuppressLint("MissingPermission")
+    @Synchronized
     fun start(onFrame: (Frame) -> Unit) {
         check(running.compareAndSet(false, true)) { "VOICE-MIC-001: میکروفون از قبل فعال است." }
         val sampleRate = 16000
@@ -105,6 +106,7 @@ class LocalMicrophone {
         }, "local-voice-microphone").apply { isDaemon = true; start() }
     }
 
+    @Synchronized
     fun stop() {
         running.set(false)
         val oldRecorder = recorder
