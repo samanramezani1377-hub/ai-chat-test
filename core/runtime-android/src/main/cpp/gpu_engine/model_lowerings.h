@@ -4,7 +4,7 @@
 
 namespace ai_chat::gpu_engine {
 
-// Registers only structural lowerings backed by existing F32 kernel builders.
+// Registers structural lowerings for F32 and packed quantized-weight kernels.
 // A lowering does not promote a kernel: OperatorRegistry still requires a
 // backend-specific numerical validation before graph dispatch is authorized.
 Status register_builtin_model_lowerings(BackendKind backend,
