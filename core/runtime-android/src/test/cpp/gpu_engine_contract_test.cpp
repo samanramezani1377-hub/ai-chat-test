@@ -427,6 +427,15 @@ void test_q8_0_decoder_and_registry() {
     assert(build_q8_0_dequantize_candidate(encoded_buffer, 34, output_tensor, dispatch).ok());
     assert(dispatch.bindings.size() == 2);
     assert(dispatch.label.find("unverified") != std::string::npos);
+    ComputeDispatch gles_dispatch;
+    assert(build_add_f32_gles_candidate(lhs, rhs, output, gles_dispatch).ok());
+    assert(gles_dispatch.backend == BackendKind::OpenGles);
+    assert(gles_dispatch.glsl_source.find("#version 310 es") == 0);
+    assert(gles_dispatch.wgsl_source.empty());
+    OperatorRegistry gles_registry;
+    assert(register_builtin_gles_operator_candidates(gles_registry).ok());
+    assert(gles_registry.select_kernel("Add", BackendKind::OpenGles, DataType::F32,
+                                       DataType::F32, 2, 2, selected).code == StatusCode::Unsupported);
     assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") != std::string::npos);
 
     BufferDesc q4_encoded_desc{20, 4, MemoryDomain::Device, false, "q4-encoded"};

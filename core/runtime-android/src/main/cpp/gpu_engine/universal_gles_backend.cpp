@@ -57,7 +57,7 @@ public:
         if (d.validation != KernelValidation::Validated || d.kernel_id.empty() ||
             d.backend != BackendKind::OpenGles)
             return {StatusCode::Unsupported, "GLES dispatch requires a validated GLES kernel identity"};
-        if (d.glsl_es_source.empty() || d.bindings.empty() || !d.workgroups_x || !d.workgroups_y || !d.workgroups_z)
+        if (d.glsl_source.empty() || d.bindings.empty() || !d.workgroups_x || !d.workgroups_y || !d.workgroups_z)
             return {StatusCode::InvalidArgument, "GLES dispatch requires GLSL ES source, bindings and non-zero workgroups"};
         GlesCommand c; c.type=GlesCommand::Type::Dispatch; c.dispatch=d;
         commands_.push_back(std::move(c)); return Status::success();
@@ -101,7 +101,7 @@ Status dispatch_gles(const ComputeDispatch& d, const ai_chat::gpu::UniversalGpuC
         d.workgroups_z>static_cast<uint32_t>(std::max(0,caps.max_compute_workgroup_count_z)) ||
         d.bindings.size()>static_cast<size_t>(std::max(0,caps.max_shader_storage_buffer_bindings)))
         return {StatusCode::Unsupported,"GLES dispatch exceeds discovered workgroup or SSBO binding limits"};
-    GLuint program=0; Status st=compile_program(d.glsl_es_source,program); if(!st.ok()) return st;
+    GLuint program=0; Status st=compile_program(d.glsl_source,program); if(!st.ok()) return st;
     clear_errors(); glUseProgram(program);
     for (const auto& b:d.bindings) {
         auto* buf=dynamic_cast<GlesBuffer*>(b.buffer.get());
