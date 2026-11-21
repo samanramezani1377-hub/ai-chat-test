@@ -300,7 +300,7 @@ private fun CloudflareProviderSettings(onProviderChanged: () -> Unit, sharedStor
 private fun GpuLayerControls() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val preferences = remember(context) { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
-    var selected by remember(preferences) { mutableIntStateOf(preferences.getInt(KEY_GPU_LAYERS, -1)) }
+    var selected by remember(preferences) { mutableStateOf(preferences.getInt(KEY_GPU_LAYERS, -1)) }
     var dirty by remember { mutableStateOf(false) }
     val choices = listOf(0, 1, 2, 4, 8, 16, 32, 64, 99, -1)
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
