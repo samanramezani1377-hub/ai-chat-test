@@ -52,6 +52,10 @@ struct GgufTokenizerInfo {
     int64_t padding_token_id = -1;
     bool add_bos_token = false;
     bool add_eos_token = false;
+    bool add_space_prefix = false;
+    bool remove_extra_whitespaces = false;
+    bool escape_whitespaces = true;
+    bool byte_fallback = false;
 };
 
 struct GgufFileInfo {
