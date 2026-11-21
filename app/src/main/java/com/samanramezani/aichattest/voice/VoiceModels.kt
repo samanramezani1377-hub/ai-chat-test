@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.samanramezani.aichattest.storage.AtomicFileReplacement
+import com.samanramezani.aichattest.storage.SafeDirectoryReplacement
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
@@ -296,10 +297,7 @@ class VoiceModelStore(
                         val normalizedData = File(espeakStaging, "espeak-ng-data")
                         requireEspeakData(normalizedData, "VOICE-PIPER-017")
                         val destinationData = File(staging, "espeak-ng-data")
-                        destinationData.deleteRecursively()
-                        check(normalizedData.renameTo(destinationData)) {
-                            "VOICE-PIPER-021: انتقال داده‌های آواشناسی معتبر ناموفق بود."
-                        }
+                        SafeDirectoryReplacement.replace(normalizedData, destinationData)
                     } finally {
                         espeakStaging.deleteRecursively()
                     }
