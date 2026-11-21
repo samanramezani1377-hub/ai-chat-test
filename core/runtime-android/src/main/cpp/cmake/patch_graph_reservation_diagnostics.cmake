@@ -112,20 +112,24 @@ if (NOT _backend MATCHES "#include <stdexcept>")
 endif()
 
 if (NOT _backend MATCHES "AI_CHAT_GRAPH_RUNTIME_SPLIT_GUARD_V1")
-    ai_chat_replace_once(_backend
+    if (NOT _backend MATCHES "AI_CHAT_GRAPH_SPLIT_FAILED stage=runtime")
+        ai_chat_replace_once(_backend
         "    ggml_backend_sched_split_graph(sched, graph);\n\n    if (!ggml_backend_sched_alloc_splits(sched)) {"
         "    try {\n        ggml_backend_sched_split_graph(sched, graph);\n    } catch (const std::exception & err) {\n        GGML_LOG_ERROR(\"AI_CHAT_GRAPH_SPLIT_FAILED stage=runtime reason=%s\\n\", err.what());\n        return false;\n    }\n\n    if (!ggml_backend_sched_alloc_splits(sched)) {"
         "return a recoverable graph allocation failure instead of propagating exceptions during inference")
+    endif()
     string(APPEND _backend "\n// AI_CHAT_GRAPH_RUNTIME_SPLIT_GUARD_V1\n")
     file(WRITE "${_backend_file}" "${_backend}")
 endif()
 
 if (NOT _backend MATCHES "AI_CHAT_GRAPH_SPLIT_CONTEXT_FAILURE_V1")
     if (_backend MATCHES "AI_CHAT_GRAPH_SPLIT_CONTEXT_CREATE_BEGIN")
-        ai_chat_replace_once(_backend
+        if (NOT _backend MATCHES "throw std::runtime_error")
+            ai_chat_replace_once(_backend
             "        GGML_ABORT(\"%s: failed to initialize context\\n\", __func__);"
             "        throw std::runtime_error(\"failed to initialize backend scheduler graph context\");"
             "convert cached scheduler context abort to recoverable exception")
+        endif()
     else()
         ai_chat_replace_once(_backend
             "    sched->ctx = ggml_init(params);\n    if (sched->ctx == NULL) {\n        GGML_ABORT(\"%s: failed to initialize context\\n\", __func__);\n    }"
