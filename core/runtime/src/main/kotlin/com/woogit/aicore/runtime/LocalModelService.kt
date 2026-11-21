@@ -185,7 +185,9 @@ class LocalModelService(
                 // Generation never performs implicit activation or reload. The runtime
                 // must already have been activated explicitly by its lifecycle owner.
 
-                ModelResult.Success(runtime.generate(GenerationRequest(messages, settings), onToken))
+                val generated = runtime.generate(GenerationRequest(messages, settings), onToken)
+                currentCoroutineContext().ensureActive()
+                ModelResult.Success(generated)
             } catch (error: OutOfMemoryError) {
                 ModelResult.Failure(
                     ModelError.OutOfMemory("Not enough memory for generation", error),
@@ -214,6 +216,7 @@ class LocalModelService(
             runtimeMutex.withLock {
                 try {
                     runtime.unload()
+                    activeId = null
                     when (val persisted = repository.setActive(null)) {
                         is ModelResult.Success -> {
                             activeId = null

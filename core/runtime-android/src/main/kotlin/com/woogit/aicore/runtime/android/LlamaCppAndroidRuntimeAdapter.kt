@@ -109,6 +109,7 @@ class LlamaCppAndroidRuntimeAdapter(
                 RuntimeDiagnosticsStore.recordNativeEvent("SPECULATIVE_DRAFT_DISABLED target=" + file.name)
             }
             val result = NativeLlamaCpp.load(file.absolutePath, requested, requestedGpuLayers, draftFile?.absolutePath)
+            currentCoroutineContext().ensureActive()
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_RETURNED code=$result gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers")
             if (result != 0) return ModelResult.Failure(RuntimeErrorMapper.nativeLoadFailure(result))
             val info = NativeLlamaCpp.runtimeInfo()
@@ -128,6 +129,16 @@ class LlamaCppAndroidRuntimeAdapter(
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_RUNTIME_READY backend=$selectedBackend gpuPercent=$requestedGpuPercent requestedGpuLayers=$requestedGpuLayers context=$loadedContextLength cpuFallbackAllowed=true")
             RuntimeDiagnosticsStore.recordLoaded(model, latestLoadTimeMs, runtimeInfo())
             ModelResult.Success(Unit)
+        } catch (cancelled: CancellationException) {
+            RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_CANCELLED")
+            runCatching { NativeLlamaCpp.unload() }
+            selectedGpuLayers = 0
+            selectedBackend = "WebGPU"
+            loadedContextLength = null
+            loadedArchitecture = "unknown"
+            loadedModelPath = null
+            loadedDraftPath = null
+            throw cancelled
         } catch (t: Throwable) {
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_EXCEPTION ${t::class.java.name}: ${t.message}")
             NativeLlamaCpp.unload()
