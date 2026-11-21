@@ -140,6 +140,17 @@ include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_webgpu_failure_handling.cmake")
 
 include("${AI_CHAT_NATIVE_CMAKE_DIR}/cmake/patch_android_opencl.cmake")
 
+# Backend-neutral GPU engine contracts are intentionally isolated from llama.cpp/GGML.
+# This target may be reused by future backends and must not link their execution APIs.
+add_library(ai_chat_gpu_engine STATIC
+    gpu_engine/gpu_engine.cpp
+    gpu_engine/universal_adapter_bridge.cpp
+)
+target_include_directories(ai_chat_gpu_engine PUBLIC
+    ${CMAKE_CURRENT_LIST_DIR}
+)
+target_compile_features(ai_chat_gpu_engine PUBLIC cxx_std_17)
+
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp vision_runtime_android.cpp universal_gpu_adapter.cpp)
 
 # native_runtime.cpp intentionally includes llama.cpp/ggml internal headers for
@@ -175,7 +186,7 @@ target_link_options(ai_chat_runtime PRIVATE
 if (NOT TARGET ggml-webgpu)
     message(FATAL_ERROR "GGML_WEBGPU=ON was requested, but ggml-webgpu target was not created")
 endif()
-target_link_libraries(ai_chat_runtime PRIVATE llama llama-common mtmd ggml-opencl ggml-webgpu android log OpenCL EGL GLESv3)
+target_link_libraries(ai_chat_runtime PRIVATE ai_chat_gpu_engine llama llama-common mtmd ggml-opencl ggml-webgpu android log OpenCL EGL GLESv3)
 
 target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"
