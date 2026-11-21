@@ -135,6 +135,9 @@ include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_graph_reservation_diagnostics.cma
 # Prevent unbounded virtual chunks and make Dawn allocation failures recoverable.
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_bounded_buffer_allocation.cmake")
 
+# Convert Dawn callback/wait failures into recoverable GGML backend errors.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_webgpu_failure_handling.cmake")
+
 include("${AI_CHAT_NATIVE_CMAKE_DIR}/cmake/patch_android_opencl.cmake")
 
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp vision_runtime_android.cpp universal_gpu_adapter.cpp)
