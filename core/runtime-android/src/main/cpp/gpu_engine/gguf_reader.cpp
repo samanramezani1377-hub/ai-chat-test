@@ -100,7 +100,7 @@ bool align_up(uint64_t value, uint32_t alignment, uint64_t& out) {
     return true;
 }
 
-bool read_metadata_value(Reader& reader, uint32_t type, GgufMetadataValue& out) {
+bool read_metadata_value(Reader& reader, const std::string& key, uint32_t type, GgufMetadataValue& out) {
     uint8_t u8 = 0;
     uint32_t u32 = 0;
     uint64_t u64 = 0;
@@ -141,8 +141,46 @@ bool read_metadata_value(Reader& reader, uint32_t type, GgufMetadataValue& out) 
         case 9: {
             uint32_t element_type = 0;
             uint64_t count = 0;
-            if (!reader.read_u32(element_type) || !reader.read_u64(count)) return false;
-            if (count > reader.remaining() + 1) return false;
+            if (!reader.read_u32(element_type) || !reader.read_u64(count) ||
+                count > reader.remaining() + 1 || count > 1'000'000) return false;
+
+            if ((key == "tokenizer.ggml.tokens" || key == "tokenizer.ggml.merges") && element_type == 8) {
+                std::vector<std::string> values;
+                values.reserve(static_cast<size_t>(count));
+                for (uint64_t i = 0; i < count; ++i) {
+                    std::string value;
+                    if (!reader.read_string(value)) return false;
+                    values.push_back(std::move(value));
+                }
+                out = std::move(values);
+                return true;
+            }
+            if (key == "tokenizer.ggml.scores" && element_type == 6) {
+                std::vector<double> values;
+                values.reserve(static_cast<size_t>(count));
+                for (uint64_t i = 0; i < count; ++i) {
+                    uint32_t bits = 0;
+                    if (!reader.read_u32(bits)) return false;
+                    float value = 0;
+                    std::memcpy(&value, &bits, sizeof(value));
+                    values.push_back(value);
+                }
+                out = std::move(values);
+                return true;
+            }
+            if (key == "tokenizer.ggml.token_type" && (element_type == 4 || element_type == 5)) {
+                std::vector<int64_t> values;
+                values.reserve(static_cast<size_t>(count));
+                for (uint64_t i = 0; i < count; ++i) {
+                    uint32_t value = 0;
+                    if (!reader.read_u32(value)) return false;
+                    values.push_back(element_type == 5
+                        ? static_cast<int64_t>(static_cast<int32_t>(value))
+                        : static_cast<int64_t>(value));
+                }
+                out = std::move(values);
+                return true;
+            }
             for (uint64_t i = 0; i < count; ++i) {
                 if (!reader.skip_value(element_type)) return false;
             }
@@ -254,7 +292,7 @@ Status GgufReader::open(const std::string& path, GgufReader& out) {
         uint32_t type = 0;
         GgufMetadataValue value;
         if (!reader.read_string(key) || key.empty() || !reader.read_u32(type) ||
-            !read_metadata_value(reader, type, value)) {
+            !read_metadata_value(reader, key, type, value)) {
             return {StatusCode::InvalidArgument, "Malformed GGUF metadata entry"};
         }
         if (!info.metadata.emplace(std::move(key), std::move(value)).second) {
@@ -270,6 +308,30 @@ Status GgufReader::open(const std::string& path, GgufReader& out) {
     info.alignment = static_cast<uint32_t>(alignment_value);
     info.architecture = metadata_as<std::string>(info, "general.architecture", "unknown");
     info.model_name = metadata_as<std::string>(info, "general.name", "unknown");
+    info.tokenizer.model = metadata_as<std::string>(info, "tokenizer.ggml.model", "unknown");
+    info.tokenizer.pre_tokenizer = metadata_as<std::string>(info, "tokenizer.ggml.pre", "unknown");
+    info.tokenizer.bos_token_id = metadata_as<int64_t>(info, "tokenizer.ggml.bos_token_id", -1);
+    info.tokenizer.eos_token_id = metadata_as<int64_t>(info, "tokenizer.ggml.eos_token_id", -1);
+    info.tokenizer.unknown_token_id = metadata_as<int64_t>(info, "tokenizer.ggml.unknown_token_id", -1);
+    info.tokenizer.padding_token_id = metadata_as<int64_t>(info, "tokenizer.ggml.padding_token_id", -1);
+    info.tokenizer.add_bos_token = metadata_as<bool>(info, "tokenizer.ggml.add_bos_token", false);
+    info.tokenizer.add_eos_token = metadata_as<bool>(info, "tokenizer.ggml.add_eos_token", false);
+    if (const auto found = info.metadata.find("tokenizer.ggml.tokens"); found != info.metadata.end()) {
+        if (const auto* values = std::get_if<std::vector<std::string>>(&found->second)) info.tokenizer.tokens = *values;
+    }
+    if (const auto found = info.metadata.find("tokenizer.ggml.merges"); found != info.metadata.end()) {
+        if (const auto* values = std::get_if<std::vector<std::string>>(&found->second)) info.tokenizer.merges = *values;
+    }
+    if (const auto found = info.metadata.find("tokenizer.ggml.scores"); found != info.metadata.end()) {
+        if (const auto* values = std::get_if<std::vector<double>>(&found->second)) info.tokenizer.scores = *values;
+    }
+    if (const auto found = info.metadata.find("tokenizer.ggml.token_type"); found != info.metadata.end()) {
+        if (const auto* values = std::get_if<std::vector<int64_t>>(&found->second)) info.tokenizer.token_types = *values;
+    }
+    if ((!info.tokenizer.scores.empty() && info.tokenizer.scores.size() != info.tokenizer.tokens.size()) ||
+        (!info.tokenizer.token_types.empty() && info.tokenizer.token_types.size() != info.tokenizer.tokens.size())) {
+        return {StatusCode::InvalidArgument, "GGUF tokenizer metadata arrays have inconsistent vocabulary lengths"};
+    }
 
     std::set<std::string> tensor_names;
     info.tensors.reserve(static_cast<size_t>(info.tensor_count));

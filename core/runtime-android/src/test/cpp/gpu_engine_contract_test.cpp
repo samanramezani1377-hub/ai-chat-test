@@ -127,13 +127,18 @@ void test_independent_gguf_reader() {
         out.write("GGUF", 4);
         write_u32(out, 3);
         write_u64(out, 1); // tensor count
-        write_u64(out, 3); // metadata count
+        write_u64(out, 5); // metadata count
         write_string(out, "general.architecture");
         write_u32(out, 8); write_string(out, "llama");
         write_string(out, "general.alignment");
         write_u32(out, 4); write_u32(out, 32);
         write_string(out, "llama.context_length");
         write_u32(out, 4); write_u32(out, 4096);
+        write_string(out, "tokenizer.ggml.model");
+        write_u32(out, 8); write_string(out, "gpt2");
+        write_string(out, "tokenizer.ggml.tokens");
+        write_u32(out, 9); write_u32(out, 8); write_u64(out, 2);
+        write_string(out, "hello"); write_string(out, "world");
         write_string(out, "test.weight");
         write_u32(out, 2);
         write_u64(out, 2); write_u64(out, 3);
@@ -152,6 +157,8 @@ void test_independent_gguf_reader() {
     assert(reader.info().version == 3);
     assert(reader.info().architecture == "llama");
     assert(reader.info().alignment == 32);
+    assert(reader.info().tokenizer.model == "gpt2");
+    assert(reader.info().tokenizer.tokens.size() == 2);
     assert(reader.info().tensors.size() == 1);
     const auto* tensor = reader.find_tensor("test.weight");
     assert(tensor && tensor->byte_size_known && tensor->byte_size == 24);

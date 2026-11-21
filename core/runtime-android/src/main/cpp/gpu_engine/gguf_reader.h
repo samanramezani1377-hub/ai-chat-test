@@ -15,7 +15,7 @@ struct GgufArrayInfo {
     uint64_t count = 0;
 };
 
-using GgufMetadataValue = std::variant<uint64_t, int64_t, double, bool, std::string, GgufArrayInfo>;
+using GgufMetadataValue = std::variant<uint64_t, int64_t, double, bool, std::string, GgufArrayInfo,\n                                      std::vector<std::string>, std::vector<double>, std::vector<int64_t>>;
 
 struct GgufTensorTypeInfo {
     uint32_t type_id = 0;
@@ -38,6 +38,21 @@ struct GgufTensorInfo {
     GgufTensorTypeInfo type;
 };
 
+struct GgufTokenizerInfo {
+    std::string model = "unknown";
+    std::string pre_tokenizer = "unknown";
+    std::vector<std::string> tokens;
+    std::vector<std::string> merges;
+    std::vector<double> scores;
+    std::vector<int64_t> token_types;
+    int64_t bos_token_id = -1;
+    int64_t eos_token_id = -1;
+    int64_t unknown_token_id = -1;
+    int64_t padding_token_id = -1;
+    bool add_bos_token = false;
+    bool add_eos_token = false;
+};
+
 struct GgufFileInfo {
     uint32_t version = 0;
     uint64_t file_size_bytes = 0;
@@ -47,6 +62,7 @@ struct GgufFileInfo {
     uint32_t alignment = 32;
     std::string architecture = "unknown";
     std::string model_name = "unknown";
+    GgufTokenizerInfo tokenizer;
     std::unordered_map<std::string, GgufMetadataValue> metadata;
     std::vector<GgufTensorInfo> tensors;
 };
