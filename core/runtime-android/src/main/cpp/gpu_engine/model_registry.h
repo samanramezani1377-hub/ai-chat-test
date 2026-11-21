@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gguf_reader.h"
+#include "model_graph.h"
 
 #include <memory>
 #include <string>
@@ -65,6 +66,8 @@ public:
     virtual ~ArchitectureAdapter() = default;
     virtual const ArchitectureDescriptor& descriptor() const noexcept = 0;
     virtual Status validate_metadata(const GgufFileInfo& model) const = 0;
+    virtual Status build_execution_plan(const GgufFileInfo& model,
+                                        ModelExecutionPlan& plan) const = 0;
 };
 
 class ArchitectureRegistry {

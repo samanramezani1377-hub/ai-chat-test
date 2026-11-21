@@ -39,6 +39,99 @@ public:
 
     const ArchitectureDescriptor& descriptor() const noexcept override { return descriptor_; }
 
+    Status build_execution_plan(const GgufFileInfo& model,
+                                ModelExecutionPlan& plan) const override {
+        plan = ModelExecutionPlan{};
+        Status status = validate_metadata(model);
+        if (!status.ok()) return status;
+        uint64_t layers = 0, embedding = 0, heads = 0, kv_heads = 0, feed_forward = 0;
+        if (!metadata_u64(model, "llama.block_count", layers) ||
+            !metadata_u64(model, "llama.embedding_length", embedding) ||
+            !metadata_u64(model, "llama.attention.head_count", heads) ||
+            !metadata_u64(model, "llama.feed_forward_length", feed_forward))
+            return {StatusCode::InvalidArgument, "Llama execution plan metadata is incomplete"};
+        if (!metadata_u64(model, "llama.attention.head_count_kv", kv_heads)) kv_heads = heads;
+
+        std::unordered_map<std::string, const GgufTensorInfo*> tensors;
+        for (const auto& tensor : model.tensors) tensors.emplace(tensor.name, &tensor);
+        const auto has_tensor = [&tensors](const std::string& name) {
+            return tensors.find(name) != tensors.end();
+        };
+        const std::string embedding_weight = "token_embd.weight";
+        const std::string output_norm = "output_norm.weight";
+        if (!has_tensor(embedding_weight)) plan.blockers.emplace_back("MISSING_TENSOR:token_embd.weight");
+        if (!has_tensor(output_norm)) plan.blockers.emplace_back("MISSING_TENSOR:output_norm.weight");
+        const bool tied_output = !has_tensor("output.weight");
+        for (uint64_t layer = 0; layer < layers; ++layer) {
+            const std::string prefix = "blk." + std::to_string(layer) + ".";
+            const char* required[] = {
+                "attn_norm.weight", "attn_q.weight", "attn_k.weight", "attn_v.weight",
+                "attn_output.weight", "ffn_norm.weight", "ffn_gate.weight",
+                "ffn_up.weight", "ffn_down.weight"
+            };
+            for (const char* suffix : required) {
+                const std::string name = prefix + suffix;
+                if (!has_tensor(name)) plan.blockers.emplace_back("MISSING_TENSOR:" + name);
+            }
+        }
+        if (!plan.blockers.empty()) return {StatusCode::Unsupported, "Llama GGUF is missing tensors required by the dense execution plan"};
+
+        plan.architecture = descriptor_.name;
+        plan.layer_count = layers;
+        plan.embedding_length = embedding;
+        plan.attention_heads = heads;
+        plan.kv_heads = kv_heads;
+        plan.feed_forward_length = feed_forward;
+        auto add = [&plan](std::string id, std::string op,
+                           std::vector<std::string> inputs,
+                           std::vector<std::string> weights,
+                           std::string output, std::vector<uint64_t> shape = {}) {
+            plan.operations.push_back({std::move(id), std::move(op), std::move(inputs),
+                                       std::move(weights), std::move(output), std::move(shape)});
+        };
+        add("embedding", "Embedding", {"token_ids"}, {embedding_weight},
+            "hidden", {embedding});
+        for (uint64_t layer = 0; layer < layers; ++layer) {
+            const std::string p = "blk." + std::to_string(layer) + ".";
+            const std::string x = "layer." + std::to_string(layer) + ".";
+            add(x + "attn_norm", "RMSNorm", {"hidden"}, {p + "attn_norm.weight"}, x + "normalized");
+            add(x + "q_proj", "MatMul", {x + "normalized"}, {p + "attn_q.weight"}, x + "q");
+            add(x + "k_proj", "MatMul", {x + "normalized"}, {p + "attn_k.weight"}, x + "k");
+            add(x + "v_proj", "MatMul", {x + "normalized"}, {p + "attn_v.weight"}, x + "v");
+            add(x + "q_rope", "RoPE", {x + "q"}, {}, x + "q_rotated");
+            add(x + "k_rope", "RoPE", {x + "k"}, {}, x + "k_rotated");
+            add(x + "attention", "Attention", {x + "q_rotated", x + "k_rotated", x + "v", "kv_cache"},
+                {}, x + "attention_output");
+            add(x + "attention_output", "MatMul", {x + "attention_output"},
+                {p + "attn_output.weight"}, x + "attention_projected");
+            add(x + "attention_residual", "Add", {"hidden", x + "attention_projected"}, {},
+                x + "attention_residual");
+            add(x + "ffn_norm", "RMSNorm", {x + "attention_residual"},
+                {p + "ffn_norm.weight"}, x + "ffn_normalized");
+            add(x + "ffn_gate", "MatMul", {x + "ffn_normalized"},
+                {p + "ffn_gate.weight"}, x + "ffn_gate_values");
+            add(x + "ffn_up", "MatMul", {x + "ffn_normalized"},
+                {p + "ffn_up.weight"}, x + "ffn_up_values");
+            add(x + "ffn_activation", "SiLU", {x + "ffn_gate_values"}, {},
+                x + "ffn_gate_activated");
+            add(x + "ffn_multiply", "Multiply", {x + "ffn_gate_activated", x + "ffn_up_values"},
+                {}, x + "ffn_product");
+            add(x + "ffn_down", "MatMul", {x + "ffn_product"},
+                {p + "ffn_down.weight"}, x + "ffn_down_projected");
+            add(x + "ffn_residual", "Add", {x + "attention_residual", x + "ffn_down_projected"},
+                {}, "hidden");
+        }
+        add("final_norm", "RMSNorm", {"hidden"}, {output_norm}, "final_hidden");
+        add("logits", "MatMul", {"final_hidden"},
+            {tied_output ? embedding_weight : "output.weight"}, "logits");
+        plan.structurally_validated = true;
+        plan.blockers.emplace_back("TOKENIZER_EXECUTION_NOT_VALIDATED");
+        plan.blockers.emplace_back("OPERATOR_KERNEL_COVERAGE_NOT_VALIDATED");
+        plan.blockers.emplace_back("MODEL_GRAPH_EXECUTION_NOT_VALIDATED");
+        plan.gpu_ready = false;
+        return Status::success();
+    }
+
     Status validate_metadata(const GgufFileInfo& model) const override {
         if (model.architecture != descriptor_.name)
             return {StatusCode::InvalidArgument, "GGUF architecture does not match the llama adapter"};

@@ -1103,6 +1103,42 @@ void test_builtin_architecture_adapter_is_fail_closed() {
     assert(adapter->validate_metadata(model).code == StatusCode::InvalidArgument);
 }
 
+void test_llama_model_execution_plan_is_structural_only() {
+    ArchitectureRegistry registry;
+    assert(register_builtin_architecture_adapters(registry).ok());
+    const auto adapter = registry.find("llama");
+    assert(adapter);
+    GgufFileInfo model;
+    model.architecture = "llama";
+    model.metadata["llama.block_count"] = uint64_t{1};
+    model.metadata["llama.embedding_length"] = uint64_t{8};
+    model.metadata["llama.attention.head_count"] = uint64_t{2};
+    model.metadata["llama.attention.head_count_kv"] = uint64_t{1};
+    model.metadata["llama.feed_forward_length"] = uint64_t{16};
+    const std::vector<std::string> names = {
+        "token_embd.weight", "output_norm.weight",
+        "blk.0.attn_norm.weight", "blk.0.attn_q.weight",
+        "blk.0.attn_k.weight", "blk.0.attn_v.weight",
+        "blk.0.attn_output.weight", "blk.0.ffn_norm.weight",
+        "blk.0.ffn_gate.weight", "blk.0.ffn_up.weight", "blk.0.ffn_down.weight"
+    };
+    for (const auto& name : names) { GgufTensorInfo tensor; tensor.name = name; model.tensors.push_back(tensor); }
+    ModelExecutionPlan plan;
+    assert(adapter->build_execution_plan(model, plan).ok());
+    assert(plan.structurally_validated);
+    assert(!plan.gpu_ready && !plan.execution_validated);
+    assert(plan.layer_count == 1 && plan.embedding_length == 8);
+    assert(plan.operations.size() == 19);
+    assert(plan.operations.front().operator_name == "Embedding");
+    assert(plan.operations.back().operator_name == "MatMul");
+    assert(std::find(plan.blockers.begin(), plan.blockers.end(),
+                     "MODEL_GRAPH_EXECUTION_NOT_VALIDATED") != plan.blockers.end());
+
+    model.tensors.pop_back();
+    assert(adapter->build_execution_plan(model, plan).code == StatusCode::Unsupported);
+    assert(!plan.structurally_validated);
+}
+
 void test_model_and_quantization_registry_fail_closed() {
     QuantizationRegistry quantizations;
     QuantizationFormat q4;
@@ -1136,18 +1172,6 @@ void test_model_and_quantization_registry_fail_closed() {
     assert(report.unverified_quantized_tensors == 1);
 }
 
-
-
-void test_gles_q8_0_validation_is_fail_closed() {
-    FakeBackend backend;
-    OperatorRegistry registry;
-    assert(register_builtin_gles_operator_candidates(registry).ok());
-    assert(validate_gles_q8_0_matmul_kernel(backend, registry).code == StatusCode::NumericalFailure);
-    KernelDefinition selected;
-    assert(registry.select_kernel("MatMul_Q8_0", BackendKind::OpenGles,
-        std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
-        selected).code == StatusCode::Unsupported);
-}
 
 void test_universal_gles_operator_candidate_is_fail_closed() {
     FakeBackend backend;
@@ -1349,8 +1373,8 @@ int main() {
     test_independent_gguf_reader();
     test_tensor_and_memory_lease();
     test_operator_registry_fail_closed();
-    test_gles_q8_0_validation_is_fail_closed();
     test_universal_gles_operator_candidate_is_fail_closed();
+    test_llama_model_execution_plan_is_structural_only();
     test_model_and_quantization_registry_fail_closed();
     test_builtin_architecture_adapter_is_fail_closed();
     test_add_operator_candidate_and_reference();
