@@ -156,6 +156,7 @@ add_library(ai_chat_gpu_engine STATIC
     gpu_engine/runtime_router.cpp
     gpu_engine/memory_planner.cpp
     gpu_engine/tokenizer.cpp
+    gpu_engine/tokenizer_adapters.cpp
 )
 target_include_directories(ai_chat_gpu_engine PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}
