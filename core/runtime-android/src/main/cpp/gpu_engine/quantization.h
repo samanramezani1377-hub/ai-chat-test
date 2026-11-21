@@ -47,6 +47,18 @@ Status reference_q8_0_embedding(const uint8_t* quantized_weights, uint64_t weigh
 Status validate_q8_0_embedding_kernel(Backend& backend, OperatorRegistry& operators);
 const char* q4_1_matmul_wgsl_source() noexcept;
 const char* q4_1_matmul_glsl_source() noexcept;
+
+const char* q5_0_matmul_wgsl_source() noexcept;
+const char* q5_0_matmul_glsl_source() noexcept;
+const char* q5_1_matmul_wgsl_source() noexcept;
+const char* q5_1_matmul_glsl_source() noexcept;
+Status build_q5_0_matmul_candidate(const Tensor&, const std::shared_ptr<Buffer>&, uint64_t, const Tensor&, ComputeDispatch&);
+Status build_q5_0_matmul_gles_candidate(const Tensor&, const std::shared_ptr<Buffer>&, uint64_t, const Tensor&, ComputeDispatch&);
+Status reference_q5_0_matmul(const float*, const uint8_t*, uint64_t, float*, uint32_t, uint32_t, uint32_t);
+Status build_q5_1_matmul_candidate(const Tensor&, const std::shared_ptr<Buffer>&, uint64_t, const Tensor&, ComputeDispatch&);
+Status build_q5_1_matmul_gles_candidate(const Tensor&, const std::shared_ptr<Buffer>&, uint64_t, const Tensor&, ComputeDispatch&);
+Status reference_q5_1_matmul(const float*, const uint8_t*, uint64_t, float*, uint32_t, uint32_t, uint32_t);
+
 Status build_q4_1_matmul_candidate(const Tensor& activations, const std::shared_ptr<Buffer>& quantized_weights, uint64_t weight_bytes, const Tensor& output, ComputeDispatch& dispatch);
 Status build_q4_1_matmul_gles_candidate(const Tensor& activations, const std::shared_ptr<Buffer>& quantized_weights, uint64_t weight_bytes, const Tensor& output, ComputeDispatch& dispatch);
 Status reference_q4_1_matmul(const float* activations, const uint8_t* quantized_weights, uint64_t weight_bytes, float* output, uint32_t rows, uint32_t output_channels, uint32_t inner);

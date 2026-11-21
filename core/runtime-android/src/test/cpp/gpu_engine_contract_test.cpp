@@ -702,6 +702,26 @@ void test_q8_0_decoder_and_registry() {
                                             q4_matmul_output_tensor, q4_1_gles_dispatch).ok());
     assert(q4_1_gles_dispatch.backend == BackendKind::OpenGles);
     assert(q4_1_gles_dispatch.glsl_source.find("WEIGHT_ROW_BYTES = 40u") != std::string::npos);
+    BufferDesc q5_0_weights_desc{88, 4, MemoryDomain::Device, true, "q5-0-matmul-weights"};
+    BufferDesc q5_1_weights_desc{96, 4, MemoryDomain::Device, true, "q5-1-matmul-weights"};
+    std::shared_ptr<Buffer> q5_0_weights, q5_1_weights;
+    assert(backend.allocate(q5_0_weights_desc, q5_0_weights).ok());
+    assert(backend.allocate(q5_1_weights_desc, q5_1_weights).ok());
+    ComputeDispatch q5_0_matmul_dispatch, q5_1_matmul_dispatch;
+    assert(build_q5_0_matmul_candidate(q4_activation_tensor, q5_0_weights, 88,
+        q4_matmul_output_tensor, q5_0_matmul_dispatch).ok());
+    assert(build_q5_1_matmul_candidate(q4_activation_tensor, q5_1_weights, 96,
+        q4_matmul_output_tensor, q5_1_matmul_dispatch).ok());
+    ComputeDispatch q5_0_matmul_gles_dispatch, q5_1_matmul_gles_dispatch;
+    assert(build_q5_0_matmul_gles_candidate(q4_activation_tensor, q5_0_weights, 88,
+        q4_matmul_output_tensor, q5_0_matmul_gles_dispatch).ok());
+    assert(build_q5_1_matmul_gles_candidate(q4_activation_tensor, q5_1_weights, 96,
+        q4_matmul_output_tensor, q5_1_matmul_gles_dispatch).ok());
+    assert(q5_0_matmul_gles_dispatch.backend == BackendKind::OpenGles);
+    assert(q5_1_matmul_gles_dispatch.backend == BackendKind::OpenGles);
+    assert(q5_0_matmul_gles_dispatch.glsl_source.find("WEIGHT_ROW_BYTES = 44u") != std::string::npos);
+    assert(q5_1_matmul_gles_dispatch.glsl_source.find("WEIGHT_ROW_BYTES = 48u") != std::string::npos);
+
 
     BufferDesc q4_embedding_weights_desc{36, 4, MemoryDomain::Device, true, "q4-embedding-weights"};
     BufferDesc q4_embedding_tokens_desc{2 * sizeof(uint32_t), 4, MemoryDomain::Device, false, "q4-embedding-token-ids"};
