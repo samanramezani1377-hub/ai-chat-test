@@ -219,8 +219,6 @@ public:
     Status register_backend(std::shared_ptr<Backend> backend);
     Status initialize(BackendKind preferred_backend = BackendKind::DawnWebGpu);
     Status execute(const ComputeGraph& graph, const std::atomic<bool>* cancellation = nullptr);
-    // Probes UniversalGpuAdapter without promoting discovery to inference readiness.
-    Status probe_universal_adapter(DeviceInfo& out) const;
     Status shutdown();
 
     bool ready() const noexcept;
