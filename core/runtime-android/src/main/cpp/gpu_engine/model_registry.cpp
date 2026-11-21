@@ -273,8 +273,20 @@ bool QuantizationRegistry::can_decode(uint32_t file_type_id) const noexcept {
 
 bool QuantizationRegistry::can_execute_on_gpu(uint32_t file_type_id) const noexcept {
     const auto* format = find(file_type_id);
-    return format && format->decoder_state == SupportState::Validated &&
-           format->gpu_kernel_state == SupportState::Validated;
+    if (!format || format->decoder_state != SupportState::Validated) return false;
+    if (format->backend_gpu_kernel_states.empty())
+        return format->gpu_kernel_state == SupportState::Validated;
+    for (const auto& state : format->backend_gpu_kernel_states)
+        if (state.second == SupportState::Validated) return true;
+    return false;
+}
+
+bool QuantizationRegistry::can_execute_on_gpu(uint32_t file_type_id, BackendKind backend) const noexcept {
+    const auto* format = find(file_type_id);
+    if (!format || format->decoder_state != SupportState::Validated) return false;
+    const auto state = format->backend_gpu_kernel_states.find(backend);
+    return state != format->backend_gpu_kernel_states.end() &&
+           state->second == SupportState::Validated;
 }
 
 std::vector<QuantizationFormat> QuantizationRegistry::formats() const {

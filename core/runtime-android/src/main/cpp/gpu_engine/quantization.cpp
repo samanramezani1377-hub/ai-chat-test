@@ -599,6 +599,7 @@ Status validate_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& operators
             return {StatusCode::NumericalFailure, "Q8_0 MatMul GPU output differs from the independent block-decoder reference"};
     }
     kernel->validation = KernelValidation::Validated;
+    format->second.backend_gpu_kernel_states[backend_kind] = SupportState::Validated;
     format->second.gpu_kernel_state = SupportState::Validated;
     return Status::success();
 }

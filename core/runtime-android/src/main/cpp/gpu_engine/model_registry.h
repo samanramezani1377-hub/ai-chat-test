@@ -24,7 +24,10 @@ struct QuantizationFormat {
     uint32_t bytes_per_block = 0;
     bool quantized = false;
     SupportState decoder_state = SupportState::Unverified;
+    // Summary state: at least one backend has a validated kernel. Query the per-backend map
+    // before selecting a specific backend for inference.
     SupportState gpu_kernel_state = SupportState::Unverified;
+    std::unordered_map<BackendKind, SupportState> backend_gpu_kernel_states;
 };
 
 class QuantizationRegistry {
@@ -34,6 +37,7 @@ public:
     const QuantizationFormat* find(uint32_t file_type_id) const noexcept;
     bool can_decode(uint32_t file_type_id) const noexcept;
     bool can_execute_on_gpu(uint32_t file_type_id) const noexcept;
+    bool can_execute_on_gpu(uint32_t file_type_id, BackendKind backend) const noexcept;
     std::vector<QuantizationFormat> formats() const;
 
 private:
