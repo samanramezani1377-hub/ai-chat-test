@@ -1868,7 +1868,7 @@ void test_streamed_execution_loads_and_releases_quantized_weights_per_operation(
     plan.structurally_validated = true;
     plan.operator_coverage_validated = true;
     plan.operations.push_back({"q4-matmul", "MatMul_Q4_0", {"hidden"},
-        {"q4_weight"}, "projection", {0, 2}, {}, {}, {}, {}, false});
+        {"q4_weight"}, "projection", {1, 2}, {}, {}, {}, {}, false});
     plan.retained_outputs = {"projection"};
 
     BufferDesc input_desc{2 * 32 * sizeof(float), alignof(float), MemoryDomain::Device, false, "streamed-hidden"};
