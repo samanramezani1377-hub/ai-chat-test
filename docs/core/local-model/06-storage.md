@@ -20,6 +20,13 @@ Storage
 Selected URI → Validated Source → Managed File → Registry → Runtime
 ```
 
+## Replacement and deletion guarantees
+
+- Model files are staged in the same filesystem before replacement. The previous file remains available until the new file is moved into place; a failed move attempts to restore the previous copy.
+- Voice data directories are replaced through a staged directory and a temporary backup. A failed installation restores the previous directory instead of deleting it first.
+- Model deletion first renames the model file to a same-directory tombstone, then unregisters the model. If unregistering fails or is cancelled, the original file is restored. The tombstone is deleted only after registry removal succeeds.
+- If restoration or final tombstone cleanup fails, the operation returns a storage error and retains the recovery path instead of silently discarding the remaining copy.
+
 ## ارجاعات
 
 - [Architecture](01-architecture.md)
