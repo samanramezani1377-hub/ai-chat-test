@@ -2,6 +2,7 @@
 #include "tokenizer.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -20,6 +21,25 @@ bool metadata_u64(const GgufFileInfo& model, const std::string& key, uint64_t& v
     if (const auto* signed_value = std::get_if<int64_t>(&found->second)) {
         if (*signed_value <= 0) return false;
         value = static_cast<uint64_t>(*signed_value);
+        return true;
+    }
+    return false;
+}
+
+bool metadata_f64(const GgufFileInfo& model, const std::string& key, double& value) {
+    const auto found = model.metadata.find(key);
+    if (found == model.metadata.end()) return false;
+    if (const auto* floating = std::get_if<double>(&found->second)) {
+        if (!std::isfinite(*floating)) return false;
+        value = *floating;
+        return true;
+    }
+    if (const auto* unsigned_value = std::get_if<uint64_t>(&found->second)) {
+        value = static_cast<double>(*unsigned_value);
+        return true;
+    }
+    if (const auto* signed_value = std::get_if<int64_t>(&found->second)) {
+        value = static_cast<double>(*signed_value);
         return true;
     }
     return false;
@@ -150,12 +170,12 @@ public:
             (plan.rotary_dimensions & 1u) != 0)
             plan.blockers.emplace_back("INVALID_ROTARY_DIMENSION");
         plan.external_inputs = {"token_ids", "kv_cache"};
-        auto add = [&plan](std::string id, std::string op,
+        auto add = [&plan, head_dimension, kv_heads](std::string id, std::string op,
                            std::vector<std::string> inputs,
                            std::vector<std::string> weights,
                            std::string output, std::vector<uint64_t> shape = {}) {
             ModelPlanOperation operation{std::move(id), std::move(op), std::move(inputs),
-                                         std::move(weights), std::move(output), std::move(shape)};
+                                         std::move(weights), std::move(output), std::move(shape), {}, {}, {}};
             if (operation.operator_name == "RMSNorm")
                 operation.float_attributes["epsilon"] = plan.rms_norm_epsilon;
             if (operation.operator_name == "RoPE") {
