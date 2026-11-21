@@ -2,6 +2,7 @@
 #include "gguf_reader.h"
 #include "model_registry.h"
 #include "operators.h"
+#include "weight_streamer.h"
 
 #include <algorithm>
 #include <cassert>
@@ -205,6 +206,55 @@ private:
 
 
 
+
+void test_gguf_weight_streaming() {
+    const std::string path = "/tmp/ai_chat_gpu_engine_weight.gguf";
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write("GGUF", 4);
+        write_u32(out, 3);
+        write_u64(out, 1);
+        write_u64(out, 2);
+        write_string(out, "general.architecture");
+        write_u32(out, 8); write_string(out, "test-architecture");
+        write_string(out, "general.alignment");
+        write_u32(out, 4); write_u32(out, 32);
+        write_string(out, "weight");
+        write_u32(out, 1);
+        write_u64(out, 8);
+        write_u32(out, 0);
+        write_u64(out, 0);
+        const auto pos = static_cast<uint64_t>(out.tellp());
+        const auto data_start = (pos + 31u) & ~31ULL;
+        for (uint64_t i = pos; i < data_start; ++i) out.put('\0');
+        const float values[] = {1,2,3,4,5,6,7,8};
+        out.write(reinterpret_cast<const char*>(values), sizeof(values));
+    }
+
+    GgufReader reader;
+    assert(GgufReader::open(path, reader).ok());
+    FakeBackend backend;
+    DeviceInfo device;
+    device.backend = BackendKind::OpenGles;
+    device.limits.max_buffer_size = 16;
+    device.limits.max_storage_buffer_binding_size = 16;
+    device.limits.min_storage_buffer_offset_alignment = 4;
+    MemoryManager memory(backend, 64);
+    WeightStreamingPolicy policy;
+    policy.preferred_chunk_bytes = 16;
+    LoadedWeightTensor loaded;
+    assert(GgufWeightStreamer::load_tensor(reader, reader.info().tensors[0],
+        backend, memory, device, policy, loaded).ok());
+    assert(loaded.resident_chunks.size() == 2);
+    assert(memory.allocated_bytes() == 32);
+    float first[4] = {};
+    assert(backend.readback(loaded.resident_chunks[0].memory.buffer(), 0, first, sizeof(first)).ok());
+    assert(first[0] == 1.0f && first[3] == 4.0f);
+    loaded = LoadedWeightTensor{};
+    assert(memory.allocated_bytes() == 0);
+    std::remove(path.c_str());
+}
+
 void test_gpu_engine_lifecycle() {
     GpuEngine engine;
     auto backend = std::make_shared<FakeBackend>();
@@ -361,6 +411,7 @@ int main() {
     test_model_and_quantization_registry_fail_closed();
     test_add_operator_candidate_and_reference();
     test_gpu_engine_lifecycle();
+    test_gguf_weight_streaming();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";
     return 0;

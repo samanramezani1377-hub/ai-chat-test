@@ -149,6 +149,7 @@ add_library(ai_chat_gpu_engine STATIC
     gpu_engine/gguf_reader.cpp
     gpu_engine/model_registry.cpp
     gpu_engine/operators.cpp
+    gpu_engine/weight_streamer.cpp
 )
 target_include_directories(ai_chat_gpu_engine PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}
