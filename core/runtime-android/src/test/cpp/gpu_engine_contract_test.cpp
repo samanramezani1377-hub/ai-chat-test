@@ -521,6 +521,21 @@ void test_quantization_backend_compatibility_is_backend_specific() {
     assert(!dawn.blockers.empty() && !gles.blockers.empty());
     const auto unknown = evaluate_model_quantization_backend(model, registry, BackendKind::Unknown);
     assert(!unknown.compatible && !unknown.blockers.empty());
+
+    QuantizationRegistry mixed_backend_registry;
+    QuantizationFormat mixed_backend_q8;
+    mixed_backend_q8.file_type_id = 8;
+    mixed_backend_q8.name = "Q8_0";
+    mixed_backend_q8.block_elements = 32;
+    mixed_backend_q8.bytes_per_block = 34;
+    mixed_backend_q8.quantized = true;
+    mixed_backend_q8.decoder_state = SupportState::Validated;
+    mixed_backend_q8.gpu_kernel_state = SupportState::Validated;
+    mixed_backend_q8.backend_gpu_kernel_states[BackendKind::DawnWebGpu] = SupportState::Validated;
+    mixed_backend_q8.backend_gpu_kernel_states[BackendKind::OpenGles] = SupportState::Unverified;
+    assert(mixed_backend_registry.register_format(std::move(mixed_backend_q8)).ok());
+    assert(mixed_backend_registry.can_execute_on_gpu(8, BackendKind::DawnWebGpu));
+    assert(!mixed_backend_registry.can_execute_on_gpu(8, BackendKind::OpenGles));
 }
 
 void test_q8_0_decoder_and_registry() {

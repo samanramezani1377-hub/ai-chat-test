@@ -517,7 +517,10 @@ Status validate_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& operators
     auto format = quantizations.formats_.find(kQ8_0TypeId);
     if (format == quantizations.formats_.end() || format->second.decoder_state != SupportState::Validated)
         return {StatusCode::NotReady, "Q8_0 host decoder must be validated before GPU kernel promotion"};
-    if (format->second.gpu_kernel_state == SupportState::Validated) return Status::success();
+    const auto backend_validation = format->second.backend_gpu_kernel_states.find(backend_kind);
+    if (backend_validation != format->second.backend_gpu_kernel_states.end() &&
+        backend_validation->second == SupportState::Validated)
+        return Status::success();
 
     const bool use_gles = backend_kind == BackendKind::OpenGles;
     const std::string kernel_id = use_gles ? "gles-q8-0-matmul-f32-activation-v1"
