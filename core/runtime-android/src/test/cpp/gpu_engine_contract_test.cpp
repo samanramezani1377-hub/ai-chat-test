@@ -835,6 +835,25 @@ void test_gguf_weight_streaming() {
             return Status::success();
         }).ok());
     assert(streamed_chunks == 2);
+    DeviceInfo model_device = device;
+    model_device.limits.max_buffer_size = 64;
+    model_device.limits.max_storage_buffer_binding_size = 64;
+    MemoryManager model_memory(backend, 64);
+    ModelExecutionPlan plan;
+    ModelPlanOperation operation;
+    operation.id = "weight-consumer";
+    operation.operator_name = "MatMul";
+    operation.weight_tensors = {"weight"};
+    plan.operations.push_back(operation);
+    ModelExecutionContext context;
+    assert(load_model_execution_weights(reader, plan, backend, model_memory,
+                                         model_device, context).ok());
+    assert(context.tensors.at("weight").descriptor().shape == std::vector<uint64_t>({8}));
+    assert(context.weight_leases.size() == 1);
+    assert(model_memory.allocated_bytes() == 32);
+    context = ModelExecutionContext{};
+    assert(model_memory.allocated_bytes() == 0);
+
     assert(memory.allocated_bytes() == 0); // each chunk is released after its consumer returns
     const Status consumer_failure = GgufWeightStreamer::stream_tensor(reader, reader.info().tensors[0],
         backend, memory, device, policy,
@@ -1262,6 +1281,35 @@ void test_builtin_architecture_adapter_is_fail_closed() {
 
 
 
+
+
+void test_dense_model_plan_selects_q8_0_matmul_adapter() {
+    ArchitectureRegistry registry;
+    assert(register_builtin_architecture_adapters(registry).ok());
+    const auto adapter = registry.find("llama");
+    assert(adapter);
+    GgufFileInfo model;
+    model.architecture = "llama";
+    model.metadata["llama.block_count"] = uint64_t{1};
+    model.metadata["llama.embedding_length"] = uint64_t{32};
+    model.metadata["llama.attention.head_count"] = uint64_t{1};
+    model.metadata["llama.feed_forward_length"] = uint64_t{32};
+    model.tokenizer.tokens = {"a", "b"};
+    GgufTensorInfo q8_weight;
+    q8_weight.name = "blk.0.attn_q.weight";
+    q8_weight.type_id = 8;
+    q8_weight.type = GgufReader::tensor_type_info(8);
+    q8_weight.dimensions = {32, 32};
+    q8_weight.byte_size = 32 * 34;
+    q8_weight.byte_size_known = true;
+    model.tensors.push_back(q8_weight);
+    ModelExecutionPlan plan;
+    assert(adapter->build_execution_plan(model, plan).ok());
+    const auto projection = std::find_if(plan.operations.begin(), plan.operations.end(),
+        [](const ModelPlanOperation& operation) { return operation.id == "layer.0.q_proj"; });
+    assert(projection != plan.operations.end());
+    assert(projection->operator_name == "MatMul_Q8_0");
+}
 
 void test_q8_0_model_lowering_supports_gles_3d_projection() {
     FakeBackend backend(BackendKind::OpenGles);
@@ -1987,6 +2035,7 @@ int main() {
     test_activation_allocator_reuses_non_overlapping_tensor_slots();
     test_embedding_model_lowering_uploads_token_ids_and_binds_buffer();
     test_q8_0_model_lowering_supports_gles_3d_projection();
+    test_dense_model_plan_selects_q8_0_matmul_adapter();
     test_llama_model_execution_plan_is_structural_only();
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
     test_model_and_quantization_registry_fail_closed();
