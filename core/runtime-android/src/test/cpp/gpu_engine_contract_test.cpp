@@ -1,10 +1,13 @@
 #include "execution_engine.h"
+#include "gguf_reader.h"
 
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <fstream>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <utility>
@@ -98,6 +101,58 @@ public:
     std::vector<std::string> submitted;
 };
 
+
+void write_u32(std::ofstream& out, uint32_t value) {
+    for (int i = 0; i < 4; ++i) out.put(static_cast<char>((value >> (i * 8)) & 0xff));
+}
+void write_u64(std::ofstream& out, uint64_t value) {
+    for (int i = 0; i < 8; ++i) out.put(static_cast<char>((value >> (i * 8)) & 0xff));
+}
+void write_string(std::ofstream& out, const std::string& value) {
+    write_u64(out, value.size());
+    out.write(value.data(), static_cast<std::streamsize>(value.size()));
+}
+void test_independent_gguf_reader() {
+    const std::string path = "/tmp/ai_chat_gpu_engine_minimal.gguf";
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write("GGUF", 4);
+        write_u32(out, 3);
+        write_u64(out, 1); // tensor count
+        write_u64(out, 3); // metadata count
+        write_string(out, "general.architecture");
+        write_u32(out, 8); write_string(out, "llama");
+        write_string(out, "general.alignment");
+        write_u32(out, 4); write_u32(out, 32);
+        write_string(out, "llama.context_length");
+        write_u32(out, 4); write_u32(out, 4096);
+        write_string(out, "test.weight");
+        write_u32(out, 2);
+        write_u64(out, 2); write_u64(out, 3);
+        write_u32(out, 0); // F32
+        write_u64(out, 0); // relative data offset
+        const auto pos = static_cast<uint64_t>(out.tellp());
+        const auto data_start = (pos + 31u) & ~31ULL;
+        for (uint64_t i = pos; i < data_start; ++i) out.put('\0');
+        const float values[] = {1, 2, 3, 4, 5, 6};
+        out.write(reinterpret_cast<const char*>(values), sizeof(values));
+    }
+
+    GgufReader reader;
+    const Status status = GgufReader::open(path, reader);
+    assert(status.ok());
+    assert(reader.info().version == 3);
+    assert(reader.info().architecture == "llama");
+    assert(reader.info().alignment == 32);
+    assert(reader.info().tensors.size() == 1);
+    const auto* tensor = reader.find_tensor("test.weight");
+    assert(tensor && tensor->byte_size_known && tensor->byte_size == 24);
+    float values[6] = {};
+    assert(reader.read_tensor_chunk(*tensor, 0, values, sizeof(values)).ok());
+    assert(values[0] == 1.0f && values[5] == 6.0f);
+    std::remove(path.c_str());
+}
+
 void test_tensor_and_memory_lease() {
     FakeBackend backend;
     MemoryManager memory(backend, 128);
@@ -188,6 +243,7 @@ void test_graph_scheduler_order_and_cancel() {
 } // namespace
 
 int main() {
+    test_independent_gguf_reader();
     test_tensor_and_memory_lease();
     test_operator_registry_fail_closed();
     test_graph_scheduler_order_and_cancel();
