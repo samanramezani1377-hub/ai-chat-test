@@ -152,13 +152,35 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
         "log every Dawn buffer allocation and its outcome")
     ai_chat_replace_once(_webgpu
         [=[    ggml_backend_webgpu_device_context * ctx = static_cast<ggml_backend_webgpu_device_context *>(buft->device->context);
-    wgpu::Buffer                         buf;
-    ggml_webgpu_create_buffer(ctx->webgpu_global_ctx->device, buf, ROUNDUP_POW2(size, WEBGPU_STORAGE_BUF_BINDING_MULT),
+    const size_t aligned_size = ai_chat_aligned_size; // computed and logged by graph diagnostics
+    const size_t max_buffer_size = ctx->webgpu_global_ctx->capabilities.limits.maxBufferSize;
+    const size_t max_storage_binding_size = ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize;
+    if (aligned_size > max_buffer_size || aligned_size > max_storage_binding_size) {
+        ctx->webgpu_global_ctx->device_error.store(true);
+        GGML_LOG_ERROR("ggml_webgpu: refusing oversized tensor buffer name=%s requested=%zu aligned=%zu maxBufferSize=%zu maxStorageBufferBindingSize=%zu\\n",
+            buf_name.c_str(), size, aligned_size, max_buffer_size, max_storage_binding_size);
+        return nullptr;
+    }
+
+    wgpu::Buffer buf;
+    ggml_webgpu_create_buffer(ctx->webgpu_global_ctx->device, buf, aligned_size,
                               wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst,
                               buf_name.c_str());
+    if (!buf || ctx->webgpu_global_ctx->device_error.load()) {
+        ctx->webgpu_global_ctx->device_error.store(true);
+        GGML_LOG_ERROR("ggml_webgpu: Dawn did not create tensor buffer name=%s requested=%zu aligned=%zu\\n",
+            buf_name.c_str(), size, aligned_size);
+        return nullptr;
+    }
 
     ggml_backend_webgpu_buffer_context * buf_ctx =
-        new ggml_backend_webgpu_buffer_context(buf, buf_name, ctx->webgpu_global_ctx);
+        new (std::nothrow) ggml_backend_webgpu_buffer_context(buf, buf_name, ctx->webgpu_global_ctx);
+    if (buf_ctx == nullptr) {
+        ctx->webgpu_global_ctx->device_error.store(true);
+        GGML_LOG_ERROR("ggml_webgpu: host allocation failed for tensor buffer context name=%s bytes=%zu\\n",
+            buf_name.c_str(), size);
+        return nullptr;
+    }
 
     return ggml_backend_buffer_init(buft, ggml_backend_webgpu_buffer_interface, buf_ctx, size);]=]
         [=[    ggml_backend_webgpu_device_context * ctx = static_cast<ggml_backend_webgpu_device_context *>(buft->device->context);
