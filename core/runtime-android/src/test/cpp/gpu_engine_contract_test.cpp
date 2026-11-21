@@ -1433,6 +1433,53 @@ void test_dense_model_plan_selects_q8_0_matmul_adapter() {
 }
 
 
+void test_dense_model_plan_selects_q4_0_matmul_adapter() {
+    ArchitectureRegistry registry;
+    assert(register_builtin_architecture_adapters(registry).ok());
+    const auto adapter = registry.find("llama");
+    assert(adapter);
+    GgufFileInfo model;
+    model.architecture = "llama";
+    model.metadata["llama.block_count"] = uint64_t{1};
+    model.metadata["llama.embedding_length"] = uint64_t{32};
+    model.metadata["llama.attention.head_count"] = uint64_t{1};
+    model.metadata["llama.feed_forward_length"] = uint64_t{32};
+    model.tokenizer.tokens = {"a", "b"};
+    const std::vector<std::pair<std::string, std::vector<uint64_t>>> tensors = {
+        {"token_embd.weight", {32, 2}},
+        {"output.weight", {32, 2}},
+        {"output_norm.weight", {32}},
+        {"blk.0.attn_norm.weight", {32}},
+        {"blk.0.attn_q.weight", {32, 32}},
+        {"blk.0.attn_k.weight", {32, 32}},
+        {"blk.0.attn_v.weight", {32, 32}},
+        {"blk.0.attn_output.weight", {32, 32}},
+        {"blk.0.ffn_norm.weight", {32}},
+        {"blk.0.ffn_gate.weight", {32, 32}},
+        {"blk.0.ffn_up.weight", {32, 32}},
+        {"blk.0.ffn_down.weight", {32, 32}},
+    };
+    for (const auto& item : tensors) {
+        GgufTensorInfo tensor;
+        tensor.name = item.first;
+        tensor.dimensions = item.second;
+        tensor.type_id = tensor.name == "blk.0.attn_q.weight" ? 2u : 0u;
+        tensor.type = GgufReader::tensor_type_info(tensor.type_id);
+        uint64_t elements = 1;
+        for (uint64_t dimension : tensor.dimensions) elements *= dimension;
+        tensor.byte_size_known = true;
+        tensor.byte_size = tensor.type_id == 2 ? 32 * 18 : elements * sizeof(float);
+        model.tensors.push_back(std::move(tensor));
+    }
+    ModelExecutionPlan plan;
+    assert(adapter->build_execution_plan(model, plan).ok());
+    const auto projection = std::find_if(plan.operations.begin(), plan.operations.end(),
+        [](const ModelPlanOperation& operation) { return operation.id == "layer.0.q_proj"; });
+    assert(projection != plan.operations.end());
+    assert(projection->operator_name == "MatMul_Q4_0");
+}
+
+
 void test_fake_backend_never_promotes_builtin_operator_kernels() {
     FakeBackend backend(BackendKind::OpenGles);
     OperatorRegistry registry;
@@ -1484,6 +1531,44 @@ void test_q8_0_model_lowering_supports_gles_3d_projection() {
     operation.output = "output";
     ComputeDispatch dispatch;
     assert((*lowerings.find(BackendKind::OpenGles, "MatMul_Q8_0"))(operation, context, dispatch).ok());
+    assert(dispatch.backend == BackendKind::OpenGles);
+    assert(dispatch.glsl_source.find("const uint OUTPUT_CHANNELS = 4u;") != std::string::npos);
+    assert(dispatch.validation == KernelValidation::Unverified);
+}
+
+void test_q4_0_model_lowering_supports_gles_3d_projection() {
+    FakeBackend backend(BackendKind::OpenGles);
+    ModelLoweringRegistry lowerings;
+    assert(register_builtin_model_lowerings(BackendKind::OpenGles, lowerings).ok());
+    BufferDesc activation_desc{2 * 32 * sizeof(float), 4, MemoryDomain::Device, false, "q8-activation"};
+    BufferDesc output_desc{2 * 4 * sizeof(float), 4, MemoryDomain::Device, false, "q8-output"};
+    BufferDesc weight_desc{4 * 18, 4, MemoryDomain::Device, true, "q8-weight"};
+    std::shared_ptr<Buffer> activation_buffer, output_buffer, weight_buffer;
+    assert(backend.allocate(activation_desc, activation_buffer).ok());
+    assert(backend.allocate(output_desc, output_buffer).ok());
+    assert(backend.allocate(weight_desc, weight_buffer).ok());
+    TensorDesc activation_td; activation_td.shape = {2, 32}; activation_td.data_type = DataType::F32;
+    TensorDesc output_td; output_td.shape = {2, 2, 2}; output_td.data_type = DataType::F32;
+    Tensor activation, output;
+    assert(Tensor::create(activation_td, activation_buffer, 0, activation).ok());
+    assert(Tensor::create(output_td, output_buffer, 0, output).ok());
+    ModelExecutionContext context;
+    context.tensors.emplace("activation", activation);
+    context.tensors.emplace("output", output);
+    QuantizedWeightBinding binding;
+    binding.buffer = weight_buffer;
+    binding.byte_size = 4 * 18;
+    binding.file_type_id = 2;
+    binding.dimensions = {32, 4};
+    context.quantized_weights.emplace("q.weight", binding);
+    ModelPlanOperation operation;
+    operation.id = "q8-matmul";
+    operation.operator_name = "MatMul_Q4_0";
+    operation.inputs = {"activation"};
+    operation.weight_tensors = {"q.weight"};
+    operation.output = "output";
+    ComputeDispatch dispatch;
+    assert((*lowerings.find(BackendKind::OpenGles, "MatMul_Q4_0"))(operation, context, dispatch).ok());
     assert(dispatch.backend == BackendKind::OpenGles);
     assert(dispatch.glsl_source.find("const uint OUTPUT_CHANNELS = 4u;") != std::string::npos);
     assert(dispatch.validation == KernelValidation::Unverified);
@@ -2221,8 +2306,10 @@ int main() {
     test_activation_allocator_reuses_non_overlapping_tensor_slots();
     test_embedding_model_lowering_uploads_token_ids_and_binds_buffer();
     test_q8_0_model_lowering_supports_gles_3d_projection();
+    test_q4_0_model_lowering_supports_gles_3d_projection();
     test_fake_backend_never_promotes_builtin_operator_kernels();
     test_dense_model_plan_selects_q8_0_matmul_adapter();
+    test_dense_model_plan_selects_q4_0_matmul_adapter();
     test_llama_model_execution_plan_is_structural_only();
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
     test_model_and_quantization_registry_fail_closed();
