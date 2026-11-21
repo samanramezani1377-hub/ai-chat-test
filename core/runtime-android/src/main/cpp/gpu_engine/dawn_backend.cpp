@@ -70,6 +70,15 @@ public:
             dispatch.bindings.empty()) {
             return {StatusCode::InvalidArgument, "Compute dispatch requires WGSL, entry point, bindings and non-zero workgroups"};
         }
+        const uint64_t workgroup_invocations = static_cast<uint64_t>(dispatch.workgroup_size_x) *
+            dispatch.workgroup_size_y * dispatch.workgroup_size_z;
+        if (!dispatch.workgroup_size_x || !dispatch.workgroup_size_y || !dispatch.workgroup_size_z ||
+            (limits_.max_compute_workgroup_size_x && dispatch.workgroup_size_x > limits_.max_compute_workgroup_size_x) ||
+            (limits_.max_compute_workgroup_size_y && dispatch.workgroup_size_y > limits_.max_compute_workgroup_size_y) ||
+            (limits_.max_compute_workgroup_size_z && dispatch.workgroup_size_z > limits_.max_compute_workgroup_size_z) ||
+            (limits_.max_compute_workgroup_invocations && workgroup_invocations > limits_.max_compute_workgroup_invocations)) {
+            return {StatusCode::Unsupported, "Compute dispatch exceeds Dawn workgroup-size or invocation limits"};
+        }
         if (limits_.max_compute_workgroups_per_dimension != 0 &&
             (dispatch.workgroups_x > limits_.max_compute_workgroups_per_dimension ||
              dispatch.workgroups_y > limits_.max_compute_workgroups_per_dimension ||
