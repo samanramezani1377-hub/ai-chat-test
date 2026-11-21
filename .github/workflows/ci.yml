@@ -331,14 +331,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake_file="core/runtime-android/src/main/cpp/CMakeLists.txt"
+          patch_file="core/runtime-android/src/main/cpp/cmake/patch_webgpu_backend.cmake"
 
-          # CMake patches the FetchContent source during configuration and
-          # verifies every anchor before compilation. Do not scan every cached
-          # _deps copy here: Gradle may retain obsolete CMake build trees from
-          # earlier configurations, and those stale copies are not compiled.
-          # A successful native build plus these configure-time assertions
-          # validates the exact source used by the active build.
+          # The audited WebGPU patch and its whitelist now live in this dedicated
+          # module. CMake validates upstream patch anchors during configure;
+          # this post-build guard verifies the policy source itself, not the
+          # root CMakeLists.txt that only includes the module.
           for marker in \
             AI_CHAT_GENERIC_FP32_FALLBACK_V1 \
             AI_CHAT_WEBGPU_CAPABILITIES \
@@ -347,7 +345,7 @@ jobs:
             GGML_MAX_SRC \
             AI_CHAT_GENERIC_FP32_OP_WHITELIST_V2 \
             GGML_OP_SUM_ROWS; do
-            if ! grep -q "$marker" "$cmake_file"; then
+            if ! grep -q "$marker" "$patch_file"; then
               echo "::error::Missing CMake-enforced WebGPU patch marker: $marker"
               exit 1
             fi
@@ -355,7 +353,7 @@ jobs:
 
           # SOFT_MAX is intentionally excluded from the no-ShaderF16 GPU whitelist:
           # its upstream WGSL path still requires ShaderF16, so it must remain on CPU.
-          if grep -Eq 'op->op == GGML_OP_SOFT_MAX' "$cmake_file"; then
+          if grep -Eq 'op->op == GGML_OP_SOFT_MAX' "$patch_file"; then
             echo "::error::SOFT_MAX must not be admitted to the no-ShaderF16 WebGPU whitelist"
             exit 1
           fi
@@ -379,7 +377,7 @@ jobs:
             GGML_OP_SSM_CONV \
             GGML_OP_SSM_SCAN \
             GGML_OP_GATED_DELTA_NET; do
-            if ! grep -q "$marker" "$cmake_file"; then
+            if ! grep -q "$marker" "$patch_file"; then
               echo "::error::Missing audited no-ShaderF16 operation in CMake whitelist: $marker"
               exit 1
             fi
