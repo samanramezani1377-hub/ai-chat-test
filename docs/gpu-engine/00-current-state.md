@@ -49,3 +49,16 @@ Android UI / AI Core
 ## Audit conclusion
 
 The repository has a useful Android application/runtime boundary, an existing CPU fallback, a Dawn build path, and a reusable GLES capability/self-test component. It does **not** yet contain an independent GPU inference engine. The first safe implementation step is to introduce independent engine contracts and capability reporting without changing the active inference route. Actual Dawn execution, tensor/memory management, operators, quantization, model loading, and generation must then be implemented and validated incrementally.
+
+
+## Incremental GPU engine implementation after the audit snapshot
+
+The audit above is a historical snapshot at `07890ec925240671c29a1a485b52551101463db2`. Subsequent work on `engine` has added:
+
+- Independent F32 WGSL candidates and CPU references for Add, MatMul, RMSNorm, SiLU and Softmax. These candidates remain **UNVERIFIED** pending real Dawn dispatch/readback parity tests.
+- An independent Q8_0 host decoder with validated 32-value / 34-byte block parsing, plus a GPU dequantization WGSL candidate that remains **UNVERIFIED**.
+- A Llama dense metadata adapter that validates required dimension metadata but remains **UNVERIFIED** as a complete model architecture implementation.
+- A public engine API to query the existing Universal GPU Adapter. It reports the existing EGL/GLES compute self-test and limits as capability diagnostics only; it is not yet an executable engine backend.
+- Independent sampler/stop handling and GGUF tokenizer metadata parsing. No complete tokenizer implementation or generation loop is connected yet.
+
+The active Android inference route is still llama.cpp/GGML for both current GPU and CPU modes. No migration or route switch has been performed. The current branch still does not meet the goal of replacing llama.cpp GPU inference.
