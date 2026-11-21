@@ -151,28 +151,44 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
     }]=]
         "log every Dawn buffer allocation and its outcome")
     ai_chat_replace_once(_webgpu
-        [=[    ggml_backend_webgpu_device_context * ctx = static_cast<ggml_backend_webgpu_device_context *>(buft->device->context);
-    const size_t aligned_size = ai_chat_aligned_size; // computed and logged by graph diagnostics
-    const size_t max_buffer_size = ctx->webgpu_global_ctx->capabilities.limits.maxBufferSize;
-    const size_t max_storage_binding_size = ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize;
-    if (aligned_size > max_buffer_size || aligned_size > max_storage_binding_size) {
-        ctx->webgpu_global_ctx->device_error.store(true);
-        GGML_LOG_ERROR("ggml_webgpu: refusing oversized tensor buffer name=%s requested=%zu aligned=%zu maxBufferSize=%zu maxStorageBufferBindingSize=%zu\n",
-            buf_name.c_str(), size, aligned_size, max_buffer_size, max_storage_binding_size);
-        return nullptr;
-    }
-
-    wgpu::Buffer buf;
-    ggml_webgpu_create_buffer(ctx->webgpu_global_ctx->device, buf, aligned_size,
+        [=[    // AI_CHAT_WEBGPU_BUFFER_DIAGNOSTICS_V1
+    const size_t ai_chat_aligned_size = ROUNDUP_POW2(size, WEBGPU_STORAGE_BUF_BINDING_MULT);
+    GGML_LOG_INFO("AI_CHAT_WEBGPU_BUFFER_BEGIN id=%d name=%s device=%s requestedBytes=%zu alignedBytes=%zu maxStorageBindingBytes=%zu\n",
+        buffer_id, buf_name.c_str(), ctx->device_name.c_str(), size, ai_chat_aligned_size,
+        ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize);
+    ggml_webgpu_create_buffer(ctx->webgpu_global_ctx->device, buf, ai_chat_aligned_size,
                               wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst,
                               buf_name.c_str());
+    GGML_LOG_INFO("AI_CHAT_WEBGPU_BUFFER_RETURNED id=%d name=%s requestedBytes=%zu alignedBytes=%zu\n",
+        buffer_id, buf_name.c_str(), size, ai_chat_aligned_size);]=]
+        [=[    ggml_backend_webgpu_device_context * ctx = static_cast<ggml_backend_webgpu_device_context *>(buft->device->context);
+    if (ctx->webgpu_global_ctx->device_error.load()) {
+        GGML_LOG_ERROR("ggml_webgpu: refusing allocation because the device is in an error state\n");
+        return nullptr;
+    }
+    const size_t ai_chat_aligned_size = ROUNDUP_POW2(size, WEBGPU_STORAGE_BUF_BINDING_MULT);
+    const size_t max_buffer_size = static_cast<size_t>(ctx->webgpu_global_ctx->capabilities.limits.maxBufferSize);
+    const size_t max_storage_binding_size = static_cast<size_t>(ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize);
+    if (ai_chat_aligned_size > max_buffer_size || ai_chat_aligned_size > max_storage_binding_size) {
+        ctx->webgpu_global_ctx->device_error.store(true);
+        GGML_LOG_ERROR("ggml_webgpu: refusing oversized tensor buffer name=%s requested=%zu aligned=%zu maxBufferSize=%zu maxStorageBindingSize=%zu\n",
+            buf_name.c_str(), size, ai_chat_aligned_size, max_buffer_size, max_storage_binding_size);
+        return nullptr;
+    }
+    GGML_LOG_INFO("AI_CHAT_WEBGPU_BUFFER_BEGIN id=%d name=%s device=%s requestedBytes=%zu alignedBytes=%zu maxStorageBindingBytes=%zu\n",
+        buffer_id, buf_name.c_str(), ctx->device_name.c_str(), size, ai_chat_aligned_size,
+        ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize);
+    ggml_webgpu_create_buffer(ctx->webgpu_global_ctx->device, buf, ai_chat_aligned_size,
+                              wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst,
+                              buf_name.c_str());
+    GGML_LOG_INFO("AI_CHAT_WEBGPU_BUFFER_RETURNED id=%d name=%s requestedBytes=%zu alignedBytes=%zu\n",
+        buffer_id, buf_name.c_str(), size, ai_chat_aligned_size);
     if (!buf || ctx->webgpu_global_ctx->device_error.load()) {
         ctx->webgpu_global_ctx->device_error.store(true);
         GGML_LOG_ERROR("ggml_webgpu: Dawn did not create tensor buffer name=%s requested=%zu aligned=%zu\n",
-            buf_name.c_str(), size, aligned_size);
+            buf_name.c_str(), size, ai_chat_aligned_size);
         return nullptr;
     }
-
     ggml_backend_webgpu_buffer_context * buf_ctx =
         new (std::nothrow) ggml_backend_webgpu_buffer_context(buf, buf_name, ctx->webgpu_global_ctx);
     if (buf_ctx == nullptr) {
@@ -181,40 +197,7 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
             buf_name.c_str(), size);
         return nullptr;
     }
-
-    return ggml_backend_buffer_init(buft, ggml_backend_webgpu_buffer_interface, buf_ctx, size);]=]
-        [=[    ggml_backend_webgpu_device_context * ctx = static_cast<ggml_backend_webgpu_device_context *>(buft->device->context);
-    const size_t aligned_size = ROUNDUP_POW2(size, WEBGPU_STORAGE_BUF_BINDING_MULT);
-    const size_t max_buffer_size = ctx->webgpu_global_ctx->capabilities.limits.maxBufferSize;
-    const size_t max_storage_binding_size = ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize;
-    if (aligned_size > max_buffer_size || aligned_size > max_storage_binding_size) {
-        ctx->webgpu_global_ctx->device_error.store(true);
-        GGML_LOG_ERROR("ggml_webgpu: refusing oversized tensor buffer name=%s requested=%zu aligned=%zu maxBufferSize=%zu maxStorageBufferBindingSize=%zu\n",
-            buf_name.c_str(), size, aligned_size, max_buffer_size, max_storage_binding_size);
-        return nullptr;
-    }
-
-    wgpu::Buffer buf;
-    ggml_webgpu_create_buffer(ctx->webgpu_global_ctx->device, buf, aligned_size,
-                              wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst,
-                              buf_name.c_str());
-    if (!buf || ctx->webgpu_global_ctx->device_error.load()) {
-        ctx->webgpu_global_ctx->device_error.store(true);
-        GGML_LOG_ERROR("ggml_webgpu: Dawn did not create tensor buffer name=%s requested=%zu aligned=%zu\n",
-            buf_name.c_str(), size, aligned_size);
-        return nullptr;
-    }
-
-    ggml_backend_webgpu_buffer_context * buf_ctx =
-        new (std::nothrow) ggml_backend_webgpu_buffer_context(buf, buf_name, ctx->webgpu_global_ctx);
-    if (buf_ctx == nullptr) {
-        ctx->webgpu_global_ctx->device_error.store(true);
-        GGML_LOG_ERROR("ggml_webgpu: host allocation failed for tensor buffer context name=%s bytes=%zu\n",
-            buf_name.c_str(), size);
-        return nullptr;
-    }
-
-    return ggml_backend_buffer_init(buft, ggml_backend_webgpu_buffer_interface, buf_ctx, size);]=]
+    return ggml_backend_buffer_init(buft, ggml_backend_buffer_interface, buf_ctx, size);]=]
         "validate and safely construct WebGPU tensor buffers")
     ai_chat_replace_once(_webgpu
         [=[    return dev_ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize;]=]
@@ -264,16 +247,7 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
                            static_cast<int>(reason), std::string(message).c_str());
         });]=]
         "disable WebGPU after uncaptured device errors instead of aborting")
-    ai_chat_replace_once(_webgpu
-        [=[    ggml_backend_webgpu_device_context * ctx = static_cast<ggml_backend_webgpu_device_context *>(buft->device->context);
-    const size_t aligned_size]=]
-        [=[    ggml_backend_webgpu_device_context * ctx = static_cast<ggml_backend_webgpu_device_context *>(buft->device->context);
-    if (ctx->webgpu_global_ctx->device_error.load()) {
-        GGML_LOG_ERROR("ggml_webgpu: refusing allocation because the device is in an error state\n");
-        return nullptr;
-    }
-    const size_t aligned_size]=]
-        "refuse allocations after a device error")
+    # Device-error guard is applied atomically with the diagnostic buffer-allocation replacement.
     ai_chat_replace_once(_webgpu
         [=[    ggml_backend_webgpu_device_context * ctx = static_cast<ggml_backend_webgpu_device_context *>(dev->context);
 
