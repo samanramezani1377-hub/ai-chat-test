@@ -183,6 +183,14 @@ target_include_directories(ai_chat_gpu_backend_gles PUBLIC ${CMAKE_CURRENT_LIST_
 target_compile_features(ai_chat_gpu_backend_gles PUBLIC cxx_std_17)
 target_link_libraries(ai_chat_gpu_backend_gles PUBLIC ai_chat_gpu_engine PRIVATE EGL GLESv3)
 
+# Composition root: exposes Dawn and Universal GLES backends to Android runtime callers.
+add_library(ai_chat_gpu_backends_android STATIC gpu_engine/android_backends.cpp)
+target_include_directories(ai_chat_gpu_backends_android PUBLIC ${CMAKE_CURRENT_LIST_DIR})
+target_compile_features(ai_chat_gpu_backends_android PUBLIC cxx_std_17)
+target_link_libraries(ai_chat_gpu_backends_android PUBLIC
+    ai_chat_gpu_engine ai_chat_gpu_backend_dawn ai_chat_gpu_backend_gles
+)
+
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp vision_runtime_android.cpp universal_gpu_adapter.cpp)
 
 # native_runtime.cpp intentionally includes llama.cpp/ggml internal headers for
@@ -218,7 +226,7 @@ target_link_options(ai_chat_runtime PRIVATE
 if (NOT TARGET ggml-webgpu)
     message(FATAL_ERROR "GGML_WEBGPU=ON was requested, but ggml-webgpu target was not created")
 endif()
-target_link_libraries(ai_chat_runtime PRIVATE ai_chat_gpu_engine ai_chat_gpu_backend_dawn ai_chat_gpu_backend_gles llama llama-common mtmd ggml-opencl ggml-webgpu android log OpenCL EGL GLESv3)
+target_link_libraries(ai_chat_runtime PRIVATE ai_chat_gpu_engine ai_chat_gpu_backend_dawn ai_chat_gpu_backend_gles ai_chat_gpu_backends_android llama llama-common mtmd ggml-opencl ggml-webgpu android log OpenCL EGL GLESv3)
 
 target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"
