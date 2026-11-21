@@ -1871,16 +1871,17 @@ void test_streamed_execution_loads_and_releases_quantized_weights_per_operation(
         {"q4_weight"}, "projection", {0, 2}, {}, {}, {}, {}, false});
     plan.retained_outputs = {"projection"};
 
-    BufferDesc input_desc{32 * sizeof(float), alignof(float), MemoryDomain::Device, false, "streamed-hidden"};
+    BufferDesc input_desc{2 * 32 * sizeof(float), alignof(float), MemoryDomain::Device, false, "streamed-hidden"};
     std::shared_ptr<Buffer> input_buffer;
     assert(backend.allocate(input_desc, input_buffer).ok());
-    TensorDesc input_td; input_td.shape = {1, 32}; input_td.data_type = DataType::F32;
+    TensorDesc input_td; input_td.shape = {2, 32}; input_td.data_type = DataType::F32;
     Tensor input;
     assert(Tensor::create(input_td, input_buffer, 0, input).ok());
 
     ModelExecutionContext context;
     context.tensors.emplace("hidden", input);
-    context.token_ids = {0};
+    context.token_ids = {0, 1};
+    context.prefill = true;
 
     OperatorRegistry operators;
     KernelDefinition q4_kernel;
@@ -1901,7 +1902,7 @@ void test_streamed_execution_loads_and_releases_quantized_weights_per_operation(
     assert(register_builtin_model_lowerings(BackendKind::OpenGles, lowerings).ok());
     ModelGraphCompileReport report;
     assert(execute_model_execution_plan_streamed(plan, backend, lowerings, operators,
-        {}, reader, memory, device, 1, nullptr, context, report).ok());
+        {}, reader, memory, device, 2, nullptr, context, report).ok());
     assert(report.compiled && report.executed && report.compiled_nodes == 1);
     assert(context.quantized_weights.empty());
     assert(context.tensors.find("q4_weight") == context.tensors.end());
