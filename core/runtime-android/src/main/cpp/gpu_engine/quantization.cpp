@@ -400,6 +400,8 @@ Status decode_q8_0_blocks(const uint8_t* source, size_t source_bytes,
 
 
 
+const char* q8_0_matmul_wgsl_source() noexcept { return kQ8_0MatMulWgsl; }
+
 Status build_q8_0_matmul_candidate(const Tensor& activations,
                                   const std::shared_ptr<Buffer>& quantized_weights,
                                   uint64_t weight_bytes,

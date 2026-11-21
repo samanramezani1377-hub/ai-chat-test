@@ -626,6 +626,13 @@ void test_add_operator_candidate_and_reference() {
     KernelDefinition selected;
     assert(registry.select_kernel("Add", BackendKind::DawnWebGpu, DataType::F32,
                                   DataType::F32, 2, 2, selected).code == StatusCode::Unsupported);
+    KernelDefinition mixed_selected;
+    assert(registry.select_kernel("Embedding", BackendKind::DawnWebGpu,
+                                  std::vector<DataType>{DataType::F32, DataType::U32},
+                                  DataType::F32, 2, mixed_selected).code == StatusCode::Unsupported);
+    assert(registry.select_kernel("MatMul_Q8_0", BackendKind::DawnWebGpu,
+                                  std::vector<DataType>{DataType::F32, DataType::U32},
+                                  DataType::F32, 2, mixed_selected).code == StatusCode::Unsupported);
 
     FakeBackend backend;
     BufferDesc desc{24, 4, MemoryDomain::Device, false, "add"};

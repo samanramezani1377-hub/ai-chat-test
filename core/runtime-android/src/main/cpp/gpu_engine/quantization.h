@@ -23,6 +23,7 @@ Status decode_q4_1_blocks(const uint8_t* source, size_t source_bytes,
 // This validates the host decoder only; no GPU Q8_0 MatMul kernel is implied.
 Status decode_q8_0_blocks(const uint8_t* source, size_t source_bytes,
                           float* destination, size_t destination_elements);
+const char* q8_0_matmul_wgsl_source() noexcept;
 Status build_q8_0_matmul_candidate(const Tensor& activations,
                                   const std::shared_ptr<Buffer>& quantized_weights,
                                   uint64_t weight_bytes,
