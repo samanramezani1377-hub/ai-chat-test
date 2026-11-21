@@ -294,6 +294,31 @@ void test_kv_cache_memory_and_sequential_append() {
 }
 
 
+
+void test_q5_decoders() {
+    std::vector<uint8_t> q5_0(22, 0);
+    q5_0[0] = 0x00; q5_0[1] = 0x38; // d = 0.5
+    q5_0[2] = 0x01; q5_0[5] = 0x01; // high bits for q[0] and q[16]
+    q5_0[6] = 0x10; // low nibble 0, high nibble 1
+    float q5_0_output[32] = {};
+    assert(decode_q5_0_blocks(q5_0.data(), q5_0.size(), q5_0_output, 32).ok());
+    assert(q5_0_output[0] == 0.0f && q5_0_output[16] == 0.5f);
+
+    std::vector<uint8_t> q5_1(24, 0);
+    q5_1[0] = 0x00; q5_1[1] = 0x38; // d = 0.5
+    q5_1[2] = 0x00; q5_1[3] = 0x3c; // m = 1.0
+    q5_1[4] = 0x01; q5_1[7] = 0x01;
+    q5_1[8] = 0x10;
+    float q5_1_output[32] = {};
+    assert(decode_q5_1_blocks(q5_1.data(), q5_1.size(), q5_1_output, 32).ok());
+    assert(q5_1_output[0] == 9.0f && q5_1_output[16] == 9.5f);
+
+    QuantizationRegistry registry;
+    assert(register_builtin_quantization_formats(registry).ok());
+    assert(registry.can_decode(6) && registry.can_decode(7));
+    assert(!registry.can_execute_on_gpu(6) && !registry.can_execute_on_gpu(7));
+}
+
 void test_q4_decoders() {
     std::vector<uint8_t> q4_0(18, 0);
     q4_0[0] = 0x00; q4_0[1] = 0x38; // d = 0.5
@@ -314,7 +339,8 @@ void test_q4_decoders() {
 
     QuantizationRegistry registry;
     assert(register_builtin_quantization_formats(registry).ok());
-    assert(registry.can_decode(2) && registry.can_decode(3) && registry.can_decode(8));
+    assert(registry.can_decode(2) && registry.can_decode(3) && registry.can_decode(6) &&
+           registry.can_decode(7) && registry.can_decode(8));
     assert(!registry.can_execute_on_gpu(2) && !registry.can_execute_on_gpu(3) &&
            !registry.can_execute_on_gpu(8));
 }
@@ -788,6 +814,7 @@ int main() {
     test_gguf_weight_streaming();
     test_independent_sampler_and_stop_controller();
     test_q4_decoders();
+    test_q5_decoders();
     test_q8_0_decoder_and_registry();
     test_kv_cache_memory_and_sequential_append();
     test_runtime_router_fails_closed_to_cpu();
