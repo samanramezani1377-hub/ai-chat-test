@@ -5,6 +5,19 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Define the shader patch helper before FetchContent_MakeAvailable().
+# FetchContent configures nested projects during this file's evaluation; keeping
+# the helper at the top-level entry point guarantees it is available to every
+# subsequent patch invocation and avoids an unknown-command configure failure.
+function(ai_chat_replace_once var_name old_text new_text description)
+    string(FIND "${${var_name}}" "${old_text}" _patch_pos)
+    if (_patch_pos EQUAL -1)
+        message(FATAL_ERROR "Could not apply no-ShaderF16 WebGPU patch: ${description}")
+    endif()
+    string(REPLACE "${old_text}" "${new_text}" _patch_result "${${var_name}}")
+    set(${var_name} "${_patch_result}" PARENT_SCOPE)
+endfunction()
+
 include(FetchContent)
 set(LLAMA_CPP_TAG "9871df5911a03a813518bcd623ee2eba91bf32aa" CACHE STRING "Pinned llama.cpp revision with Qwen3.x/OpenCL/Q6_K support")
 set(FETCHCONTENT_QUIET OFF)
@@ -265,15 +278,6 @@ endif()
 # layout and decode the values with baseline WGSL unpack2x16float(), which
 # returns vec2<f32>. This enables the existing integer-packed Q4/Q5/Q6/Q8
 # dequantization kernels on adapters without the optional ShaderF16 feature.
-function(ai_chat_replace_once var_name old_text new_text description)
-    string(FIND "${${var_name}}" "${old_text}" _patch_pos)
-    if (_patch_pos EQUAL -1)
-        message(FATAL_ERROR "Could not apply no-ShaderF16 WebGPU patch: ${description}")
-    endif()
-    string(REPLACE "${old_text}" "${new_text}" _patch_result "${${var_name}}")
-    set(${var_name} "${_patch_result}" PARENT_SCOPE)
-endfunction()
-
 set(AI_CHAT_WEBGPU_SHADER_DIR "${llama_cpp_SOURCE_DIR}/ggml/src/ggml-webgpu/wgsl-shaders")
 set(AI_CHAT_WEBGPU_COMMON_DECLS "${AI_CHAT_WEBGPU_SHADER_DIR}/common_decls.tmpl")
 set(AI_CHAT_WEBGPU_MMV "${AI_CHAT_WEBGPU_SHADER_DIR}/mul_mat_vec.wgsl")
