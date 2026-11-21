@@ -2666,7 +2666,28 @@ void test_graph_scheduler_order_and_cancel() {
 
 } // namespace
 
+void test_sampler_min_p_filter() {
+    SamplingConfig config;
+    config.temperature = 1.0f;
+    config.top_k = 0;
+    config.top_p = 1.0f;
+    config.min_p = 0.5f;
+    Sampler sampler(config);
+    const std::vector<float> logits = {8.0f, 2.0f, 1.0f};
+    const std::vector<int32_t> history;
+    for (int i = 0; i < 8; ++i) {
+        int32_t token = -1;
+        assert(sampler.sample(logits, history, token).ok());
+        assert(token == 0);
+    }
+    config.min_p = 1.1f;
+    Sampler invalid_sampler(config);
+    int32_t ignored = -1;
+    assert(invalid_sampler.sample(logits, history, ignored).code == StatusCode::InvalidArgument);
+}
+
 int main() {
+    test_sampler_min_p_filter();
     test_independent_gguf_reader();
     test_tensor_and_memory_lease();
     test_operator_registry_fail_closed();
