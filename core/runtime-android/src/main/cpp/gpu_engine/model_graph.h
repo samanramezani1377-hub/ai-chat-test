@@ -8,6 +8,8 @@
 
 namespace ai_chat::gpu_engine {
 
+class OperatorRegistry;
+
 struct ModelPlanOperation {
     std::string id;
     std::string operator_name;
@@ -31,5 +33,16 @@ struct ModelExecutionPlan {
     bool execution_validated = false;
     bool gpu_ready = false;
 };
+
+struct ModelGraphCoverageReport {
+    bool complete = false;
+    std::vector<std::string> supported_operators;
+    std::vector<std::string> unsupported_operators;
+};
+
+Status validate_model_plan_operator_coverage(ModelExecutionPlan& plan,
+                                             const OperatorRegistry& registry,
+                                             BackendKind backend,
+                                             ModelGraphCoverageReport& report);
 
 } // namespace ai_chat::gpu_engine

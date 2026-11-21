@@ -79,6 +79,7 @@ class OperatorRegistry {
     friend Status validate_gles_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& registry);
 public:
     Status register_kernel(KernelDefinition definition);
+    bool has_validated_kernel(const std::string& operator_name, BackendKind backend) const noexcept;
     Status select_kernel(const std::string& operator_name, BackendKind backend,
                          DataType input_type, DataType output_type,
                          uint32_t input_count, uint32_t rank,

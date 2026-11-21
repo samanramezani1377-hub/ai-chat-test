@@ -9,6 +9,7 @@
 #include "runtime_router.h"
 #include "memory_planner.h"
 #include "tokenizer.h"
+#include "model_graph.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1136,6 +1137,13 @@ void test_llama_model_execution_plan_is_structural_only() {
     assert(plan.operations.back().operator_name == "MatMul");
     assert(std::find(plan.blockers.begin(), plan.blockers.end(),
                      "MODEL_GRAPH_EXECUTION_NOT_VALIDATED") != plan.blockers.end());
+    OperatorRegistry operator_registry;
+    ModelGraphCoverageReport coverage;
+    assert(validate_model_plan_operator_coverage(plan, operator_registry,
+        BackendKind::OpenGles, coverage).ok());
+    assert(!coverage.complete && !plan.operator_coverage_validated);
+    assert(std::find(coverage.unsupported_operators.begin(), coverage.unsupported_operators.end(),
+                     "Attention") != coverage.unsupported_operators.end());
 
     model.tensors.pop_back();
     assert(adapter->build_execution_plan(model, plan).code == StatusCode::Unsupported);

@@ -147,6 +147,7 @@ add_library(ai_chat_gpu_engine STATIC
     gpu_engine/execution_engine.cpp
     gpu_engine/gguf_reader.cpp
     gpu_engine/model_registry.cpp
+    gpu_engine/model_graph.cpp
     gpu_engine/operators.cpp
     gpu_engine/weight_streamer.cpp
     gpu_engine/sampler.cpp

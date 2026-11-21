@@ -237,6 +237,15 @@ uint64_t MemoryManager::available_bytes() const noexcept {
     return used >= state_->budget ? 0 : state_->budget - used;
 }
 
+bool OperatorRegistry::has_validated_kernel(const std::string& operator_name,
+                                                   BackendKind backend) const noexcept {
+    return std::any_of(kernels_.begin(), kernels_.end(), [&](const KernelDefinition& kernel) {
+        return kernel.operator_name == operator_name &&
+               kernel.backend == backend &&
+               kernel.validation == KernelValidation::Validated;
+    });
+}
+
 Status OperatorRegistry::register_kernel(KernelDefinition definition) {
     const bool invalid_input_types = !definition.input_types.empty() &&
         (definition.input_types.size() < definition.min_input_count ||
