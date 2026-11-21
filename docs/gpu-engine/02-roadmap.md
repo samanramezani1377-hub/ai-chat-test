@@ -103,3 +103,5 @@ CI/source checks are useful but not hardware evidence. Do not wait for CI to pro
 - **2026-11-22 / model-coverage backend retry:** extended the model-specific backend retry gate beyond quantization. If the selected backend cannot satisfy the validated model operator/lowering coverage, the session now tries the alternate backend and repeats baseline-kernel, quantization, and model-coverage validation before deciding whether GPU inference is safe.
 
 - **2026-11-22 / GGUF streamed-read efficiency:** the independent GGUF reader now retains one synchronized file stream for the reader lifetime instead of reopening the model file for every streamed weight chunk. Repeated and concurrent range reads serialize on the retained stream; the parser and weight layout remain independent of GGML.
+
+- **2026-11-22 / GGUF metadata lookup:** the independent reader now builds a tensor-name index at parse time, replacing repeated linear scans during per-operation weight streaming with indexed lookup. The index is rebuilt from the validated tensor table and does not change file parsing or tensor offsets.
