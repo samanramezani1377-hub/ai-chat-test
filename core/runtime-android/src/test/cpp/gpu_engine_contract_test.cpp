@@ -1919,6 +1919,42 @@ void test_q8_0_embedding_model_lowering_supports_gles() {
     assert(dispatch.validation == KernelValidation::Unverified);
 }
 
+void test_q8_0_embedding_model_lowering_supports_dawn() {
+    FakeBackend backend(BackendKind::DawnWebGpu);
+    ModelLoweringRegistry lowerings;
+    assert(register_builtin_model_lowerings(BackendKind::DawnWebGpu, lowerings).ok());
+    BufferDesc weight_desc{68, 4, MemoryDomain::Device, true, "q8-embedding-weight"};
+    BufferDesc output_desc{2 * 32 * sizeof(float), 4, MemoryDomain::Device, false, "q8-embedding-output"};
+    std::shared_ptr<Buffer> weight_buffer, output_buffer;
+    assert(backend.allocate(weight_desc, weight_buffer).ok());
+    assert(backend.allocate(output_desc, output_buffer).ok());
+    TensorDesc output_td; output_td.shape = {2, 32}; output_td.data_type = DataType::F32;
+    Tensor output;
+    assert(Tensor::create(output_td, output_buffer, 0, output).ok());
+    ModelExecutionContext context;
+    context.backend = &backend;
+    context.token_ids = {1, 0};
+    context.tensors.emplace("embedding", output);
+    QuantizedWeightBinding binding;
+    binding.buffer = weight_buffer;
+    binding.byte_size = 68;
+    binding.file_type_id = 8;
+    binding.dimensions = {32, 2};
+    context.quantized_weights.emplace("token_embd.weight", binding);
+    ModelPlanOperation operation;
+    operation.id = "embedding";
+    operation.operator_name = "Embedding_Q8_0";
+    operation.inputs = {"token_ids"};
+    operation.weight_tensors = {"token_embd.weight"};
+    operation.output = "embedding";
+    ComputeDispatch dispatch;
+    assert((*lowerings.find(BackendKind::DawnWebGpu, "Embedding_Q8_0"))(operation, context, dispatch).ok());
+    assert(dispatch.backend == BackendKind::DawnWebGpu);
+    assert(dispatch.kernel_id == "dawn-q8-0-embedding-f32-v1");
+    assert(dispatch.wgsl_source.find("VOCABULARY_SIZE: u32 = 2u") != std::string::npos);
+    assert(dispatch.validation == KernelValidation::Unverified);
+}
+
 void test_streamed_execution_loads_and_releases_quantized_weights_per_operation() {
     const std::string path = "/tmp/ai_chat_gpu_engine_streamed_q4.gguf";
     {
@@ -2796,6 +2832,7 @@ int main() {
     test_activation_allocator_reuses_non_overlapping_tensor_slots();
     test_q4_0_embedding_model_lowering_supports_gles();
     test_q8_0_embedding_model_lowering_supports_gles();
+    test_q8_0_embedding_model_lowering_supports_dawn();
     test_q4_1_embedding_model_lowering_supports_gles();
     test_streamed_execution_loads_and_releases_quantized_weights_per_operation();
     test_embedding_model_lowering_uploads_token_ids_and_binds_buffer();
