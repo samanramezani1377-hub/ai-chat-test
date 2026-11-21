@@ -128,6 +128,40 @@ if (NOT _alloc MATCHES "AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V1")
     file(WRITE "${_alloc_file}" "${_alloc}")
 endif()
 
+# Upgrade previously patched .cxx trees that still contain the old unbounded final chunk.
+file(READ "${_alloc_file}" _alloc)
+if (NOT _alloc MATCHES "AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V2")
+    if (_alloc MATCHES "SIZE_MAX/2")
+        ai_chat_replace_once(_alloc
+            [=[    struct tallocr_chunk * chunk = calloc(1, sizeof(struct tallocr_chunk));
+    chunk->n_free_blocks = 1;
+    chunk->free_blocks[0].offset = 0;
+    // available space in a chunk is limited to max_chunk_size, but can be higher if:
+    // 1. a single tensor exceeds the maximum, and cannot fit any other way
+    // 2. we are running out of chunks
+    // backends will either manage to allocate the larger size, or report an error.
+    chunk->free_blocks[0].size = MAX(min_size, alloc->max_chunk_size);
+    if (alloc->n_chunks == GGML_VBUFFER_MAX_CHUNKS - 1) {
+        chunk->free_blocks[0].size = SIZE_MAX/2;
+    }]=]
+            [=[    // Never manufacture an over-limit virtual chunk for a single oversized tensor.
+    if (min_size > alloc->max_chunk_size) {
+        return -1;
+    }
+    struct tallocr_chunk * chunk = calloc(1, sizeof(struct tallocr_chunk));
+    if (chunk == NULL) {
+        return -1;
+    }
+    chunk->n_free_blocks = 1;
+    chunk->free_blocks[0].offset = 0;
+    // Every chunk is strictly bounded by the backend's maximum buffer/binding size.
+    chunk->free_blocks[0].size = alloc->max_chunk_size;]=]
+            "upgrade cached allocator chunk bounds")
+    endif()
+    string(APPEND _alloc "\\n// AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V2\\n")
+    file(WRITE "${_alloc_file}" "${_alloc}")
+endif()
+
 # WebGPU: reject allocations exceeding either the whole-buffer or storage-binding
 # limit before calling Dawn. A failed buffer allocation is returned to ggml-alloc
 # as NULL so graph reservation can fail cleanly and the caller can select fallback.
