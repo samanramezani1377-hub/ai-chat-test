@@ -65,11 +65,14 @@ public:
 
 class FakeBackend final : public Backend {
 public:
-    BackendKind kind() const noexcept override { return BackendKind::OpenGles; }
+    explicit FakeBackend(BackendKind backend_kind = BackendKind::OpenGles, bool available = true)
+        : backend_kind_(backend_kind), available_(available) {}
+    BackendKind kind() const noexcept override { return backend_kind_; }
     Status enumerate_devices(std::vector<DeviceInfo>& out) override {
         out.clear();
+        if (!available_) return {StatusCode::Unsupported, "fake backend intentionally unavailable"};
         DeviceInfo device;
-        device.backend = BackendKind::OpenGles;
+        device.backend = backend_kind_;
         device.name = "fake-test-device";
         device.compute_available = true;
         out.push_back(device);
@@ -92,31 +95,27 @@ public:
         return Status::success();
     }
     Status synchronize() override { ++sync_count; return Status::success(); }
-    Status upload(const std::shared_ptr<Buffer>& destination, uint64_t offset,
-                  const void* source, uint64_t size) override {
+    Status upload(const std::shared_ptr<Buffer>& destination, uint64_t offset, const void* source, uint64_t size) override {
         auto buffer = std::dynamic_pointer_cast<FakeBuffer>(destination);
-        if (!buffer || !source || offset + size > buffer->bytes.size())
-            return {StatusCode::InvalidArgument, "fake upload range invalid"};
+        if (!buffer || !source || offset + size > buffer->bytes.size()) return {StatusCode::InvalidArgument, "fake upload range invalid"};
         std::memcpy(buffer->bytes.data() + offset, source, static_cast<size_t>(size));
         return Status::success();
     }
-    Status readback(const std::shared_ptr<Buffer>& source, uint64_t offset,
-                    void* destination, uint64_t size) override {
+    Status readback(const std::shared_ptr<Buffer>& source, uint64_t offset, void* destination, uint64_t size) override {
         auto buffer = std::dynamic_pointer_cast<FakeBuffer>(source);
-        if (!buffer || !destination || offset + size > buffer->bytes.size())
-            return {StatusCode::InvalidArgument, "fake readback range invalid"};
+        if (!buffer || !destination || offset + size > buffer->bytes.size()) return {StatusCode::InvalidArgument, "fake readback range invalid"};
         std::memcpy(destination, buffer->bytes.data() + offset, static_cast<size_t>(size));
         return Status::success();
     }
     Status shutdown() override { ready = false; return Status::success(); }
     bool healthy() const noexcept override { return ready; }
-
+    BackendKind backend_kind_;
+    bool available_;
     bool ready = true;
     int submit_count = 0;
     int sync_count = 0;
     std::vector<std::string> submitted;
 };
-
 
 void write_u32(std::ofstream& out, uint32_t value) {
     for (int i = 0; i < 4; ++i) out.put(static_cast<char>((value >> (i * 8)) & 0xff));
@@ -271,6 +270,17 @@ void test_gpu_memory_planner_respects_streaming_and_reserve() {
     assert(report.blockers.front() == "GPU_MEMORY_BUDGET_UNKNOWN");
 }
 
+void test_gpu_backend_fallback_order() {
+    GpuEngine engine;
+    assert(engine.register_backend(std::make_shared<FakeBackend>(BackendKind::DawnWebGpu, false)).ok());
+    assert(engine.register_backend(std::make_shared<FakeBackend>(BackendKind::OpenGles, true)).ok());
+    assert(engine.initialize_with_fallback({BackendKind::DawnWebGpu, BackendKind::OpenGles}).ok());
+    assert(engine.ready());
+    assert(engine.active_device() && engine.active_device()->backend == BackendKind::OpenGles);
+    assert(engine.diagnostics().fallback_used);
+    assert(!engine.diagnostics().fallback_reason.empty());
+    assert(engine.shutdown().ok());
+}
 void test_runtime_router_fails_closed_to_cpu() {
     RuntimeReadiness readiness;
     auto report = select_runtime(readiness);
@@ -1374,6 +1384,7 @@ int main() {
     test_q5_decoders();
     test_q8_0_decoder_and_registry();
     test_kv_cache_memory_and_sequential_append();
+    test_gpu_backend_fallback_order();
     test_runtime_router_fails_closed_to_cpu();
     test_gpu_memory_planner_respects_streaming_and_reserve();
     test_graph_scheduler_order_and_cancel();
