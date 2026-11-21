@@ -5,6 +5,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CMAKE="$ROOT/core/runtime-android/src/main/cpp/CMakeLists.txt"
 WEBGPU_PATCH="$ROOT/core/runtime-android/src/main/cpp/cmake/patch_webgpu_backend.cmake"
 OPENCL_PATCH="$ROOT/core/runtime-android/src/main/cpp/cmake/patch_android_opencl.cmake"
+RECURRENT_PATCH="$ROOT/core/runtime-android/src/main/cpp/cmake/patch_recurrent_memory_diagnostics.cmake"
+WEBGPU_FAILURE_PATCH="$ROOT/core/runtime-android/src/main/cpp/cmake/patch_webgpu_failure_handling.cmake"
+GRAPH_PATCH="$ROOT/core/runtime-android/src/main/cpp/cmake/patch_graph_reservation_diagnostics.cmake"
+ALLOC_PATCH="$ROOT/core/runtime-android/src/main/cpp/cmake/patch_bounded_buffer_allocation.cmake"
 PATCH_HELPERS="$ROOT/core/runtime-android/src/main/cpp/cmake/AIChatPatchHelpers.cmake"
 CMAKE_FILES=( "$CMAKE" "$WEBGPU_PATCH" )
 FIND_DAWN="$ROOT/core/runtime-android/src/main/cpp/cmake/FindDawn.cmake"
@@ -45,6 +49,19 @@ grep -q 'extractWebGpuDawnMetadata' "$GRADLE" || fail "Gradle must extract Dawn 
 ! grep -q 'implementation("androidx.webgpu:webgpu:' "$GRADLE" || fail "JNI-only AndroidX Dawn library must not be packaged into the app"
 ! grep -q 'AI_CHAT_WEBGPU_LIBRARY' "$GRADLE" || fail "Gradle must not pass the JNI-only AAR library to native linking"
 grep -q 'AI_CHAT_DAWN_METADATA_FILE' "$GRADLE" || fail "Gradle must pass the extracted Dawn metadata path to CMake"
+
+# Recurrent memory, graph planning and Dawn failures must be isolated and diagnosable.
+grep -q 'patch_recurrent_memory_diagnostics.cmake' "$CMAKE" || fail "CMake must include recurrent memory allocation diagnostics"
+grep -q 'patch_webgpu_failure_handling.cmake' "$CMAKE" || fail "CMake must include safe WebGPU failure propagation"
+grep -q 'AI_CHAT_RECURRENT_BUFFER_ALLOC_BEGIN' "$RECURRENT_PATCH" || fail "Recurrent cache allocations must be traced per buffer type"
+grep -q 'AI_CHAT_RECURRENT_BUFFER_ALLOC_FAILED' "$RECURRENT_PATCH" || fail "Recurrent allocation failure must be recorded before throwing"
+grep -q 'AI_CHAT_GRAPH_SPLIT_BEGIN' "$GRAPH_PATCH" || fail "Graph splitting must have a pre-stage checkpoint"
+grep -q 'AI_CHAT_GRAPH_ALLOCATOR_RESERVE_BEGIN' "$GRAPH_PATCH" || fail "Graph allocator reservation must have a pre-stage checkpoint"
+grep -q 'AI_CHAT_WEBGPU_WAIT_RESULT_V1' "$WEBGPU_FAILURE_PATCH" || fail "Dawn callbacks must use heap-owned wait result state"
+grep -q 'std::shared_ptr<ai_chat_webgpu_wait_result>' "$WEBGPU_FAILURE_PATCH" || fail "AllowSpontaneous callbacks must not capture stack-owned result state"
+grep -q 'AI_CHAT_WEBGPU_GRAPH_FAILURE_PROPAGATION_V1' "$WEBGPU_FAILURE_PATCH" || fail "WebGPU execution errors must propagate as GGML_STATUS_FAILED"
+grep -q 'AI_CHAT_WEBGPU_UNCAPTURED_ERROR' "$WEBGPU_FAILURE_PATCH" || fail "Uncaptured Dawn errors must be persisted without GGML_ABORT"
+grep -q 'min_size > alloc->max_chunk_size' "$ALLOC_PATCH" || fail "Oversized tensors must not create virtual chunks beyond backend limits"
 
 # The universal adapter must prove real GLES compute, not just EGL context creation.
 grep -q 'gles_compute_self_test_passed' "$GPU_ADAPTER_H" || fail "GLES compute self-test result must be represented in capabilities"
