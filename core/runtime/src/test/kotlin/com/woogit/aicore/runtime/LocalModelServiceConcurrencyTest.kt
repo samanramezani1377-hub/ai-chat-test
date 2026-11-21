@@ -98,6 +98,27 @@ class LocalModelServiceConcurrencyTest {
     }
 
     @Test
+    fun failedModelRegistrationRemovesTheImportedFile() = runBlocking {
+        val directory = Files.createTempDirectory("model-import-rollback")
+        try {
+            val importedPath = directory.resolve("imported.gguf")
+            Files.writeString(importedPath, "new-model")
+            val descriptor = model(importedPath)
+            val repository = RecordingRepository(descriptor).apply { failRegister = true }
+            val service = LocalModelService(
+                SuccessfulImporter(descriptor),
+                repository,
+                RecordingRuntime(),
+            )
+
+            assertTrue(service.importModel(Path.of("/tmp/source.gguf")) is ModelResult.Failure)
+            assertTrue(!Files.exists(importedPath), "failed registration must not leave an orphan model file")
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun failedModelRecordDeletionRestoresOriginalModelFile() = runBlocking {
         val directory = Files.createTempDirectory("model-delete-rollback")
         try {
@@ -232,6 +253,11 @@ class LocalModelServiceConcurrencyTest {
         state = ModelState.READY,
     )
 
+    private class SuccessfulImporter(private val descriptor: ModelDescriptor) : ModelImporter {
+        override suspend fun import(source: Path): ModelResult<ModelDescriptor> =
+            ModelResult.Success(descriptor)
+    }
+
     private class NoOpImporter : ModelImporter {
         override suspend fun import(source: Path): ModelResult<ModelDescriptor> =
             ModelResult.Failure(ModelError.InvalidModel("Not used by this test"))
@@ -240,9 +266,12 @@ class LocalModelServiceConcurrencyTest {
     private class RecordingRepository(private val model: ModelDescriptor) : ModelRepository {
         var activeId: String? = null
         var registered = true
+        var failRegister = false
         var failUnregister = false
 
-        override suspend fun register(model: ModelDescriptor): ModelResult<Unit> = ModelResult.Success(Unit)
+        override suspend fun register(model: ModelDescriptor): ModelResult<Unit> =
+            if (failRegister) ModelResult.Failure(ModelError.Storage("simulated register failure"))
+            else ModelResult.Success(Unit)
         override suspend fun get(id: String): ModelResult<ModelDescriptor?> =
             ModelResult.Success(model.takeIf { id == model.id && registered })
         override suspend fun list(): ModelResult<List<ModelDescriptor>> = ModelResult.Success(listOf(model))

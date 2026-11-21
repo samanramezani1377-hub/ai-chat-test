@@ -71,8 +71,17 @@ class LocalModelService(
         return when (val registered = repository.register(model)) {
             is ModelResult.Success -> ModelResult.Success(model)
             is ModelResult.Failure -> {
-                Files.deleteIfExists(model.path)
-                registered
+                try {
+                    Files.deleteIfExists(model.path)
+                    registered
+                } catch (cleanupError: Exception) {
+                    ModelResult.Failure(
+                        ModelError.Storage(
+                            "Model registration failed (${registered.error.message}) and imported file cleanup also failed: ${model.path.fileName}",
+                            cleanupError,
+                        ),
+                    )
+                }
             }
         }
     }
