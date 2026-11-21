@@ -48,6 +48,7 @@ private:
 
 TokenizerPreflightReport evaluate_tokenizer_preflight(
     const GgufTokenizerInfo& metadata, const TokenizerRegistry& registry);
+Status register_builtin_tokenizer_adapters(TokenizerRegistry& registry);
 
 class TokenizerEngine {
 public:
