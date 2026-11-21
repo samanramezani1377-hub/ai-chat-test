@@ -161,7 +161,8 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
                               wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst,
                               buf_name.c_str());
     GGML_LOG_INFO("AI_CHAT_WEBGPU_BUFFER_RETURNED id=%d name=%s requestedBytes=%zu alignedBytes=%zu\n",
-        buffer_id, buf_name.c_str(), size, ai_chat_aligned_size);]=]
+        buffer_id, buf_name.c_str(), size, ai_chat_aligned_size);
+]=]
         [=[    ggml_backend_webgpu_device_context * ctx = static_cast<ggml_backend_webgpu_device_context *>(buft->device->context);
     if (ctx->webgpu_global_ctx->device_error.load()) {
         GGML_LOG_ERROR("ggml_webgpu: refusing allocation because the device is in an error state\n");
