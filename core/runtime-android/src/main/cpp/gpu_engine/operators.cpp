@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <utility>
 
 namespace ai_chat::gpu_engine {
 namespace {
@@ -53,7 +54,7 @@ Status build_add_f32_candidate(const Tensor& lhs, const Tensor& rhs,
         return {StatusCode::InvalidArgument, "Add tensor byte ranges are inconsistent"};
     }
     constexpr uint64_t kWorkgroupSize = 64;
-    const uint64_t groups = (lhs.element_count() + kWorkgroupSize - 1) / kWorkgroupSize;
+    const uint64_t groups = 1 + (lhs.element_count() - 1) / kWorkgroupSize;
     if (groups == 0 || groups > std::numeric_limits<uint32_t>::max()) {
         return {StatusCode::Unsupported, "Add tensor exceeds the generic dispatch workgroup range"};
     }
