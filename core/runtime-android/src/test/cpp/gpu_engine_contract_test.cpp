@@ -974,6 +974,49 @@ void test_model_and_quantization_registry_fail_closed() {
     assert(report.unverified_quantized_tensors == 1);
 }
 
+
+void test_universal_gles_operator_candidate_is_fail_closed() {
+    FakeBackend backend;
+    BufferDesc desc{16, 4, MemoryDomain::Device, false, "gles-add"};
+    std::shared_ptr<Buffer> lhs_buffer, rhs_buffer, output_buffer;
+    assert(backend.allocate(desc, lhs_buffer).ok());
+    assert(backend.allocate(desc, rhs_buffer).ok());
+    assert(backend.allocate(desc, output_buffer).ok());
+    TensorDesc tensor_desc; tensor_desc.shape = {4}; tensor_desc.data_type = DataType::F32;
+    Tensor lhs, rhs, output;
+    assert(Tensor::create(tensor_desc, lhs_buffer, 0, lhs).ok());
+    assert(Tensor::create(tensor_desc, rhs_buffer, 0, rhs).ok());
+    assert(Tensor::create(tensor_desc, output_buffer, 0, output).ok());
+    ComputeDispatch dispatch;
+    assert(build_add_f32_gles_candidate(lhs, rhs, output, dispatch).ok());
+    assert(dispatch.backend == BackendKind::OpenGles);
+    assert(dispatch.wgsl_source.empty());
+    assert(dispatch.glsl_es_source.find("#version 310 es") != std::string::npos);
+    assert(dispatch.glsl_es_source.find("ELEMENT_COUNT = 4u") != std::string::npos);
+
+    OperatorRegistry registry;
+    assert(register_builtin_operator_candidates(registry).ok());
+    KernelDefinition selected;
+    assert(registry.select_kernel("Add", BackendKind::OpenGles, DataType::F32,
+                                  DataType::F32, 2, 1, selected).code == StatusCode::Unsupported);
+    KernelDefinition validated;
+    validated.operator_name = "Add";
+    validated.kernel_id = "gles-add-test-validated";
+    validated.backend = BackendKind::OpenGles;
+    validated.input_type = DataType::F32;
+    validated.output_type = DataType::F32;
+    validated.min_input_count = 2;
+    validated.max_input_count = 2;
+    validated.min_rank = 1;
+    validated.max_rank = 1;
+    validated.validation = KernelValidation::Validated;
+    validated.glsl_es_source = add_f32_glsl_es_source();
+    assert(registry.register_kernel(validated).ok());
+    dispatch.kernel_id = validated.kernel_id;
+    assert(registry.authorize_dispatch(validated.kernel_id, BackendKind::OpenGles, dispatch).ok());
+    assert(dispatch.validation == KernelValidation::Validated);
+}
+
 void test_operator_registry_fail_closed() {
     OperatorRegistry registry;
     KernelDefinition definition;
@@ -1109,6 +1152,7 @@ int main() {
     test_independent_gguf_reader();
     test_tensor_and_memory_lease();
     test_operator_registry_fail_closed();
+    test_universal_gles_operator_candidate_is_fail_closed();
     test_model_and_quantization_registry_fail_closed();
     test_builtin_architecture_adapter_is_fail_closed();
     test_add_operator_candidate_and_reference();

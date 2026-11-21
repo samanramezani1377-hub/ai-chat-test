@@ -4,8 +4,8 @@
 
 namespace ai_chat::gpu_engine {
 
-// Generic WGSL candidate. It remains UNVERIFIED until compared with the
-// reference implementation on real Dawn/WebGPU devices.
+// Generic backend-specific candidates remain UNVERIFIED until GPU dispatch/readback
+// has passed numerical parity tests on the selected backend.
 const char* add_f32_wgsl_source() noexcept;
 
 Status build_add_f32_candidate(const Tensor& lhs, const Tensor& rhs,
@@ -13,6 +13,9 @@ Status build_add_f32_candidate(const Tensor& lhs, const Tensor& rhs,
 
 Status reference_add_f32(const float* lhs, const float* rhs, float* output,
                          uint64_t element_count);
+const char* add_f32_glsl_es_source() noexcept;
+Status build_add_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
+                                    const Tensor& output, ComputeDispatch& dispatch);
 const char* multiply_f32_wgsl_source() noexcept;
 Status build_multiply_f32_candidate(const Tensor& lhs, const Tensor& rhs,
                                     const Tensor& output, ComputeDispatch& dispatch);

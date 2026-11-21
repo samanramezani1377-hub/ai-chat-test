@@ -166,7 +166,8 @@ public:
             if(error!=GL_NO_ERROR&&id){glDeleteBuffers(1,&id);id=0;}
         },detail);
         if(!ran) return {StatusCode::DeviceLost,detail};
-        if(error!=GL_NO_ERROR||!id) return gl_error("GLES buffer allocation",error);
+        if(error!=GL_NO_ERROR) return gl_error("GLES buffer allocation",error);
+        if(!id) return {StatusCode::BackendFailure,"GLES buffer allocation returned no buffer without a GL error"};
         out=std::make_shared<GlesBuffer>(id,d.size_bytes,d.memory); return Status::success();
     }
     Status begin_commands(std::unique_ptr<CommandBatch>& out) override {
