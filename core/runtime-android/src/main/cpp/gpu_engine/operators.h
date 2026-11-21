@@ -40,6 +40,7 @@ Status build_attention_f32_gles_candidate(const Tensor& query, const Tensor& key
                                           const Tensor& value, const Tensor& output,
                                           uint32_t past_length, ComputeDispatch& dispatch);
 Status register_builtin_gles_operator_candidates(OperatorRegistry& registry);
+Status validate_gles_add_f32_kernel(Backend& backend, OperatorRegistry& registry);
 Status reference_multiply_f32(const float* lhs, const float* rhs, float* output,
                               uint64_t element_count);
 

@@ -75,6 +75,7 @@ struct KernelDefinition {
 };
 
 class OperatorRegistry {
+    friend Status validate_gles_add_f32_kernel(Backend& backend, OperatorRegistry& registry);
 public:
     Status register_kernel(KernelDefinition definition);
     Status select_kernel(const std::string& operator_name, BackendKind backend,

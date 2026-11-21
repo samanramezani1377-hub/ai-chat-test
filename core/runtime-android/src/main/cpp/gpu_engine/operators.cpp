@@ -839,6 +839,67 @@ Status build_add_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
     return Status::success();
 }
 
+
+Status validate_gles_add_f32_kernel(Backend& backend, OperatorRegistry& registry) {
+    if (backend.kind() != BackendKind::OpenGles || !backend.healthy())
+        return {StatusCode::NotReady, "GLES Add validation requires an initialized healthy OpenGLES backend"};
+    auto kernel = std::find_if(registry.kernels_.begin(), registry.kernels_.end(),
+        [](const KernelDefinition& definition) {
+            return definition.kernel_id == "gles-add-f32-generic-v1" &&
+                   definition.backend == BackendKind::OpenGles;
+        });
+    if (kernel == registry.kernels_.end())
+        return {StatusCode::NotReady, "GLES Add candidate is not registered"};
+    if (kernel->validation == KernelValidation::Validated) return Status::success();
+    if (kernel->validation != KernelValidation::Unverified || kernel->glsl_source.empty())
+        return {StatusCode::Unsupported, "GLES Add candidate is rejected or has no GLSL ES source"};
+
+    constexpr float lhs_values[] = {1.0f, -2.0f, 3.5f, 4.0f};
+    constexpr float rhs_values[] = {0.5f, 2.0f, -1.0f, 8.0f};
+    float expected[4] = {};
+    float actual[4] = {};
+    Status status = reference_add_f32(lhs_values, rhs_values, expected, 4);
+    if (!status.ok()) return status;
+
+    BufferDesc desc{sizeof(lhs_values), alignof(float), MemoryDomain::Device, false, "gles-add-validation"};
+    std::shared_ptr<Buffer> lhs_buffer, rhs_buffer, output_buffer;
+    status = backend.allocate(desc, lhs_buffer); if (!status.ok()) return status;
+    status = backend.allocate(desc, rhs_buffer); if (!status.ok()) return status;
+    status = backend.allocate(desc, output_buffer); if (!status.ok()) return status;
+    status = backend.upload(lhs_buffer, 0, lhs_values, sizeof(lhs_values)); if (!status.ok()) return status;
+    status = backend.upload(rhs_buffer, 0, rhs_values, sizeof(rhs_values)); if (!status.ok()) return status;
+
+    TensorDesc tensor_desc;
+    tensor_desc.shape = {4};
+    tensor_desc.data_type = DataType::F32;
+    tensor_desc.memory = MemoryDomain::Device;
+    Tensor lhs, rhs, output;
+    status = Tensor::create(tensor_desc, lhs_buffer, 0, lhs); if (!status.ok()) return status;
+    status = Tensor::create(tensor_desc, rhs_buffer, 0, rhs); if (!status.ok()) return status;
+    status = Tensor::create(tensor_desc, output_buffer, 0, output); if (!status.ok()) return status;
+
+    ComputeDispatch dispatch;
+    status = build_add_f32_gles_candidate(lhs, rhs, output, dispatch);
+    if (!status.ok()) return status;
+    if (dispatch.kernel_id != kernel->kernel_id || dispatch.glsl_source != kernel->glsl_source)
+        return {StatusCode::InvalidArgument, "GLES Add validation source does not match the registered candidate"};
+    dispatch.validation = KernelValidation::Validated;
+    std::unique_ptr<CommandBatch> commands;
+    status = backend.begin_commands(commands); if (!status.ok()) return status;
+    status = commands->dispatch_compute(dispatch); if (!status.ok()) return status;
+    status = backend.submit(std::move(commands)); if (!status.ok()) return status;
+    status = backend.synchronize(); if (!status.ok()) return status;
+    status = backend.readback(output_buffer, 0, actual, sizeof(actual)); if (!status.ok()) return status;
+
+    for (size_t i = 0; i < 4; ++i) {
+        const float tolerance = 1.0e-5f * std::max(1.0f, std::fabs(expected[i]));
+        if (!std::isfinite(actual[i]) || std::fabs(actual[i] - expected[i]) > tolerance)
+            return {StatusCode::NumericalFailure, "GLES Add GPU output did not match the independent F32 reference"};
+    }
+    kernel->validation = KernelValidation::Validated;
+    return Status::success();
+}
+
 Status build_multiply_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
                                          const Tensor& output, ComputeDispatch& dispatch) {
     Status status = build_binary_f32_candidate(lhs, rhs, output, dispatch,
