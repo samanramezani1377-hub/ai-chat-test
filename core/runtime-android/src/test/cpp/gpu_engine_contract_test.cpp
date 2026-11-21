@@ -1248,7 +1248,20 @@ void test_llama_model_execution_plan_is_structural_only() {
     assert(plan.layer_count == 1 && plan.embedding_length == 8);
     assert(plan.operations.size() == 19);
     assert(plan.operations.front().operator_name == "Embedding");
+    assert(plan.operations.front().output_shape == std::vector<uint64_t>({0, 8}));
     assert(plan.operations.back().operator_name == "MatMul");
+    assert(plan.operations.back().output_shape == std::vector<uint64_t>({0, 2}));
+    assert(plan.vocabulary_size == 2 && plan.head_dimension == 4);
+    const auto rope_op = std::find_if(plan.operations.begin(), plan.operations.end(),
+        [](const auto& op) { return op.operator_name == "RoPE"; });
+    assert(rope_op != plan.operations.end());
+    assert(rope_op->integer_attributes.at("rotary_dimensions") == 4);
+    assert(rope_op->float_attributes.at("theta") == 10000.0);
+    const auto attention_op = std::find_if(plan.operations.begin(), plan.operations.end(),
+        [](const auto& op) { return op.operator_name == "Attention"; });
+    assert(attention_op != plan.operations.end());
+    assert(attention_op->integer_attributes.at("kv_heads") == 1);
+    assert(attention_op->bool_attributes.at("causal"));
     assert(std::find(plan.blockers.begin(), plan.blockers.end(),
                      "MODEL_GRAPH_EXECUTION_NOT_VALIDATED") != plan.blockers.end());
 
