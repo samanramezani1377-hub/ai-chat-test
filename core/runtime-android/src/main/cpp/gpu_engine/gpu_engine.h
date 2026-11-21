@@ -187,6 +187,7 @@ public:
 // opt-in until the runtime router has validated model/operator support.
 std::shared_ptr<Backend> create_dawn_backend();
 std::shared_ptr<Backend> create_universal_gles_backend();
+std::shared_ptr<Backend> create_universal_gles_backend();
 
 class BackendRegistry {
 public:
