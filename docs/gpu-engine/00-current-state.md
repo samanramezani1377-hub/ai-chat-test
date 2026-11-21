@@ -81,3 +81,12 @@ A separate `ai_chat_gpu_backend_gles` target now implements the generic Backend 
 - a backend-level integer compute/readback self-test.
 
 The backend rejects dispatches unless their kernel identity is marked `Validated` and a GLSL ES source is supplied. The engine core remains independent of EGL/GLES; the adapter bridge and GLES backend are separate targets. This does **not** establish model inference support: no production operator is validated for GLES, the backend is not connected to the Android model router, and hardware compatibility remains **UNVERIFIED** until real-device tests run.
+
+
+## Additional independent runtime components — 2026-11-21
+
+- Android backend composition now registers Dawn first and the Universal GLES backend second. `initialize_android_gpu_engine()` uses ordered backend initialization and records whether a backend fallback occurred. This is an engine API and composition root; the Android app's model-generation path has not yet switched to it.
+- Generic GPU dispatch now validates per-axis workgroup sizes, total local invocations, workgroup counts, SSBO binding indices, ranges and alignments against discovered limits.
+- GGUF tokenizer metadata now preserves space-prefix, whitespace normalization and byte-fallback flags.
+- Independent SentencePiece-score-merging and byte-level BPE adapters are registered for selected profiles (`llama/default`, `llama/llama`, `spm/default`, and `gpt2` with `gpt2`, `llama3`, `qwen2`, `qwen3` pre-tokenizers). Their tokenization/pre-tokenization parity is **UNVERIFIED**; model preflight reports this explicitly and the public TokenizerEngine refuses to execute unvalidated adapters.
+- An initial direct Q8_0 F32-activation MatMul candidate is available for WGSL and Universal GLES. It remains **UNVERIFIED** and is not eligible for production dispatch.
