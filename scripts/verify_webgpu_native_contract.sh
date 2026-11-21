@@ -55,6 +55,7 @@ grep -q 'patch_recurrent_memory_diagnostics.cmake' "$CMAKE" || fail "CMake must 
 grep -q 'patch_webgpu_failure_handling.cmake' "$CMAKE" || fail "CMake must include safe WebGPU failure propagation"
 grep -q 'AI_CHAT_RECURRENT_BUFFER_ALLOC_BEGIN' "$RECURRENT_PATCH" || fail "Recurrent cache allocations must be traced per buffer type"
 grep -q 'AI_CHAT_RECURRENT_BUFFER_ALLOC_FAILED' "$RECURRENT_PATCH" || fail "Recurrent allocation failure must be recorded before throwing"
+grep -q 'AI_CHAT_RECURRENT_MEMORY_ALLOCATION_V3' "$RECURRENT_PATCH" || fail "Recurrent row arithmetic and tensor handles must be validated"
 grep -q 'AI_CHAT_GRAPH_SPLIT_BEGIN' "$GRAPH_PATCH" || fail "Graph splitting must have a pre-stage checkpoint"
 grep -q 'AI_CHAT_GRAPH_ALLOCATOR_RESERVE_BEGIN' "$GRAPH_PATCH" || fail "Graph allocator reservation must have a pre-stage checkpoint"
 grep -q 'AI_CHAT_WEBGPU_WAIT_RESULT_V2' "$WEBGPU_FAILURE_PATCH" || fail "Dawn callbacks must use heap-owned wait result state"
