@@ -228,14 +228,14 @@ jobs:
           grep -q 'OPENCL_KERNEL_POLICY=UPSTREAM_DEVICE_CAPABILITY_SELECTION' core/runtime-android/src/main/cpp/native_runtime.cpp
           # Never spoof device families: upstream kernels have family-specific
           # subgroup assumptions, so unsupported devices must fail closed.
-          grep -q 'Do not spoof an unsupported GPU family' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'Do not spoof an unsupported GPU family' core/runtime-android/src/main/cpp/cmake/patch_android_opencl.cmake
           ! grep -q 'AI_CHAT_ADRENO_A7X_FAMILY_EXPANSION_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
           # Match a real setenv call, not unsetenv (which contains setenv as a substring).
           ! grep -Eq '(^|[^[:alnum:]_])setenv\("GGML_OPENCL_Q6K_GEMV_TILED"' core/runtime-android/src/main/cpp/native_runtime.cpp
           grep -q 'GGML_OPENCL_USE_ADRENO_KERNELS OFF' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'GGML_WEBGPU ON' core/runtime-android/src/main/cpp/CMakeLists.txt
-          grep -q 'FeatureLevel::Compatibility' core/runtime-android/src/main/cpp/CMakeLists.txt
-          grep -q 'BackendType::OpenGLES' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'FeatureLevel::Compatibility' core/runtime-android/src/main/cpp/cmake/patch_webgpu_backend.cmake
+          grep -q 'BackendType::OpenGLES' core/runtime-android/src/main/cpp/cmake/patch_webgpu_backend.cmake
           grep -q 'GGML_CPU_KLEIDIAI ON' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'GGML_OPENMP ON' core/runtime-android/src/main/cpp/CMakeLists.txt
           # The generic CPU backend must stay on a portable ARMv8-A baseline.
@@ -301,9 +301,9 @@ jobs:
 
           grep -q 'gles_compute_supported' core/runtime-android/src/main/cpp/universal_gpu_adapter.h
           grep -q 'AI_CHAT_GPU_ADAPTER_OPENGL_ES=1' core/runtime-android/src/main/cpp/CMakeLists.txt
-          grep -q 'AI_CHAT_GENERIC_FP32_FALLBACK_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
-          grep -q 'supports_shader_f16' core/runtime-android/src/main/cpp/CMakeLists.txt
-          grep -q 'ggml_is_quantized' core/runtime-android/src/main/cpp/CMakeLists.txt
+          grep -q 'AI_CHAT_GENERIC_FP32_FALLBACK_V1' core/runtime-android/src/main/cpp/cmake/patch_webgpu_backend.cmake
+          grep -q 'supports_shader_f16' core/runtime-android/src/main/cpp/cmake/patch_webgpu_backend.cmake
+          grep -q 'ggml_is_quantized' core/runtime-android/src/main/cpp/cmake/patch_webgpu_backend.cmake
           # Native context/lifecycle regression guards. These are intentionally
           # model-, quantization-, and device-agnostic policies.
           grep -q 'cp.offload_kqv = !use_webgpu_backend' core/runtime-android/src/main/cpp/native_runtime.cpp
