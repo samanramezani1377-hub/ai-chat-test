@@ -1329,6 +1329,25 @@ void test_dense_model_plan_selects_q8_0_matmul_adapter() {
     assert(projection->operator_name == "MatMul_Q8_0");
 }
 
+
+void test_fake_backend_never_promotes_builtin_operator_kernels() {
+    FakeBackend backend(BackendKind::OpenGles);
+    OperatorRegistry registry;
+    assert(register_builtin_gles_operator_candidates(registry).ok());
+    KernelValidationReport report;
+    assert(validate_builtin_operator_kernels(backend, registry, report).ok());
+    assert(!report.complete);
+    for (const char* kernel_id : {
+        "gles-add-f32-generic-v1", "gles-multiply-f32-generic-v1",
+        "gles-matmul-f32-generic-v1", "gles-rms-norm-f32-generic-v1",
+        "gles-silu-f32-generic-v1", "gles-softmax-f32-generic-v1",
+        "gles-rope-f32-generic-v1", "gles-attention-f32-causal-gqa-v1",
+        "gles-embedding-f32-generic-v1"
+    }) {
+        assert(!registry.is_validated_kernel(kernel_id, BackendKind::OpenGles));
+    }
+}
+
 void test_q8_0_model_lowering_supports_gles_3d_projection() {
     FakeBackend backend(BackendKind::OpenGles);
     ModelLoweringRegistry lowerings;
@@ -2059,6 +2078,7 @@ int main() {
     test_activation_allocator_reuses_non_overlapping_tensor_slots();
     test_embedding_model_lowering_uploads_token_ids_and_binds_buffer();
     test_q8_0_model_lowering_supports_gles_3d_projection();
+    test_fake_backend_never_promotes_builtin_operator_kernels();
     test_dense_model_plan_selects_q8_0_matmul_adapter();
     test_llama_model_execution_plan_is_structural_only();
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
