@@ -1539,22 +1539,6 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     status = registry.register_kernel(std::move(embedding));
     if (!status.ok()) return status;
 
-    KernelDefinition q8_matmul;
-    q8_matmul.operator_name = "MatMul_Q8_0";
-    q8_matmul.kernel_id = "dawn-q8-0-matmul-f32-activation-v1";
-    q8_matmul.backend = BackendKind::DawnWebGpu;
-    q8_matmul.input_type = DataType::F32;
-    q8_matmul.input_types = {DataType::F32, DataType::U32};
-    q8_matmul.output_type = DataType::F32;
-    q8_matmul.min_input_count = 2;
-    q8_matmul.max_input_count = 2;
-    q8_matmul.min_rank = 2;
-    q8_matmul.max_rank = 2;
-    q8_matmul.validation = KernelValidation::Unverified;
-    q8_matmul.wgsl_source = q8_0_matmul_wgsl_source();
-    status = registry.register_kernel(std::move(q8_matmul));
-    if (!status.ok()) return status;
-
     KernelDefinition attention;
     attention.operator_name = "Attention";
     attention.backend = BackendKind::DawnWebGpu;
@@ -1798,20 +1782,7 @@ Status register_builtin_gles_operator_candidates(OperatorRegistry& registry) {
     status = registry.register_kernel(std::move(attention));
     if (!status.ok()) return status;
 
-    KernelDefinition q8_matmul;
-    q8_matmul.operator_name = "MatMul_Q8_0";
-    q8_matmul.backend = BackendKind::OpenGles;
-    q8_matmul.input_type = DataType::F32;
-    q8_matmul.input_types = {DataType::F32, DataType::U32};
-    q8_matmul.output_type = DataType::F32;
-    q8_matmul.min_input_count = 2;
-    q8_matmul.max_input_count = 2;
-    q8_matmul.min_rank = 2;
-    q8_matmul.max_rank = 2;
-    q8_matmul.validation = KernelValidation::Unverified;
-    q8_matmul.kernel_id = "gles-q8-0-matmul-f32-activation-v1";
-    q8_matmul.glsl_source = q8_0_matmul_glsl_source();
-    return registry.register_kernel(std::move(q8_matmul));
+    return Status::success();
 }
 
 } // namespace ai_chat::gpu_engine

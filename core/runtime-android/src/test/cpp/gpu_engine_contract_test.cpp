@@ -489,6 +489,7 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     OperatorRegistry operators;
     QuantizationRegistry quantizations;
     assert(register_builtin_gles_operator_candidates(operators).ok());
+    assert(register_builtin_quantized_operator_candidates(operators).ok());
     assert(register_builtin_quantization_formats(quantizations).ok());
     assert(validate_q8_0_matmul_kernel(backend, operators, quantizations).code == StatusCode::NumericalFailure);
     const QuantizationFormat* format = quantizations.find(8);
