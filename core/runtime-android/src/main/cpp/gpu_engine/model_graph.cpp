@@ -34,7 +34,7 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
                                     const ModelLoweringRegistry& lowerings,
                                     const OperatorRegistry& operators,
                                     const std::vector<std::string>& external_inputs,
-                                    const std::vector<std::string>& available_weight_tensors,
+                                    const ModelTensorBindings& tensors,
                                     ComputeGraph& graph, ModelGraphCompileReport& report) {
     report = ModelGraphCompileReport{};
     plan.graph_compiled = false;
@@ -44,7 +44,6 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
         return {StatusCode::InvalidArgument, "Model graph compilation requires a backend and an empty destination graph"};
 
     const std::unordered_set<std::string> external(external_inputs.begin(), external_inputs.end());
-    const std::unordered_set<std::string> weights(available_weight_tensors.begin(), available_weight_tensors.end());
     std::unordered_map<std::string, size_t> producers;
     std::unordered_set<std::string> operation_ids;
     ComputeGraph candidate;
@@ -69,12 +68,20 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
                 report.unresolved_inputs.push_back(operation.id + ":" + input);
                 inputs_ready = false;
             }
+            if (tensors.find(input) == tensors.end()) {
+                report.unresolved_inputs.push_back(operation.id + ":UNBOUND:" + input);
+                inputs_ready = false;
+            }
         }
         for (const auto& weight : operation.weight_tensors) {
-            if (weights.find(weight) == weights.end()) {
+            if (tensors.find(weight) == tensors.end()) {
                 report.missing_weight_tensors.push_back(operation.id + ":" + weight);
                 inputs_ready = false;
             }
+        }
+        if (tensors.find(operation.output) == tensors.end()) {
+            report.errors.push_back(operation.id + ":UNBOUND_OUTPUT:" + operation.output);
+            inputs_ready = false;
         }
         if (!inputs_ready) continue;
 
@@ -84,7 +91,7 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
             continue;
         }
         ComputeDispatch dispatch;
-        Status status = (*lowering)(operation, dispatch);
+        Status status = (*lowering)(operation, tensors, dispatch);
         if (!status.ok()) {
             report.errors.push_back(operation.id + ":" + status.message);
             continue;

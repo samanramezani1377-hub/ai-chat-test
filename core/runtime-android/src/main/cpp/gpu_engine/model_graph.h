@@ -13,6 +13,7 @@ namespace ai_chat::gpu_engine {
 
 class OperatorRegistry;
 class ComputeGraph;
+using ModelTensorBindings = std::unordered_map<std::string, Tensor>;
 
 struct ModelPlanOperation {
     std::string id;
@@ -67,7 +68,7 @@ struct ModelGraphCompileReport {
 
 class ModelLoweringRegistry {
 public:
-    using Lowering = std::function<Status(const ModelPlanOperation&, ComputeDispatch&)>;
+    using Lowering = std::function<Status(const ModelPlanOperation&, const ModelTensorBindings&, ComputeDispatch&)>;
     Status register_lowering(BackendKind backend, const std::string& operator_name,
                              Lowering lowering);
     const Lowering* find(BackendKind backend, const std::string& operator_name) const;
@@ -80,7 +81,7 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
                                     const ModelLoweringRegistry& lowerings,
                                     const OperatorRegistry& operators,
                                     const std::vector<std::string>& external_inputs,
-                                    const std::vector<std::string>& available_weight_tensors,
+                                    const ModelTensorBindings& tensors,
                                     ComputeGraph& graph, ModelGraphCompileReport& report);
 
 Status validate_model_plan_operator_coverage(ModelExecutionPlan& plan,
