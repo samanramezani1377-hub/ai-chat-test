@@ -19,6 +19,7 @@ internal object NativeLlamaCpp {
     private var nativeInitialized = false
     @Volatile private var gpuEngineActive = false
     private var loadedContextLength = 0
+    @Volatile private var lastGpuEngineFallbackDiagnostics: String = ""
 
     const val GPU_LAYERS_MAX = 99
     const val GPU_LAYERS_ALL = -1
@@ -69,6 +70,7 @@ internal object NativeLlamaCpp {
             gpuEngineActive = false
         }
 
+        lastGpuEngineFallbackDiagnostics = ""
         val fullGpuRequest = gpuLayers == GPU_LAYERS_ALL || gpuLayers == GPU_LAYERS_MAX
         if (fullGpuRequest) {
             val budgetBytes = conservativeGpuMemoryBudgetBytes()
@@ -81,17 +83,21 @@ internal object NativeLlamaCpp {
                 }
                 if (gpuResult == 0) {
                     gpuEngineActive = true
+                    lastGpuEngineFallbackDiagnostics = ""
                     loadedContextLength = contextLength
                     Log.i(TAG, "ACTIVATION_LOAD_END result=0 runtime=AIChatGpuEngine gpu_backend=selected memory_budget_bytes=$budgetBytes")
                     return 0
                 }
                 val gpuDiagnostics = nativeGpuEngineDiagnostics()
+                lastGpuEngineFallbackDiagnostics = "code=$gpuResult; $gpuDiagnostics"
                 Log.w(TAG, "GPU_ENGINE_LOAD_FALLBACK code=$gpuResult diagnostics=$gpuDiagnostics")
                 nativeGpuEngineUnload()
             } else {
+                lastGpuEngineFallbackDiagnostics = "reason=NO_SAFE_SHARED_MEMORY_BUDGET"
                 Log.w(TAG, "GPU_ENGINE_LOAD_FALLBACK reason=NO_SAFE_SHARED_MEMORY_BUDGET")
             }
         } else if (gpuLayers != 0) {
+            lastGpuEngineFallbackDiagnostics = "reason=PARTIAL_GPU_LAYER_MODE_NOT_SUPPORTED;requested_layers=$gpuLayers"
             Log.w(TAG, "GPU_ENGINE_LOAD_FALLBACK reason=PARTIAL_GPU_LAYER_MODE_NOT_SUPPORTED requested_layers=$gpuLayers")
         }
 
@@ -222,7 +228,11 @@ internal object NativeLlamaCpp {
 
     /** Probes the independent Dawn/Universal GLES engine without loading a model or changing llama.cpp state. */
     @Synchronized
-    fun gpuEngineDiagnostics(): String = if (gpuEngineActive) nativeGpuEngineDiagnostics() else nativeGpuEngineProbe()
+    fun gpuEngineDiagnostics(): String = when {
+        gpuEngineActive -> nativeGpuEngineDiagnostics()
+        lastGpuEngineFallbackDiagnostics.isNotBlank() -> lastGpuEngineFallbackDiagnostics
+        else -> nativeGpuEngineProbe()
+    }
 
     fun runtimeInfo(): String = if (gpuEngineActive) nativeGpuEngineDiagnostics() else nativeRuntimeInfo()
     fun contextLength(): Int = if (gpuEngineActive) nativeGpuEngineContextLength() else nativeContextLength()
