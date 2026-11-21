@@ -379,7 +379,6 @@ Status reference_attention_f32(const float* query, const float* key, const float
         head_dimension > 256 || query_heads % kv_heads != 0 ||
         tokens > UINT32_MAX - past_length)
         return {StatusCode::InvalidArgument, "Attention reference dimensions are invalid"};
-    const uint32_t sequence_length = past_length + tokens;
     const float scale = 1.0f / std::sqrt(static_cast<float>(head_dimension));
     std::vector<float> accumulator(head_dimension);
     for (uint32_t token = 0; token < tokens; ++token) {
