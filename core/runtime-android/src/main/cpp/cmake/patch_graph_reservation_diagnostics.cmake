@@ -60,7 +60,7 @@ bool ggml_backend_sched_reserve(ggml_backend_sched_t sched, struct ggml_cgraph *
 
     for (int ai_chat_backend_index = 0; ai_chat_backend_index < sched->n_backends; ++ai_chat_backend_index) {
         ggml_backend_t ai_chat_backend = sched->backends[ai_chat_backend_index];
-        GGML_LOG_INFO("AI_CHAT_GRAPH_BACKEND_RESERVATION backend=%s buft=%s bytes=%zu success=%d\\n",
+        GGML_LOG_INFO("AI_CHAT_GRAPH_BACKEND_RESERVATION backend=%s buft=%s bytes=%zu success=%d\n",
             ggml_backend_name(ai_chat_backend), ggml_backend_buft_name(sched->bufts[ai_chat_backend_index]),
             ggml_backend_sched_get_buffer_size(sched, ai_chat_backend), ai_chat_reserve_ok ? 1 : 0);
     }
