@@ -216,20 +216,35 @@ private:
                     continue;
                 }
             }
+            if (!space(cp) && !letter(cp) && !digit(cp) && i + n < s.size()) {
+                size_t next_n = 0;
+                const uint32_t next = codepoint(s, i + n, next_n);
+                if (letter(next)) {
+                    i += n + next_n;
+                    while (i < s.size()) {
+                        size_t k = 0;
+                        const uint32_t current = codepoint(s, i, k);
+                        if (!letter(current)) break;
+                        i += k;
+                    }
+                    out.emplace_back(s.substr(start, i - start));
+                    continue;
+                }
+            }
             if(cp==0x20 && i+n<s.size()){
                 size_t next_n=0;uint32_t next=codepoint(s,i+n,next_n);
                 if(!space(next)){
                     i+=n;
                     if(letter(next)){i+=next_n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(!letter(c))break;i+=k;}}
                     else if(digit(next)){size_t count=0;while(i<s.size()&&count<digit_group){size_t k=0;uint32_t c=codepoint(s,i,k);if(!digit(c))break;i+=k;++count;}}
-                    else{i+=next_n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(space(c)||letter(c)||digit(c))break;i+=k;}}
+                    else{i+=next_n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(space(c)||letter(c)||digit(c))break;i+=k;}while(i<s.size()&&(s[i]=='\\r'||s[i]=='\\n'))++i;}
                     out.emplace_back(s.substr(start,i-start));continue;
                 }
             }
             if(space(cp)){i+=n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(!space(c))break;i+=k;}}
             else if(letter(cp)){i+=n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(!letter(c))break;i+=k;}}
             else if(digit(cp)){size_t count=0;while(i<s.size()&&count<digit_group){size_t k=0;uint32_t c=codepoint(s,i,k);if(!digit(c))break;i+=k;++count;}}
-            else{i+=n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(space(c)||letter(c)||digit(c))break;i+=k;}}
+            else{i+=n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(space(c)||letter(c)||digit(c))break;i+=k;}while(i<s.size()&&(s[i]=='\\r'||s[i]=='\\n'))++i;}
             out.emplace_back(s.substr(start,i-start));
         }return out;
     }

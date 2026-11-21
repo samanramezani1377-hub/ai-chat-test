@@ -955,6 +955,19 @@ void test_tokenizer_engine_contracts() {
     assert(qwen2_digit_adapter->encode(qwen2_digits, "1234", digit_ids).ok());
     assert((digit_ids == std::vector<uint32_t>{0, 1, 2, 3}));
 
+    GgufTokenizerInfo bpe_prefix;
+    bpe_prefix.model = "gpt2";
+    bpe_prefix.pre_tokenizer = "gpt2";
+    bpe_prefix.tokens = {"(", "h", "i", "(h", "(hi", "hi", "<unk>"};
+    bpe_prefix.merges = {"( h", "(h i", "h i"};
+    bpe_prefix.token_types = {1, 1, 1, 1, 1, 1, 2};
+    bpe_prefix.unknown_token_id = 6;
+    auto prefix_adapter = builtins.find(bpe_prefix);
+    assert(prefix_adapter && prefix_adapter->validate_metadata(bpe_prefix).ok());
+    std::vector<uint32_t> prefix_ids;
+    assert(prefix_adapter->encode(bpe_prefix, "(hi", prefix_ids).ok());
+    assert((prefix_ids == std::vector<uint32_t>{4}));
+
     TokenizerEngine fail_closed_tokenizer(builtins);
     assert(fail_closed_tokenizer.encode(bpe, "hi", bpe_ids).code == StatusCode::Unsupported);
     assert(bpe_ids.empty());
