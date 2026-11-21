@@ -1191,6 +1191,20 @@ void test_model_plan_graph_compilation_is_fail_closed() {
         {"add", "Add", {"input_a", "input_b"}, {}, "sum", {4}},
         {"mul", "Multiply", {"sum", "input_c"}, {}, "product", {4}}
     };
+    FakeBackend backend;
+    ModelTensorBindings tensors;
+    const auto bind_tensor = [&](const std::string& name) {
+        BufferDesc buffer_desc{16, 4, MemoryDomain::Device, false, name};
+        std::shared_ptr<Buffer> buffer;
+        assert(backend.allocate(buffer_desc, buffer).ok());
+        TensorDesc tensor_desc; tensor_desc.shape = {4}; tensor_desc.data_type = DataType::F32;
+        Tensor tensor;
+        assert(Tensor::create(tensor_desc, buffer, 0, tensor).ok());
+        tensors.emplace(name, tensor);
+    };
+    for (const char* name : {"input_a", "input_b", "input_c", "sum", "product"})
+        bind_tensor(name);
+
     OperatorRegistry operators;
     for (const auto& entry : std::vector<std::pair<std::string, std::string>>{
             {"Add", "test-add"}, {"Multiply", "test-mul"}}) {
@@ -1205,25 +1219,35 @@ void test_model_plan_graph_compilation_is_fail_closed() {
         kernel.min_rank = 1;
         kernel.max_rank = 1;
         kernel.validation = KernelValidation::Validated;
-        kernel.glsl_source = "#version 310 es\nvoid main(){}";
+        kernel.glsl_source = "#version 310 es\\nvoid main(){}";
         assert(operators.register_kernel(std::move(kernel)).ok());
     }
     ModelLoweringRegistry lowerings;
     for (const auto& item : std::vector<std::pair<std::string, std::string>>{
             {"Add", "test-add"}, {"Multiply", "test-mul"}}) {
         assert(lowerings.register_lowering(BackendKind::OpenGles, item.first,
-            [kernel_id = item.second](const ModelPlanOperation&, ComputeDispatch& dispatch) {
+            [kernel_id = item.second](const ModelPlanOperation& operation,
+                                      const ModelTensorBindings& bound,
+                                      ComputeDispatch& dispatch) {
+                const Tensor& lhs = bound.at(operation.inputs[0]);
+                const Tensor& rhs = bound.at(operation.inputs[1]);
+                const Tensor& output = bound.at(operation.output);
                 dispatch.backend = BackendKind::OpenGles;
                 dispatch.kernel_id = kernel_id;
-                dispatch.glsl_source = "#version 310 es\nvoid main(){}";
+                dispatch.glsl_source = "#version 310 es\\nvoid main(){}";
                 dispatch.workgroups_x = 1;
+                dispatch.bindings = {
+                    {0, lhs.buffer(), lhs.byte_offset(), lhs.byte_size()},
+                    {1, rhs.buffer(), rhs.byte_offset(), rhs.byte_size()},
+                    {2, output.buffer(), output.byte_offset(), output.byte_size()}
+                };
                 return Status::success();
             }).ok());
     }
     ComputeGraph graph;
     ModelGraphCompileReport report;
     assert(compile_model_execution_plan(plan, BackendKind::OpenGles, lowerings, operators,
-        {"input_a", "input_b", "input_c"}, {}, graph, report).ok());
+        {"input_a", "input_b", "input_c"}, tensors, graph, report).ok());
     assert(report.compiled && report.compiled_nodes == 2);
     assert(graph.node_count() == 2);
     std::vector<size_t> order;
@@ -1236,14 +1260,16 @@ void test_model_plan_graph_compilation_is_fail_closed() {
     blocked.operator_coverage_validated = false;
     ComputeGraph blocked_graph;
     assert(compile_model_execution_plan(blocked, BackendKind::OpenGles, lowerings, operators,
-        {"input_a", "input_b", "input_c"}, {}, blocked_graph, report).code == StatusCode::NotReady);
+        {"input_a", "input_b", "input_c"}, tensors, blocked_graph, report).code == StatusCode::NotReady);
     assert(blocked_graph.node_count() == 0);
 
+    ModelTensorBindings incomplete_tensors = tensors;
+    incomplete_tensors.erase("input_c");
     ModelExecutionPlan missing_input = plan;
     missing_input.graph_compiled = false;
     ComputeGraph incomplete_graph;
     assert(compile_model_execution_plan(missing_input, BackendKind::OpenGles, lowerings, operators,
-        {"input_a", "input_b"}, {}, incomplete_graph, report).code == StatusCode::Unsupported);
+        {"input_a", "input_b"}, incomplete_tensors, incomplete_graph, report).code == StatusCode::Unsupported);
     assert(!report.unresolved_inputs.empty());
     assert(incomplete_graph.node_count() == 0); // partial graphs are never published
 }
