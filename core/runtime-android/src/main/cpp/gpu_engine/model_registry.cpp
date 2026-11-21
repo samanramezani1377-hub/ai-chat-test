@@ -1,4 +1,5 @@
 #include "model_registry.h"
+#include "tokenizer.h"
 
 #include <algorithm>
 #include <limits>
@@ -316,9 +317,24 @@ ModelPreflightReport evaluate_model_preflight(const GgufFileInfo& model,
         }
     }
 
+    // Tokenizer algorithms are independently registered and fail closed until their
+    // reference parity suites are complete for the exact GGUF profile.
+    TokenizerRegistry tokenizer_registry;
+    const Status tokenizer_registration = register_builtin_tokenizer_adapters(tokenizer_registry);
+    if (!tokenizer_registration.ok()) {
+        report.blockers.emplace_back("TOKENIZER_ADAPTER_REGISTRY_FAILED");
+    } else {
+        const TokenizerPreflightReport tokenizer_report =
+            evaluate_tokenizer_preflight(model.tokenizer, tokenizer_registry);
+        report.tokenizer_metadata_valid = tokenizer_report.metadata_valid;
+        report.tokenizer_adapter_registered = tokenizer_report.adapter_registered;
+        report.tokenizer_adapter_validated = tokenizer_report.adapter_validated;
+        for (const std::string& blocker : tokenizer_report.blockers)
+            report.blockers.emplace_back("TOKENIZER:" + blocker);
+    }
+
     // Preflight is necessary but not sufficient: model-specific graph construction,
     // operator/kernel coverage and numerical validation have not been completed here.
-    report.blockers.emplace_back("TOKENIZER_IMPLEMENTATION_PENDING");
     report.blockers.emplace_back("SAMPLER_MODEL_INTEGRATION_PENDING");
     report.blockers.emplace_back("MODEL_GRAPH_AND_KERNEL_VALIDATION_PENDING");
     report.gpu_execution_ready = false;
