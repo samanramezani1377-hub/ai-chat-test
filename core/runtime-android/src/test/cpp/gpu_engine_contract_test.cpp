@@ -535,6 +535,18 @@ void test_dawn_q8_0_operator_registration_is_unverified() {
 }
 
 
+
+void test_q5_matmul_lowerings_are_registered_for_both_backends() {
+    ModelLoweringRegistry dawn;
+    ModelLoweringRegistry gles;
+    assert(register_builtin_model_lowerings(BackendKind::DawnWebGpu,dawn).ok());
+    assert(register_builtin_model_lowerings(BackendKind::OpenGles,gles).ok());
+    assert(dawn.find(BackendKind::DawnWebGpu,"MatMul_Q5_0") != nullptr);
+    assert(dawn.find(BackendKind::DawnWebGpu,"MatMul_Q5_1") != nullptr);
+    assert(gles.find(BackendKind::OpenGles,"MatMul_Q5_0") != nullptr);
+    assert(gles.find(BackendKind::OpenGles,"MatMul_Q5_1") != nullptr);
+}
+
 void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     FakeBackend backend;
     OperatorRegistry operators;
@@ -3022,6 +3034,7 @@ int main() {
     test_q4_decoders();
     test_q5_decoders();
     test_dawn_q8_0_operator_registration_is_unverified();
+    test_q5_matmul_lowerings_are_registered_for_both_backends();
     test_q8_0_gpu_validation_does_not_promote_fake_backend();
     test_quantization_backend_compatibility_is_backend_specific();
     test_q8_0_decoder_and_registry();
