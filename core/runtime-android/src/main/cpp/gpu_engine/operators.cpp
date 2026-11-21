@@ -23,13 +23,13 @@ const HEAD_DIM: u32 = 2u;
 const PAST_LENGTH: u32 = 0u;
 const SEQUENCE_LENGTH: u32 = 1u;
 const SCALE: f32 = 0.70710678118;
-@compute @workgroup_size(1)
+@compute @workgroup_size(1, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let head_task = gid.x;
-    if (head_task >= TOKENS * QUERY_HEADS) { return; }
-    let token = head_task / QUERY_HEADS;
-    let query_head = head_task % QUERY_HEADS;
+    let token = gid.x;
+    let query_head = gid.y;
+    if (token >= TOKENS || query_head >= QUERY_HEADS) { return; }
     let kv_head = query_head / (QUERY_HEADS / KV_HEADS);
+    let head_task = token * QUERY_HEADS + query_head;
     let query_base = head_task * HEAD_DIM;
     let kv_head_offset = kv_head * HEAD_DIM;
     var accumulator: array<f32, 256>;
@@ -358,7 +358,8 @@ Status build_attention_f32_candidate(const Tensor& query, const Tensor& key,
             return {StatusCode::BackendFailure, "Attention WGSL constant placeholder is missing"};
         dispatch.wgsl_source.replace(position, constant.first.size(), constant.second);
     }
-    dispatch.workgroups_x = static_cast<uint32_t>(q[0] * q[1]);
+    dispatch.workgroups_x = static_cast<uint32_t>(q[0]);
+    dispatch.workgroups_y = static_cast<uint32_t>(q[1]);
     dispatch.bindings = {
         {0, query.buffer(), query.byte_offset(), query.byte_size()},
         {1, key.buffer(), key.byte_offset(), key.byte_size()},
