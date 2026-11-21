@@ -1,6 +1,7 @@
 #include "memory_planner.h"
 
 #include <limits>
+#include <algorithm>
 
 namespace ai_chat::gpu_engine {
 namespace {
@@ -23,12 +24,12 @@ GpuMemoryPlanReport plan_gpu_memory(const GpuMemoryPlanInput& input) {
         return report;
     }
     if (input.stream_weights && input.total_weight_bytes != 0 &&
-        (input.streaming_chunk_bytes == 0 || input.streaming_chunk_bytes > input.total_weight_bytes)) {
+        input.streaming_chunk_bytes == 0) {
         report.blockers.emplace_back("INVALID_WEIGHT_STREAMING_CHUNK");
         return report;
     }
     report.resident_weight_bytes = input.stream_weights
-        ? (input.total_weight_bytes == 0 ? 0 : input.streaming_chunk_bytes)
+        ? std::min(input.total_weight_bytes, input.streaming_chunk_bytes)
         : input.total_weight_bytes;
 
     if (input.safety_reserve_bytes >= input.device_budget_bytes) {
