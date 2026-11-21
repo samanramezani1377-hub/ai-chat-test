@@ -213,7 +213,7 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
                 return;
             }
             GGML_UNUSED(device);
-            GGML_LOG_ERROR("ggml_webgpu: Device lost! Reason: %d, Message: %s\\n", static_cast<int>(reason),
+            GGML_LOG_ERROR("ggml_webgpu: Device lost! Reason: %d, Message: %s\n", static_cast<int>(reason),
                            std::string(message).c_str());
         });]=]
         [=[        [ctx](const wgpu::Device & device, wgpu::DeviceLostReason reason, wgpu::StringView message) {
@@ -222,20 +222,20 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
             }
             GGML_UNUSED(device);
             ctx->webgpu_global_ctx->device_error.store(true);
-            GGML_LOG_ERROR("ggml_webgpu: Device lost! Reason: %d, Message: %s\\n", static_cast<int>(reason),
+            GGML_LOG_ERROR("ggml_webgpu: Device lost! Reason: %d, Message: %s\n", static_cast<int>(reason),
                            std::string(message).c_str());
         });]=]
         "mark device lost and force future operation placement away from WebGPU")
     ai_chat_replace_once(_webgpu
         [=[        [](const wgpu::Device & device, wgpu::ErrorType reason, wgpu::StringView message) {
             GGML_UNUSED(device);
-            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error (non-fatal diagnostic): reason=%d message=%s\\n",
+            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error (non-fatal diagnostic): reason=%d message=%s\n",
                            static_cast<int>(reason), std::string(message).c_str());
         });]=]
         [=[        [ctx](const wgpu::Device & device, wgpu::ErrorType reason, wgpu::StringView message) {
             GGML_UNUSED(device);
             ctx->webgpu_global_ctx->device_error.store(true);
-            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error; disabling WebGPU backend for subsequent graph placement: reason=%d message=%s\\n",
+            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error; disabling WebGPU backend for subsequent graph placement: reason=%d message=%s\n",
                            static_cast<int>(reason), std::string(message).c_str());
         });]=]
         "disable WebGPU after uncaptured device errors instead of aborting")
@@ -244,7 +244,7 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
     const size_t aligned_size]=]
         [=[    ggml_backend_webgpu_device_context * ctx = static_cast<ggml_backend_webgpu_device_context *>(buft->device->context);
     if (ctx->webgpu_global_ctx->device_error.load()) {
-        GGML_LOG_ERROR("ggml_webgpu: refusing allocation because the device is in an error state\\n");
+        GGML_LOG_ERROR("ggml_webgpu: refusing allocation because the device is in an error state\n");
         return nullptr;
     }
     const size_t aligned_size]=]
