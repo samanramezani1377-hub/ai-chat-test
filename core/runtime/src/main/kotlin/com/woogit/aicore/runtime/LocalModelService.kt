@@ -165,13 +165,19 @@ class LocalModelService(
             try {
                 currentCoroutineContext().ensureActive()
 
-                when (val result = runtimeMutex.withLock { repository.getActive() }) {
+                val activeModel = when (val result = runtimeMutex.withLock { repository.getActive() }) {
                     is ModelResult.Failure -> return@generationLock result
-                    is ModelResult.Success -> if (result.value == null) {
-                        return@generationLock ModelResult.Failure(
-                            ModelError.RuntimeUnavailable("No model is active"),
-                        )
-                    }
+                    is ModelResult.Success -> result.value
+                } ?: return@generationLock ModelResult.Failure(
+                    ModelError.RuntimeUnavailable("No model is active"),
+                )
+
+                // A persisted selection is not proof that native weights are resident.
+                // Require the runtime lifecycle state and repository selection to agree.
+                if (activeId != activeModel.id) {
+                    return@generationLock ModelResult.Failure(
+                        ModelError.RuntimeUnavailable("The active model is not loaded in the runtime"),
+                    )
                 }
 
                 // A stop request may arrive while the active-model record is read.
@@ -215,8 +221,10 @@ class LocalModelService(
         withLifecycleExclusive {
             runtimeMutex.withLock {
                 try {
-                    runtime.unload()
+                    // Fail closed before native unload: cancellation or unload failure
+                    // must never leave this service advertising weights as resident.
                     activeId = null
+                    runtime.unload()
                     when (val persisted = repository.setActive(null)) {
                         is ModelResult.Success -> {
                             activeId = null
@@ -239,11 +247,15 @@ class LocalModelService(
     suspend fun deleteModel(id: String): ModelResult<Unit> =
         withLifecycleExclusive {
             runtimeMutex.withLock runtimeLock@{
-                val active = repository.getActive()
-                if (active is ModelResult.Success && active.value?.id == id) {
+                val active = when (val result = repository.getActive()) {
+                    is ModelResult.Success -> result.value
+                    is ModelResult.Failure -> return@runtimeLock result
+                }
+                if (active?.id == id) {
+                    activeId = null
                     runtime.unload()
                     when (val cleared = repository.setActive(null)) {
-                        is ModelResult.Success -> activeId = null
+                        is ModelResult.Success -> Unit
                         is ModelResult.Failure -> return@runtimeLock cleared
                     }
                 }

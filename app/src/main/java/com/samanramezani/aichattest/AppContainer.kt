@@ -124,16 +124,24 @@ class AppContainer(context: Context? = null) {
     private val actionRetryExecutor: suspend (ActionPlan) -> ActionExecutionOutcome = { plan -> lifecycle.retryFailed(plan.prepared.executionId, verifier).let(::executionOutcome) }
 
     suspend fun pendingApproval(conversationId: String): PreparedAction? = lifecycle.pendingApprovals(conversationId).maxByOrNull { it.executionId }
-    suspend fun executionCheckpoint(executionId: String): PreparedAction? = runCatching { lifecycle.checkpoint(executionId) }.getOrNull()
+    suspend fun executionCheckpoint(executionId: String): PreparedAction? = try {
+        lifecycle.checkpoint(executionId)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Throwable) {
+        null
+    }
     suspend fun reconcileInterruptedActions(): List<PreparedAction> = lifecycle.markInterruptedExecutionsUnknown()
 
-    suspend fun retryAction(executionId: String, conversationId: String? = null): ActionExecutionOutcome = runCatching {
+    suspend fun retryAction(executionId: String, conversationId: String? = null): ActionExecutionOutcome = try {
         val prepared = lifecycle.checkpoint(executionId)
         if (conversationId != null) require(prepared.conversationId == conversationId) { "Retry belongs to another conversation" }
         lifecycle.retryFailed(executionId, verifier).let(::executionOutcome)
-    }.getOrElse {
-        reportError("Action", "RETRY_FAILED", "تلاش مجدد عملیات ناموفق بود.", it, executionId = executionId)
-        ActionExecutionOutcome(false, false, it.message ?: "Retry failed", errorCode = "RETRY_FAILED")
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Throwable) {
+        reportError("Action", "RETRY_FAILED", "تلاش مجدد عملیات ناموفق بود.", error, executionId = executionId)
+        ActionExecutionOutcome(false, false, error.message ?: "Retry failed", errorCode = "RETRY_FAILED")
     }
 
     data class WorkspaceFileEntry(val path: String, val sizeBytes: Long, val modifiedAtMs: Long)
