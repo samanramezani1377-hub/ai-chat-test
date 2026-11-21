@@ -1163,8 +1163,8 @@ Status build_q8_0_embedding_candidate(const std::shared_ptr<Buffer>& quantized_w
         output.buffer().get() == token_ids_buffer.get() ||
         quantized_weights.get() == token_ids_buffer.get())
         return {StatusCode::InvalidArgument, "Q8_0 Embedding buffer ranges are inconsistent"};
-    dispatch.label = "q4-0-embedding-f32-activation-generic-unverified";
-    dispatch.kernel_id = "dawn-q4-0-embedding-f32-v1";
+    dispatch.label = "q8-0-embedding-f32-activation-generic-unverified";
+    dispatch.kernel_id = "dawn-q8-0-embedding-f32-v1";
     dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = kQ8_0EmbeddingWgsl;
     dispatch.workgroup_size_x = 64;
@@ -1199,8 +1199,8 @@ Status build_q8_0_embedding_gles_candidate(const std::shared_ptr<Buffer>& quanti
         vocabulary_size, embedding_dimension, token_ids_buffer, token_ids, output, dispatch);
     if (!status.ok()) return status;
     dispatch.backend = BackendKind::OpenGles;
-    dispatch.kernel_id = "gles-q4-0-embedding-f32-v1";
-    dispatch.label = "gles-q4-0-embedding-f32-unverified";
+    dispatch.kernel_id = "gles-q8-0-embedding-f32-v1";
+    dispatch.label = "gles-q8-0-embedding-f32-unverified";
     dispatch.wgsl_source.clear();
     dispatch.glsl_source = kQ8_0EmbeddingGlsl;
     const uint64_t row_bytes = static_cast<uint64_t>(embedding_dimension / 32) * 34;
@@ -1559,8 +1559,8 @@ Status validate_q8_0_embedding_kernel(Backend& backend, OperatorRegistry& operat
         !backend.healthy())
         return {StatusCode::NotReady, "Q8_0 Embedding validation requires a healthy Dawn or GLES backend"};
     const bool use_gles = backend_kind == BackendKind::OpenGles;
-    const std::string kernel_id = use_gles ? "gles-q4-0-embedding-f32-v1"
-                                           : "dawn-q4-0-embedding-f32-v1";
+    const std::string kernel_id = use_gles ? "gles-q8-0-embedding-f32-v1"
+                                           : "dawn-q8-0-embedding-f32-v1";
     auto kernel = std::find_if(operators.kernels_.begin(), operators.kernels_.end(),
         [&](const KernelDefinition& definition) {
             return definition.kernel_id == kernel_id && definition.backend == backend_kind;
@@ -1595,9 +1595,9 @@ Status validate_q8_0_embedding_kernel(Backend& backend, OperatorRegistry& operat
         dimension, token_ids, expected.data());
     if (!status.ok()) return status;
 
-    BufferDesc weight_desc{(weight_bytes + 3) & ~uint64_t{3}, 4, MemoryDomain::Device, true, "q4-0-embedding-weights"};
-    BufferDesc token_desc{token_ids.size() * sizeof(uint32_t), alignof(uint32_t), MemoryDomain::Device, false, "q4-0-embedding-token-ids"};
-    BufferDesc output_desc{actual.size() * sizeof(float), alignof(float), MemoryDomain::Device, false, "q4-0-embedding-output"};
+    BufferDesc weight_desc{(weight_bytes + 3) & ~uint64_t{3}, 4, MemoryDomain::Device, true, "q8-0-embedding-weights"};
+    BufferDesc token_desc{token_ids.size() * sizeof(uint32_t), alignof(uint32_t), MemoryDomain::Device, false, "q8-0-embedding-token-ids"};
+    BufferDesc output_desc{actual.size() * sizeof(float), alignof(float), MemoryDomain::Device, false, "q8-0-embedding-output"};
     std::shared_ptr<Buffer> weight_buffer, token_buffer, output_buffer;
     status = backend.allocate(weight_desc, weight_buffer); if (!status.ok()) return status;
     status = backend.allocate(token_desc, token_buffer); if (!status.ok()) return status;
