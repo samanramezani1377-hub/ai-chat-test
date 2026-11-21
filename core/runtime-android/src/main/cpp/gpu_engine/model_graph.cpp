@@ -322,14 +322,18 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
                 return {StatusCode::InvalidArgument, "Final hidden-state tensor cannot be sliced for last-token logits"};
             }
             const Tensor& full_hidden = hidden->second;
+            if (full_hidden.descriptor().shape[1] == 0 ||
+                full_hidden.descriptor().shape[1] > UINT64_MAX / sizeof(float))
+                return {StatusCode::InvalidArgument, "Final hidden-state row size overflowed"};
             const uint64_t row_bytes = full_hidden.descriptor().shape[1] * sizeof(float);
-            if (row_bytes == 0 || token_count - 1 > UINT64_MAX / row_bytes)
+            if (token_count - 1 > UINT64_MAX / row_bytes)
                 return {StatusCode::InvalidArgument, "Final hidden-state row offset overflowed"};
             const uint64_t row_offset = (token_count - 1) * row_bytes;
             if (full_hidden.byte_offset() > UINT64_MAX - row_offset)
                 return {StatusCode::InvalidArgument, "Final hidden-state byte offset overflowed"};
             TensorDesc last_row_desc = full_hidden.descriptor();
             last_row_desc.shape[0] = 1;
+            last_row_desc.strides.clear();
             Tensor last_hidden_row;
             status = Tensor::create(last_row_desc, full_hidden.buffer(),
                 full_hidden.byte_offset() + row_offset, last_hidden_row);
