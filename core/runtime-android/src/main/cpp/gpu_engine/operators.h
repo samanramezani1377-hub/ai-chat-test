@@ -15,6 +15,9 @@ Status build_add_f32_candidate(const Tensor& lhs, const Tensor& rhs,
 
 Status reference_add_f32(const float* lhs, const float* rhs, float* output,
                          uint64_t element_count);
+Status reference_add_f32_trailing_broadcast(const float* lhs, const float* rhs,
+                                            float* output, uint64_t element_count,
+                                            uint64_t broadcast_width);
 Status build_add_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
                                     const Tensor& output, ComputeDispatch& dispatch);
 const char* multiply_f32_wgsl_source() noexcept;

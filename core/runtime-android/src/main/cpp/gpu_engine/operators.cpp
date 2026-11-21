@@ -1413,6 +1413,19 @@ Status reference_add_f32(const float* lhs, const float* rhs, float* output,
     return Status::success();
 }
 
+Status reference_add_f32_trailing_broadcast(const float* lhs, const float* rhs,
+                                            float* output, uint64_t element_count,
+                                            uint64_t broadcast_width) {
+    if ((!lhs || !rhs || !output) && element_count)
+        return {StatusCode::InvalidArgument, "Broadcast Add reference received a null pointer"};
+    if (!element_count || !broadcast_width || element_count % broadcast_width)
+        return {StatusCode::InvalidArgument, "Broadcast Add dimensions are invalid"};
+    for (uint64_t index = 0; index < element_count; ++index)
+        output[index] = lhs[index] + rhs[index % broadcast_width];
+    return Status::success();
+}
+
+
 Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     KernelDefinition add;
     add.operator_name = "Add";

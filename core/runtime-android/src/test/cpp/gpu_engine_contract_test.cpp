@@ -916,6 +916,25 @@ void test_add_operator_candidate_and_reference() {
     float result[] = {0, 0, 0};
     assert(reference_add_f32(left, right, result, 3).ok());
     assert(result[0] == 5 && result[1] == 7 && result[2] == 9);
+    BufferDesc bias_desc{12, 4, MemoryDomain::Device, false, "add-bias"};
+    std::shared_ptr<Buffer> bias_buffer;
+    assert(backend.allocate(bias_desc, bias_buffer).ok());
+    TensorDesc bias_tensor_desc; bias_tensor_desc.shape = {3}; bias_tensor_desc.data_type = DataType::F32;
+    Tensor bias_tensor;
+    assert(Tensor::create(bias_tensor_desc, bias_buffer, 0, bias_tensor).ok());
+    ComputeDispatch broadcast_dispatch;
+    assert(build_add_f32_candidate(lhs, bias_tensor, output, broadcast_dispatch).ok());
+    assert(broadcast_dispatch.bindings[1].size_bytes == 12);
+    assert(broadcast_dispatch.wgsl_source.find("gid.x % arrayLength(&rhs)") != std::string::npos);
+    float broadcast_result[6] = {};
+    const float broadcast_lhs[] = {1, 2, 3, 4, 5, 6};
+    const float broadcast_rhs[] = {10, 20, 30};
+    assert(reference_add_f32_trailing_broadcast(broadcast_lhs, broadcast_rhs,
+                                                broadcast_result, 6, 3).ok());
+    assert(broadcast_result[0] == 11 && broadcast_result[1] == 22 &&
+           broadcast_result[2] == 33 && broadcast_result[3] == 14 &&
+           broadcast_result[4] == 25 && broadcast_result[5] == 36);
+
     const float embedding_weights[] = {1, 2, 3, 4, 5, 6};
     const std::vector<uint32_t> token_ids = {2, 0};
     float embedding_output[4] = {};
@@ -1138,6 +1157,20 @@ void test_add_operator_candidate_and_reference() {
     assert(mat_dispatch.wgsl_source.find("@binding(3)") == std::string::npos);
     assert(mat_dispatch.wgsl_source.find("params.") == std::string::npos);
     assert(mat_dispatch.wgsl_source.find("const ROWS: u32 = 2u;") != std::string::npos);
+    BufferDesc mat3_out_desc{16, 4, MemoryDomain::Device, false, "mat-out-3d"};
+    std::shared_ptr<Buffer> mat3_out;
+    assert(backend.allocate(mat3_out_desc, mat3_out).ok());
+    TensorDesc c3_desc; c3_desc.shape = {2, 1, 2}; c3_desc.data_type = DataType::F32;
+    Tensor c3_tensor;
+    assert(Tensor::create(c3_desc, mat3_out, 0, c3_tensor).ok());
+    ComputeDispatch mat3_dispatch;
+    assert(build_matmul_f32_candidate(a_tensor, b_tensor, c3_tensor, mat3_dispatch).ok());
+    assert(mat3_dispatch.wgsl_source.find("const COLUMNS: u32 = 2u;") != std::string::npos);
+    ComputeDispatch mat3_gles_dispatch;
+    assert(build_matmul_f32_gles_candidate(a_tensor, b_tensor, c3_tensor, mat3_gles_dispatch).ok());
+    assert(mat3_gles_dispatch.backend == BackendKind::OpenGles);
+    assert(mat3_gles_dispatch.glsl_source.find("const uint COLUMNS = 2u;") != std::string::npos);
+
 
     BufferDesc norm_x_desc{16, 4, MemoryDomain::Device, false, "norm-x"};
     BufferDesc norm_w_desc{8, 4, MemoryDomain::Device, false, "norm-w"};
