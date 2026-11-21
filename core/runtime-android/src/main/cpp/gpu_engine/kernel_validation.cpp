@@ -247,28 +247,23 @@ Status validate_embedding(Backend& backend, Validate&& build) {
 }
 
 template <typename Validate>
-void run_one(Backend& backend, OperatorRegistry& registry, KernelValidationReport& report,
+void run_one(KernelDefinition* definition, KernelValidationReport& report,
              const char* operator_name, const char* kernel_id, Validate&& validate) {
-    auto found = std::find_if(registry.kernels_.begin(), registry.kernels_.end(),
-        [operator_name, kernel_id, &backend](const KernelDefinition& definition) {
-            return definition.operator_name == operator_name &&
-                   definition.kernel_id == kernel_id && definition.backend == backend.kind();
-        });
     const std::string label = std::string(operator_name) + ":" + kernel_id;
-    if (found == registry.kernels_.end()) {
+    if (!definition) {
         report.unavailable.push_back(label + ":NOT_REGISTERED");
         return;
     }
-    if (found->validation == KernelValidation::Validated) {
+    if (definition->validation == KernelValidation::Validated) {
         report.validated.push_back(label + ":ALREADY_VALIDATED");
         return;
     }
     const Status status = validate();
     if (status.ok()) {
-        found->validation = KernelValidation::Validated;
+        definition->validation = KernelValidation::Validated;
         report.validated.push_back(label);
     } else if (status.code == StatusCode::NumericalFailure) {
-        found->validation = KernelValidation::Rejected;
+        definition->validation = KernelValidation::Rejected;
         report.rejected.push_back(label + ":" + status.message);
     } else {
         report.unavailable.push_back(label + ":" + status.message);
@@ -283,8 +278,18 @@ Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& reg
     if (!backend.healthy() || backend.kind() == BackendKind::Unknown)
         return {StatusCode::NotReady, "Kernel validation requires a healthy initialized backend"};
 
+    auto run = [&](const char* operator_name, const char* kernel_id, auto&& validate) {
+        auto found = std::find_if(registry.kernels_.begin(), registry.kernels_.end(),
+            [operator_name, kernel_id, &backend](const KernelDefinition& definition) {
+                return definition.operator_name == operator_name &&
+                       definition.kernel_id == kernel_id && definition.backend == backend.kind();
+            });
+        run_one(found == registry.kernels_.end() ? nullptr : &*found,
+                report, operator_name, kernel_id, std::forward<decltype(validate)>(validate));
+    };
+
     if (backend.kind() == BackendKind::DawnWebGpu) {
-        run_one(backend, registry, report, "Add", "dawn-add-f32-generic-v1",
+        run( "Add", "dawn-add-f32-generic-v1",
                 [&] { return validate_dawn_add_f32_kernel(backend, registry); });
     } else {
         run_one(backend, registry, report, "Add", "gles-add-f32-generic-v1",
