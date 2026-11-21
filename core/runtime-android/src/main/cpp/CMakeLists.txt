@@ -144,7 +144,6 @@ include("${AI_CHAT_NATIVE_CMAKE_DIR}/cmake/patch_android_opencl.cmake")
 # This target may be reused by future backends and must not link their execution APIs.
 add_library(ai_chat_gpu_engine STATIC
     gpu_engine/gpu_engine.cpp
-    gpu_engine/universal_adapter_bridge.cpp
     gpu_engine/execution_engine.cpp
     gpu_engine/gguf_reader.cpp
     gpu_engine/model_registry.cpp
@@ -172,6 +171,16 @@ target_include_directories(ai_chat_gpu_backend_dawn PUBLIC
 )
 target_compile_features(ai_chat_gpu_backend_dawn PUBLIC cxx_std_17)
 target_link_libraries(ai_chat_gpu_backend_dawn PUBLIC ai_chat_gpu_engine PRIVATE dawn::webgpu_dawn)
+
+# OpenGL ES compute backend reuses UniversalGpuAdapter's dedicated EGL context thread.
+# Keep EGL/GLES implementation outside the backend-neutral engine core.
+add_library(ai_chat_gpu_backend_gles STATIC
+    gpu_engine/gles_backend.cpp
+    gpu_engine/universal_adapter_bridge.cpp
+)
+target_include_directories(ai_chat_gpu_backend_gles PUBLIC ${CMAKE_CURRENT_LIST_DIR})
+target_compile_features(ai_chat_gpu_backend_gles PUBLIC cxx_std_17)
+target_link_libraries(ai_chat_gpu_backend_gles PUBLIC ai_chat_gpu_engine PRIVATE EGL GLESv3)
 
 add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp vision_runtime_android.cpp universal_gpu_adapter.cpp)
 
@@ -208,7 +217,7 @@ target_link_options(ai_chat_runtime PRIVATE
 if (NOT TARGET ggml-webgpu)
     message(FATAL_ERROR "GGML_WEBGPU=ON was requested, but ggml-webgpu target was not created")
 endif()
-target_link_libraries(ai_chat_runtime PRIVATE ai_chat_gpu_engine ai_chat_gpu_backend_dawn llama llama-common mtmd ggml-opencl ggml-webgpu android log OpenCL EGL GLESv3)
+target_link_libraries(ai_chat_runtime PRIVATE ai_chat_gpu_engine ai_chat_gpu_backend_dawn ai_chat_gpu_backend_gles llama llama-common mtmd ggml-opencl ggml-webgpu android log OpenCL EGL GLESv3)
 
 target_compile_definitions(ai_chat_runtime PRIVATE
     AI_CHAT_LLAMA_CPP_SHA="${LLAMA_CPP_TAG}"

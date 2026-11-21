@@ -70,6 +70,7 @@ struct KernelDefinition {
     KernelValidation validation = KernelValidation::Unverified;
     std::string kernel_id;
     std::string wgsl_source;
+    std::string glsl_source;
     std::string entry_point = "main";
 };
 

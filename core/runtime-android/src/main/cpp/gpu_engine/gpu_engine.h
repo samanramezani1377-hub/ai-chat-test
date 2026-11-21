@@ -142,6 +142,7 @@ struct ComputeDispatch {
     BackendKind backend = BackendKind::Unknown;
     KernelValidation validation = KernelValidation::Unverified;
     std::string wgsl_source;
+    std::string glsl_source;
     std::string entry_point = "main";
     std::vector<BufferBinding> bindings;
     uint32_t workgroups_x = 1;
@@ -185,6 +186,7 @@ public:
 // Creates the first native Dawn/WebGPU backend. Device execution is still
 // opt-in until the runtime router has validated model/operator support.
 std::shared_ptr<Backend> create_dawn_backend();
+std::shared_ptr<Backend> create_universal_gles_backend();
 
 class BackendRegistry {
 public:
@@ -217,8 +219,7 @@ public:
     Status register_backend(std::shared_ptr<Backend> backend);
     Status initialize(BackendKind preferred_backend = BackendKind::DawnWebGpu);
     Status execute(const ComputeGraph& graph, const std::atomic<bool>* cancellation = nullptr);
-    // Uses UniversalGpuAdapter for GLES capability discovery only; it does not
-    // register an executable GLES backend or claim model inference readiness.
+    // Probes UniversalGpuAdapter without promoting discovery to inference readiness.
     Status probe_universal_adapter(DeviceInfo& out) const;
     Status shutdown();
 

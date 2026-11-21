@@ -173,8 +173,12 @@ Status OperatorRegistry::register_kernel(KernelDefinition definition) {
         invalid_input_types) {
         return {StatusCode::InvalidArgument, "Kernel definition is missing required identity or valid constraints"};
     }
-    if (definition.validation == KernelValidation::Validated && definition.wgsl_source.empty()) {
-        return {StatusCode::InvalidArgument, "A validated kernel must include WGSL source"};
+    if (definition.validation == KernelValidation::Validated) {
+        const bool source_present = definition.backend == BackendKind::DawnWebGpu
+            ? !definition.wgsl_source.empty()
+            : (definition.backend == BackendKind::OpenGles && !definition.glsl_source.empty());
+        if (!source_present)
+            return {StatusCode::InvalidArgument, "A validated kernel must include source for its target backend"};
     }
     const auto duplicate = std::find_if(kernels_.begin(), kernels_.end(),
         [&definition](const KernelDefinition& current) {
@@ -235,8 +239,11 @@ Status OperatorRegistry::authorize_dispatch(const std::string& kernel_id, Backen
         });
     if (found == kernels_.end())
         return {StatusCode::Unsupported, "Kernel is not registered as validated for this backend"};
-    if (dispatch.wgsl_source.empty() || dispatch.kernel_id != kernel_id)
-        return {StatusCode::InvalidArgument, "Dispatch does not match the requested registered kernel"};
+    const bool source_present = backend == BackendKind::DawnWebGpu
+        ? !dispatch.wgsl_source.empty()
+        : (backend == BackendKind::OpenGles && !dispatch.glsl_source.empty());
+    if (!source_present || dispatch.kernel_id != kernel_id)
+        return {StatusCode::InvalidArgument, "Dispatch does not match the requested registered kernel source and identity"};
     dispatch.backend = backend;
     dispatch.validation = KernelValidation::Validated;
     return Status::success();
