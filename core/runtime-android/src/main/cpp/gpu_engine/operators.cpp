@@ -80,6 +80,53 @@ fn main(@builtin(workgroup_id) group: vec3<u32>,
 }
 )wgsl";
 
+constexpr char kRopeF32Wgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+const TOTAL_ELEMENTS: u32 = 1u;
+const HEADS: u32 = 1u;
+const HEAD_DIM: u32 = 2u;
+const ROTARY_DIM: u32 = 2u;
+const START_POSITION: u32 = 0u;
+const THETA: f32 = 10000.0;
+const NEOX_STYLE: u32 = 0u;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= TOTAL_ELEMENTS) { return; }
+    let dimension = gid.x % HEAD_DIM;
+    if (dimension >= ROTARY_DIM) {
+        output[gid.x] = input[gid.x];
+        return;
+    }
+    let token = gid.x / (HEADS * HEAD_DIM);
+    let half_dimension = ROTARY_DIM / 2u;
+    var pair = dimension / 2u;
+    var partner_dimension = dimension ^ 1u;
+    if (NEOX_STYLE == 1u) {
+        pair = dimension % half_dimension;
+        partner_dimension = select(dimension + half_dimension, dimension - half_dimension,
+                                   dimension >= half_dimension);
+    }
+    let exponent = 2.0 * f32(pair) / f32(ROTARY_DIM);
+    let inverse_frequency = pow(THETA, -exponent);
+    let angle = f32(START_POSITION + token) * inverse_frequency;
+    let cosine = cos(angle);
+    let sine = sin(angle);
+    let base = gid.x - dimension;
+    let value = input[gid.x];
+    let partner = input[base + partner_dimension];
+    if (NEOX_STYLE == 0u) {
+        output[gid.x] = select(value * cosine - partner * sine,
+                               value * cosine + partner * sine,
+                               (dimension & 1u) == 1u);
+    } else {
+        output[gid.x] = select(value * cosine - partner * sine,
+                               value * cosine + partner * sine,
+                               dimension >= half_dimension);
+    }
+}
+)wgsl";
+
 constexpr char kMatMulF32Wgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> lhs: array<f32>;
 @group(0) @binding(1) var<storage, read> rhs: array<f32>;
@@ -308,6 +355,89 @@ Status reference_rms_norm_f32(const float* input, const float* weight, float* ou
 }
 
 
+
+const char* rope_f32_wgsl_source() noexcept { return kRopeF32Wgsl; }
+
+Status build_rope_f32_candidate(const Tensor& input, const Tensor& output,
+                                const RopeConfig& config, ComputeDispatch& dispatch) {
+    dispatch = ComputeDispatch{};
+    if (!is_contiguous_f32(input) || !is_contiguous_f32(output))
+        return {StatusCode::Unsupported, "RoPE requires contiguous device/shared F32 tensors"};
+    const auto& shape = input.descriptor().shape;
+    if (shape.size() != 3 || output.descriptor().shape != shape ||
+        shape[0] == 0 || shape[1] == 0 || shape[2] == 0 ||
+        shape[0] > UINT32_MAX || shape[1] > UINT32_MAX || shape[2] > UINT32_MAX ||
+        input.element_count() > UINT32_MAX || output.element_count() > UINT32_MAX ||
+        !input.buffer() || !output.buffer() || input.buffer().get() == output.buffer().get())
+        return {StatusCode::InvalidArgument, "RoPE expects matching [tokens,heads,head_dimension] tensors in WGSL range"};
+    if (config.rotary_dimensions < 2 || config.rotary_dimensions > shape[2] ||
+        (config.rotary_dimensions & 1u) != 0 || !std::isfinite(config.theta) ||
+        config.theta <= 1.0f || shape[0] > UINT32_MAX - config.start_position)
+        return {StatusCode::InvalidArgument, "RoPE dimensions, position or theta are invalid"};
+    dispatch.label = "rope-f32-generic-unverified";
+    dispatch.wgsl_source = kRopeF32Wgsl;
+    const std::pair<std::string, std::string> constants[] = {
+        {"const TOTAL_ELEMENTS: u32 = 1u;", "const TOTAL_ELEMENTS: u32 = " + std::to_string(input.element_count()) + "u;"},
+        {"const HEADS: u32 = 1u;", "const HEADS: u32 = " + std::to_string(shape[1]) + "u;"},
+        {"const HEAD_DIM: u32 = 2u;", "const HEAD_DIM: u32 = " + std::to_string(shape[2]) + "u;"},
+        {"const ROTARY_DIM: u32 = 2u;", "const ROTARY_DIM: u32 = " + std::to_string(config.rotary_dimensions) + "u;"},
+        {"const START_POSITION: u32 = 0u;", "const START_POSITION: u32 = " + std::to_string(config.start_position) + "u;"},
+        {"const NEOX_STYLE: u32 = 0u;", std::string("const NEOX_STYLE: u32 = ") + (config.neox_style ? "1u;" : "0u;")},
+    };
+    for (const auto& constant : constants) {
+        const size_t position = dispatch.wgsl_source.find(constant.first);
+        if (position == std::string::npos)
+            return {StatusCode::BackendFailure, "RoPE WGSL constant placeholder is missing"};
+        dispatch.wgsl_source.replace(position, constant.first.size(), constant.second);
+    }
+    std::ostringstream theta_literal;
+    theta_literal << std::setprecision(9) << config.theta;
+    std::string theta_text = theta_literal.str();
+    if (theta_text.find_first_of(".eE") == std::string::npos) theta_text += ".0";
+    dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source),
+        "const THETA: f32 = 10000.0;", "const THETA: f32 = " + theta_text + ";");
+    dispatch.workgroups_x = static_cast<uint32_t>((input.element_count() + 63) / 64);
+    dispatch.bindings = {
+        {0, input.buffer(), input.byte_offset(), input.byte_size()},
+        {1, output.buffer(), output.byte_offset(), output.byte_size()},
+    };
+    return Status::success();
+}
+
+Status reference_rope_f32(const float* input, float* output,
+                          uint32_t tokens, uint32_t heads, uint32_t head_dimension,
+                          const RopeConfig& config) {
+    if ((!input || !output) && tokens && heads && head_dimension)
+        return {StatusCode::InvalidArgument, "RoPE reference received a null pointer"};
+    if (tokens == 0 || heads == 0 || head_dimension == 0 ||
+        config.rotary_dimensions < 2 || config.rotary_dimensions > head_dimension ||
+        (config.rotary_dimensions & 1u) != 0 || !std::isfinite(config.theta) ||
+        config.theta <= 1.0f || tokens > UINT32_MAX - config.start_position)
+        return {StatusCode::InvalidArgument, "RoPE reference configuration is invalid"};
+    uint64_t elements = static_cast<uint64_t>(tokens) * heads * head_dimension;
+    for (uint64_t i = 0; i < elements; ++i) output[i] = input[i];
+    const uint32_t half = config.rotary_dimensions / 2;
+    for (uint32_t token = 0; token < tokens; ++token) {
+        const double position = static_cast<double>(config.start_position + token);
+        for (uint32_t head = 0; head < heads; ++head) {
+            const uint64_t base = (static_cast<uint64_t>(token) * heads + head) * head_dimension;
+            for (uint32_t pair = 0; pair < half; ++pair) {
+                const uint32_t first = config.neox_style ? pair : pair * 2;
+                const uint32_t second = config.neox_style ? pair + half : pair * 2 + 1;
+                const double exponent = 2.0 * static_cast<double>(pair) / config.rotary_dimensions;
+                const double angle = position / std::pow(static_cast<double>(config.theta), exponent);
+                const float cosine = static_cast<float>(std::cos(angle));
+                const float sine = static_cast<float>(std::sin(angle));
+                const float x0 = input[base + first];
+                const float x1 = input[base + second];
+                output[base + first] = x0 * cosine - x1 * sine;
+                output[base + second] = x1 * cosine + x0 * sine;
+            }
+        }
+    }
+    return Status::success();
+}
+
 const char* silu_f32_wgsl_source() noexcept { return kSiluF32Wgsl; }
 
 Status build_silu_f32_candidate(const Tensor& input, const Tensor& output,
@@ -483,6 +613,21 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     softmax.kernel_id = "dawn-softmax-f32-generic-v1";
     softmax.wgsl_source = kSoftmaxF32Wgsl;
     status = registry.register_kernel(std::move(softmax));
+    if (!status.ok()) return status;
+
+    KernelDefinition rope;
+    rope.operator_name = "RoPE";
+    rope.backend = BackendKind::DawnWebGpu;
+    rope.input_type = DataType::F32;
+    rope.output_type = DataType::F32;
+    rope.min_input_count = 1;
+    rope.max_input_count = 1;
+    rope.min_rank = 3;
+    rope.max_rank = 3;
+    rope.validation = KernelValidation::Unverified;
+    rope.kernel_id = "dawn-rope-f32-generic-v1";
+    rope.wgsl_source = kRopeF32Wgsl;
+    status = registry.register_kernel(std::move(rope));
     if (!status.ok()) return status;
 
     KernelDefinition q8;

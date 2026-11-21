@@ -507,6 +507,30 @@ void test_add_operator_candidate_and_reference() {
     assert(std::abs(softmax_output[0] + softmax_output[1] - 1.0f) < 1e-6f);
     assert(std::abs(softmax_output[2] + softmax_output[3] - 1.0f) < 1e-6f);
 
+    const float rope_input[] = {1.0f, 0.0f};
+    float rope_output[2] = {};
+    RopeConfig rope_config;
+    rope_config.rotary_dimensions = 2;
+    rope_config.start_position = 1;
+    assert(reference_rope_f32(rope_input, rope_output, 1, 1, 2, rope_config).ok());
+    assert(std::abs(rope_output[0] - std::cos(1.0f)) < 1e-5f);
+    assert(std::abs(rope_output[1] - std::sin(1.0f)) < 1e-5f);
+
+    BufferDesc rope_desc{8, 4, MemoryDomain::Device, false, "rope"};
+    std::shared_ptr<Buffer> rope_input_buffer, rope_output_buffer;
+    assert(backend.allocate(rope_desc, rope_input_buffer).ok());
+    assert(backend.allocate(rope_desc, rope_output_buffer).ok());
+    TensorDesc rope_tensor_desc;
+    rope_tensor_desc.shape = {1, 1, 2};
+    rope_tensor_desc.data_type = DataType::F32;
+    Tensor rope_tensor, rope_output_tensor;
+    assert(Tensor::create(rope_tensor_desc, rope_input_buffer, 0, rope_tensor).ok());
+    assert(Tensor::create(rope_tensor_desc, rope_output_buffer, 0, rope_output_tensor).ok());
+    ComputeDispatch rope_dispatch;
+    assert(build_rope_f32_candidate(rope_tensor, rope_output_tensor, rope_config, rope_dispatch).ok());
+    assert(rope_dispatch.bindings.size() == 2);
+    assert(rope_dispatch.wgsl_source.find("const START_POSITION: u32 = 1u;") != std::string::npos);
+
     BufferDesc activation_desc{12, 4, MemoryDomain::Device, false, "silu"};
     std::shared_ptr<Buffer> activation_input_buffer, activation_output_buffer;
     assert(backend.allocate(activation_desc, activation_input_buffer).ok());

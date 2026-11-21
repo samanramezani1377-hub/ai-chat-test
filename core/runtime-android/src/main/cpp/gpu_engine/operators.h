@@ -38,6 +38,19 @@ Status build_softmax_f32_candidate(const Tensor& input, const Tensor& output,
 Status reference_softmax_f32(const float* input, float* output,
                              uint64_t rows, uint64_t columns);
 
+struct RopeConfig {
+    uint32_t rotary_dimensions = 0;
+    uint32_t start_position = 0;
+    float theta = 10000.0f;
+    bool neox_style = false;
+};
+const char* rope_f32_wgsl_source() noexcept;
+Status build_rope_f32_candidate(const Tensor& input, const Tensor& output,
+                                const RopeConfig& config, ComputeDispatch& dispatch);
+Status reference_rope_f32(const float* input, float* output,
+                          uint32_t tokens, uint32_t heads, uint32_t head_dimension,
+                          const RopeConfig& config);
+
 Status register_builtin_operator_candidates(OperatorRegistry& registry);
 
 } // namespace ai_chat::gpu_engine
