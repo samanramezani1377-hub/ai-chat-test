@@ -484,6 +484,9 @@ void test_dawn_q8_0_operator_registration_is_unverified() {
     assert(registry.select_kernel("MatMul_Q4_0", BackendKind::DawnWebGpu,
         std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
         selected).code == StatusCode::Unsupported);
+    assert(registry.select_kernel("MatMul_Q4_1", BackendKind::DawnWebGpu,
+        std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
+        selected).code == StatusCode::Unsupported);
 }
 
 
@@ -498,6 +501,12 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
            StatusCode::NumericalFailure);
     assert(validate_q4_0_matmul_kernel(backend, operators, quantizations).code ==
            StatusCode::NumericalFailure);
+    assert(validate_q4_1_matmul_kernel(backend, operators, quantizations).code ==
+           StatusCode::NumericalFailure);
+    const QuantizationFormat* q4_1_format = quantizations.find(3);
+    assert(q4_1_format != nullptr && q4_1_format->gpu_kernel_state == SupportState::Unverified);
+    assert(!quantizations.can_execute_on_gpu(3, BackendKind::DawnWebGpu));
+    assert(!quantizations.can_execute_on_gpu(3, BackendKind::OpenGles));
     const QuantizationFormat* format = quantizations.find(8);
     const QuantizationFormat* q4_format = quantizations.find(2);
     assert(q4_format != nullptr && q4_format->gpu_kernel_state == SupportState::Unverified);
@@ -573,6 +582,8 @@ void test_q8_0_decoder_and_registry() {
     assert(!registry.can_execute_on_gpu(8));
     assert(registry.can_decode(2));
     assert(!registry.can_execute_on_gpu(2));
+    assert(registry.can_decode(3));
+    assert(!registry.can_execute_on_gpu(3));
 
     FakeBackend backend;
     BufferDesc encoded_desc{36, 4, MemoryDomain::Device, false, "q8-encoded"};
@@ -617,6 +628,20 @@ void test_q8_0_decoder_and_registry() {
                                             q4_matmul_output_tensor, q4_gles_dispatch).ok());
     assert(q4_gles_dispatch.backend == BackendKind::OpenGles);
     assert(q4_gles_dispatch.glsl_source.find("WEIGHT_ROW_BYTES = 36u") != std::string::npos);
+
+    BufferDesc q4_1_weights_desc{80, 4, MemoryDomain::Device, true, "q4-1-matmul-weights"};
+    std::shared_ptr<Buffer> q4_1_weights;
+    assert(backend.allocate(q4_1_weights_desc, q4_1_weights).ok());
+    ComputeDispatch q4_1_dispatch;
+    assert(build_q4_1_matmul_candidate(q4_activation_tensor, q4_1_weights, 80,
+                                       q4_matmul_output_tensor, q4_1_dispatch).ok());
+    assert(q4_1_dispatch.kernel_id == "dawn-q4-1-matmul-f32-activation-v1");
+    assert(q4_1_dispatch.wgsl_source.find("WEIGHT_ROW_BYTES: u32 = 40u") != std::string::npos);
+    ComputeDispatch q4_1_gles_dispatch;
+    assert(build_q4_1_matmul_gles_candidate(q4_activation_tensor, q4_1_weights, 80,
+                                            q4_matmul_output_tensor, q4_1_gles_dispatch).ok());
+    assert(q4_1_gles_dispatch.backend == BackendKind::OpenGles);
+    assert(q4_1_gles_dispatch.glsl_source.find("WEIGHT_ROW_BYTES = 40u") != std::string::npos);
     OperatorRegistry gles_registry;
     assert(register_builtin_gles_operator_candidates(gles_registry).ok());
     assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") != std::string::npos);
