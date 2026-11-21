@@ -1004,6 +1004,17 @@ void test_graph_scheduler_order_and_cancel() {
     assert(first_pos < second_pos);
 
     ExecutionScheduler scheduler;
+    ComputeGraph mismatched_graph;
+    GraphNode mismatched;
+    mismatched.name = "wrong-backend";
+    mismatched.dispatch.kernel_id = "test-dawn-only";
+    mismatched.dispatch.backend = BackendKind::DawnWebGpu;
+    mismatched.dispatch.validation = KernelValidation::Validated;
+    size_t mismatch_index = 0;
+    assert(mismatched_graph.add_node(mismatched, mismatch_index).ok());
+    assert(scheduler.execute(backend, mismatched_graph).code == StatusCode::Unsupported);
+    assert(backend.submit_count == 0);
+
     assert(scheduler.execute(backend, graph).ok());
     assert(backend.submit_count == 1);
     assert(backend.sync_count == 1);
