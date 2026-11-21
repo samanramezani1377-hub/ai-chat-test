@@ -3075,7 +3075,7 @@ Status validate_dequantize_candidate(Backend& backend, const std::vector<uint8_t
     if (!backend.healthy() ||
         (backend.kind() != BackendKind::DawnWebGpu && backend.kind() != BackendKind::OpenGles))
         return {StatusCode::NotReady, "Quantized dequantization validation requires a healthy supported GPU backend"};
-    if (source.empty() || block_bytes == 0 || source.size() % block_bytes != 0)
+    if (source.empty() || block_bytes == 0 || source.size() % block_bytes != 0 || source.size() > UINT64_MAX - 3ull)
         return {StatusCode::InvalidArgument, "Quantized dequantization validation requires complete encoded blocks"};
     const uint64_t elements = (source.size() / block_bytes) * 32ull;
     if (elements == 0 || elements > UINT32_MAX || elements > UINT64_MAX / sizeof(float))
@@ -3204,7 +3204,7 @@ Status build_q5_matmul_candidate_impl(const Tensor& activations, const std::shar
     dispatch = ComputeDispatch{};
     const uint64_t block_bytes = q5_1 ? 24 : 22;
     const std::string type = q5_1 ? "Q5_1" : "Q5_0";
-    if (!weights || !is_device_contiguous_f32(activations) || !is_device_contiguous_f32(output) ||
+    if (!weights || weights->memory_domain() == MemoryDomain::Host || !is_device_contiguous_f32(activations) || !is_device_contiguous_f32(output) ||
         !activations.buffer() || !output.buffer() || activations.descriptor().shape.size() != 2 ||
         (output.descriptor().shape.size() != 2 && output.descriptor().shape.size() != 3))
         return {StatusCode::Unsupported, type + " MatMul requires F32 [M,K] activations and F32 [M,N] or [M,H,D] output"};
@@ -3249,7 +3249,7 @@ Status build_q5_matmul_candidate_impl(const Tensor& activations, const std::shar
 Status build_q5_0_matmul_candidate(const Tensor& a,const std::shared_ptr<Buffer>& w,uint64_t b,const Tensor& o,ComputeDispatch& d){return build_q5_matmul_candidate_impl(a,w,b,o,d,false);}
 Status build_q5_1_matmul_candidate(const Tensor& a,const std::shared_ptr<Buffer>& w,uint64_t b,const Tensor& o,ComputeDispatch& d){return build_q5_matmul_candidate_impl(a,w,b,o,d,true);}
 
-Status build_q5_matmul_gles_candidate_impl(const Tensor& activations,const std::shared_ptr<Buffer>& weights,
+static Status build_q5_matmul_gles_candidate_impl(const Tensor& activations,const std::shared_ptr<Buffer>& weights,
                                            uint64_t bytes,const Tensor& output,ComputeDispatch& dispatch,bool q5_1){
     Status status=build_q5_matmul_candidate_impl(activations,weights,bytes,output,dispatch,q5_1);
     if(!status.ok())return status;
