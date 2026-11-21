@@ -176,7 +176,7 @@ struct MemoryManager::State {
         const uint64_t pool_limit = budget / 2;
         if (!persistent && physical_bytes <= pool_limit) {
             std::lock_guard<std::mutex> lock(pool_mutex);
-            if (pooled_bytes <= pool_limit - physical_bytes) {
+            if (physical_bytes <= pool_limit && pooled_bytes <= pool_limit - physical_bytes) {
                 try {
                     pool.push_back({buffer, physical_bytes, alignment, domain});
                     pooled_bytes += physical_bytes;

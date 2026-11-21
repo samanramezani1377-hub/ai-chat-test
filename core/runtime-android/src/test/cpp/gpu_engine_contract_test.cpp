@@ -221,6 +221,15 @@ void test_tensor_and_memory_lease() {
 
     reused_lease = MemoryLease{};
     assert(memory.allocated_bytes() == 0);
+
+    MemoryManager bounded_pool(backend, 128);
+    BufferDesc oversized_for_pool{80, 4, MemoryDomain::Device, false, "oversized-pool-entry"};
+    MemoryLease oversized_lease;
+    assert(bounded_pool.allocate(oversized_for_pool, oversized_lease).ok());
+    oversized_lease = MemoryLease{};
+    assert(bounded_pool.allocated_bytes() == 0);
+    assert(bounded_pool.available_bytes() == 128); // An entry larger than half-budget is freed, never pooled.
+
     desc.shape = {UINT64_MAX, 8};
     uint64_t bytes = 0;
     assert(Tensor::required_bytes(desc, bytes).code == StatusCode::InvalidArgument);
