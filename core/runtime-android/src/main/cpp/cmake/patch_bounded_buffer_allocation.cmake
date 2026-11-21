@@ -151,7 +151,8 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
     }]=]
         "log every Dawn buffer allocation and its outcome")
     ai_chat_replace_once(_webgpu
-        [=[    // AI_CHAT_WEBGPU_BUFFER_DIAGNOSTICS_V1
+        [=[
+    // AI_CHAT_WEBGPU_BUFFER_DIAGNOSTICS_V1
     const size_t ai_chat_aligned_size = ROUNDUP_POW2(size, WEBGPU_STORAGE_BUF_BINDING_MULT);
     GGML_LOG_INFO("AI_CHAT_WEBGPU_BUFFER_BEGIN id=%d name=%s device=%s requestedBytes=%zu alignedBytes=%zu maxStorageBindingBytes=%zu\n",
         buffer_id, buf_name.c_str(), ctx->device_name.c_str(), size, ai_chat_aligned_size,
