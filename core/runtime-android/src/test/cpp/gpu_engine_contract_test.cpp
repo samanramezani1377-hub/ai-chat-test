@@ -742,6 +742,10 @@ void test_q8_0_decoder_and_registry() {
         q4_matmul_output_tensor, q5_0_matmul_dispatch).ok());
     assert(build_q5_1_matmul_candidate(q4_activation_tensor, q5_1_weights, 96,
         q4_matmul_output_tensor, q5_1_matmul_dispatch).ok());
+    assert(q5_0_matmul_dispatch.kernel_id == "dawn-q5-0-matmul-f32-activation-v1");
+    assert(q5_1_matmul_dispatch.kernel_id == "dawn-q5-1-matmul-f32-activation-v1");
+    assert(q5_0_matmul_dispatch.wgsl_source.find("WEIGHT_ROW_BYTES: u32 = 44u") != std::string::npos);
+    assert(q5_1_matmul_dispatch.wgsl_source.find("WEIGHT_ROW_BYTES: u32 = 48u") != std::string::npos);
     ComputeDispatch q5_0_matmul_gles_dispatch, q5_1_matmul_gles_dispatch;
     assert(build_q5_0_matmul_gles_candidate(q4_activation_tensor, q5_0_weights, 88,
         q4_matmul_output_tensor, q5_0_matmul_gles_dispatch).ok());
