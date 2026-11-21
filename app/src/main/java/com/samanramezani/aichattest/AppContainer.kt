@@ -61,8 +61,15 @@ class AppContainer(context: Context? = null) {
         traceStore = appContext?.let { AndroidExecutionTraceStore(it) } ?: com.woogit.aicore.observability.InMemoryExecutionTraceStore(),
     )
 
-    private val localModelRuntime = LlamaCppAndroidRuntimeAdapter()
+    private val localModelRuntime = LlamaCppAndroidRuntimeAdapter(
+        gpuLayers = appContext?.getSharedPreferences("inference_settings", Context.MODE_PRIVATE)
+            ?.getInt("gpu_layers", LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_ALL)
+            ?: LlamaCppAndroidRuntimeAdapter.GPU_LAYERS_ALL,
+    )
     val providerStore: CloudflareProviderStore? = appContext?.let { CloudflareProviderStore(it) }
+    fun setGpuLayers(value: Int) = localModelRuntime.setGpuLayers(value)
+    fun gpuLayers(): Int = localModelRuntime.gpuLayers()
+
     val modelRuntime: RuntimeAdapter = if (providerStore != null) ProviderRoutingModelRuntime(localModelRuntime, providerStore) else localModelRuntime
     val conversationHistory: ConversationHistoryRepository = appContext?.let { AndroidConversationHistoryRepository(it) } ?: InMemoryConversationHistoryRepository()
     val modelManager: AndroidModelManager? = appContext?.let {
