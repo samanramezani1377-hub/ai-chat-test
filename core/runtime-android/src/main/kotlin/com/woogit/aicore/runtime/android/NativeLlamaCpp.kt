@@ -162,6 +162,10 @@ internal object NativeLlamaCpp {
     @Synchronized
     fun stop() = nativeStop()
 
+    /** Probes the independent Dawn/Universal GLES engine without loading a model or changing llama.cpp state. */
+    @Synchronized
+    fun gpuEngineDiagnostics(): String = nativeGpuEngineProbe()
+
     fun runtimeInfo(): String = nativeRuntimeInfo()
     fun contextLength(): Int = nativeContextLength()
 
@@ -175,6 +179,7 @@ internal object NativeLlamaCpp {
     @JvmStatic private external fun nativeGenerate(prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float, minP: Float, cachePrefixTokens: Int, continuationPrefixTokens: Int, listener: TokenListener): Int
     @JvmStatic private external fun nativeStop()
     @JvmStatic private external fun nativeUnload()
+    @JvmStatic private external fun nativeGpuEngineProbe(): String
     @JvmStatic private external fun nativeRuntimeInfo(): String
     @JvmStatic private external fun nativeContextLength(): Int
 }

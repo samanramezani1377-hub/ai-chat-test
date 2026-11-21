@@ -194,7 +194,7 @@ target_link_libraries(ai_chat_gpu_backends_android PUBLIC
     ai_chat_gpu_engine ai_chat_gpu_backend_dawn ai_chat_gpu_backend_gles
 )
 
-add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp vision_runtime_android.cpp universal_gpu_adapter.cpp)
+add_library(ai_chat_runtime SHARED native_runtime_android_safe.cpp vision_runtime_android.cpp universal_gpu_adapter.cpp gpu_engine/android_jni.cpp)
 
 # native_runtime.cpp intentionally includes llama.cpp/ggml internal headers for
 # strict backend and tensor-residency validation. Keep both internal source
