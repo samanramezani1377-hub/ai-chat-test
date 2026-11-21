@@ -308,6 +308,35 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
         operation_context.context_length = context.context_length;
         operation_context.prefill = context.prefill;
 
+        // Only the final prompt position is consumed by the sampler. Slice the
+        // final hidden-state row before output projection, avoiding [tokens,vocab]
+        // logits storage during prefill.
+        if (operation.output == "logits" && context.prefill &&
+            context.token_ids.size() > 1 && !operation.inputs.empty()) {
+            auto hidden = operation_context.tensors.find(operation.inputs.front());
+            if (hidden == operation_context.tensors.end() ||
+                hidden->second.descriptor().data_type != DataType::F32 ||
+                hidden->second.descriptor().shape.size() != 2 ||
+                hidden->second.descriptor().shape[0] != token_count) {
+                report.errors.push_back(operation.id + ":LAST_TOKEN_LOGITS_INPUT_INVALID");
+                return {StatusCode::InvalidArgument, "Final hidden-state tensor cannot be sliced for last-token logits"};
+            }
+            const Tensor& full_hidden = hidden->second;
+            const uint64_t row_bytes = full_hidden.descriptor().shape[1] * sizeof(float);
+            if (row_bytes == 0 || token_count - 1 > UINT64_MAX / row_bytes)
+                return {StatusCode::InvalidArgument, "Final hidden-state row offset overflowed"};
+            const uint64_t row_offset = (token_count - 1) * row_bytes;
+            if (full_hidden.byte_offset() > UINT64_MAX - row_offset)
+                return {StatusCode::InvalidArgument, "Final hidden-state byte offset overflowed"};
+            TensorDesc last_row_desc = full_hidden.descriptor();
+            last_row_desc.shape[0] = 1;
+            Tensor last_hidden_row;
+            status = Tensor::create(last_row_desc, full_hidden.buffer(),
+                full_hidden.byte_offset() + row_offset, last_hidden_row);
+            if (!status.ok()) return status;
+            hidden->second = std::move(last_hidden_row);
+        }
+
         if (!operation.weight_tensors.empty()) {
             status = load_model_execution_weights(reader, single, backend, memory,
                                                   device, operation_context);

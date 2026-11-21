@@ -149,6 +149,12 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         return status;
     }
     status = architecture->build_execution_plan(model, plan_);
+    if (status.ok()) {
+        auto logits_operation = std::find_if(plan_.operations.begin(), plan_.operations.end(),
+            [](const ModelPlanOperation& operation) { return operation.output == "logits"; });
+        if (logits_operation != plan_.operations.end() && plan_.vocabulary_size > 0)
+            logits_operation->output_shape = {1, plan_.vocabulary_size};
+    }
     if (!status.ok() || !plan_.structurally_validated || plan_.operations.empty()) {
         last_error_ = "Model execution plan is not structurally valid: " + status.message;
         for (const auto& blocker : plan_.blockers) last_error_ += " | " + blocker;
