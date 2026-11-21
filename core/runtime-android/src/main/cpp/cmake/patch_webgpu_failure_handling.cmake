@@ -163,12 +163,19 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_NONFATAL_CALLBACKS_V2")
                            std::string(message).c_str());]=]
         "identify terminal device loss in diagnostics")
     ai_chat_replace_once(_webgpu
-        [=[            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error (non-fatal diagnostic): reason=%d message=%s\n",
-                           static_cast<int>(reason), std::string(message).c_str());]=]
-        [=[            g_webgpu_graph_error.store(true, std::memory_order_release);
+        [=[        [](const wgpu::Device & device, wgpu::ErrorType reason, wgpu::StringView message) {
+            GGML_UNUSED(device);
+            g_webgpu_device_error.store(true, std::memory_order_release);
+            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error; disabling WebGPU backend for subsequent graph placement: reason=%d message=%s\n",
+                           static_cast<int>(reason), std::string(message).c_str());
+        });]=]
+        [=[        [](const wgpu::Device & device, wgpu::ErrorType reason, wgpu::StringView message) {
+            GGML_UNUSED(device);
+            g_webgpu_graph_error.store(true, std::memory_order_release);
             GGML_LOG_ERROR("AI_CHAT_WEBGPU_UNCAPTURED_ERROR reason=%d message=%s\n",
-                           static_cast<int>(reason), std::string(message).c_str());]=]
-        "record uncaptured Dawn validation errors as recoverable graph failures")
+                           static_cast<int>(reason), std::string(message).c_str());
+        });]=]
+        "separate uncaptured validation failures from terminal device loss")
     string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_NONFATAL_CALLBACKS_V2\n")
 endif()
 
