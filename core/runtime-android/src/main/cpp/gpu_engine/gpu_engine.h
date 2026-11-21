@@ -223,6 +223,7 @@ class GpuEngine {
 public:
     Status register_backend(std::shared_ptr<Backend> backend);
     Status initialize(BackendKind preferred_backend = BackendKind::DawnWebGpu);
+    Status initialize_with_fallback(const std::vector<BackendKind>& preference_order);
     Status execute(const ComputeGraph& graph, const std::atomic<bool>* cancellation = nullptr);
     Status shutdown();
 

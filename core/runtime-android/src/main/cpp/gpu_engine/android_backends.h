@@ -9,5 +9,6 @@ namespace ai_chat::gpu_engine {
 // not claim model/operator readiness.
 Status register_android_gpu_backends(GpuEngine& engine);
 Status initialize_android_gpu_engine(GpuEngine& engine);
+Status initialize_android_gpu_engine(GpuEngine& engine);
 
 } // namespace ai_chat::gpu_engine

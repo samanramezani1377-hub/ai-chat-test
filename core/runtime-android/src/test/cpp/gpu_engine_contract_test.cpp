@@ -726,6 +726,19 @@ void test_gguf_weight_streaming() {
     std::remove(path.c_str());
 }
 
+void test_gpu_engine_backend_fallback() {
+    GpuEngine engine;
+    assert(engine.register_backend(std::make_shared<FakeBackend>(BackendKind::DawnWebGpu, false)).ok());
+    assert(engine.register_backend(std::make_shared<FakeBackend>(BackendKind::OpenGles, true)).ok());
+    assert(engine.initialize_with_fallback({BackendKind::DawnWebGpu, BackendKind::OpenGles}).ok());
+    assert(engine.active_device() != nullptr);
+    assert(engine.active_device()->backend == BackendKind::OpenGles);
+    assert(engine.diagnostics().fallback_used);
+    assert(!engine.diagnostics().fallback_reason.empty());
+    assert(engine.diagnostics().last_error.empty());
+    assert(engine.shutdown().ok());
+}
+
 void test_gpu_engine_lifecycle() {
     GpuEngine engine;
     auto backend = std::make_shared<FakeBackend>();
@@ -1101,20 +1114,16 @@ void test_llama_model_execution_plan_is_structural_only() {
         "blk.0.ffn_gate.weight", "blk.0.ffn_up.weight", "blk.0.ffn_down.weight"
     };
     model.tokenizer.tokens = {"a", "b"};
-    const auto ends_with = [](const std::string& value, const std::string& suffix) {
-        return value.size() >= suffix.size() &&
-               value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
-    };
     for (const auto& name : names) {
         GgufTensorInfo tensor; tensor.name = name;
         if (name == "token_embd.weight") tensor.dimensions = {8, 2};
-        else if (name == "output_norm.weight" || ends_with(name, "attn_norm.weight") ||
-                 ends_with(name, "ffn_norm.weight")) tensor.dimensions = {8};
-        else if (ends_with(name, "attn_k.weight") || ends_with(name, "attn_v.weight"))
+        else if (name == "output_norm.weight" || name.ends_with("attn_norm.weight") ||
+                 name.ends_with("ffn_norm.weight")) tensor.dimensions = {8};
+        else if (name.ends_with("attn_k.weight") || name.ends_with("attn_v.weight"))
             tensor.dimensions = {8, 4};
-        else if (ends_with(name, "ffn_gate.weight") || ends_with(name, "ffn_up.weight"))
+        else if (name.ends_with("ffn_gate.weight") || name.ends_with("ffn_up.weight"))
             tensor.dimensions = {8, 16};
-        else if (ends_with(name, "ffn_down.weight")) tensor.dimensions = {16, 8};
+        else if (name.ends_with("ffn_down.weight")) tensor.dimensions = {16, 8};
         else tensor.dimensions = {8, 8};
         model.tensors.push_back(tensor);
     }
@@ -1381,6 +1390,7 @@ int main() {
     test_builtin_architecture_adapter_is_fail_closed();
     test_add_operator_candidate_and_reference();
     test_gpu_engine_lifecycle();
+    test_gpu_engine_backend_fallback();
     test_gguf_weight_streaming();
     test_tokenizer_engine_contracts();
     test_independent_sampler_and_stop_controller();
