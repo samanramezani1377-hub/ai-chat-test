@@ -271,7 +271,7 @@ public:
             if(error!=GL_NO_ERROR&&id){glDeleteBuffers(1,&id);id=0;}
         },detail);
         if(!ran) return {StatusCode::DeviceLost,detail};
-        if(error!=GL_NO_ERROR) return gl_error("GLES buffer allocation",error);
+        if(error!=GL_NO_ERROR) { Status failure = gl_error("GLES buffer allocation",error); if (failure.code == StatusCode::DeviceLost) healthy_=false; return failure; }
         if(!id) return {StatusCode::BackendFailure,"GLES buffer allocation returned no buffer without a GL error"};
         out=std::make_shared<GlesBuffer>(id,d.size_bytes,d.memory); return Status::success();
     }
@@ -299,6 +299,7 @@ public:
             glFlush();
         },detail);
         if(!ran){healthy_=false;return {StatusCode::DeviceLost,detail};}
+        if (result.code == StatusCode::DeviceLost) healthy_=false;
         return result;
     }
     Status synchronize() override {
@@ -306,7 +307,10 @@ public:
         GLenum e=GL_NO_ERROR; std::string detail;
         const bool ran=ai_chat::gpu::run_universal_gpu_task([&](){glFinish();e=glGetError();},detail);
         if(!ran){healthy_=false;return {StatusCode::DeviceLost,detail};}
-        return e==GL_NO_ERROR?Status::success():gl_error("glFinish",e);
+        if (e == GL_NO_ERROR) return Status::success();
+        Status failure = gl_error("glFinish",e);
+        if (failure.code == StatusCode::DeviceLost) healthy_=false;
+        return failure;
     }
     Status upload(const std::shared_ptr<Buffer>& dst,uint64_t offset,const void* src,uint64_t size) override {
         auto* b=dynamic_cast<GlesBuffer*>(dst.get());
@@ -315,7 +319,11 @@ public:
             return {StatusCode::InvalidArgument,"Invalid GLES upload range"};
         GLenum e=GL_NO_ERROR; std::string detail;
         const bool ran=ai_chat::gpu::run_universal_gpu_task([&](){clear_errors();glBindBuffer(GL_SHADER_STORAGE_BUFFER,b->id());glBufferSubData(GL_SHADER_STORAGE_BUFFER,static_cast<GLintptr>(offset),static_cast<GLsizeiptr>(size),src);glBindBuffer(GL_SHADER_STORAGE_BUFFER,0);e=glGetError();},detail);
-        if(!ran)return {StatusCode::DeviceLost,detail}; return e==GL_NO_ERROR?Status::success():gl_error("GLES upload",e);
+        if(!ran) { healthy_=false; return {StatusCode::DeviceLost,detail}; }
+        if(e==GL_NO_ERROR) return Status::success();
+        Status failure = gl_error("GLES upload",e);
+        if (failure.code == StatusCode::DeviceLost) healthy_=false;
+        return failure;
     }
     Status readback(const std::shared_ptr<Buffer>& src,uint64_t offset,void* dst,uint64_t size) override {
         auto* b=dynamic_cast<GlesBuffer*>(src.get());
@@ -330,10 +338,15 @@ public:
             else {std::memcpy(dst,mapped,static_cast<size_t>(size));const GLboolean ok=glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);e=ok==GL_TRUE?glGetError():GL_INVALID_OPERATION;}
             glBindBuffer(GL_SHADER_STORAGE_BUFFER,0);
         },detail);
-        if(!ran)return {StatusCode::DeviceLost,detail}; return e==GL_NO_ERROR?Status::success():gl_error("GLES readback",e);
+        if(!ran) { healthy_=false; return {StatusCode::DeviceLost,detail}; }
+        if(e==GL_NO_ERROR) return Status::success();
+        Status failure = gl_error("GLES readback",e);
+        if (failure.code == StatusCode::DeviceLost) healthy_=false;
+        return failure;
     }
     Status shutdown() override {
         healthy_ = false;
+        if (program_cache_.empty()) { program_cache_order_.clear(); return Status::success(); }
         std::string detail;
         const bool ran = ai_chat::gpu::run_universal_gpu_task([&]() {
             for (const auto& entry : program_cache_) if (entry.second) glDeleteProgram(entry.second);
