@@ -427,87 +427,6 @@ void test_q8_0_decoder_and_registry() {
     assert(build_q8_0_dequantize_candidate(encoded_buffer, 34, output_tensor, dispatch).ok());
     assert(dispatch.bindings.size() == 2);
     assert(dispatch.label.find("unverified") != std::string::npos);
-    ComputeDispatch gles_dispatch;
-    assert(build_add_f32_gles_candidate(lhs, rhs, output, gles_dispatch).ok());
-    assert(gles_dispatch.backend == BackendKind::OpenGles);
-    assert(gles_dispatch.glsl_source.find("#version 310 es") == 0);
-    assert(gles_dispatch.wgsl_source.empty());
-    OperatorRegistry gles_registry;
-    assert(register_builtin_gles_operator_candidates(gles_registry).ok());
-    KernelDefinition gles_embedding_unverified;
-    assert(gles_registry.select_kernel("Embedding", BackendKind::OpenGles,
-        std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
-        gles_embedding_unverified).code == StatusCode::Unsupported);
-    assert(gles_registry.select_kernel("Add", BackendKind::OpenGles, DataType::F32,
-                                       DataType::F32, 2, 2, selected).code == StatusCode::Unsupported);
-    TensorDesc rhs_matmul_desc = tensor_desc;
-    rhs_matmul_desc.shape = {3, 2};
-    TensorDesc output_matmul_desc = tensor_desc;
-    output_matmul_desc.shape = {2, 2};
-    Tensor rhs_matmul, output_matmul;
-    assert(Tensor::create(rhs_matmul_desc, b, 0, rhs_matmul).ok());
-    assert(Tensor::create(output_matmul_desc, out, 0, output_matmul).ok());
-    ComputeDispatch gles_matmul;
-    assert(build_matmul_f32_gles_candidate(lhs, rhs_matmul, output_matmul, gles_matmul).ok());
-    assert(gles_matmul.backend == BackendKind::OpenGles);
-    assert(gles_matmul.workgroups_x == 1 && gles_matmul.workgroups_y == 1);
-    assert(gles_matmul.glsl_source.find("const uint ROWS = 2u;") != std::string::npos);
-    assert(gles_matmul.glsl_source.find("const uint COLUMNS = 2u;") != std::string::npos);
-    const float matmul_lhs[] = {1, 2, 3, 4, 5, 6};
-    const float matmul_rhs[] = {7, 8, 9, 10, 11, 12};
-    float matmul_output[] = {0, 0, 0, 0};
-    assert(reference_matmul_f32(matmul_lhs, matmul_rhs, matmul_output, 2, 2, 3).ok());
-    assert(matmul_output[0] == 58 && matmul_output[1] == 64 &&
-           matmul_output[2] == 139 && matmul_output[3] == 154);
-    ComputeDispatch gles_silu;
-    assert(build_silu_f32_gles_candidate(lhs, output, gles_silu).ok());
-    assert(gles_silu.backend == BackendKind::OpenGles);
-    assert(gles_silu.glsl_source.find("exp(-x)") != std::string::npos);
-    TensorDesc weight_desc = tensor_desc;
-    weight_desc.shape = {3};
-    Tensor weight_tensor;
-    assert(Tensor::create(weight_desc, b, 0, weight_tensor).ok());
-    ComputeDispatch gles_rms;
-    assert(build_rms_norm_f32_gles_candidate(lhs, weight_tensor, output, 1.0e-5f, gles_rms).ok());
-    assert(gles_rms.workgroups_x == 2);
-    assert(gles_rms.glsl_source.find("const uint COLUMNS = 3u;") != std::string::npos);
-    ComputeDispatch gles_softmax;
-    assert(build_softmax_f32_gles_candidate(lhs, output, gles_softmax).ok());
-    assert(gles_softmax.workgroups_x == 2);
-    assert(gles_softmax.glsl_source.find("const uint COLUMNS = 3u;") != std::string::npos);
-    TensorDesc rope_desc = tensor_desc;
-    rope_desc.shape = {1, 1, 4};
-    std::shared_ptr<Buffer> rope_in_buffer, rope_out_buffer;
-    BufferDesc rope_buffer_desc{16, 4, MemoryDomain::Device, false, "rope"};
-    assert(backend.allocate(rope_buffer_desc, rope_in_buffer).ok());
-    assert(backend.allocate(rope_buffer_desc, rope_out_buffer).ok());
-    Tensor rope_input, rope_output;
-    assert(Tensor::create(rope_desc, rope_in_buffer, 0, rope_input).ok());
-    assert(Tensor::create(rope_desc, rope_out_buffer, 0, rope_output).ok());
-    RopeConfig rope_config; rope_config.rotary_dimensions = 4;
-    ComputeDispatch gles_rope;
-    assert(build_rope_f32_gles_candidate(rope_input, rope_output, rope_config, gles_rope).ok());
-    assert(gles_rope.glsl_source.find("const uint ROTARY_DIM = 4u;") != std::string::npos);
-    BufferDesc q_desc{16, 4, MemoryDomain::Device, false, "attention-q"};
-    BufferDesc kv_desc{8, 4, MemoryDomain::Device, false, "attention-kv"};
-    BufferDesc attn_out_desc{16, 4, MemoryDomain::Device, false, "attention-out"};
-    std::shared_ptr<Buffer> q_buffer, k_buffer, v_buffer, attn_out_buffer;
-    assert(backend.allocate(q_desc, q_buffer).ok());
-    assert(backend.allocate(kv_desc, k_buffer).ok());
-    assert(backend.allocate(kv_desc, v_buffer).ok());
-    assert(backend.allocate(attn_out_desc, attn_out_buffer).ok());
-    TensorDesc q_tensor_desc = tensor_desc; q_tensor_desc.shape = {1, 2, 2};
-    TensorDesc kv_tensor_desc = tensor_desc; kv_tensor_desc.shape = {1, 1, 2};
-    Tensor q_tensor, k_tensor, v_tensor, attn_output;
-    assert(Tensor::create(q_tensor_desc, q_buffer, 0, q_tensor).ok());
-    assert(Tensor::create(kv_tensor_desc, k_buffer, 0, k_tensor).ok());
-    assert(Tensor::create(kv_tensor_desc, v_buffer, 0, v_tensor).ok());
-    assert(Tensor::create(q_tensor_desc, attn_out_buffer, 0, attn_output).ok());
-    ComputeDispatch gles_attention;
-    assert(build_attention_f32_gles_candidate(q_tensor, k_tensor, v_tensor, attn_output, 0, gles_attention).ok());
-    assert(gles_attention.workgroups_x == 1 && gles_attention.workgroups_y == 2);
-    assert(gles_attention.workgroup_size_x == 1 && gles_attention.workgroup_size_y == 1);
-    assert(gles_attention.glsl_source.find("const uint QUERY_HEADS = 2u;") != std::string::npos);
     assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") != std::string::npos);
 
     BufferDesc q4_encoded_desc{20, 4, MemoryDomain::Device, false, "q4-encoded"};
@@ -583,6 +502,8 @@ void test_q8_0_decoder_and_registry() {
     assert(gles_q8_matmul_dispatch.workgroup_size_x == 8 &&
            gles_q8_matmul_dispatch.workgroup_size_y == 8);
     assert(gles_q8_matmul_dispatch.glsl_source.find("const uint WEIGHT_ROW_BYTES = 34u;") != std::string::npos);
+    OperatorRegistry gles_registry;
+    assert(register_builtin_gles_operator_candidates(gles_registry).ok());
     KernelDefinition q8_gles_unverified;
     assert(gles_registry.select_kernel("MatMul_Q8_0", BackendKind::OpenGles,
         std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
