@@ -63,10 +63,12 @@ if (NOT _alloc MATCHES "AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V1")
         "propagate bounded allocator exhaustion")
     ai_chat_replace_once(_alloc
         [=[    alloc->n_chunks = 0;
-}]=]
+
+#ifdef GGML_ALLOCATOR_DEBUG]=]
         [=[    alloc->n_chunks = 0;
     alloc->failed = false;
-}]=]
+
+#ifdef GGML_ALLOCATOR_DEBUG]=]
         "reset allocator failure state")
     ai_chat_replace_once(_alloc
         [=[    ggml_gallocr_alloc_graph_impl(galloc, graph, node_buffer_ids, leaf_buffer_ids);
@@ -130,7 +132,7 @@ file(READ "${_webgpu_file}" _webgpu)
 # std::nothrow is used when creating the host-side buffer context.
 ai_chat_replace_once(_webgpu
     "#include <memory>"
-    "#include <memory>\\n#include <new> // AI_CHAT_WEBGPU_NOTHROW_INCLUDE_V1"
+    "#include <memory>\n#include <new>\n#include <algorithm> // AI_CHAT_WEBGPU_NOTHROW_INCLUDE_V1"
     "include std::nothrow declaration")
 if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
     ai_chat_replace_once(_webgpu
