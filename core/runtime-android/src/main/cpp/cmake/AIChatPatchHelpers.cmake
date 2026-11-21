@@ -2,7 +2,7 @@
 function(ai_chat_replace_once var_name old_text new_text description)
     string(FIND "${${var_name}}" "${old_text}" _patch_pos)
     if (_patch_pos EQUAL -1)
-        message(FATAL_ERROR "Could not apply no-ShaderF16 WebGPU patch: ${description}")
+        message(FATAL_ERROR "AI Chat source patch failed (${description}): expected upstream anchor was not found")
     endif()
     string(REPLACE "${old_text}" "${new_text}" _patch_result "${${var_name}}")
     set(${var_name} "${_patch_result}" PARENT_SCOPE)
