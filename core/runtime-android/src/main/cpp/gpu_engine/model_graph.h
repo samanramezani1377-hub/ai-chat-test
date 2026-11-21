@@ -2,6 +2,7 @@
 
 #include "gguf_reader.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -43,7 +44,6 @@ struct ModelGraphCoverageReport {
     std::vector<std::string> supported_operators;
     std::vector<std::string> unsupported_operators;
 };
-
 
 struct ModelGraphCompileReport {
     bool compiled = false;
