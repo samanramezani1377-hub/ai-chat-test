@@ -194,8 +194,11 @@ GpuMemoryPlanReport plan_gpu_memory(const GpuMemoryPlanInput& input) {
         report.blockers.emplace_back("INVALID_WEIGHT_STREAMING_CHUNK");
         return report;
     }
+    // The streamed set may be slightly larger than the logical file bytes
+    // because each device allocation is padded for SSBO alignment. Preserve
+    // that physical padding in the peak-residency estimate.
     report.resident_weight_bytes = input.stream_weights
-        ? std::min(input.total_weight_bytes, input.streaming_chunk_bytes)
+        ? input.streaming_chunk_bytes
         : input.total_weight_bytes;
 
     if (input.safety_reserve_bytes >= input.device_budget_bytes) {

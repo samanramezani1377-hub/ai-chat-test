@@ -259,6 +259,22 @@ void test_gpu_memory_planner_respects_streaming_and_reserve() {
     assert(report.required_bytes == input.streaming_chunk_bytes +
            input.kv_cache_bytes + input.scratch_bytes);
 
+    input.total_weight_bytes = 100;
+    input.streaming_chunk_bytes = 104; // Per-buffer alignment padding is physically resident.
+    input.kv_cache_bytes = 0;
+    input.scratch_bytes = 0;
+    input.safety_reserve_bytes = 0;
+    input.device_budget_bytes = 200;
+    report = plan_gpu_memory(input);
+    assert(report.fits && report.resident_weight_bytes == 104 &&
+           report.required_bytes == 104);
+
+    input.total_weight_bytes = 8ull * 1024 * 1024 * 1024;
+    input.streaming_chunk_bytes = 8ull * 1024 * 1024;
+    input.kv_cache_bytes = 128ull * 1024 * 1024;
+    input.scratch_bytes = 32ull * 1024 * 1024;
+    input.safety_reserve_bytes = 64ull * 1024 * 1024;
+    input.device_budget_bytes = 512ull * 1024 * 1024;
     input.stream_weights = false;
     report = plan_gpu_memory(input);
     assert(!report.fits);
