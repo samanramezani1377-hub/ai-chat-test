@@ -11,6 +11,68 @@ namespace {
 
 
 
+
+constexpr char kQ5_0DequantizeWgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> encoded: array<u32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+const ELEMENT_COUNT: u32 = 32u;
+fn read_u8(byte_offset: u32) -> u32 {
+    let word = encoded[byte_offset >> 2u];
+    let shift = (byte_offset & 3u) * 8u;
+    return (word >> shift) & 255u;
+}
+fn read_u16(byte_offset: u32) -> u32 {
+    let word = encoded[byte_offset >> 2u];
+    let shift = (byte_offset & 3u) * 8u;
+    return (word >> shift) & 65535u;
+}
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= ELEMENT_COUNT) { return; }
+    let block_index = gid.x / 32u;
+    let within = gid.x % 32u;
+    let offset = block_index * 22u;
+    let scale = unpack2x16float(vec2<u32>(read_u16(offset), 0u)).x;
+    let high_bits = read_u8(offset + 2u) | (read_u8(offset + 3u) << 8u) |
+                    (read_u8(offset + 4u) << 16u) | (read_u8(offset + 5u) << 24u);
+    let packed = read_u8(offset + 6u + (within % 16u));
+    let nibble = select(packed & 15u, packed >> 4u, within >= 16u);
+    let high = (high_bits >> within) & 1u;
+    output[gid.x] = scale * f32(i32(nibble | (high << 4u)) - 16);
+}
+)wgsl";
+
+constexpr char kQ5_1DequantizeWgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> encoded: array<u32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+const ELEMENT_COUNT: u32 = 32u;
+fn read_u8(byte_offset: u32) -> u32 {
+    let word = encoded[byte_offset >> 2u];
+    let shift = (byte_offset & 3u) * 8u;
+    return (word >> shift) & 255u;
+}
+fn read_u16(byte_offset: u32) -> u32 {
+    let word = encoded[byte_offset >> 2u];
+    let shift = (byte_offset & 3u) * 8u;
+    return (word >> shift) & 65535u;
+}
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= ELEMENT_COUNT) { return; }
+    let block_index = gid.x / 32u;
+    let within = gid.x % 32u;
+    let offset = block_index * 24u;
+    let scale = unpack2x16float(vec2<u32>(read_u16(offset), 0u)).x;
+    let minimum = unpack2x16float(vec2<u32>(read_u16(offset + 2u), 0u)).x;
+    let high_bits = read_u8(offset + 4u) | (read_u8(offset + 5u) << 8u) |
+                    (read_u8(offset + 6u) << 16u) | (read_u8(offset + 7u) << 24u);
+    let packed = read_u8(offset + 8u + (within % 16u));
+    let nibble = select(packed & 15u, packed >> 4u, within >= 16u);
+    let high = (high_bits >> within) & 1u;
+    output[gid.x] = scale * f32(nibble | (high << 4u)) + minimum;
+}
+)wgsl";
+
 constexpr char kQ4_1DequantizeWgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> encoded: array<u32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
@@ -287,6 +349,77 @@ Status decode_q8_0_blocks(const uint8_t* source, size_t source_bytes,
 
 
 
+
+
+const char* q5_0_dequantize_wgsl_source() noexcept { return kQ5_0DequantizeWgsl; }
+
+Status build_q5_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
+                                       uint64_t encoded_bytes,
+                                       const Tensor& output,
+                                       ComputeDispatch& dispatch) {
+    dispatch = ComputeDispatch{};
+    if (!encoded || !output.buffer() || output.descriptor().data_type != DataType::F32 ||
+        output.descriptor().layout != TensorLayout::Contiguous ||
+        output.descriptor().memory == MemoryDomain::Host || output.descriptor().shape.empty())
+        return {StatusCode::Unsupported, "Q5_0 GPU decoder requires a device/shared encoded buffer and contiguous F32 output"};
+    constexpr uint64_t block_elements = 32, block_bytes = 22;
+    if (output.element_count() == 0 || output.element_count() % block_elements != 0 ||
+        output.element_count() > UINT32_MAX)
+        return {StatusCode::InvalidArgument, "Q5_0 output must contain complete blocks and fit WGSL indexing"};
+    const uint64_t blocks = output.element_count() / block_elements;
+    if (blocks > UINT64_MAX / block_bytes || encoded_bytes != blocks * block_bytes ||
+        encoded_bytes > static_cast<uint64_t>(UINT32_MAX) - 3)
+        return {StatusCode::InvalidArgument, "Q5_0 encoded size does not match output elements"};
+    const uint64_t padded = (encoded_bytes + 3) & ~uint64_t{3};
+    if (encoded->size_bytes() < padded || output.byte_size() != output.element_count() * sizeof(float) ||
+        encoded.get() == output.buffer().get())
+        return {StatusCode::InvalidArgument, "Q5_0 input/output buffer ranges are inconsistent"};
+    dispatch.label = "q5-0-dequantize-generic-unverified";
+    dispatch.wgsl_source = kQ5_0DequantizeWgsl;
+    const std::string placeholder = "const ELEMENT_COUNT: u32 = 32u;";
+    const std::string replacement = "const ELEMENT_COUNT: u32 = " + std::to_string(output.element_count()) + "u;";
+    const size_t position = dispatch.wgsl_source.find(placeholder);
+    if (position == std::string::npos) return {StatusCode::BackendFailure, "Q5_0 WGSL placeholder missing"};
+    dispatch.wgsl_source.replace(position, placeholder.size(), replacement);
+    dispatch.workgroups_x = static_cast<uint32_t>((output.element_count() + 63) / 64);
+    dispatch.bindings = {{0, encoded, 0, padded}, {1, output.buffer(), output.byte_offset(), output.byte_size()}};
+    return Status::success();
+}
+
+const char* q5_1_dequantize_wgsl_source() noexcept { return kQ5_1DequantizeWgsl; }
+
+Status build_q5_1_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
+                                       uint64_t encoded_bytes,
+                                       const Tensor& output,
+                                       ComputeDispatch& dispatch) {
+    dispatch = ComputeDispatch{};
+    if (!encoded || !output.buffer() || output.descriptor().data_type != DataType::F32 ||
+        output.descriptor().layout != TensorLayout::Contiguous ||
+        output.descriptor().memory == MemoryDomain::Host || output.descriptor().shape.empty())
+        return {StatusCode::Unsupported, "Q5_1 GPU decoder requires a device/shared encoded buffer and contiguous F32 output"};
+    constexpr uint64_t block_elements = 32, block_bytes = 24;
+    if (output.element_count() == 0 || output.element_count() % block_elements != 0 ||
+        output.element_count() > UINT32_MAX)
+        return {StatusCode::InvalidArgument, "Q5_1 output must contain complete blocks and fit WGSL indexing"};
+    const uint64_t blocks = output.element_count() / block_elements;
+    if (blocks > UINT64_MAX / block_bytes || encoded_bytes != blocks * block_bytes ||
+        encoded_bytes > static_cast<uint64_t>(UINT32_MAX) - 3)
+        return {StatusCode::InvalidArgument, "Q5_1 encoded size does not match output elements"};
+    const uint64_t padded = (encoded_bytes + 3) & ~uint64_t{3};
+    if (encoded->size_bytes() < padded || output.byte_size() != output.element_count() * sizeof(float) ||
+        encoded.get() == output.buffer().get())
+        return {StatusCode::InvalidArgument, "Q5_1 input/output buffer ranges are inconsistent"};
+    dispatch.label = "q5-1-dequantize-generic-unverified";
+    dispatch.wgsl_source = kQ5_1DequantizeWgsl;
+    const std::string placeholder = "const ELEMENT_COUNT: u32 = 32u;";
+    const std::string replacement = "const ELEMENT_COUNT: u32 = " + std::to_string(output.element_count()) + "u;";
+    const size_t position = dispatch.wgsl_source.find(placeholder);
+    if (position == std::string::npos) return {StatusCode::BackendFailure, "Q5_1 WGSL placeholder missing"};
+    dispatch.wgsl_source.replace(position, placeholder.size(), replacement);
+    dispatch.workgroups_x = static_cast<uint32_t>((output.element_count() + 63) / 64);
+    dispatch.bindings = {{0, encoded, 0, padded}, {1, output.buffer(), output.byte_offset(), output.byte_size()}};
+    return Status::success();
+}
 
 const char* q4_1_dequantize_wgsl_source() noexcept { return kQ4_1DequantizeWgsl; }
 
