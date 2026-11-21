@@ -50,7 +50,7 @@ public:
         auto* s = dynamic_cast<GlesBuffer*>(src.get());
         auto* d = dynamic_cast<GlesBuffer*>(dst.get());
         if (!s || !d || !size || so > s->size_bytes() || size > s->size_bytes()-so ||
-            dso > d->size_bytes() || size > d->size_bytes()-dso || ((so|dso|size)&3u))
+            dso > d->size_bytes() || size > d->size_bytes()-dso)
             return {StatusCode::InvalidArgument, "Invalid GLES buffer copy range"};
         GlesCommand c; c.type=GlesCommand::Type::Copy; c.source=src; c.destination=dst;
         c.source_offset=so; c.destination_offset=dso; c.size=size; commands_.push_back(std::move(c));
@@ -259,7 +259,7 @@ public:
     Status allocate(const BufferDesc& d,std::shared_ptr<Buffer>& out) override {
         out.reset();
         if(!healthy()) return {StatusCode::DeviceLost,"GLES backend is not initialized"};
-        if(d.memory==MemoryDomain::Host||!d.size_bytes||d.size_bytes%4||
+        if(d.memory==MemoryDomain::Host||!d.size_bytes||
            d.size_bytes>static_cast<uint64_t>(std::max<int64_t>(0,caps_.max_shader_storage_block_bytes))||
            d.size_bytes>static_cast<uint64_t>(std::numeric_limits<GLsizeiptr>::max()))
             return {StatusCode::InvalidArgument,"GLES buffer size/domain is unsupported or exceeds SSBO limit"};
