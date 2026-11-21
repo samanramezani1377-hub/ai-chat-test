@@ -97,11 +97,18 @@ Status compile_program(const std::string& source, GLuint& program) {
 }
 
 Status dispatch_gles(const ComputeDispatch& d, const ai_chat::gpu::UniversalGpuCapabilities& caps) {
-    if (d.workgroups_x>static_cast<uint32_t>(std::max(0,caps.max_compute_workgroup_count_x)) ||
-        d.workgroups_y>static_cast<uint32_t>(std::max(0,caps.max_compute_workgroup_count_y)) ||
-        d.workgroups_z>static_cast<uint32_t>(std::max(0,caps.max_compute_workgroup_count_z)) ||
-        d.bindings.size()>static_cast<size_t>(std::max(0,caps.max_shader_storage_buffer_bindings)))
-        return {StatusCode::Unsupported,"GLES dispatch exceeds discovered workgroup or SSBO binding limits"};
+    const uint64_t workgroup_invocations = static_cast<uint64_t>(d.workgroup_size_x) *
+        d.workgroup_size_y * d.workgroup_size_z;
+    if (!d.workgroup_size_x || !d.workgroup_size_y || !d.workgroup_size_z ||
+        d.workgroup_size_x > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_size_x)) ||
+        d.workgroup_size_y > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_size_y)) ||
+        d.workgroup_size_z > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_size_z)) ||
+        workgroup_invocations > static_cast<uint64_t>(std::max(0, caps.max_compute_invocations)) ||
+        d.workgroups_x > static_cast<uint32_t>(std::max(0,caps.max_compute_workgroup_count_x)) ||
+        d.workgroups_y > static_cast<uint32_t>(std::max(0,caps.max_compute_workgroup_count_y)) ||
+        d.workgroups_z > static_cast<uint32_t>(std::max(0,caps.max_compute_workgroup_count_z)) ||
+        d.bindings.size() > static_cast<size_t>(std::max(0,caps.max_shader_storage_buffer_bindings)))
+        return {StatusCode::Unsupported, "GLES dispatch exceeds discovered workgroup-size, invocation, count or SSBO limits"};
     const uint64_t local_invocations = static_cast<uint64_t>(d.workgroup_size_x) *
         d.workgroup_size_y * d.workgroup_size_z;
     if (!d.workgroup_size_x || !d.workgroup_size_y || !d.workgroup_size_z ||
