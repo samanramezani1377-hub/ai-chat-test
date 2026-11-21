@@ -3291,4 +3291,90 @@ Status reference_q5_1_matmul(const float* a,const uint8_t*w,uint64_t bytes,float
     return Status::success();
 }
 
+
+namespace {
+Status validate_q5_matmul_kernel_impl(Backend& backend, OperatorRegistry& operators,
+                                      QuantizationRegistry& quantizations, bool q5_1) {
+    const BackendKind kind=backend.kind();
+    if((kind!=BackendKind::DawnWebGpu&&kind!=BackendKind::OpenGles)||!backend.healthy())
+        return {StatusCode::NotReady,"Q5 MatMul validation requires a healthy Dawn or GLES backend"};
+    const uint32_t type_id=q5_1?7u:6u;
+    auto format=quantizations.formats_.find(type_id);
+    if(format==quantizations.formats_.end()||format->second.decoder_state!=SupportState::Validated)
+        return {StatusCode::NotReady,"Q5 host decoder must be validated before GPU kernel promotion"};
+    const auto state=format->second.backend_gpu_kernel_states.find(kind);
+    if(state!=format->second.backend_gpu_kernel_states.end()&&state->second==SupportState::Validated)return Status::success();
+    const std::string suffix=q5_1?"q5-1":"q5-0";
+    const std::string kernel_id=(kind==BackendKind::OpenGles?"gles-":"dawn-")+suffix+"-matmul-f32-activation-v1";
+    auto kernel=std::find_if(operators.kernels_.begin(),operators.kernels_.end(),[&](const KernelDefinition& k){
+        return k.kernel_id==kernel_id&&k.backend==kind;
+    });
+    if(kernel==operators.kernels_.end())return {StatusCode::NotReady,"Q5 MatMul candidate is not registered for selected backend"};
+    if(kernel->validation==KernelValidation::Validated){format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;format->second.gpu_kernel_state=SupportState::Validated;return Status::success();}
+    if(kernel->validation!=KernelValidation::Unverified)return {StatusCode::Unsupported,"Q5 MatMul candidate is rejected"};
+    const bool gles=kind==BackendKind::OpenGles;
+    const std::string& registered=gles?kernel->glsl_source:kernel->wgsl_source;
+    const std::string& canonical=q5_1?(gles?q5_1_matmul_glsl_source():q5_1_matmul_wgsl_source())
+                                    :(gles?q5_0_matmul_glsl_source():q5_0_matmul_wgsl_source());
+    if(registered.empty()||registered!=canonical)return {StatusCode::InvalidArgument,"Q5 MatMul registered shader differs from canonical source"};
+    constexpr uint32_t rows=2,channels=2,inner=64;
+    const uint32_t block_bytes=q5_1?24u:22u;
+    const uint64_t bytes=static_cast<uint64_t>(channels)*(inner/32)*block_bytes;
+    std::vector<float> activations(rows*inner);
+    for(size_t i=0;i<activations.size();++i)activations[i]=(static_cast<int>(i%9)-4)*0.25f;
+    std::vector<uint8_t> encoded(static_cast<size_t>(bytes),0);
+    for(uint32_t block=0;block<channels*(inner/32);++block){
+        const size_t off=static_cast<size_t>(block)*block_bytes;
+        encoded[off]=0x00;encoded[off+1]=0x38;
+        const uint32_t qh_offset=q5_1?4u:2u, qs_offset=q5_1?8u:6u;
+        if(q5_1){encoded[off+2]=0x00;encoded[off+3]=0xbc;}
+        for(uint32_t i=0;i<4;++i)encoded[off+qh_offset+i]=static_cast<uint8_t>(0x96u+(i*17u));
+        for(uint32_t i=0;i<16;++i){
+            const uint8_t low=static_cast<uint8_t>((i+block)%16);
+            const uint8_t high=static_cast<uint8_t>((i+block+5)%16);
+            encoded[off+qs_offset+i]=static_cast<uint8_t>(low|(high<<4));
+        }
+    }
+    float expected[rows*channels]={},actual[rows*channels]={};
+    Status status=q5_1?reference_q5_1_matmul(activations.data(),encoded.data(),bytes,expected,rows,channels,inner)
+                      :reference_q5_0_matmul(activations.data(),encoded.data(),bytes,expected,rows,channels,inner);
+    if(!status.ok())return status;
+    BufferDesc ad{activations.size()*sizeof(float),alignof(float),MemoryDomain::Device,false,"q5-validation-activations"};
+    BufferDesc wd{(bytes+3)&~uint64_t{3},4,MemoryDomain::Device,true,"q5-validation-weights"};
+    BufferDesc od{sizeof(actual),alignof(float),MemoryDomain::Device,false,"q5-validation-output"};
+    std::shared_ptr<Buffer> ab,wb,ob;
+    status=backend.allocate(ad,ab);if(!status.ok())return status;
+    status=backend.allocate(wd,wb);if(!status.ok())return status;
+    status=backend.allocate(od,ob);if(!status.ok())return status;
+    status=backend.upload(ab,0,activations.data(),ad.size_bytes);if(!status.ok())return status;
+    status=backend.upload(wb,0,encoded.data(),bytes);if(!status.ok())return status;
+    TensorDesc atd;atd.shape={rows,inner};atd.data_type=DataType::F32;
+    TensorDesc otd;otd.shape={rows,channels};otd.data_type=DataType::F32;
+    Tensor at,ot;status=Tensor::create(atd,ab,0,at);if(!status.ok())return status;
+    status=Tensor::create(otd,ob,0,ot);if(!status.ok())return status;
+    ComputeDispatch dispatch;
+    if(q5_1)status=gles?build_q5_1_matmul_gles_candidate(at,wb,bytes,ot,dispatch):build_q5_1_matmul_candidate(at,wb,bytes,ot,dispatch);
+    else status=gles?build_q5_0_matmul_gles_candidate(at,wb,bytes,ot,dispatch):build_q5_0_matmul_candidate(at,wb,bytes,ot,dispatch);
+    if(!status.ok())return status;
+    if(dispatch.kernel_id!=kernel_id||dispatch.backend!=kind)return {StatusCode::InvalidArgument,"Q5 MatMul candidate identity mismatch"};
+    dispatch.validation=KernelValidation::Validated;
+    std::unique_ptr<CommandBatch> commands;status=backend.begin_commands(commands);if(!status.ok())return status;
+    if(!commands)return {StatusCode::BackendFailure,"Q5 MatMul backend returned empty command batch"};
+    status=commands->dispatch_compute(dispatch);if(!status.ok())return status;
+    status=backend.submit(std::move(commands));if(!status.ok())return status;
+    status=backend.synchronize();if(!status.ok())return status;
+    status=backend.readback(ob,0,actual,sizeof(actual));if(!status.ok())return status;
+    for(size_t i=0;i<rows*channels;++i){
+        const float tolerance=1.0e-4f*std::max(1.0f,std::fabs(expected[i]));
+        if(!std::isfinite(actual[i])||std::fabs(actual[i]-expected[i])>tolerance)
+            return {StatusCode::NumericalFailure,"Q5 MatMul GPU output differs from independent block-decoder reference"};
+    }
+    kernel->validation=KernelValidation::Validated;
+    format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;
+    format->second.gpu_kernel_state=SupportState::Validated;
+    return Status::success();
+}
+}
+Status validate_q5_0_matmul_kernel(Backend& b,OperatorRegistry& o,QuantizationRegistry& q){return validate_q5_matmul_kernel_impl(b,o,q,false);}
+Status validate_q5_1_matmul_kernel(Backend& b,OperatorRegistry& o,QuantizationRegistry& q){return validate_q5_matmul_kernel_impl(b,o,q,true);}
 } // namespace ai_chat::gpu_engine
