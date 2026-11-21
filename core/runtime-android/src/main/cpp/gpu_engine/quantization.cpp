@@ -1020,7 +1020,7 @@ Status validate_q4_1_matmul_kernel(Backend& backend, OperatorRegistry& operators
     if ((backend_kind != BackendKind::DawnWebGpu && backend_kind != BackendKind::OpenGles) ||
         !backend.healthy())
         return {StatusCode::NotReady, "Q4_1 MatMul validation requires a healthy Dawn or GLES backend"};
-    constexpr uint32_t kQ4_1TypeId = 2;
+    constexpr uint32_t kQ4_1TypeId = 3;
     auto format = quantizations.formats_.find(kQ4_1TypeId);
     if (format == quantizations.formats_.end() || format->second.decoder_state != SupportState::Validated)
         return {StatusCode::NotReady, "Q4_1 host decoder must be validated before GPU kernel promotion"};
