@@ -88,6 +88,9 @@ struct ModelPreflightReport {
     uint64_t unknown_storage_tensors = 0;
     uint64_t unverified_quantized_tensors = 0;
     bool architecture_known = false;
+    bool tokenizer_metadata_valid = false;
+    bool tokenizer_adapter_registered = false;
+    bool tokenizer_adapter_validated = false;
     bool all_tensor_storage_known = false;
     bool all_quantization_decoders_validated = false;
     bool all_quantization_gpu_kernels_validated = false;
