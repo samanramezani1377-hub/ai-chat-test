@@ -22,8 +22,8 @@ if (NOT _alloc MATCHES "AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V1")
         "#define GGML_VBUFFER_MAX_CHUNKS 64"
         "raise bounded virtual-buffer chunk count")
     ai_chat_replace_once(_alloc
-        "    int n_chunks;\n};"
-        "    int n_chunks;\n    bool failed; // allocation exhaustion is reported to reserve, never process-aborted\n};"
+        "    int n_chunks;\n#ifdef GGML_ALLOCATOR_DEBUG"
+        "    int n_chunks;\n    bool failed; // allocation exhaustion is reported to reserve, never process-aborted\n#ifdef GGML_ALLOCATOR_DEBUG"
         "add allocator failure state")
     ai_chat_replace_once(_alloc
         [=[    struct tallocr_chunk * chunk = calloc(1, sizeof(struct tallocr_chunk));
