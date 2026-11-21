@@ -7,6 +7,7 @@
 #include "quantization.h"
 #include "kv_cache.h"
 #include "runtime_router.h"
+#include "memory_planner.h"
 
 #include <algorithm>
 #include <cmath>
@@ -224,6 +225,34 @@ private:
 
 
 
+
+
+void test_gpu_memory_planner_respects_streaming_and_reserve() {
+    GpuMemoryPlanInput input;
+    input.total_weight_bytes = 8ull * 1024 * 1024 * 1024;
+    input.streaming_chunk_bytes = 8ull * 1024 * 1024;
+    input.kv_cache_bytes = 128ull * 1024 * 1024;
+    input.scratch_bytes = 32ull * 1024 * 1024;
+    input.safety_reserve_bytes = 64ull * 1024 * 1024;
+    input.device_budget_bytes = 512ull * 1024 * 1024;
+    input.stream_weights = true;
+    auto report = plan_gpu_memory(input);
+    assert(report.fits);
+    assert(report.resident_weight_bytes == input.streaming_chunk_bytes);
+    assert(report.required_bytes == input.streaming_chunk_bytes +
+           input.kv_cache_bytes + input.scratch_bytes);
+
+    input.stream_weights = false;
+    report = plan_gpu_memory(input);
+    assert(!report.fits);
+    assert(!report.blockers.empty());
+
+    input.stream_weights = true;
+    input.device_budget_bytes = 0;
+    report = plan_gpu_memory(input);
+    assert(!report.fits);
+    assert(report.blockers.front() == "GPU_MEMORY_BUDGET_UNKNOWN");
+}
 
 void test_runtime_router_fails_closed_to_cpu() {
     RuntimeReadiness readiness;
@@ -977,6 +1006,7 @@ int main() {
     test_q8_0_decoder_and_registry();
     test_kv_cache_memory_and_sequential_append();
     test_runtime_router_fails_closed_to_cpu();
+    test_gpu_memory_planner_respects_streaming_and_reserve();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";
     return 0;
