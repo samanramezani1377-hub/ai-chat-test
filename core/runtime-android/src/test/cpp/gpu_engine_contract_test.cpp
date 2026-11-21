@@ -4,6 +4,7 @@
 #include "operators.h"
 #include "weight_streamer.h"
 #include "sampler.h"
+#include "quantization.h"
 
 #include <algorithm>
 #include <cmath>
@@ -216,6 +217,33 @@ private:
 
 
 
+
+
+void test_q8_0_decoder_and_registry() {
+    std::vector<uint8_t> encoded(34, 0);
+    encoded[0] = 0x00;
+    encoded[1] = 0x38; // FP16 0.5
+    encoded[2] = static_cast<uint8_t>(-2);
+    encoded[3] = static_cast<uint8_t>(-1);
+    encoded[4] = 0;
+    encoded[5] = 1;
+    encoded[6] = 2;
+    float decoded[32] = {};
+    assert(decode_q8_0_blocks(encoded.data(), encoded.size(), decoded, 32).ok());
+    assert(decoded[0] == -1.0f && decoded[1] == -0.5f &&
+           decoded[2] == 0.0f && decoded[3] == 0.5f && decoded[4] == 1.0f);
+    assert(decode_q8_0_blocks(encoded.data(), encoded.size() - 1, decoded, 32).code ==
+           StatusCode::InvalidArgument);
+
+    encoded[0] = 0x00; encoded[1] = 0x7e; // NaN scale
+    assert(decode_q8_0_blocks(encoded.data(), encoded.size(), decoded, 32).code ==
+           StatusCode::NumericalFailure);
+
+    QuantizationRegistry registry;
+    assert(register_builtin_quantization_formats(registry).ok());
+    assert(registry.can_decode(8));
+    assert(!registry.can_execute_on_gpu(8));
+}
 
 void test_independent_sampler_and_stop_controller() {
     SamplingConfig greedy;
@@ -503,6 +531,7 @@ int main() {
     test_gpu_engine_lifecycle();
     test_gguf_weight_streaming();
     test_independent_sampler_and_stop_controller();
+    test_q8_0_decoder_and_registry();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";
     return 0;

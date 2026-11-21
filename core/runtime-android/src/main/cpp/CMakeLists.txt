@@ -151,6 +151,7 @@ add_library(ai_chat_gpu_engine STATIC
     gpu_engine/operators.cpp
     gpu_engine/weight_streamer.cpp
     gpu_engine/sampler.cpp
+    gpu_engine/quantization.cpp
 )
 target_include_directories(ai_chat_gpu_engine PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}
