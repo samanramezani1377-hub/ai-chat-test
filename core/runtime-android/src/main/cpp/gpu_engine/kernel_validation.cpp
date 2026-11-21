@@ -60,7 +60,15 @@ Status execute_and_compare(Backend& backend, const ComputeDispatch& dispatch,
     Status status = backend.begin_commands(commands);
     if (!status.ok()) return status;
     if (!commands) return {StatusCode::BackendFailure, "Backend returned an empty validation command batch"};
-    status = commands->dispatch_compute(dispatch);
+    // Candidate kernels are intentionally Unverified until this exact GPU
+    // execution/readback succeeds. The backend requires a validated dispatch
+    // token even during the isolated validation run; do not mutate the registry
+    // here. Promotion happens only in run_one() after numerical parity passes.
+    ComputeDispatch validation_dispatch = dispatch;
+    if (validation_dispatch.backend != backend.kind() || validation_dispatch.kernel_id.empty())
+        return {StatusCode::InvalidArgument, "Kernel validation dispatch identity does not match the selected backend"};
+    validation_dispatch.validation = KernelValidation::Validated;
+    status = commands->dispatch_compute(validation_dispatch);
     if (!status.ok()) return status;
     status = backend.submit(std::move(commands));
     if (!status.ok()) return status;
