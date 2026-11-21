@@ -298,7 +298,7 @@ void test_kv_cache_memory_and_sequential_append() {
 void test_q5_decoders() {
     std::vector<uint8_t> q5_0(22, 0);
     q5_0[0] = 0x00; q5_0[1] = 0x38; // d = 0.5
-    q5_0[2] = 0x01; q5_0[5] = 0x01; // high bits for q[0] and q[16]
+    q5_0[2] = 0x01; q5_0[4] = 0x01; // high bits for q[0] and q[16]
     q5_0[6] = 0x10; // low nibble 0, high nibble 1
     float q5_0_output[32] = {};
     assert(decode_q5_0_blocks(q5_0.data(), q5_0.size(), q5_0_output, 32).ok());
@@ -307,7 +307,7 @@ void test_q5_decoders() {
     std::vector<uint8_t> q5_1(24, 0);
     q5_1[0] = 0x00; q5_1[1] = 0x38; // d = 0.5
     q5_1[2] = 0x00; q5_1[3] = 0x3c; // m = 1.0
-    q5_1[4] = 0x01; q5_1[7] = 0x01;
+    q5_1[4] = 0x01; q5_1[6] = 0x01;
     q5_1[8] = 0x10;
     float q5_1_output[32] = {};
     assert(decode_q5_1_blocks(q5_1.data(), q5_1.size(), q5_1_output, 32).ok());
