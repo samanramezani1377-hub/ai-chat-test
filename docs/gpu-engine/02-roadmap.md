@@ -69,3 +69,5 @@ CI/source checks are useful but not hardware evidence. Do not wait for CI to pro
 - **2026-11-22 / device KV cache path:** added typed tensor validation, device-to-device K/V cache append via command-buffer copies (no host readback), post-synchronization valid-token accounting, and tensor views over valid cache prefixes. Integration into staged model graph execution remains pending.
 
 - **2026-11-22 / Embedding lowering:** added backend-owned token-ID upload and dispatch-lifetime binding for the F32 Embedding candidate; graph compilation now resolves `token_ids` as a declared external input. Tokenizer and GPU numerical parity remain UNVERIFIED.
+
+- **2026-11-22 / graph-ordered KV cache:** introduced internal copy-only graph nodes, explicit control dependencies and side-effect outputs; dense plans now sequence K/V cache append before Attention. Added typed planned-prefix K/V tensor views and post-sync valid-token commits. The host contract validates ordering and cache state; real-device ordering and Attention parity remain UNVERIFIED.

@@ -132,3 +132,8 @@ The lowering registry is keyed by backend and operator, and resolves tensors thr
 ### Token-ID and embedding binding
 
 The model execution context carries token IDs and the selected backend. The Embedding lowering allocates a device token-ID buffer, uploads the exact token sequence, and binds it with the weight/output tensors. The graph compiler treats `token_ids` as a declared external host input and does not fabricate a Tensor for it. The upload buffer lifetime is held by the compute dispatch. This is a structural path only; tokenizer and Embedding kernel parity remain separate validation gates.
+
+
+### Graph-ordered KV cache and attention
+
+KVCacheAppend is represented as an internal copy-only graph node. It records two bounded device-buffer copies (K and V) in the same backend command batch as compute operations, after their producer nodes and before Attention through explicit control dependencies. The graph compiler allows side-effect outputs without fabricating tensor storage. Attention binds K/V tensor views sized to `past_length + sequence_length`. The cache valid-token counters are advanced only after the entire graph has submitted and synchronized; failed execution leaves the logical cache length unchanged so the same append range can be safely overwritten on retry. Internal copy nodes do not masquerade as validated math operators.
