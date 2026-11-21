@@ -487,6 +487,9 @@ void test_dawn_q8_0_operator_registration_is_unverified() {
     assert(registry.select_kernel("MatMul_Q4_1", BackendKind::DawnWebGpu,
         std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
         selected).code == StatusCode::Unsupported);
+    assert(registry.select_kernel("Embedding_Q4_0", BackendKind::DawnWebGpu,
+        std::vector<DataType>{DataType::U32, DataType::U32}, DataType::F32, 2,
+        selected).code == StatusCode::Unsupported);
 }
 
 
@@ -500,6 +503,8 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     assert(validate_q8_0_matmul_kernel(backend, operators, quantizations).code ==
            StatusCode::NumericalFailure);
     assert(validate_q4_0_matmul_kernel(backend, operators, quantizations).code ==
+           StatusCode::NumericalFailure);
+    assert(validate_q4_0_embedding_kernel(backend, operators).code ==
            StatusCode::NumericalFailure);
     assert(validate_q4_1_matmul_kernel(backend, operators, quantizations).code ==
            StatusCode::NumericalFailure);
@@ -642,6 +647,31 @@ void test_q8_0_decoder_and_registry() {
                                             q4_matmul_output_tensor, q4_1_gles_dispatch).ok());
     assert(q4_1_gles_dispatch.backend == BackendKind::OpenGles);
     assert(q4_1_gles_dispatch.glsl_source.find("WEIGHT_ROW_BYTES = 40u") != std::string::npos);
+
+    BufferDesc q4_embedding_weights_desc{36, 4, MemoryDomain::Device, true, "q4-embedding-weights"};
+    BufferDesc q4_embedding_tokens_desc{2 * sizeof(uint32_t), 4, MemoryDomain::Device, false, "q4-embedding-token-ids"};
+    BufferDesc q4_embedding_output_desc{2 * 32 * sizeof(float), 4, MemoryDomain::Device, false, "q4-embedding-output"};
+    std::shared_ptr<Buffer> q4_embedding_weights, q4_embedding_tokens, q4_embedding_output;
+    assert(backend.allocate(q4_embedding_weights_desc, q4_embedding_weights).ok());
+    assert(backend.allocate(q4_embedding_tokens_desc, q4_embedding_tokens).ok());
+    assert(backend.allocate(q4_embedding_output_desc, q4_embedding_output).ok());
+    TensorDesc q4_embedding_output_td; q4_embedding_output_td.shape = {2, 32};
+    q4_embedding_output_td.data_type = DataType::F32;
+    Tensor q4_embedding_output_tensor;
+    assert(Tensor::create(q4_embedding_output_td, q4_embedding_output, 0,
+                          q4_embedding_output_tensor).ok());
+    const std::vector<uint32_t> q4_embedding_ids = {1, 0};
+    ComputeDispatch q4_embedding_dispatch;
+    assert(build_q4_0_embedding_candidate(q4_embedding_weights, 36, 2, 32,
+        q4_embedding_tokens, q4_embedding_ids, q4_embedding_output_tensor,
+        q4_embedding_dispatch).ok());
+    assert(q4_embedding_dispatch.kernel_id == "dawn-q4-0-embedding-f32-v1");
+    assert(q4_embedding_dispatch.wgsl_source.find("WEIGHT_ROW_BYTES: u32 = 18u") != std::string::npos);
+    ComputeDispatch q4_embedding_gles_dispatch;
+    assert(build_q4_0_embedding_gles_candidate(q4_embedding_weights, 36, 2, 32,
+        q4_embedding_tokens, q4_embedding_ids, q4_embedding_output_tensor,
+        q4_embedding_gles_dispatch).ok());
+    assert(q4_embedding_gles_dispatch.backend == BackendKind::OpenGles);
     OperatorRegistry gles_registry;
     assert(register_builtin_gles_operator_candidates(gles_registry).ok());
     assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") != std::string::npos);
