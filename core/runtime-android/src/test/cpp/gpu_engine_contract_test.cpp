@@ -1310,15 +1310,20 @@ void test_activation_allocator_reuses_non_overlapping_tensor_slots() {
     second.inputs = {"x", "c"}; second.output = "y"; second.output_shape = {0, 4};
     ModelPlanOperation third; third.id = "third"; third.operator_name = "Add";
     third.inputs = {"y", "d"}; third.output = "z"; third.output_shape = {0, 4};
-    plan.operations = {first, second, third};
+    ModelPlanOperation fourth; fourth.id = "fourth"; fourth.operator_name = "Add";
+    fourth.inputs = {"z", "e"}; fourth.output = "w"; fourth.output_shape = {0, 4};
+    ModelPlanOperation fifth; fifth.id = "fifth"; fifth.operator_name = "Add";
+    fifth.inputs = {"w", "f"}; fifth.output = "q"; fifth.output_shape = {0, 4};
+    plan.operations = {first, second, third, fourth, fifth};
     plan.retained_outputs = {"z"};
     ModelExecutionContext context;
     assert(allocate_model_activation_tensors(plan, memory, 2, context).ok());
     assert(context.tensors.at("x").descriptor().shape == std::vector<uint64_t>({2, 4}));
     assert(context.tensors.at("z").buffer().get() == context.tensors.at("x").buffer().get());
-    assert(context.tensors.at("y").buffer().get() != context.tensors.at("x").buffer().get());
-    assert(context.activation_leases.size() == 2);
-    assert(memory.allocated_bytes() == 64);
+    assert(context.tensors.at("w").buffer().get() == context.tensors.at("y").buffer().get());
+    assert(context.tensors.at("q").buffer().get() != context.tensors.at("z").buffer().get());
+    assert(context.activation_leases.size() == 3);
+    assert(memory.allocated_bytes() == 96);
 }
 
 void test_model_kv_cache_view_binding_uses_planned_sequence_length() {
