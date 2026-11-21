@@ -738,6 +738,7 @@ void test_add_operator_candidate_and_reference() {
                                          gqa_output_tensor, 1, gqa_dispatch).ok());
     assert(gqa_dispatch.wgsl_source.find("const QUERY_HEADS: u32 = 2u;") != std::string::npos);
     assert(gqa_dispatch.wgsl_source.find("const KV_HEADS: u32 = 1u;") != std::string::npos);
+    assert(gqa_dispatch.workgroups_x == 1 && gqa_dispatch.workgroups_y == 2);
 
     BufferDesc attention_desc{8, 4, MemoryDomain::Device, false, "attention"};
     std::shared_ptr<Buffer> q_buffer, k_buffer, v_buffer, attention_output_buffer;
