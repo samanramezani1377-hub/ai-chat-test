@@ -174,10 +174,7 @@ Status self_test_gles_backend(const ai_chat::gpu::UniversalGpuCapabilities& caps
     dispatch.workgroups_x = 1;
     dispatch.workgroup_size_x = 4;
     status = dispatch_gles(dispatch, caps);
-    if (!status.ok()) {
-        glDeleteBuffers(1, &id);
-        return status;
-    }
+    if (!status.ok()) return status;
     glFinish();
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, id);
     void* mapped = glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(input), GL_MAP_READ_BIT);
