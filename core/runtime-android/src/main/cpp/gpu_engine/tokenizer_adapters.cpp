@@ -147,9 +147,15 @@ private:
         // Greedy adjacent-pair merging is BPE behavior and can select a lower
         // total-score path, so use Viterbi over UTF-8 byte offsets instead.
         std::string norm;bool pending=false;
-        for(unsigned char c:input){if(m.remove_extra_whitespaces&&std::isspace(c)){pending=!norm.empty();continue;}
+        for(size_t input_pos=0;input_pos<input.size();){
+            size_t width=0;
+            const uint32_t cp=codepoint(input,input_pos,width);
+            if(m.remove_extra_whitespaces&&space(cp)){pending=!norm.empty();input_pos+=width;continue;}
             if(pending){norm.push_back(' ');pending=false;}
-            if(m.escape_whitespaces&&c==' ')norm+="\xe2\x96\x81";else norm.push_back(static_cast<char>(c));}
+            if(m.escape_whitespaces&&cp==' ')norm+="\xe2\x96\x81";
+            else norm.append(input,input_pos,width);
+            input_pos+=width;
+        }
         if(m.add_space_prefix&&!norm.empty()&&norm.rfind("\xe2\x96\x81",0)!=0)norm.insert(0,"\xe2\x96\x81");
         if (norm.empty()) return Status::success();
 
@@ -179,7 +185,7 @@ private:
         static constexpr char hex[] = "0123456789ABCDEF";
         for (size_t start = 0; start < n; ++start) {
             if (!std::isfinite(best[start])) continue;
-            const size_t limit = std::min(n, start + max_piece_bytes);
+            const size_t limit = start + std::min(max_piece_bytes, n - start);
             for (size_t end = start + 1; end <= limit; ++end) {
                 const auto found = map.find(norm.substr(start, end - start));
                 if (found != map.end() && !special_type(m, found->second))
