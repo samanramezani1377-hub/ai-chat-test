@@ -94,6 +94,46 @@ Status execute_and_compare(Backend& backend, const ComputeDispatch& dispatch,
 }
 
 template <typename Validate>
+Status validate_add(Backend& backend, Validate&& build) {
+    TensorFixture lhs, rhs, output;
+    const std::vector<float> a = {1.0f, -2.0f, 0.5f, 4.0f, 3.0f, -1.0f, 2.0f, 0.25f};
+    const std::vector<float> b = {0.5f, 3.0f, -4.0f, 0.25f, -2.0f, 0.5f, 1.5f, 8.0f};
+    Status status = make_f32_tensor(backend, {2, 4}, a, "validate-add-a", lhs);
+    if (!status.ok()) return status;
+    status = make_f32_tensor(backend, {2, 4}, b, "validate-add-b", rhs);
+    if (!status.ok()) return status;
+    status = make_f32_tensor(backend, {2, 4}, {}, "validate-add-out", output);
+    if (!status.ok()) return status;
+    std::vector<float> expected(a.size());
+    status = reference_add_f32(a.data(), b.data(), expected.data(), a.size());
+    if (!status.ok()) return status;
+    ComputeDispatch dispatch;
+    status = build(lhs.tensor, rhs.tensor, output.tensor, dispatch);
+    if (!status.ok()) return status;
+    status = execute_and_compare(backend, dispatch, output.tensor, expected);
+    if (!status.ok()) return status;
+
+    TensorFixture lhs2, rhs2, output2;
+    std::vector<float> a2(129), b2(129);
+    for (size_t i = 0; i < a2.size(); ++i) {
+        a2[i] = static_cast<float>(static_cast<int>(i % 17) - 8) * 0.125f;
+        b2[i] = static_cast<float>(static_cast<int>(i % 11) - 5) * 0.2f;
+    }
+    status = make_f32_tensor(backend, {1, 129}, a2, "validate-add-a-odd", lhs2);
+    if (!status.ok()) return status;
+    status = make_f32_tensor(backend, {1, 129}, b2, "validate-add-b-odd", rhs2);
+    if (!status.ok()) return status;
+    status = make_f32_tensor(backend, {1, 129}, {}, "validate-add-out-odd", output2);
+    if (!status.ok()) return status;
+    std::vector<float> expected2(a2.size());
+    status = reference_add_f32(a2.data(), b2.data(), expected2.data(), a2.size());
+    if (!status.ok()) return status;
+    status = build(lhs2.tensor, rhs2.tensor, output2.tensor, dispatch);
+    if (!status.ok()) return status;
+    return execute_and_compare(backend, dispatch, output2.tensor, expected2);
+}
+
+template <typename Validate>
 Status validate_multiply(Backend& backend, Validate&& build) {
     TensorFixture lhs, rhs, output;
     const std::vector<float> a = {1.0f, -2.0f, 0.5f, 4.0f, 3.0f, -1.0f, 2.0f, 0.25f};
@@ -442,15 +482,16 @@ Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& reg
                 report, operator_name, kernel_id, std::forward<decltype(validate)>(validate));
     };
 
-    if (backend.kind() == BackendKind::DawnWebGpu) {
-        run("Add", "dawn-add-f32-generic-v1",
-                [&] { return validate_dawn_add_f32_kernel(backend, registry); });
-    } else {
-        run( "Add", "gles-add-f32-generic-v1",
-                [&] { return validate_gles_add_f32_kernel(backend, registry); });
-    }
-
     const bool gles = backend.kind() == BackendKind::OpenGles;
+    run("Add", gles ? "gles-add-f32-generic-v1" : "dawn-add-f32-generic-v1",
+        [&] {
+            return validate_add(backend, [&](const Tensor& a, const Tensor& b,
+                                             const Tensor& out, ComputeDispatch& dispatch) {
+                return gles ? build_add_f32_gles_candidate(a, b, out, dispatch)
+                            : build_add_f32_candidate(a, b, out, dispatch);
+            });
+        });
+
     run( "Multiply",
             gles ? "gles-multiply-f32-generic-v1" : "dawn-multiply-f32-generic-v1",
             [&] {
