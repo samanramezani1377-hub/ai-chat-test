@@ -120,7 +120,7 @@ Status build_q8_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
     }
     const uint64_t blocks = output.element_count() / kBlockElements;
     if (blocks > UINT64_MAX / kBlockBytes || encoded_bytes != blocks * kBlockBytes ||
-        encoded_bytes > UINT64_MAX - 3) {
+        encoded_bytes > static_cast<uint64_t>(UINT32_MAX) - 3) {
         return {StatusCode::InvalidArgument, "Q8_0 encoded byte count does not match the output tensor"};
     }
     const uint64_t padded_bytes = (encoded_bytes + 3) & ~uint64_t{3};
