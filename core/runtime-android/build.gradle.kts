@@ -32,7 +32,9 @@ android {
         minSdk = 29
         consumerProguardFiles("consumer-rules.pro")
         ndk {
-            debugSymbolLevel = "none"
+            // Keep full native symbols in the Android native-debug-symbols output so a
+            // tombstone from this exact APK can be symbolized down to function/line.
+            debugSymbolLevel = "FULL"
         }
         externalNativeBuild {
             cmake {
