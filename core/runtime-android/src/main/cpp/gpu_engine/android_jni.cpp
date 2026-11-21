@@ -54,7 +54,7 @@ std::string probe_gpu_engine() {
            << ";operators_validated=" << operator_report.validated.size()
            << ";operators_rejected=" << operator_report.rejected.size()
            << ";operators_unavailable=" << operator_report.unavailable.size()
-           << ";q8_0_validation=" << (q8_status.ok() ? "VALIDATED" : "UNVERIFIED");
+           << ";q8_0_validation=" << (q8_status.ok() ? "VALIDATED" : "UNVERIFIED")
            << ";fallback_used=" << (engine.diagnostics().fallback_used ? "true" : "false")
            << ";fallback_reason=" << (engine.diagnostics().fallback_reason.empty()
                 ? "none" : engine.diagnostics().fallback_reason);
