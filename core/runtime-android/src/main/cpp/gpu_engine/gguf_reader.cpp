@@ -143,7 +143,7 @@ bool read_metadata_value(Reader& reader, const std::string& key, uint32_t type, 
             uint32_t element_type = 0;
             uint64_t count = 0;
             if (!reader.read_u32(element_type) || !reader.read_u64(count) ||
-                count > reader.remaining() + 1 || count > 1'000'000) return false;
+                count > reader.remaining() + 1 || count > 4'000'000) return false;
 
             if ((key == "tokenizer.ggml.tokens" || key == "tokenizer.ggml.merges") && element_type == 8) {
                 std::vector<std::string> values;

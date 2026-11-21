@@ -76,6 +76,9 @@ ModelPreflightReport evaluate_model_preflight(const GgufFileInfo& model,
     ModelPreflightReport report;
     report.architecture = model.architecture;
     report.tensor_count = model.tensor_count;
+    if (model.tokenizer.model == "unknown" || model.tokenizer.tokens.empty()) {
+        report.blockers.emplace_back("GGUF_TOKENIZER_METADATA_MISSING");
+    }
     report.all_tensor_storage_known = true;
     report.all_quantization_decoders_validated = true;
 
