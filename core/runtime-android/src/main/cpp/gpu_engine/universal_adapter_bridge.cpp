@@ -2,7 +2,13 @@
 
 #include <sstream>
 
+#include "execution_engine.h"
+
 namespace ai_chat::gpu_engine {
+
+Status GpuEngine::probe_universal_adapter(DeviceInfo& out) const {
+    return ai_chat::gpu_engine::probe_universal_adapter(out);
+}
 
 Status probe_universal_adapter(DeviceInfo& out) {
     const ai_chat::gpu::UniversalGpuCapabilities capabilities =

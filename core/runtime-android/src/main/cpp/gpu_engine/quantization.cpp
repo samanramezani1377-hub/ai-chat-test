@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <utility>
 
 namespace ai_chat::gpu_engine {
 namespace {
@@ -46,17 +47,22 @@ Status decode_q8_0_blocks(const uint8_t* source, size_t source_bytes,
     constexpr size_t kBytesPerBlock = 34;
     if ((!source || !destination) && (source_bytes != 0 || destination_elements != 0))
         return {StatusCode::InvalidArgument, "Q8_0 decoder received a null buffer"};
-    if (destination_elements == 0 || destination_elements % kElementsPerBlock != 0 ||
-        source_bytes != (destination_elements / kElementsPerBlock) * kBytesPerBlock)
+    if (destination_elements == 0 || destination_elements % kElementsPerBlock != 0)
+        return {StatusCode::InvalidArgument, "Q8_0 destination size must contain complete blocks"};
+    const size_t block_count = destination_elements / kElementsPerBlock;
+    if (block_count > std::numeric_limits<size_t>::max() / kBytesPerBlock ||
+        source_bytes != block_count * kBytesPerBlock)
         return {StatusCode::InvalidArgument, "Q8_0 source and destination sizes do not match complete blocks"};
 
-    for (size_t block = 0; block < destination_elements / kElementsPerBlock; ++block) {
+    for (size_t block = 0; block < block_count; ++block) {
         const uint8_t* encoded = source + block * kBytesPerBlock;
         const float scale = half_to_float(read_u16_le(encoded));
         if (!std::isfinite(scale))
             return {StatusCode::NumericalFailure, "Q8_0 block has a non-finite FP16 scale"};
         for (size_t i = 0; i < kElementsPerBlock; ++i) {
-            const int8_t quantized = static_cast<int8_t>(encoded[2 + i]);
+            const uint8_t raw = encoded[2 + i];
+            const int32_t quantized = raw < 128u ? static_cast<int32_t>(raw)
+                                                  : static_cast<int32_t>(raw) - 256;
             destination[block * kElementsPerBlock + i] = scale * static_cast<float>(quantized);
         }
     }
