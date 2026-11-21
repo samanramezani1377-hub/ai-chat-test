@@ -36,6 +36,8 @@ jobs:
 
       - name: Verify standalone GPU engine contracts
         run: bash scripts/test_gpu_engine_contracts.sh
+      - name: Verify GPU engine has no llama.cpp or GGML execution dependency
+        run: bash scripts/verify_gpu_engine_independence.sh
 
       - name: Set up JDK
         uses: actions/setup-java@v5
