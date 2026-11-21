@@ -115,3 +115,5 @@ CI/source checks are useful but not hardware evidence. Do not wait for CI to pro
 - **2026-11-22 / transient pool bound fix:** corrected an unsigned-underflow edge case when a released buffer was larger than the pool's half-budget cap. Oversized entries are now freed instead of accidentally being retained; a regression test checks that the full budget becomes available again.
 
 - **2026-11-22 / BPE digit grouping regression:** added synthetic tokenizer tests proving the GPT-2 profile groups up to three consecutive digits while the Qwen2 profile splits digit runs one at a time, according to their registered profile settings. This remains component-level coverage only; complete pre-tokenizer parity is still **UNVERIFIED**.
+
+- **2026-11-22 / BPE punctuation boundaries:** added support for the single optional non-letter prefix before a letter run and trailing CR/LF characters after punctuation runs, matching additional GPT-2-style pre-tokenizer boundaries. A synthetic prefix-merge regression test covers the merge boundary; the full Unicode regex profile remains **UNVERIFIED**.
