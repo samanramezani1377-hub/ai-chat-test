@@ -1054,7 +1054,8 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         g_universal_gles_compute_supported = universal_gpu_caps.gles_compute_supported &&
             universal_gpu_caps.gles_compute_self_test_passed;
         append_native_trace((std::string("UNIVERSAL_GPU_ADAPTER_STATUS compute=") +
-            (universal_gpu_caps.gles_compute_supported ? "supported" : "unavailable") +
+            (universal_gpu_caps.gles_compute_supported && universal_gpu_caps.gles_compute_self_test_passed
+                ? "verified" : (universal_gpu_caps.gles_compute_supported ? "self_test_failed" : "unavailable")) +
             " eglContext=" + (universal_gpu_caps.egl_context_created ? "created" : "not_created") +
             " computeSelfTest=" + (universal_gpu_caps.gles_compute_self_test_passed ? "passed" : "failed") +
             " executionBackend=GGML_WEBGPU_DAWN").c_str());
