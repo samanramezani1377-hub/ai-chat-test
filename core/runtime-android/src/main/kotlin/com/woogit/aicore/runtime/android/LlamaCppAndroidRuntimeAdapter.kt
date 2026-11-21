@@ -23,10 +23,12 @@ import kotlin.math.roundToInt
 /** Direct llama.cpp Android runtime. Prefer WebGPU; allow CPU execution for unsupported ops/devices. */
 class LlamaCppAndroidRuntimeAdapter(
     private val defaultContextLength: Int = 8192,
-    gpuLayers: Int = GPU_LAYERS_MAX,
+    gpuLayers: Int = GPU_LAYERS_ALL,
 ) : RuntimeAdapter, RuntimeMetrics {
     companion object {
         const val GPU_LAYERS_MAX = 99
+        /** Explicit sentinel for offloading every layer supported by llama.cpp. */
+        const val GPU_LAYERS_ALL = -1
     }
 
     private val stopRequested = AtomicBoolean(false)
@@ -44,10 +46,10 @@ class LlamaCppAndroidRuntimeAdapter(
     @Volatile private var selectedDraftPath: String? = null
     @Volatile private var loadedDraftPath: String? = null
 
-    init { require(gpuLayers in 0..GPU_LAYERS_MAX) { "GPU layer preference must be between 0 and $GPU_LAYERS_MAX" } }
+    init { require(gpuLayers == GPU_LAYERS_ALL || gpuLayers in 0..GPU_LAYERS_MAX) { "GPU layer preference must be ALL (-1) or between 0 and $GPU_LAYERS_MAX" } }
 
     fun setGpuLayers(value: Int) {
-        require(value in 0..GPU_LAYERS_MAX) { "GPU layer preference must be between 0 and $GPU_LAYERS_MAX" }
+        require(value == GPU_LAYERS_ALL || value in 0..GPU_LAYERS_MAX) { "GPU layer preference must be ALL (-1) or between 0 and $GPU_LAYERS_MAX" }
         gpuLayersMode = value
         RuntimeDiagnosticsStore.recordNativeEvent("WEBGPU_GPU_PREFERRED_CPU_FALLBACK_ALLOWED")
         RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "WebGPU OpenGL ES Compatibility preferred; CPU fallback allowed (applies on next activation)")
@@ -89,12 +91,9 @@ class LlamaCppAndroidRuntimeAdapter(
         val file = model.path.toFile()
         if (!file.isFile || !file.canRead()) return ModelResult.Failure(ModelError.FileAccess("Model file cannot be read: ${file.absolutePath}"))
         val startedAt = System.nanoTime()
-        val requestedGpuPercent = if (gpuLayersMode > 0) 100 else 0
+        val requestedGpuPercent = if (gpuLayersMode != 0) 100 else 0
         val totalBlocks = model.metadata.blockCount?.toInt()?.takeIf { it > 0 }
-        val requestedGpuLayers = if (gpuLayersMode <= 0) 0 else when {
-            totalBlocks != null -> totalBlocks
-            else -> GPU_LAYERS_MAX
-        }
+        val requestedGpuLayers = gpuLayersMode
         return try {
             // Use a larger working context so a long user prompt does not immediately
             // consume the entire generation window. We still never exceed the model's
