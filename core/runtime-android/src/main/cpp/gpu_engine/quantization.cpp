@@ -1014,6 +1014,122 @@ Status validate_q4_0_matmul_kernel(Backend& backend, OperatorRegistry& operators
 
 
 
+Status validate_q4_1_matmul_kernel(Backend& backend, OperatorRegistry& operators,
+                                   QuantizationRegistry& quantizations) {
+    const BackendKind backend_kind = backend.kind();
+    if ((backend_kind != BackendKind::DawnWebGpu && backend_kind != BackendKind::OpenGles) ||
+        !backend.healthy())
+        return {StatusCode::NotReady, "Q4_1 MatMul validation requires a healthy Dawn or GLES backend"};
+    constexpr uint32_t kQ4_1TypeId = 2;
+    auto format = quantizations.formats_.find(kQ4_1TypeId);
+    if (format == quantizations.formats_.end() || format->second.decoder_state != SupportState::Validated)
+        return {StatusCode::NotReady, "Q4_1 host decoder must be validated before GPU kernel promotion"};
+    const auto backend_validation = format->second.backend_gpu_kernel_states.find(backend_kind);
+    if (backend_validation != format->second.backend_gpu_kernel_states.end() &&
+        backend_validation->second == SupportState::Validated)
+        return Status::success();
+
+    const bool use_gles = backend_kind == BackendKind::OpenGles;
+    const std::string kernel_id = use_gles ? "gles-q4-1-matmul-f32-activation-v1"
+                                           : "dawn-q4-1-matmul-f32-activation-v1";
+    auto kernel = std::find_if(operators.kernels_.begin(), operators.kernels_.end(),
+        [&](const KernelDefinition& definition) {
+            return definition.kernel_id == kernel_id && definition.backend == backend_kind;
+        });
+    if (kernel == operators.kernels_.end())
+        return {StatusCode::NotReady, "Q4_1 MatMul candidate is not registered for the selected backend"};
+    if (kernel->validation == KernelValidation::Validated) {
+        format->second.backend_gpu_kernel_states[backend_kind] = SupportState::Validated;
+        format->second.gpu_kernel_state = SupportState::Validated;
+        return Status::success();
+    }
+    if (kernel->validation != KernelValidation::Unverified)
+        return {StatusCode::Unsupported, "Q4_1 MatMul candidate is rejected"};
+    const std::string& registered_source = use_gles ? kernel->glsl_source : kernel->wgsl_source;
+    if (registered_source.empty())
+        return {StatusCode::Unsupported, "Q4_1 MatMul candidate has no source for its selected backend"};
+
+    constexpr uint32_t rows = 2, output_channels = 2, inner = 64;
+    std::vector<float> activations(rows * inner);
+    for (size_t i = 0; i < activations.size(); ++i)
+        activations[i] = (static_cast<int>(i % 9) - 4) * 0.25f;
+    const uint64_t weight_bytes = static_cast<uint64_t>(output_channels) * (inner / 32) * 20;
+    std::vector<uint8_t> encoded(static_cast<size_t>(weight_bytes), 0);
+    for (uint32_t block = 0; block < output_channels * (inner / 32); ++block) {
+        const size_t offset = static_cast<size_t>(block) * 20;
+        encoded[offset] = 0x00;
+        encoded[offset + 1] = 0x38; // FP16 scale 0.5
+        encoded[offset + 2] = 0x00;
+        encoded[offset + 3] = 0xbc; // FP16 minimum -1.0
+        for (uint32_t i = 0; i < 16; ++i) {
+            const uint8_t low = static_cast<uint8_t>(i % 16);
+            const uint8_t high = static_cast<uint8_t>((i + 3) % 16);
+            encoded[offset + 4 + i] = static_cast<uint8_t>(low | (high << 4));
+        }
+    }
+    float expected[rows * output_channels] = {};
+    float actual[rows * output_channels] = {};
+    Status status = reference_q4_1_matmul(activations.data(), encoded.data(), weight_bytes,
+        expected, rows, output_channels, inner);
+    if (!status.ok()) return status;
+
+    BufferDesc activation_desc{activations.size() * sizeof(float), alignof(float), MemoryDomain::Device,
+        false, "q4_1-validation-activations"};
+    BufferDesc weights_desc{(weight_bytes + 3) & ~uint64_t{3}, 4, MemoryDomain::Device,
+        true, "q4_1-validation-weights"};
+    BufferDesc output_desc{sizeof(actual), alignof(float), MemoryDomain::Device,
+        false, "q4_1-validation-output"};
+    std::shared_ptr<Buffer> activation_buffer, weights_buffer, output_buffer;
+    status = backend.allocate(activation_desc, activation_buffer); if (!status.ok()) return status;
+    status = backend.allocate(weights_desc, weights_buffer); if (!status.ok()) return status;
+    status = backend.allocate(output_desc, output_buffer); if (!status.ok()) return status;
+    status = backend.upload(activation_buffer, 0, activations.data(), activations.size() * sizeof(float));
+    if (!status.ok()) return status;
+    status = backend.upload(weights_buffer, 0, encoded.data(), weight_bytes);
+    if (!status.ok()) return status;
+
+    TensorDesc activation_tensor_desc; activation_tensor_desc.shape = {rows, inner};
+    activation_tensor_desc.data_type = DataType::F32;
+    TensorDesc output_tensor_desc; output_tensor_desc.shape = {rows, output_channels};
+    output_tensor_desc.data_type = DataType::F32;
+    Tensor activation_tensor, output_tensor;
+    status = Tensor::create(activation_tensor_desc, activation_buffer, 0, activation_tensor);
+    if (!status.ok()) return status;
+    status = Tensor::create(output_tensor_desc, output_buffer, 0, output_tensor);
+    if (!status.ok()) return status;
+
+    ComputeDispatch dispatch;
+    status = use_gles
+        ? build_q4_1_matmul_gles_candidate(activation_tensor, weights_buffer, weight_bytes, output_tensor, dispatch)
+        : build_q4_1_matmul_candidate(activation_tensor, weights_buffer, weight_bytes, output_tensor, dispatch);
+    if (!status.ok()) return status;
+    const std::string& candidate_source = use_gles ? dispatch.glsl_source : dispatch.wgsl_source;
+    const std::string& canonical_source = use_gles ? q4_1_matmul_glsl_source()
+                                                    : q4_1_matmul_wgsl_source();
+    if (dispatch.kernel_id != kernel_id || registered_source != canonical_source ||
+        candidate_source.empty())
+        return {StatusCode::InvalidArgument, "Q4_1 MatMul validation source differs from the registered canonical candidate"};
+    dispatch.validation = KernelValidation::Validated;
+    std::unique_ptr<CommandBatch> commands;
+    status = backend.begin_commands(commands); if (!status.ok()) return status;
+    status = commands->dispatch_compute(dispatch); if (!status.ok()) return status;
+    status = backend.submit(std::move(commands)); if (!status.ok()) return status;
+    status = backend.synchronize(); if (!status.ok()) return status;
+    status = backend.readback(output_buffer, 0, actual, sizeof(actual)); if (!status.ok()) return status;
+    for (size_t i = 0; i < rows * output_channels; ++i) {
+        const float tolerance = 1.0e-4f * std::max(1.0f, std::fabs(expected[i]));
+        if (!std::isfinite(actual[i]) || std::fabs(actual[i] - expected[i]) > tolerance)
+            return {StatusCode::NumericalFailure, "Q4_1 MatMul GPU output differs from the independent block-decoder reference"};
+    }
+    kernel->validation = KernelValidation::Validated;
+    format->second.backend_gpu_kernel_states[backend_kind] = SupportState::Validated;
+    format->second.gpu_kernel_state = SupportState::Validated;
+    return Status::success();
+}
+
+
+
+
 Status build_q8_0_matmul_gles_candidate(const Tensor& activations,
                                        const std::shared_ptr<Buffer>& quantized_weights,
                                        uint64_t weight_bytes, const Tensor& output,
