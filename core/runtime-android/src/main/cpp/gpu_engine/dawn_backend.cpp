@@ -61,7 +61,10 @@ public:
     }
 
     Status dispatch_compute(const ComputeDispatch& dispatch) override {
-        if (dispatch.wgsl_source.empty() || dispatch.entry_point.empty() ||
+        if (dispatch.validation != KernelValidation::Validated || dispatch.kernel_id.empty()) {
+            return {StatusCode::Unsupported, "Dawn refuses dispatches without a validated kernel identity"};
+        }
+        if (dispatch.wgsl_source.empty() ||
             dispatch.workgroups_x == 0 || dispatch.workgroups_y == 0 || dispatch.workgroups_z == 0 ||
             dispatch.bindings.empty()) {
             return {StatusCode::InvalidArgument, "Compute dispatch requires WGSL, entry point, bindings and non-zero workgroups"};

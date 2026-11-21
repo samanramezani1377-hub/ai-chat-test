@@ -281,7 +281,7 @@ bool is_contiguous_f32(const Tensor& tensor) {
 
 Status build_binary_f32_candidate(const Tensor& lhs, const Tensor& rhs,
                                     const Tensor& output, ComputeDispatch& dispatch,
-                                    const char* label, const char* shader) {
+                                    const char* label, const char* kernel_id, const char* shader) {
     dispatch = ComputeDispatch{};
     if (!is_contiguous_f32(lhs) || !is_contiguous_f32(rhs) || !is_contiguous_f32(output))
         return {StatusCode::Unsupported, "Binary F32 operator requires contiguous device/shared tensors"};
@@ -297,6 +297,7 @@ Status build_binary_f32_candidate(const Tensor& lhs, const Tensor& rhs,
         lhs.byte_size() != lhs.element_count() * sizeof(float))
         return {StatusCode::InvalidArgument, "Binary F32 tensor byte ranges are inconsistent"};
     dispatch.label = label;
+    dispatch.kernel_id = kernel_id;
     dispatch.wgsl_source = shader;
     dispatch.workgroups_x = static_cast<uint32_t>((lhs.element_count() + 63) / 64);
     dispatch.bindings = {
@@ -337,6 +338,7 @@ Status build_attention_f32_candidate(const Tensor& query, const Tensor& key,
         output.buffer().get() == value.buffer().get())
         return {StatusCode::InvalidArgument, "Attention output must use a distinct valid buffer"};
     dispatch.label = "attention-f32-causal-gqa-online-softmax-unverified";
+    dispatch.kernel_id = "dawn-attention-f32-causal-gqa-v1";
     dispatch.wgsl_source = kAttentionF32Wgsl;
     const double scale = 1.0 / std::sqrt(static_cast<double>(q[2]));
     std::ostringstream scale_literal;
@@ -443,6 +445,7 @@ Status build_embedding_f32_candidate(const Tensor& embedding_weights,
         output.buffer().get() == token_ids_buffer.get())
         return {StatusCode::InvalidArgument, "Embedding input/output buffer ranges are inconsistent"};
     dispatch.label = "embedding-f32-generic-unverified";
+    dispatch.kernel_id = "dawn-embedding-f32-generic-v1";
     dispatch.wgsl_source = kEmbeddingF32Wgsl;
     const std::pair<std::string, std::string> constants[] = {
         {"const VOCABULARY_SIZE: u32 = 1u;", "const VOCABULARY_SIZE: u32 = " + std::to_string(weights_shape[0]) + "u;"},
@@ -489,7 +492,7 @@ const char* add_f32_wgsl_source() noexcept { return kAddF32Wgsl; }
 Status build_add_f32_candidate(const Tensor& lhs, const Tensor& rhs,
                                const Tensor& output, ComputeDispatch& dispatch) {
     return build_binary_f32_candidate(lhs, rhs, output, dispatch,
-                                      "add-f32-generic-unverified", kAddF32Wgsl);
+                                      "add-f32-generic-unverified", "dawn-add-f32-generic-v1", kAddF32Wgsl);
 }
 
 const char* multiply_f32_wgsl_source() noexcept { return kMultiplyF32Wgsl; }
@@ -497,7 +500,7 @@ const char* multiply_f32_wgsl_source() noexcept { return kMultiplyF32Wgsl; }
 Status build_multiply_f32_candidate(const Tensor& lhs, const Tensor& rhs,
                                     const Tensor& output, ComputeDispatch& dispatch) {
     return build_binary_f32_candidate(lhs, rhs, output, dispatch,
-                                      "multiply-f32-generic-unverified", kMultiplyF32Wgsl);
+                                      "multiply-f32-generic-unverified", "dawn-multiply-f32-generic-v1", kMultiplyF32Wgsl);
 }
 
 Status reference_multiply_f32(const float* lhs, const float* rhs, float* output,
@@ -534,6 +537,7 @@ Status build_matmul_f32_candidate(const Tensor& lhs, const Tensor& rhs,
     if (groups_x > UINT32_MAX || groups_y > UINT32_MAX)
         return {StatusCode::Unsupported, "MatMul dispatch dimensions exceed uint32"};
     dispatch.label = "matmul-f32-generic-unverified";
+    dispatch.kernel_id = "dawn-matmul-f32-generic-v1";
     dispatch.wgsl_source = kMatMulF32Wgsl;
     dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source), "const ROWS: u32 = 1u;",
         "const ROWS: u32 = " + std::to_string(a[0]) + "u;");
@@ -588,6 +592,7 @@ Status build_rms_norm_f32_candidate(const Tensor& input, const Tensor& weight,
         output.buffer().get() == input.buffer().get() || output.buffer().get() == weight.buffer().get())
         return {StatusCode::Unsupported, "RMSNorm output must use a distinct buffer"};
     dispatch.label = "rms-norm-f32-generic-unverified";
+    dispatch.kernel_id = "dawn-rms-norm-f32-generic-v1";
     dispatch.wgsl_source = kRmsNormF32Wgsl;
     dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source), "const COLUMNS: u32 = 1u;",
         "const COLUMNS: u32 = " + std::to_string(x[1]) + "u;");
@@ -646,6 +651,7 @@ Status build_rope_f32_candidate(const Tensor& input, const Tensor& output,
         config.theta <= 1.0f || shape[0] > UINT32_MAX - config.start_position)
         return {StatusCode::InvalidArgument, "RoPE dimensions, position or theta are invalid"};
     dispatch.label = "rope-f32-generic-unverified";
+    dispatch.kernel_id = "dawn-rope-f32-generic-v1";
     dispatch.wgsl_source = kRopeF32Wgsl;
     const std::pair<std::string, std::string> constants[] = {
         {"const TOTAL_ELEMENTS: u32 = 1u;", "const TOTAL_ELEMENTS: u32 = " + std::to_string(input.element_count()) + "u;"},
@@ -727,6 +733,7 @@ Status build_silu_f32_candidate(const Tensor& input, const Tensor& output,
         !input.buffer() || !output.buffer() || input.buffer().get() == output.buffer().get())
         return {StatusCode::InvalidArgument, "SiLU input/output shape, size or buffer is invalid"};
     dispatch.label = "silu-f32-generic-unverified";
+    dispatch.kernel_id = "dawn-silu-f32-generic-v1";
     dispatch.wgsl_source = kSiluF32Wgsl;
     const std::string placeholder = "const ELEMENT_COUNT: u32 = 1u;";
     const std::string replacement = "const ELEMENT_COUNT: u32 = " +
@@ -765,6 +772,7 @@ Status build_softmax_f32_candidate(const Tensor& input, const Tensor& output,
         !input.buffer() || !output.buffer() || input.buffer().get() == output.buffer().get())
         return {StatusCode::InvalidArgument, "Softmax expects valid [rows,columns] input/output tensors"};
     dispatch.label = "softmax-f32-generic-unverified";
+    dispatch.kernel_id = "dawn-softmax-f32-generic-v1";
     dispatch.wgsl_source = kSoftmaxF32Wgsl;
     const std::string placeholder = "const COLUMNS: u32 = 1u;";
     const std::string replacement = "const COLUMNS: u32 = " + std::to_string(shape[1]) + "u;";
