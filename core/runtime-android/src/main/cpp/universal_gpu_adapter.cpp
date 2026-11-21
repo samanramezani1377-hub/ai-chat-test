@@ -11,6 +11,9 @@
 #include <cstring>
 #include <cstdio>
 #include <condition_variable>
+#include <deque>
+#include <future>
+#include <functional>
 #include <mutex>
 #include <thread>
 #include <exception>
@@ -274,18 +277,49 @@ public:
         return capabilities_;
     }
 
+    bool run_task(const std::function<void()>& task, std::string& error) {
+        error.clear();
+        if (!task) { error = "gles_task_callback_is_empty"; return false; }
+        const UniversalGpuCapabilities caps = initialize();
+        if (!caps.egl_context_created || !caps.gles_compute_supported ||
+            !caps.gles_compute_self_test_passed) {
+            error = caps.failure_reason.empty() ? "gles_context_not_compute_ready" : caps.failure_reason;
+            return false;
+        }
+        auto completion = std::make_shared<std::promise<void>>();
+        std::future<void> finished = completion->get_future();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!worker_.joinable() || stopping_) {
+                error = "gles_owner_thread_is_stopping";
+                return false;
+            }
+            tasks_.emplace_back([task, completion]() {
+                try { task(); completion->set_value(); }
+                catch (...) { completion->set_exception(std::current_exception()); }
+            });
+        }
+        task_cv_.notify_one();
+        try { finished.get(); return true; }
+        catch (const std::exception& exception) {
+            error = std::string("gles_task_exception_") + exception.what();
+        } catch (...) { error = "gles_task_exception_unknown"; }
+        return false;
+    }
+
     void shutdown() {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (!worker_.joinable()) return;
             stopping_ = true;
         }
-        shutdown_cv_.notify_one();
+        task_cv_.notify_one();
         worker_.join();
         std::lock_guard<std::mutex> lock(mutex_);
         stopping_ = false;
         startup_complete_ = false;
         capabilities_ = {};
+        tasks_.clear();
     }
 
 private:
@@ -298,9 +332,18 @@ private:
         startup_cv_.notify_all();
     }
 
-    void wait_for_shutdown() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        shutdown_cv_.wait(lock, [this] { return stopping_; });
+    void process_tasks() {
+        for (;;) {
+            std::function<void()> task;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                task_cv_.wait(lock, [this] { return stopping_ || !tasks_.empty(); });
+                if (stopping_ && tasks_.empty()) return;
+                task = std::move(tasks_.front());
+                tasks_.pop_front();
+            }
+            task();
+        }
     }
 
     void run() {
@@ -403,7 +446,7 @@ private:
 
         // Publish even on failure so the caller never waits indefinitely.
         publish_startup(caps);
-        wait_for_shutdown();
+        process_tasks();
 
         // All EGL/GLES teardown occurs on the same thread that owns the context.
         if (context_current) {
@@ -417,8 +460,9 @@ private:
 
     std::mutex mutex_;
     std::condition_variable startup_cv_;
-    std::condition_variable shutdown_cv_;
+    std::condition_variable task_cv_;
     std::thread worker_;
+    std::deque<std::function<void()>> tasks_;
     UniversalGpuCapabilities capabilities_;
     bool startup_complete_ = false;
     bool stopping_ = false;
@@ -460,6 +504,10 @@ std::string UniversalGpuCapabilities::diagnostic_line() const {
 
 UniversalGpuCapabilities probe_universal_gpu_adapter() {
     return persistent_gles_probe().initialize();
+}
+
+bool run_universal_gpu_task(const std::function<void()>& task, std::string& error) {
+    return persistent_gles_probe().run_task(task, error);
 }
 
 void shutdown_universal_gpu_adapter() {

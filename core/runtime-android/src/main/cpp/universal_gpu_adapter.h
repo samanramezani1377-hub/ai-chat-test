@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <functional>
 
 namespace ai_chat::gpu {
 
@@ -49,6 +50,10 @@ UniversalGpuCapabilities probe_universal_gpu_adapter();
 
 // Explicitly stops the dedicated context thread. Normally process lifetime owns
 // this engine; call only when the native backend itself is being permanently torn down.
+// Executes GLES work on the dedicated thread that owns the persistent EGL context.
+// The callback must not retain GL thread-local assumptions or recursively enqueue work.
+bool run_universal_gpu_task(const std::function<void()>& task, std::string& error);
+
 void shutdown_universal_gpu_adapter();
 
 } // namespace ai_chat::gpu
