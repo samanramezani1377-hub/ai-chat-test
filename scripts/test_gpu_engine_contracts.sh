@@ -23,6 +23,7 @@ trap 'rm -rf "$TMP"' EXIT
   "$ENGINE/runtime_router.cpp" \
   "$ENGINE/memory_planner.cpp" \
   "$ENGINE/tokenizer.cpp" \
+  "$ENGINE/tokenizer_adapters.cpp" \
   "$TEST" \
   -o "$TMP/gpu_engine_contract_test"
 
