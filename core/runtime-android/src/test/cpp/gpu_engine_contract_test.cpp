@@ -361,6 +361,19 @@ void test_q8_0_decoder_and_registry() {
     assert(dispatch.bindings.size() == 2);
     assert(dispatch.label.find("unverified") != std::string::npos);
     assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") == std::string::npos);
+
+    BufferDesc q4_encoded_desc{20, 4, MemoryDomain::Device, false, "q4-encoded"};
+    std::shared_ptr<Buffer> q4_encoded;
+    assert(backend.allocate(q4_encoded_desc, q4_encoded).ok());
+    BufferDesc q4_output_desc{128, 4, MemoryDomain::Device, false, "q4-output"};
+    std::shared_ptr<Buffer> q4_output_buffer;
+    assert(backend.allocate(q4_output_desc, q4_output_buffer).ok());
+    Tensor q4_output_tensor;
+    assert(Tensor::create(output_desc_tensor, q4_output_buffer, 0, q4_output_tensor).ok());
+    ComputeDispatch q4_dispatch;
+    assert(build_q4_0_dequantize_candidate(q4_encoded, 18, q4_output_tensor, q4_dispatch).ok());
+    assert(q4_dispatch.bindings.size() == 2);
+    assert(q4_dispatch.label.find("unverified") != std::string::npos);
 }
 
 void test_independent_sampler_and_stop_controller() {

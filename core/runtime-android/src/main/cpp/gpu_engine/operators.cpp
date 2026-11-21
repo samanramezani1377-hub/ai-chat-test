@@ -674,6 +674,21 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     status = registry.register_kernel(std::move(rope));
     if (!status.ok()) return status;
 
+    KernelDefinition q4;
+    q4.operator_name = "Dequantize_Q4_0";
+    q4.backend = BackendKind::DawnWebGpu;
+    q4.input_type = DataType::U32;
+    q4.output_type = DataType::F32;
+    q4.min_input_count = 1;
+    q4.max_input_count = 1;
+    q4.min_rank = 1;
+    q4.max_rank = 16;
+    q4.validation = KernelValidation::Unverified;
+    q4.kernel_id = "dawn-q4-0-dequantize-generic-v1";
+    q4.wgsl_source = q4_0_dequantize_wgsl_source();
+    status = registry.register_kernel(std::move(q4));
+    if (!status.ok()) return status;
+
     KernelDefinition q8;
     q8.operator_name = "Dequantize_Q8_0";
     q8.backend = BackendKind::DawnWebGpu;
