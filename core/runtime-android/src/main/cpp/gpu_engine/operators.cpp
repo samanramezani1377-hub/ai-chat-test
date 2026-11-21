@@ -123,6 +123,46 @@ void main() {
 }
 )glsl";
 
+constexpr char kRopeF32Glsl[] = R"glsl(#version 310 es
+precision highp float;
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Input { float input_values[]; };
+layout(std430, binding = 1) writeonly buffer Output { float output_values[]; };
+const uint TOTAL_ELEMENTS = 1u;
+const uint HEADS = 1u;
+const uint HEAD_DIM = 2u;
+const uint ROTARY_DIM = 2u;
+const uint START_POSITION = 0u;
+const float THETA = 10000.0;
+const uint NEOX_STYLE = 0u;
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= TOTAL_ELEMENTS) return;
+    uint dimension = index % HEAD_DIM;
+    if (dimension >= ROTARY_DIM) { output_values[index] = input_values[index]; return; }
+    uint token = index / (HEADS * HEAD_DIM);
+    uint half_dimension = ROTARY_DIM / 2u;
+    uint pair_index = dimension / 2u;
+    uint partner_dimension = dimension ^ 1u;
+    if (NEOX_STYLE == 1u) {
+        pair_index = dimension % half_dimension;
+        partner_dimension = dimension >= half_dimension ? dimension - half_dimension : dimension + half_dimension;
+    }
+    float exponent = 2.0 * float(pair_index) / float(ROTARY_DIM);
+    float inverse_frequency = pow(THETA, -exponent);
+    float angle = float(START_POSITION + token) * inverse_frequency;
+    float cosine = cos(angle);
+    float sine = sin(angle);
+    uint base = index - dimension;
+    float value = input_values[index];
+    float partner = input_values[base + partner_dimension];
+    if (NEOX_STYLE == 0u)
+        output_values[index] = (dimension & 1u) == 1u ? value * cosine + partner * sine : value * cosine - partner * sine;
+    else
+        output_values[index] = dimension >= half_dimension ? value * cosine + partner * sine : value * cosine - partner * sine;
+}
+)glsl";
+
 constexpr char kSoftmaxF32Glsl[] = R"glsl(#version 310 es
 precision highp float;
 layout(local_size_x = 64) in;
@@ -885,6 +925,37 @@ Status build_rope_f32_candidate(const Tensor& input, const Tensor& output,
     return Status::success();
 }
 
+Status build_rope_f32_gles_candidate(const Tensor& input, const Tensor& output,
+                                     const RopeConfig& config, ComputeDispatch& dispatch) {
+    Status status = build_rope_f32_candidate(input, output, config, dispatch);
+    if (!status.ok()) return status;
+    const auto& shape = input.descriptor().shape;
+    std::ostringstream theta_literal;
+    theta_literal << std::setprecision(9) << config.theta;
+    std::string theta_text = theta_literal.str();
+    if (theta_text.find_first_of(".eE") == std::string::npos) theta_text += ".0";
+    dispatch.backend = BackendKind::OpenGles;
+    dispatch.kernel_id = "gles-rope-f32-generic-v1";
+    dispatch.label = "gles-rope-f32-generic-unverified";
+    dispatch.wgsl_source.clear();
+    dispatch.glsl_source = kRopeF32Glsl;
+    const std::pair<std::string, std::string> constants[] = {
+        {"const uint TOTAL_ELEMENTS = 1u;", "const uint TOTAL_ELEMENTS = " + std::to_string(input.element_count()) + "u;"},
+        {"const uint HEADS = 1u;", "const uint HEADS = " + std::to_string(shape[1]) + "u;"},
+        {"const uint HEAD_DIM = 2u;", "const uint HEAD_DIM = " + std::to_string(shape[2]) + "u;"},
+        {"const uint ROTARY_DIM = 2u;", "const uint ROTARY_DIM = " + std::to_string(config.rotary_dimensions) + "u;"},
+        {"const uint START_POSITION = 0u;", "const uint START_POSITION = " + std::to_string(config.start_position) + "u;"},
+        {"const float THETA = 10000.0;", "const float THETA = " + theta_text + ";"},
+        {"const uint NEOX_STYLE = 0u;", std::string("const uint NEOX_STYLE = ") + (config.neox_style ? "1u;" : "0u;")}
+    };
+    for (const auto& constant : constants) {
+        const size_t pos = dispatch.glsl_source.find(constant.first);
+        if (pos == std::string::npos) return {StatusCode::BackendFailure, "RoPE GLSL constant placeholder is missing"};
+        dispatch.glsl_source.replace(pos, constant.first.size(), constant.second);
+    }
+    return Status::success();
+}
+
 Status reference_rope_f32(const float* input, float* output,
                           uint32_t tokens, uint32_t heads, uint32_t head_dimension,
                           const RopeConfig& config) {
@@ -1376,7 +1447,22 @@ Status register_builtin_gles_operator_candidates(OperatorRegistry& registry) {
     softmax.validation = KernelValidation::Unverified;
     softmax.kernel_id = "gles-softmax-f32-generic-v1";
     softmax.glsl_source = kSoftmaxF32Glsl;
-    return registry.register_kernel(std::move(softmax));
+    status = registry.register_kernel(std::move(softmax));
+    if (!status.ok()) return status;
+
+    KernelDefinition rope;
+    rope.operator_name = "RoPE";
+    rope.backend = BackendKind::OpenGles;
+    rope.input_type = DataType::F32;
+    rope.output_type = DataType::F32;
+    rope.min_input_count = 1;
+    rope.max_input_count = 1;
+    rope.min_rank = 3;
+    rope.max_rank = 3;
+    rope.validation = KernelValidation::Unverified;
+    rope.kernel_id = "gles-rope-f32-generic-v1";
+    rope.glsl_source = kRopeF32Glsl;
+    return registry.register_kernel(std::move(rope));
 }
 
 } // namespace ai_chat::gpu_engine

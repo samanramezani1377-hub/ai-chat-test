@@ -471,6 +471,19 @@ void test_q8_0_decoder_and_registry() {
     assert(build_softmax_f32_gles_candidate(lhs, output, gles_softmax).ok());
     assert(gles_softmax.workgroups_x == 2);
     assert(gles_softmax.glsl_source.find("const uint COLUMNS = 3u;") != std::string::npos);
+    TensorDesc rope_desc = tensor_desc;
+    rope_desc.shape = {1, 1, 4};
+    std::shared_ptr<Buffer> rope_in_buffer, rope_out_buffer;
+    BufferDesc rope_buffer_desc{16, 4, MemoryDomain::Device, false, "rope"};
+    assert(backend.allocate(rope_buffer_desc, rope_in_buffer).ok());
+    assert(backend.allocate(rope_buffer_desc, rope_out_buffer).ok());
+    Tensor rope_input, rope_output;
+    assert(Tensor::create(rope_desc, rope_in_buffer, 0, rope_input).ok());
+    assert(Tensor::create(rope_desc, rope_out_buffer, 0, rope_output).ok());
+    RopeConfig rope_config; rope_config.rotary_dimensions = 4;
+    ComputeDispatch gles_rope;
+    assert(build_rope_f32_gles_candidate(rope_input, rope_output, rope_config, gles_rope).ok());
+    assert(gles_rope.glsl_source.find("const uint ROTARY_DIM = 4u;") != std::string::npos);
     assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") != std::string::npos);
 
     BufferDesc q4_encoded_desc{20, 4, MemoryDomain::Device, false, "q4-encoded"};
