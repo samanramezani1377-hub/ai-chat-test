@@ -271,8 +271,6 @@ endif()
 
 
     endif()
-    string(APPEND _webgpu "\\n// AI_CHAT_WEBGPU_READBACK_GUARDS_V2\\n")
-endif()
 
 file(WRITE "${_webgpu_file}" "${_webgpu}")
 message(STATUS "AI Chat: safe Dawn callback lifetime, recoverable waits, and graph failure propagation enabled")
