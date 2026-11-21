@@ -1054,6 +1054,29 @@ void test_operator_registry_fail_closed() {
     unknown.wgsl_source = selected.wgsl_source;
     assert(registry.authorize_dispatch(unknown.kernel_id, selected.backend, unknown).code ==
            StatusCode::Unsupported);
+    OperatorRegistry gles_registry;
+    KernelDefinition gles_definition;
+    gles_definition.operator_name = "Add";
+    gles_definition.kernel_id = "gles-add-f32-v1";
+    gles_definition.backend = BackendKind::OpenGles;
+    gles_definition.input_type = DataType::F32;
+    gles_definition.output_type = DataType::F32;
+    gles_definition.min_input_count = 2;
+    gles_definition.max_input_count = 2;
+    gles_definition.min_rank = 1;
+    gles_definition.max_rank = 4;
+    gles_definition.validation = KernelValidation::Validated;
+    gles_definition.glsl_source = "#version 310 es\\nvoid main(){}";
+    assert(gles_registry.register_kernel(gles_definition).ok());
+    KernelDefinition gles_selected;
+    assert(gles_registry.select_kernel("Add", BackendKind::OpenGles,
+        DataType::F32, DataType::F32, 2, 2, gles_selected).ok());
+    ComputeDispatch gles_dispatch;
+    gles_dispatch.kernel_id = gles_selected.kernel_id;
+    gles_dispatch.glsl_source = gles_selected.glsl_source;
+    assert(gles_registry.authorize_dispatch(gles_selected.kernel_id,
+        BackendKind::OpenGles, gles_dispatch).ok());
+    assert(gles_dispatch.backend == BackendKind::OpenGles);
 
     KernelDefinition mixed;
     mixed.operator_name = "Mixed";
