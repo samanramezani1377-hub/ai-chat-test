@@ -589,8 +589,11 @@ Status validate_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& operators
         : build_q8_0_matmul_candidate(activation_tensor, weights_buffer, weight_bytes, output_tensor, dispatch);
     if (!status.ok()) return status;
     const std::string& candidate_source = use_gles ? dispatch.glsl_source : dispatch.wgsl_source;
-    if (dispatch.kernel_id != kernel_id || candidate_source != registered_source)
-        return {StatusCode::InvalidArgument, "Q8_0 MatMul validation source differs from the registered candidate"};
+    const std::string& canonical_source = use_gles ? q8_0_matmul_glsl_source()
+                                                    : q8_0_matmul_wgsl_source();
+    if (dispatch.kernel_id != kernel_id || registered_source != canonical_source ||
+        candidate_source.empty())
+        return {StatusCode::InvalidArgument, "Q8_0 MatMul validation source differs from the registered canonical candidate"};
     dispatch.validation = KernelValidation::Validated;
     std::unique_ptr<CommandBatch> commands;
     status = backend.begin_commands(commands); if (!status.ok()) return status;
