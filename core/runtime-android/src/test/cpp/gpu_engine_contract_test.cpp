@@ -422,6 +422,36 @@ void test_add_operator_candidate_and_reference() {
     assert(std::abs(softmax_output[0] + softmax_output[1] - 1.0f) < 1e-6f);
     assert(std::abs(softmax_output[2] + softmax_output[3] - 1.0f) < 1e-6f);
 
+    BufferDesc activation_desc{12, 4, MemoryDomain::Device, false, "silu"};
+    std::shared_ptr<Buffer> activation_input_buffer, activation_output_buffer;
+    assert(backend.allocate(activation_desc, activation_input_buffer).ok());
+    assert(backend.allocate(activation_desc, activation_output_buffer).ok());
+    TensorDesc activation_tensor_desc;
+    activation_tensor_desc.shape = {3};
+    activation_tensor_desc.data_type = DataType::F32;
+    Tensor activation_tensor, activation_output_tensor;
+    assert(Tensor::create(activation_tensor_desc, activation_input_buffer, 0, activation_tensor).ok());
+    assert(Tensor::create(activation_tensor_desc, activation_output_buffer, 0, activation_output_tensor).ok());
+    ComputeDispatch silu_dispatch;
+    assert(build_silu_f32_candidate(activation_tensor, activation_output_tensor, silu_dispatch).ok());
+    assert(silu_dispatch.bindings.size() == 2);
+    assert(silu_dispatch.label.find("unverified") != std::string::npos);
+
+    BufferDesc softmax_desc{16, 4, MemoryDomain::Device, false, "softmax"};
+    std::shared_ptr<Buffer> softmax_input_buffer, softmax_output_buffer;
+    assert(backend.allocate(softmax_desc, softmax_input_buffer).ok());
+    assert(backend.allocate(softmax_desc, softmax_output_buffer).ok());
+    TensorDesc softmax_tensor_desc;
+    softmax_tensor_desc.shape = {2, 2};
+    softmax_tensor_desc.data_type = DataType::F32;
+    Tensor softmax_tensor, softmax_output_tensor;
+    assert(Tensor::create(softmax_tensor_desc, softmax_input_buffer, 0, softmax_tensor).ok());
+    assert(Tensor::create(softmax_tensor_desc, softmax_output_buffer, 0, softmax_output_tensor).ok());
+    ComputeDispatch softmax_dispatch;
+    assert(build_softmax_f32_candidate(softmax_tensor, softmax_output_tensor, softmax_dispatch).ok());
+    assert(softmax_dispatch.bindings.size() == 2);
+    assert(softmax_dispatch.wgsl_source.find("const COLUMNS: u32 = 2u;") != std::string::npos);
+
     BufferDesc mat_a_desc{24, 4, MemoryDomain::Device, false, "mat-a"};
     BufferDesc mat_b_desc{24, 4, MemoryDomain::Device, false, "mat-b"};
     BufferDesc mat_out_desc{16, 4, MemoryDomain::Device, false, "mat-out"};
