@@ -12,6 +12,7 @@ namespace {
 bool valid_config(const SamplingConfig& config) {
     return std::isfinite(config.temperature) && config.temperature >= 0.0f &&
            std::isfinite(config.top_p) && config.top_p > 0.0f && config.top_p <= 1.0f &&
+           std::isfinite(config.min_p) && config.min_p >= 0.0f && config.min_p <= 1.0f &&
            std::isfinite(config.repetition_penalty) && config.repetition_penalty > 0.0f;
 }
 
@@ -79,6 +80,19 @@ Status Sampler::sample(const std::vector<float>& logits,
         return {StatusCode::NumericalFailure, "Softmax probability normalization failed"};
     }
     for (double& probability : probabilities) probability /= total;
+
+    if (config_.min_p > 0.0f) {
+        const double maximum_probability = *std::max_element(probabilities.begin(), probabilities.end());
+        const double minimum_probability = maximum_probability * config_.min_p;
+        total = 0.0;
+        for (double& probability : probabilities) {
+            if (probability < minimum_probability) probability = 0.0;
+            total += probability;
+        }
+        if (total <= 0.0 || !std::isfinite(total))
+            return {StatusCode::NumericalFailure, "Min-p filtering removed all candidate tokens"};
+        for (double& probability : probabilities) probability /= total;
+    }
 
     if (config_.top_p < 1.0f) {
         std::vector<size_t> ranked = order;

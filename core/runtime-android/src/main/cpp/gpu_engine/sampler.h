@@ -12,6 +12,7 @@ struct SamplingConfig {
     float temperature = 1.0f;
     uint32_t top_k = 0;
     float top_p = 1.0f;
+    float min_p = 0.0f;
     float repetition_penalty = 1.0f;
     uint64_t seed = 0;
 };
