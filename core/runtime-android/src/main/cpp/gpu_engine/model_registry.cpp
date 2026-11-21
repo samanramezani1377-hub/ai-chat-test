@@ -184,6 +184,7 @@ public:
                 if (found != model.tensors.end()) {
                     if (found->type.name == "Q8_0") operation.operator_name = "MatMul_Q8_0";
                     else if (found->type.name == "Q4_0") operation.operator_name = "MatMul_Q4_0";
+                    else if (found->type.name == "Q4_1") operation.operator_name = "MatMul_Q4_1";
                 }
             }
             if (operation.operator_name == "RMSNorm")

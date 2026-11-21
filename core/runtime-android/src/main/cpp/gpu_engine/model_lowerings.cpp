@@ -173,6 +173,36 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
                     weight->second.byte_size, *output, dispatch);
         });
     if (!status.ok()) return status;
+    status = registry.register_lowering(backend, "MatMul_Q4_1",
+        [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
+                  ComputeDispatch& dispatch) {
+            if (operation.inputs.size() != 1 || operation.weight_tensors.size() != 1)
+                return Status{StatusCode::InvalidArgument, "Q4_1 MatMul requires one activation and one quantized weight"};
+            const Tensor *input = nullptr, *output = nullptr;
+            Status result = lookup_operand(operation, context, 0, input);
+            if (!result.ok()) return result;
+            result = lookup_output(operation, context, output);
+            if (!result.ok()) return result;
+            const auto weight = context.quantized_weights.find(operation.weight_tensors.front());
+            if (weight == context.quantized_weights.end() || !weight->second.buffer ||
+                weight->second.byte_size == 0 ||
+                GgufReader::tensor_type_info(weight->second.file_type_id).name != "Q4_1")
+                return Status{StatusCode::InvalidArgument, "Q4_1 weight binding is missing or has the wrong file type"};
+            if (input->descriptor().shape.size() != 2 ||
+                (output->descriptor().shape.size() != 2 && output->descriptor().shape.size() != 3))
+                return Status{StatusCode::Unsupported, "Q4_1 MatMul requires [M,K] activations and [M,N] or [M,H,D] output"};
+            const uint64_t output_channels = output->element_count() / input->descriptor().shape[0];
+            if (weight->second.dimensions.size() != 2 ||
+                weight->second.dimensions[0] != input->descriptor().shape[1] ||
+                weight->second.dimensions[1] != output_channels)
+                return Status{StatusCode::InvalidArgument, "Q4_1 weight tensor dimensions do not match activation and output shapes"};
+            return backend == BackendKind::OpenGles
+                ? build_q4_1_matmul_gles_candidate(*input, weight->second.buffer,
+                    weight->second.byte_size, *output, dispatch)
+                : build_q4_1_matmul_candidate(*input, weight->second.buffer,
+                    weight->second.byte_size, *output, dispatch);
+        });
+    if (!status.ok()) return status;
 
     status = registry.register_lowering(backend, "RMSNorm",
         [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
