@@ -1703,7 +1703,7 @@ void test_llama_model_execution_plan_is_structural_only() {
     assert(plan.structurally_validated);
     assert(!plan.gpu_ready && !plan.execution_validated);
     assert(plan.layer_count == 1 && plan.embedding_length == 8);
-    assert(plan.operations.size() == 19);
+    assert(plan.operations.size() == 20);
     assert(plan.operations.front().operator_name == "Embedding");
     assert(plan.operations.front().output_shape == std::vector<uint64_t>({0, 8}));
     assert(plan.operations.back().operator_name == "MatMul");
@@ -1719,6 +1719,12 @@ void test_llama_model_execution_plan_is_structural_only() {
     assert(attention_op != plan.operations.end());
     assert(attention_op->integer_attributes.at("kv_heads") == 1);
     assert(attention_op->bool_attributes.at("causal"));
+    assert(attention_op->inputs.size() == 3);
+    assert(attention_op->control_inputs.size() == 1);
+    const auto cache_append = std::find_if(plan.operations.begin(), plan.operations.end(),
+        [](const auto& op) { return op.operator_name == "KVCacheAppend"; });
+    assert(cache_append != plan.operations.end() && cache_append->side_effect);
+    assert(cache_append->integer_attributes.at("layer_index") == 0);
     assert(std::find(plan.blockers.begin(), plan.blockers.end(),
                      "MODEL_GRAPH_EXECUTION_NOT_VALIDATED") != plan.blockers.end());
 
