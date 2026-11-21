@@ -3,6 +3,7 @@
 #include "execution_engine.h"
 #include "gguf_reader.h"
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,15 @@ struct WeightStreamingPolicy {
 
 class GgufWeightStreamer {
 public:
+    // Streams one validated chunk at a time. The callback may retain the chunk's
+    // MemoryLease; otherwise its GPU allocation is released before the next chunk.
+    static Status stream_tensor(const GgufReader& reader,
+                                const GgufTensorInfo& tensor,
+                                Backend& backend,
+                                MemoryManager& memory,
+                                const DeviceInfo& device,
+                                const WeightStreamingPolicy& policy,
+                                const std::function<Status(WeightChunk&&)>& consume);
     static Status load_tensor(const GgufReader& reader,
                               const GgufTensorInfo& tensor,
                               Backend& backend,

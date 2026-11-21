@@ -52,14 +52,38 @@ Status GgufWeightStreamer::load_tensor(const GgufReader& reader,
         canonical->byte_size != tensor.byte_size) {
         return {StatusCode::Unsupported, "Weight tensor is foreign to the GGUF reader or has unknown storage size"};
     }
+    out.name = canonical->name;
+    out.dimensions = canonical->dimensions;
+    out.type = canonical->type;
+    out.total_size_bytes = canonical->byte_size;
+    Status status = stream_tensor(reader, tensor, backend, memory, device, policy,
+        [&out](WeightChunk&& chunk) {
+            out.resident_chunks.push_back(std::move(chunk));
+            return Status::success();
+        });
+    if (!status.ok()) out = LoadedWeightTensor{};
+    return status;
+}
+
+Status GgufWeightStreamer::stream_tensor(
+        const GgufReader& reader, const GgufTensorInfo& tensor,
+        Backend& backend, MemoryManager& memory, const DeviceInfo& device,
+        const WeightStreamingPolicy& policy,
+        const std::function<Status(WeightChunk&&)>& consume) {
+    if (!consume) return {StatusCode::InvalidArgument, "Weight streamer requires a chunk consumer"};
+    const GgufTensorInfo* canonical = reader.find_tensor(tensor.name);
+    if (!canonical || !canonical->byte_size_known ||
+        canonical->absolute_offset != tensor.absolute_offset ||
+        canonical->byte_size != tensor.byte_size) {
+        return {StatusCode::Unsupported, "Weight tensor is foreign to the GGUF reader or has unknown storage size"};
+    }
     if (!backend.healthy()) return {StatusCode::DeviceLost, "Cannot stream weights to an unhealthy GPU backend"};
     if (policy.target_memory == MemoryDomain::Host) {
         return {StatusCode::Unsupported, "This streamer currently targets backend-managed device/shared memory"};
     }
 
     uint64_t backend_limit = device.limits.max_storage_buffer_binding_size;
-    if (backend_limit == 0 || (device.limits.max_buffer_size != 0 &&
-                               device.limits.max_buffer_size < backend_limit)) {
+    if (backend_limit == 0 || (device.limits.max_buffer_size != 0 && device.limits.max_buffer_size < backend_limit)) {
         backend_limit = device.limits.max_buffer_size;
     }
     if (backend_limit == 0) return {StatusCode::Unsupported, "Backend did not report a usable storage-buffer limit"};
@@ -78,21 +102,15 @@ Status GgufWeightStreamer::load_tensor(const GgufReader& reader,
     chunk_limit -= chunk_limit % alignment;
     if (chunk_limit == 0) return {StatusCode::Unsupported, "Device storage limit is smaller than one aligned tensor block"};
 
-    out.name = canonical->name;
-    out.dimensions = canonical->dimensions;
-    out.type = canonical->type;
-    out.total_size_bytes = canonical->byte_size;
     uint64_t offset = 0;
     while (offset < canonical->byte_size) {
         const uint64_t remaining = canonical->byte_size - offset;
         const uint64_t logical_size = std::min(remaining, chunk_limit);
         if (logical_size == 0 || (logical_size % block_bytes) != 0) {
-            out = LoadedWeightTensor{};
             return {StatusCode::InvalidArgument, "Weight chunk splits a quantization storage block"};
         }
         uint64_t allocation_size = 0;
         if (!round_up(logical_size, 4, allocation_size)) {
-            out = LoadedWeightTensor{};
             return {StatusCode::InvalidArgument, "Weight chunk allocation size overflows"};
         }
 
@@ -108,22 +126,15 @@ Status GgufWeightStreamer::load_tensor(const GgufReader& reader,
         chunk.logical_size_bytes = logical_size;
         chunk.allocated_size_bytes = allocation_size;
         Status status = memory.allocate(allocation, chunk.memory);
-        if (!status.ok()) {
-            out = LoadedWeightTensor{};
-            return status;
-        }
+        if (!status.ok()) return status;
+
         std::vector<uint8_t> staging(static_cast<size_t>(allocation_size), 0);
         status = reader.read_tensor_chunk(*canonical, offset, staging.data(), logical_size);
-        if (!status.ok()) {
-            out = LoadedWeightTensor{};
-            return status;
-        }
+        if (!status.ok()) return status;
         status = backend.upload(chunk.memory.buffer(), 0, staging.data(), allocation_size);
-        if (!status.ok()) {
-            out = LoadedWeightTensor{};
-            return status;
-        }
-        out.resident_chunks.push_back(std::move(chunk));
+        if (!status.ok()) return status;
+        status = consume(std::move(chunk));
+        if (!status.ok()) return status;
         offset += logical_size;
     }
     return Status::success();

@@ -411,6 +411,17 @@ void test_gguf_weight_streaming() {
     assert(first[0] == 1.0f && first[3] == 4.0f);
     loaded = LoadedWeightTensor{};
     assert(memory.allocated_bytes() == 0);
+
+    uint32_t streamed_chunks = 0;
+    assert(GgufWeightStreamer::stream_tensor(reader, reader.info().tensors[0],
+        backend, memory, device, policy,
+        [&streamed_chunks](WeightChunk&& chunk) {
+            assert(chunk.memory);
+            ++streamed_chunks;
+            return Status::success();
+        }).ok());
+    assert(streamed_chunks == 2);
+    assert(memory.allocated_bytes() == 0); // each chunk is released after its consumer returns
     std::remove(path.c_str());
 }
 
