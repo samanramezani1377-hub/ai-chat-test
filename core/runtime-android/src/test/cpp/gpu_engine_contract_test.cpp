@@ -935,6 +935,26 @@ void test_tokenizer_engine_contracts() {
     assert(contraction_adapter->encode(bpe_contractions, "we're", contraction_ids).ok());
     assert((contraction_ids == std::vector<uint32_t>{6, 5}));
 
+    GgufTokenizerInfo gpt2_digits;
+    gpt2_digits.model = "gpt2";
+    gpt2_digits.pre_tokenizer = "gpt2";
+    gpt2_digits.tokens = {"1", "2", "3", "4", "12", "123", "1234", "<unk>"};
+    gpt2_digits.merges = {"1 2", "12 3", "123 4"};
+    gpt2_digits.token_types = {1, 1, 1, 1, 1, 1, 1, 2};
+    gpt2_digits.unknown_token_id = 7;
+    auto gpt2_digit_adapter = builtins.find(gpt2_digits);
+    assert(gpt2_digit_adapter && gpt2_digit_adapter->validate_metadata(gpt2_digits).ok());
+    std::vector<uint32_t> digit_ids;
+    assert(gpt2_digit_adapter->encode(gpt2_digits, "1234", digit_ids).ok());
+    assert((digit_ids == std::vector<uint32_t>{5, 3}));
+
+    GgufTokenizerInfo qwen2_digits = gpt2_digits;
+    qwen2_digits.pre_tokenizer = "qwen2";
+    auto qwen2_digit_adapter = builtins.find(qwen2_digits);
+    assert(qwen2_digit_adapter && qwen2_digit_adapter->validate_metadata(qwen2_digits).ok());
+    assert(qwen2_digit_adapter->encode(qwen2_digits, "1234", digit_ids).ok());
+    assert((digit_ids == std::vector<uint32_t>{0, 1, 2, 3}));
+
     TokenizerEngine fail_closed_tokenizer(builtins);
     assert(fail_closed_tokenizer.encode(bpe, "hi", bpe_ids).code == StatusCode::Unsupported);
     assert(bpe_ids.empty());
