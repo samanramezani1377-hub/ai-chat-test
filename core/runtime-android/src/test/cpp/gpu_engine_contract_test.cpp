@@ -193,8 +193,10 @@ void test_tensor_and_memory_lease() {
     assert(tensor.byte_size() == 24);
 
     lease = MemoryLease{};
-    assert(memory.allocated_bytes() == 64); // aliased buffer keeps the lease alive
+    assert(memory.allocated_bytes() == 64); // Tensor still owns the aliasing lease
     backing.reset();
+    assert(memory.allocated_bytes() == 64);
+    tensor = Tensor{};
     assert(memory.allocated_bytes() == 0);
 
     desc.shape = {UINT64_MAX, 8};
