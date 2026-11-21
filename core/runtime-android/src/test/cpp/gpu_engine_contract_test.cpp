@@ -712,10 +712,10 @@ void test_q8_0_decoder_and_registry() {
     BufferDesc q4_1_encoded_desc{20, 4, MemoryDomain::Device, false, "q4-1-encoded"};
     std::shared_ptr<Buffer> q4_1_encoded;
     assert(backend.allocate(q4_1_encoded_desc, q4_1_encoded).ok());
-    ComputeDispatch q4_1_dispatch;
-    assert(build_q4_1_dequantize_candidate(q4_1_encoded, 20, q4_output_tensor, q4_1_dispatch).ok());
-    assert(q4_1_dispatch.bindings.size() == 2);
-    assert(q4_1_dispatch.label.find("unverified") != std::string::npos);
+    ComputeDispatch q4_1_dequant_dispatch;
+    assert(build_q4_1_dequantize_candidate(q4_1_encoded, 20, q4_output_tensor, q4_1_dequant_dispatch).ok());
+    assert(q4_1_dequant_dispatch.bindings.size() == 2);
+    assert(q4_1_dequant_dispatch.label.find("unverified") != std::string::npos);
 
     BufferDesc q5_encoded_desc{24, 4, MemoryDomain::Device, false, "q5-encoded"};
     std::shared_ptr<Buffer> q5_encoded;
@@ -1020,7 +1020,7 @@ void test_gguf_weight_streaming() {
     q4_operation.weight_tensors = {"q4_weight"};
     q4_plan.operations.push_back(q4_operation);
     ModelExecutionContext q4_context;
-    assert(load_model_execution_weights(q4_reader, q4_plan, backend, model_device,
+    assert(load_model_execution_weights(q4_reader, q4_plan, backend, q4_memory, model_device,
                                          q4_context).ok());
     const auto q4_binding = q4_context.quantized_weights.find("q4_weight");
     assert(q4_binding != q4_context.quantized_weights.end());
@@ -1067,7 +1067,7 @@ void test_gguf_weight_streaming() {
     q4_1_operation.weight_tensors = {"q4_1_weight"};
     q4_1_plan.operations.push_back(q4_1_operation);
     ModelExecutionContext q4_1_context;
-    assert(load_model_execution_weights(q4_1_reader, q4_1_plan, backend, model_device,
+    assert(load_model_execution_weights(q4_1_reader, q4_1_plan, backend, q4_1_memory, model_device,
                                          q4_1_context).ok());
     const auto q4_1_binding = q4_1_context.quantized_weights.find("q4_1_weight");
     assert(q4_1_binding != q4_1_context.quantized_weights.end());

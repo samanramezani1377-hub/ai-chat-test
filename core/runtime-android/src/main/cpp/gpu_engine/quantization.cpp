@@ -939,7 +939,7 @@ Status build_q4_1_matmul_candidate(const Tensor& activations,
     return Status::success();
 }
 
-const char* q8_0_matmul_glsl_source() noexcept { return kQ8_0MatMulGlsl; }
+
 
 
 
@@ -1840,34 +1840,6 @@ Status build_q4_1_matmul_gles_candidate(const Tensor& activations,
     }
     return Status::success();
 }
-
-Status reference_q8_0_matmul(const float* activations, const uint8_t* quantized_weights,
-                             uint64_t weight_bytes, float* output,
-                             uint32_t rows, uint32_t output_channels, uint32_t inner) {
-    if ((!activations || !quantized_weights || !output) && rows && output_channels && inner)
-        return {StatusCode::InvalidArgument, "Q8_0 MatMul reference received a null pointer"};
-    if (rows == 0 || output_channels == 0 || inner == 0 || inner % 32 != 0)
-        return {StatusCode::InvalidArgument, "Q8_0 MatMul dimensions must be non-zero and inner block-aligned"};
-    const uint64_t blocks_per_row = inner / 32;
-    if (blocks_per_row > UINT64_MAX / 34 ||
-        output_channels > UINT64_MAX / (blocks_per_row * 34) ||
-        weight_bytes != static_cast<uint64_t>(output_channels) * blocks_per_row * 34)
-        return {StatusCode::InvalidArgument, "Q8_0 MatMul weight byte size is inconsistent"};
-    std::vector<float> decoded(inner);
-    for (uint32_t channel = 0; channel < output_channels; ++channel) {
-        const uint8_t* row_weights = quantized_weights + static_cast<uint64_t>(channel) * blocks_per_row * 34;
-        Status status = decode_q8_0_blocks(row_weights, blocks_per_row * 34, decoded.data(), inner);
-        if (!status.ok()) return status;
-        for (uint32_t row = 0; row < rows; ++row) {
-            float sum = 0.0f;
-            for (uint32_t k = 0; k < inner; ++k)
-                sum += activations[static_cast<uint64_t>(row) * inner + k] * decoded[k];
-            output[static_cast<uint64_t>(row) * output_channels + channel] = sum;
-        }
-    }
-    return Status::success();
-}
-
 
 const char* q5_0_dequantize_wgsl_source() noexcept { return kQ5_0DequantizeWgsl; }
 
