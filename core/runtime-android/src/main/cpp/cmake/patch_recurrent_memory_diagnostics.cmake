@@ -71,4 +71,27 @@ if (NOT _memory MATCHES "AI_CHAT_RECURRENT_MEMORY_ALLOCATION_V2")
     file(WRITE "${_memory_file}" "${_memory}")
 endif()
 
+# Guard the row-count arithmetic and tensor handles before allocating recurrent state.
+# These checks are architecture-neutral and preserve the original per-layer buft selection.
+if (NOT _memory MATCHES "AI_CHAT_RECURRENT_MEMORY_ALLOCATION_V3") 
+    ai_chat_replace_once(_memory
+        "        const uint32_t n_rows = mem_size * (1 + n_rs_seq);"
+        "        const uint64_t ai_chat_rows_wide = static_cast<uint64_t>(mem_size) * (1ULL + static_cast<uint64_t>(n_rs_seq));\n        if (ai_chat_rows_wide > std::numeric_limits<uint32_t>::max()) {\n            LLAMA_LOG_ERROR(\\"AI_CHAT_RECURRENT_MEMORY_INVALID rows=%llu maxRows=%u\\n\\", static_cast<unsigned long long>(ai_chat_rows_wide), std::numeric_limits<uint32_t>::max());\n            throw std::runtime_error(\\"recurrent state row count overflow\\");\n        }\n        const uint32_t n_rows = static_cast<uint32_t>(ai_chat_rows_wide);"
+        "reject recurrent row-count overflow before tensor creation")
+    ai_chat_replace_once(_memory
+        "        ggml_tensor * s = ggml_new_tensor_2d(ctx, type_s, hparams.n_embd_s(), n_rows);\n        ggml_format_name(r, \\"cache_r_l%d\\", i);"
+        "        ggml_tensor * s = ggml_new_tensor_2d(ctx, type_s, hparams.n_embd_s(), n_rows);\n        if (r == nullptr || s == nullptr) {\n            LLAMA_LOG_ERROR(\\"AI_CHAT_RECURRENT_TENSOR_CREATE_FAILED layer=%d buft=%s rows=%u\\n\\", i, ggml_backend_buft_name(buft), n_rows);\n            throw std::runtime_error(\\"failed to create recurrent state tensors\\");\n        }\n        ggml_format_name(r, \\"cache_r_l%d\\", i);"
+        "check recurrent R/S tensor handles before naming or accounting")
+    ai_chat_replace_once(_memory
+        "            ggml_tensor * p = ggml_new_tensor_2d(ctx, type_r, hparams.ple_conv_state(), n_rows);\n            ggml_format_name(p, \\"cache_ple_r_l%d\\", i);"
+        "            ggml_tensor * p = ggml_new_tensor_2d(ctx, type_r, hparams.ple_conv_state(), n_rows);\n            if (p == nullptr) {\n                LLAMA_LOG_ERROR(\\"AI_CHAT_RECURRENT_PLE_TENSOR_CREATE_FAILED layer=%d buft=%s rows=%u\\n\\", i, ggml_backend_buft_name(buft), n_rows);\n                throw std::runtime_error(\\"failed to create recurrent PLE state tensor\\");\n            }\n            ggml_format_name(p, \\"cache_ple_r_l%d\\", i);"
+        "check optional PLE state tensor handle")
+    ai_chat_replace_once(_memory
+        "            ggml_context * ctx = ggml_init(params);\n            if (!ctx) {\n                return nullptr;\n            }"
+        "            ggml_context * ctx = ggml_init(params);\n            if (!ctx) {\n                LLAMA_LOG_ERROR(\\"AI_CHAT_RECURRENT_CONTEXT_CREATE_FAILED buft=%s metadataBytes=%zu\\n\\", ggml_backend_buft_name(buft), params.mem_size);\n                return nullptr;\n            }"
+        "report recurrent metadata context allocation failure")
+    string(APPEND _memory "\\n// AI_CHAT_RECURRENT_MEMORY_ALLOCATION_V3\\n")
+    file(WRITE "${_memory_file}" "${_memory}")
+endif()
+
 message(STATUS "AI Chat: recurrent/hybrid state-cache allocation tracing enabled")
