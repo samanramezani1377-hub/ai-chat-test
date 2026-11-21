@@ -208,6 +208,41 @@ Status execute_model_execution_plan(ModelExecutionPlan& plan, Backend& backend,
 }
 
 
+
+Status bind_model_kv_cache_views(const ModelExecutionPlan& plan, KvCache& cache,
+                                 uint64_t past_length, uint64_t sequence_length,
+                                 ModelExecutionContext& context) {
+    if (sequence_length == 0 || past_length > UINT32_MAX ||
+        sequence_length > UINT32_MAX - past_length)
+        return {StatusCode::InvalidArgument, "KV cache view sequence range is invalid"};
+    const uint32_t total_length = static_cast<uint32_t>(past_length + sequence_length);
+    for (const auto& operation : plan.operations) {
+        if (operation.operator_name != "Attention") continue;
+        if (operation.inputs.size() != 3)
+            return {StatusCode::InvalidArgument, "Attention plan must reference Q and cache K/V tensor names"};
+        const auto layer_attr = operation.integer_attributes.find("layer_index");
+        if (layer_attr == operation.integer_attributes.end() || layer_attr->second > UINT32_MAX)
+            return {StatusCode::InvalidArgument, "Attention plan is missing a valid KV cache layer index"};
+        Tensor keys, values;
+        Status status = cache.key_tensor_for_length(static_cast<uint32_t>(layer_attr->second),
+                                                    total_length, keys);
+        if (!status.ok()) return status;
+        status = cache.value_tensor_for_length(static_cast<uint32_t>(layer_attr->second),
+                                               total_length, values);
+        if (!status.ok()) return status;
+        const auto key_result = context.tensors.emplace(operation.inputs[1], std::move(keys));
+        if (!key_result.second)
+            return {StatusCode::InvalidArgument, "KV cache key tensor binding already exists"};
+        const auto value_result = context.tensors.emplace(operation.inputs[2], std::move(values));
+        if (!value_result.second)
+            return {StatusCode::InvalidArgument, "KV cache value tensor binding already exists"};
+    }
+    context.kv_cache = &cache;
+    context.past_length = past_length;
+    context.sequence_length = sequence_length;
+    return Status::success();
+}
+
 Status validate_model_plan_operator_coverage(ModelExecutionPlan& plan,
                                              const OperatorRegistry& registry,
                                              BackendKind backend,

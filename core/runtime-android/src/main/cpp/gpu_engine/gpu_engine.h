@@ -238,6 +238,8 @@ public:
     Status shutdown();
 
     bool ready() const noexcept;
+    Backend* active_backend() noexcept;
+    const Backend* active_backend() const noexcept;
     const DeviceInfo* active_device() const noexcept;
     const RuntimeDiagnostics& diagnostics() const noexcept;
 

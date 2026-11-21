@@ -107,6 +107,10 @@ Status execute_model_execution_plan(ModelExecutionPlan& plan, Backend& backend,
                                     const std::atomic<bool>* cancellation,
                                     ModelGraphCompileReport& report);
 
+Status bind_model_kv_cache_views(const ModelExecutionPlan& plan, KvCache& cache,
+                                 uint64_t past_length, uint64_t sequence_length,
+                                 ModelExecutionContext& context);
+
 Status validate_model_plan_operator_coverage(ModelExecutionPlan& plan,
                                              const OperatorRegistry& registry,
                                              BackendKind backend,

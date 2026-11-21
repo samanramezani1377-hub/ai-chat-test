@@ -139,6 +139,9 @@ bool GpuEngine::ready() const noexcept {
     return active_backend_ && active_backend_->healthy();
 }
 
+Backend* GpuEngine::active_backend() noexcept { return active_backend_.get(); }
+const Backend* GpuEngine::active_backend() const noexcept { return active_backend_.get(); }
+
 const DeviceInfo* GpuEngine::active_device() const noexcept {
     return active_backend_ ? &active_device_ : nullptr;
 }

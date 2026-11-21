@@ -224,6 +224,7 @@ public:
             add(x + "attention", "Attention",
                 {x + "q_rotated", x + "cache_key", x + "cache_value"}, {},
                 x + "attention_output", {0, heads, head_dimension});
+            plan.operations.back().integer_attributes["layer_index"] = layer;
             plan.operations.back().control_inputs.push_back(x + "kv_cache_updated");
             if (uses_qkv_bias_) {
                 add(x + "attention_output", "MatMul", {x + "attention_output"},
