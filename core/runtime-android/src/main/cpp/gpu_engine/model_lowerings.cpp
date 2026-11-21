@@ -179,6 +179,40 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
         });
     if (!status.ok()) return status;
 
+
+    status = registry.register_lowering(backend, "Embedding",
+        [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
+                  ComputeDispatch& dispatch) {
+            if (operation.inputs.size() != 1 || operation.inputs[0] != "token_ids" ||
+                operation.weight_tensors.size() != 1 || !context.backend ||
+                context.token_ids.empty() || context.token_ids.size() > UINT32_MAX)
+                return Status{StatusCode::InvalidArgument, "Embedding requires token IDs, one weight tensor and an active backend"};
+            const Tensor *weights = nullptr, *output = nullptr;
+            Status result = lookup_operand(operation, context, 1, weights);
+            if (!result.ok()) return result;
+            result = lookup_output(operation, context, output);
+            if (!result.ok()) return result;
+            if (context.token_ids.size() > UINT64_MAX / sizeof(uint32_t))
+                return Status{StatusCode::InvalidArgument, "Embedding token buffer size overflows"};
+            BufferDesc token_desc;
+            token_desc.size_bytes = context.token_ids.size() * sizeof(uint32_t);
+            token_desc.alignment = alignof(uint32_t);
+            token_desc.memory = MemoryDomain::Device;
+            token_desc.persistent = false;
+            token_desc.label = "model-token-ids";
+            std::shared_ptr<Buffer> token_buffer;
+            result = context.backend->allocate(token_desc, token_buffer);
+            if (!result.ok()) return result;
+            if (!token_buffer || token_buffer->size_bytes() < token_desc.size_bytes)
+                return Status{StatusCode::BackendFailure, "Backend returned an undersized token-ID buffer"};
+            result = context.backend->upload(token_buffer, 0, context.token_ids.data(), token_desc.size_bytes);
+            if (!result.ok()) return result;
+            return backend == BackendKind::OpenGles
+                ? build_embedding_f32_gles_candidate(*weights, token_buffer, context.token_ids, *output, dispatch)
+                : build_embedding_f32_candidate(*weights, token_buffer, context.token_ids, *output, dispatch);
+        });
+    if (!status.ok()) return status;
+
     // Embedding needs a backend-owned token-id upload and lifetime contract.
     // Attention needs the KV-cache append/read contract. Both intentionally stay
     // unregistered until those resource paths are implemented and validated.

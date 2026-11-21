@@ -1261,6 +1261,41 @@ void test_builtin_architecture_adapter_is_fail_closed() {
 
 
 
+
+void test_embedding_model_lowering_uploads_token_ids_and_binds_buffer() {
+    FakeBackend backend(BackendKind::OpenGles);
+    ModelLoweringRegistry lowerings;
+    assert(register_builtin_model_lowerings(BackendKind::OpenGles, lowerings).ok());
+    ModelExecutionContext context;
+    context.backend = &backend;
+    context.token_ids = {2, 0};
+    BufferDesc weights_desc{24, 4, MemoryDomain::Device, false, "embedding-weights"};
+    BufferDesc output_desc{16, 4, MemoryDomain::Device, false, "embedding-output"};
+    std::shared_ptr<Buffer> weights_buffer, output_buffer;
+    assert(backend.allocate(weights_desc, weights_buffer).ok());
+    assert(backend.allocate(output_desc, output_buffer).ok());
+    TensorDesc weights_td; weights_td.shape = {3, 2}; weights_td.data_type = DataType::F32;
+    TensorDesc output_td; output_td.shape = {2, 2}; output_td.data_type = DataType::F32;
+    Tensor weights, output;
+    assert(Tensor::create(weights_td, weights_buffer, 0, weights).ok());
+    assert(Tensor::create(output_td, output_buffer, 0, output).ok());
+    context.tensors.emplace("token_embd.weight", weights);
+    context.tensors.emplace("hidden", output);
+    ModelPlanOperation operation;
+    operation.id = "embedding";
+    operation.operator_name = "Embedding";
+    operation.inputs = {"token_ids"};
+    operation.weight_tensors = {"token_embd.weight"};
+    operation.output = "hidden";
+    operation.output_shape = {0, 2};
+    ComputeDispatch dispatch;
+    assert((*lowerings.find(BackendKind::OpenGles, "Embedding"))(operation, context, dispatch).ok());
+    assert(dispatch.backend == BackendKind::OpenGles);
+    assert(dispatch.bindings.size() == 3);
+    assert(dispatch.bindings[1].size_bytes == 2 * sizeof(uint32_t));
+    assert(dispatch.glsl_source.find("const uint TOKEN_COUNT = 2u;") != std::string::npos);
+}
+
 void test_model_execution_never_promotes_unvalidated_kernels() {
     FakeBackend backend(BackendKind::OpenGles);
     ModelExecutionPlan plan;
@@ -1795,6 +1830,7 @@ int main() {
     test_model_plan_graph_compilation_is_fail_closed();
     test_builtin_model_lowerings_are_backend_scoped_and_fail_closed();
     test_model_execution_never_promotes_unvalidated_kernels();
+    test_embedding_model_lowering_uploads_token_ids_and_binds_buffer();
     test_llama_model_execution_plan_is_structural_only();
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
     test_model_and_quantization_registry_fail_closed();

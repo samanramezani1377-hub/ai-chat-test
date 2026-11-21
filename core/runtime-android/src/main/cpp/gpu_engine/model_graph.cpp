@@ -68,7 +68,9 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
                 report.unresolved_inputs.push_back(operation.id + ":" + input);
                 inputs_ready = false;
             }
-            if (context.tensors.find(input) == context.tensors.end()) {
+            const bool token_ids_external = input == "token_ids" &&
+                external.find(input) != external.end() && !context.token_ids.empty();
+            if (context.tensors.find(input) == context.tensors.end() && !token_ids_external) {
                 report.unresolved_inputs.push_back(operation.id + ":UNBOUND:" + input);
                 inputs_ready = false;
             }

@@ -18,6 +18,7 @@ using ModelTensorBindings = std::unordered_map<std::string, Tensor>;
 
 struct ModelExecutionContext {
     ModelTensorBindings tensors;
+    Backend* backend = nullptr;
     std::vector<uint32_t> token_ids;
     uint64_t past_length = 0;
     uint64_t sequence_length = 0;
