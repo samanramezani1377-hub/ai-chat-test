@@ -184,6 +184,7 @@ bool run_gles_compute_self_test(std::string &failure_reason) {
     // A minimal integer-only compute kernel proves shader compilation, SSBO
     // binding, dispatch, barriers and GPU-to-CPU readback without assuming FP16.
     static constexpr char shader_source[] = R"glsl(#version 310 es
+precision highp int;
 layout(local_size_x = 4, local_size_y = 1, local_size_z = 1) in;
 layout(std430, binding = 0) buffer SelfTestData {
     uint values[];
