@@ -491,10 +491,8 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     assert(register_builtin_gles_operator_candidates(operators).ok());
     assert(register_builtin_quantized_operator_candidates(operators).ok());
     assert(register_builtin_quantization_formats(quantizations).ok());
-    const Status q8_validation = validate_q8_0_matmul_kernel(backend, operators, quantizations);
-    std::fprintf(stderr, "Q8 validation status=%d message=%s\\n",
-                 static_cast<int>(q8_validation.code), q8_validation.message.c_str());
-    assert(q8_validation.code == StatusCode::NumericalFailure);
+    assert(validate_q8_0_matmul_kernel(backend, operators, quantizations).code ==
+           StatusCode::NumericalFailure);
     const QuantizationFormat* format = quantizations.find(8);
     assert(format != nullptr && format->gpu_kernel_state == SupportState::Unverified);
     assert(!quantizations.can_execute_on_gpu(8, BackendKind::DawnWebGpu));
