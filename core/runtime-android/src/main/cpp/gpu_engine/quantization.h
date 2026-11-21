@@ -24,6 +24,7 @@ Status decode_q4_1_blocks(const uint8_t* source, size_t source_bytes,
 Status decode_q8_0_blocks(const uint8_t* source, size_t source_bytes,
                           float* destination, size_t destination_elements);
 const char* q8_0_matmul_wgsl_source() noexcept;
+// Q4_0 packed-block kernels are candidates until backend-specific numerical parity passes.
 const char* q4_0_matmul_wgsl_source() noexcept;
 const char* q4_0_matmul_glsl_source() noexcept;
 Status build_q4_0_matmul_candidate(const Tensor& activations, const std::shared_ptr<Buffer>& quantized_weights, uint64_t weight_bytes, const Tensor& output, ComputeDispatch& dispatch);
