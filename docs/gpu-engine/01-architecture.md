@@ -152,3 +152,8 @@ The Android JNI probe is explicitly diagnostic-only: it initializes the independ
 ### GGUF weight binding and Q8_0 projection
 
 The current plan-driven weight binder loads only weights referenced by the execution plan. F32 tensors become F32 device Tensor bindings; Q8_0 tensors remain encoded and are stored as quantized-weight bindings rather than fully dequantized. Each binding must fit in one backend storage binding; multi-chunk tensor execution is not yet wired into the graph. The Dense architecture plan marks Q8_0 MatMul operations explicitly so the backend-specific Q8_0 candidate is selected. Candidate registration is not validation: the Q8_0 kernels remain UNVERIFIED until numerical parity validation passes on each backend.
+
+
+### Runtime kernel qualification
+
+Kernel registration remains UNVERIFIED by default. The qualification suite allocates deterministic test tensors, dispatches each backend-specific candidate, synchronizes, reads results back and compares them with CPU reference implementations using explicit absolute/relative tolerances. Only a successful readback parity test promotes that kernel in the active registry. Backend errors leave the kernel unverified; numerical mismatches mark it rejected. Dawn and Universal GLES are qualified independently. Q8_0 MatMul remains separately gated on the Q8_0 decoder and backend-specific numerical validation.

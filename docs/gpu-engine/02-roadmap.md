@@ -77,3 +77,5 @@ CI/source checks are useful but not hardware evidence. Do not wait for CI to pro
 - **2026-11-22 / Android backend probe:** added an opt-in JNI diagnostics method to exercise the Dawn-first / Universal GLES backend composition and expose actual Android device limits/features without changing the llama.cpp load/generate path. Physical-device execution remains pending.
 
 - **2026-11-22 / model weight binding:** added plan-driven single-buffer F32 and Q8_0 GGUF weight loading with persistent MemoryLease ownership. Q8_0 weights stay encoded and route to explicit MatMul_Q8_0 lowering on Dawn/GLES, including flattened 3D projections. Multi-chunk inference, quantized Embedding, and numerical backend validation remain pending.
+
+- **2026-11-22 / operator qualification suite:** added real backend readback parity validators for F32 Multiply, MatMul, RMSNorm, SiLU, Softmax, RoPE, Attention and Embedding, with registry promotion only after CPU-reference parity. Android diagnostics runs the suite; Q8_0 remains separately gated. Physical-device evidence is pending.
