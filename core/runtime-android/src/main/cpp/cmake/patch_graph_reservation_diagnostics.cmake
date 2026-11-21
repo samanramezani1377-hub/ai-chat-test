@@ -11,7 +11,7 @@ if (NOT EXISTS "${_backend_file}" OR NOT EXISTS "${_webgpu_file}")
 endif()
 
 file(READ "${_backend_file}" _backend)
-if (NOT _backend MATCHES "AI_CHAT_GRAPH_RESERVE_DIAGNOSTICS_V2")
+if (NOT _backend MATCHES "AI_CHAT_GRAPH_RESERVE_DIAGNOSTICS_V3")
     if (NOT _backend MATCHES "#include <chrono>")
         string(REPLACE "#include <algorithm>" "#include <algorithm>\n#include <chrono>" _backend "${_backend}")
     endif()
@@ -36,7 +36,7 @@ bool ggml_backend_sched_reserve(ggml_backend_sched_t sched, struct ggml_cgraph *
     GGML_ASSERT(sched);
     GGML_ASSERT((int)sched->hash_set.size >= measure_graph->n_nodes + measure_graph->n_leafs);
 
-    // AI_CHAT_GRAPH_RESERVE_DIAGNOSTICS_V2
+    // AI_CHAT_GRAPH_RESERVE_DIAGNOSTICS_V3
     const auto ai_chat_reserve_started = std::chrono::steady_clock::now();
     GGML_LOG_INFO("AI_CHAT_GRAPH_RESERVE_BEGIN inputNodes=%d inputLeafs=%d backends=%d\n",
         measure_graph->n_nodes, measure_graph->n_leafs, sched->n_backends);
@@ -89,10 +89,12 @@ bool ggml_backend_sched_reserve(ggml_backend_sched_t sched, struct ggml_cgraph *
     set(_backend "${_backend_before_reserve}${_reserve_replacement}${_backend_after_reserve}")
 
     # Give graph-split context creation its own pre-abort checkpoint.
+    if (NOT _backend MATCHES "AI_CHAT_GRAPH_SPLIT_INTERNAL_BEGIN")
     ai_chat_replace_once(_backend
         "void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgraph * graph) {"
         "void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgraph * graph) {\n    GGML_LOG_INFO(\"AI_CHAT_GRAPH_SPLIT_INTERNAL_BEGIN nodes=%d leafs=%d\\n\", graph->n_nodes, graph->n_leafs);"
         "record entry to backend graph splitting")
+    endif()
 
 
 
