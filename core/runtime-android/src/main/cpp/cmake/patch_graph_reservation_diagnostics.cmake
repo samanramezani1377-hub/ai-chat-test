@@ -58,6 +58,13 @@ bool ggml_backend_sched_reserve(ggml_backend_sched_t sched, struct ggml_cgraph *
     GGML_LOG_INFO("AI_CHAT_GRAPH_ALLOCATOR_RESERVE_END success=%d elapsedMs=%.3f\n",
         ai_chat_reserve_ok ? 1 : 0, ai_chat_alloc_ms);
 
+    for (int ai_chat_backend_index = 0; ai_chat_backend_index < sched->n_backends; ++ai_chat_backend_index) {
+        ggml_backend_t ai_chat_backend = sched->backends[ai_chat_backend_index];
+        GGML_LOG_INFO("AI_CHAT_GRAPH_BACKEND_RESERVATION backend=%s buft=%s bytes=%zu success=%d\\n",
+            ggml_backend_name(ai_chat_backend), ggml_backend_buft_name(sched->bufts[ai_chat_backend_index]),
+            ggml_backend_sched_get_buffer_size(sched, ai_chat_backend), ai_chat_reserve_ok ? 1 : 0);
+    }
+
     if (!ai_chat_reserve_ok) {
         GGML_LOG_ERROR("AI_CHAT_GRAPH_RESERVE_FAILED stage=allocator nodes=%d leafs=%d backends=%d splits=%d elapsedMs=%.3f\n",
             sched->graph.n_nodes, sched->graph.n_leafs, sched->n_backends, sched->n_splits,
