@@ -32,6 +32,7 @@ struct UniversalGpuCapabilities {
     int max_compute_workgroup_size_z = 0;
     int64_t max_shader_storage_block_bytes = 0;
     int min_shader_storage_buffer_offset_alignment = 4;
+    int max_shader_storage_buffer_bindings = 0;
     std::string vendor;
     std::string renderer;
     std::string version;

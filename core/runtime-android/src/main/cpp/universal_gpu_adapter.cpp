@@ -233,6 +233,7 @@ void read_compute_limits(UniversalGpuCapabilities &caps) {
     glGetIntegerv(GL_MAX_COMPUTE_SHARED_MEMORY_SIZE, &caps.max_compute_shared_memory_bytes);
     glGetInteger64v(GL_MAX_SHADER_STORAGE_BLOCK_SIZE, &caps.max_shader_storage_block_bytes);
     glGetIntegerv(GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT, &caps.min_shader_storage_buffer_offset_alignment);
+    glGetIntegerv(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS, &caps.max_shader_storage_buffer_bindings);
 
     GLint values[3] = {0, 0, 0};
     for (GLuint i = 0; i < 3; ++i) {
@@ -494,6 +495,8 @@ std::string UniversalGpuCapabilities::diagnostic_line() const {
         << " extensionCount=" << extension_count
         << " maxComputeInvocations=" << max_compute_invocations
         << " maxComputeSharedBytes=" << max_compute_shared_memory_bytes
+        << " ssboBindings=" << max_shader_storage_buffer_bindings
+        << " ssboOffsetAlignment=" << min_shader_storage_buffer_offset_alignment
         << " maxSsboBytes=" << max_shader_storage_block_bytes
         << " maxWorkgroupCount=" << max_compute_workgroup_count_x << "x"
         << max_compute_workgroup_count_y << "x" << max_compute_workgroup_count_z
