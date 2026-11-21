@@ -1041,7 +1041,7 @@ Status build_matmul_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
     Status status = build_matmul_f32_candidate(lhs, rhs, output, dispatch);
     if (!status.ok()) return status;
     const auto& a = lhs.descriptor().shape;
-    const auto& b = rhs.descriptor().shape;
+    const uint64_t output_columns = output.element_count() / a[0];
     dispatch.backend = BackendKind::OpenGles;
     dispatch.kernel_id = "gles-matmul-f32-generic-v1";
     dispatch.label = "gles-matmul-f32-generic-unverified";
