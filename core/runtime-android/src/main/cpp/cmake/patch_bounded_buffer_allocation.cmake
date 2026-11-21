@@ -99,6 +99,13 @@ if (NOT _alloc MATCHES "AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V1")
         assert(hn->addr.offset == 0);]=]
         "skip allocations after a bounded allocator failure")
     ai_chat_replace_once(_alloc
+        [=[        // allocate tensor from the buffer
+        struct ggml_dyn_tallocr * alloc = galloc->buf_tallocs[buffer_id];
+        ggml_backend_buffer_type_t buft = galloc->bufts[buffer_id];]=]
+        [=[        // allocate tensor from the buffer
+        ggml_backend_buffer_type_t buft = galloc->bufts[buffer_id];]=]
+        "avoid redeclaring the allocator after the early failure guard")
+    ai_chat_replace_once(_alloc
         [=[    struct hash_node * hn = ggml_gallocr_hash_get(galloc, node);
     int buffer_id = hn->buffer_id;
     struct ggml_dyn_tallocr * alloc = galloc->buf_tallocs[buffer_id];
