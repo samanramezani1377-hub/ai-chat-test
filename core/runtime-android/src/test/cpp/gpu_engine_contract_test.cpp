@@ -1238,6 +1238,75 @@ void test_llama_model_execution_plan_is_structural_only() {
     assert(!plan.structurally_validated);
 }
 
+void test_model_graph_compiler_requires_validated_dispatch_builders() {
+    FakeBackend backend;
+    TensorBindings tensors;
+    const auto bind_tensor = [&](const std::string& name) {
+        BufferDesc buffer_desc{16, 4, MemoryDomain::Device, false, name};
+        std::shared_ptr<Buffer> buffer;
+        assert(backend.allocate(buffer_desc, buffer).ok());
+        TensorDesc tensor_desc; tensor_desc.shape = {4}; tensor_desc.data_type = DataType::F32;
+        Tensor tensor;
+        assert(Tensor::create(tensor_desc, buffer, 0, tensor).ok());
+        tensors.emplace(name, tensor);
+    };
+    bind_tensor("input"); bind_tensor("weight"); bind_tensor("output");
+
+    ModelExecutionPlan plan;
+    plan.structurally_validated = true;
+    plan.operator_coverage_validated = true;
+    plan.execution_validated = true;
+    plan.external_inputs = {"input"};
+    plan.operations.push_back({"add", "Add", {"input"}, {"weight"}, "output", {4}});
+
+    OperatorRegistry operators;
+    KernelDefinition kernel;
+    kernel.operator_name = "Add"; kernel.kernel_id = "add-f32-validated";
+    kernel.backend = BackendKind::OpenGles; kernel.input_type = DataType::F32;
+    kernel.output_type = DataType::F32; kernel.min_input_count = 1;
+    kernel.max_input_count = 1; kernel.min_rank = 1; kernel.max_rank = 1;
+    kernel.validation = KernelValidation::Validated;
+    kernel.glsl_source = "#version 310 es\\nlayout(local_size_x=1) in; void main() {}";
+    assert(operators.register_kernel(kernel).ok());
+
+    OperatorDispatchRegistry builders;
+    OperatorDispatchBuilderDefinition builder;
+    builder.operator_name = "Add"; builder.backend = BackendKind::OpenGles;
+    builder.validation = SupportState::Validated;
+    builder.build = [](const ModelPlanOperation&, const std::vector<Tensor>& inputs,
+                       const std::vector<Tensor>& weights, const Tensor& output,
+                       ComputeDispatch& dispatch) {
+        dispatch.backend = BackendKind::OpenGles;
+        dispatch.kernel_id = "add-f32-validated";
+        dispatch.validation = KernelValidation::Validated;
+        dispatch.glsl_source = "#version 310 es\\nlayout(local_size_x=1) in; void main() {}";
+        dispatch.workgroup_size_x = 1; dispatch.workgroup_size_y = 1; dispatch.workgroup_size_z = 1;
+        dispatch.workgroups_x = 1; dispatch.workgroups_y = 1; dispatch.workgroups_z = 1;
+        dispatch.bindings = {
+            {0, inputs[0].buffer(), inputs[0].byte_offset(), inputs[0].byte_size()},
+            {1, weights[0].buffer(), weights[0].byte_offset(), weights[0].byte_size()},
+            {2, output.buffer(), output.byte_offset(), output.byte_size()}
+        };
+        return Status::success();
+    };
+    assert(builders.register_builder(builder).ok());
+    ModelGraphCompiler compiler;
+    ComputeGraph graph;
+    assert(compiler.compile(plan, tensors, builders, operators, BackendKind::OpenGles, graph).ok());
+    assert(graph.node_count() == 1);
+
+    OperatorDispatchRegistry unverified;
+    builder.validation = SupportState::Unverified;
+    assert(unverified.register_builder(builder).ok());
+    ComputeGraph rejected;
+    assert(compiler.compile(plan, tensors, unverified, operators,
+                            BackendKind::OpenGles, rejected).code == StatusCode::Unsupported);
+    TensorBindings incomplete = tensors;
+    incomplete.erase("weight");
+    assert(compiler.compile(plan, incomplete, builders, operators,
+                            BackendKind::OpenGles, rejected).code == StatusCode::InvalidArgument);
+}
+
 void test_qwen2_dense_adapter_builds_bias_aware_structural_plan() {
     ArchitectureRegistry registry;
     assert(register_builtin_architecture_adapters(registry).ok());
@@ -1516,6 +1585,7 @@ int main() {
     test_universal_gles_operator_candidate_is_fail_closed();
     test_model_plan_graph_compilation_is_fail_closed();
     test_llama_model_execution_plan_is_structural_only();
+    test_model_graph_compiler_requires_validated_dispatch_builders();
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
     test_model_and_quantization_registry_fail_closed();
     test_builtin_architecture_adapter_is_fail_closed();
