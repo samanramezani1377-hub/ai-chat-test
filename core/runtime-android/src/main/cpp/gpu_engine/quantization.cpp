@@ -129,6 +129,44 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 )wgsl";
 
+
+constexpr char kQ8_0MatMulWgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> activations: array<f32>;
+@group(0) @binding(1) var<storage, read> weights: array<u32>;
+@group(0) @binding(2) var<storage, read_write> output: array<f32>;
+const ROWS: u32 = 1u;
+const OUTPUT_CHANNELS: u32 = 1u;
+const INNER: u32 = 32u;
+const WEIGHT_ROW_BYTES: u32 = 34u;
+fn read_u8(byte_offset: u32) -> u32 {
+    let word = weights[byte_offset >> 2u];
+    let shift = (byte_offset & 3u) * 8u;
+    return (word >> shift) & 255u;
+}
+fn read_u16(byte_offset: u32) -> u32 {
+    let word = weights[byte_offset >> 2u];
+    let shift = (byte_offset & 3u) * 8u;
+    return (word >> shift) & 65535u;
+}
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let row = gid.y;
+    let channel = gid.x;
+    if (row >= ROWS || channel >= OUTPUT_CHANNELS) { return; }
+    var sum = 0.0;
+    for (var k = 0u; k < INNER; k = k + 1u) {
+        let block = k / 32u;
+        let within = k % 32u;
+        let block_offset = channel * WEIGHT_ROW_BYTES + block * 34u;
+        let scale = unpack2x16float(vec2<u32>(read_u16(block_offset), 0u)).x;
+        let raw = read_u8(block_offset + 2u + within);
+        let quantized = select(i32(raw), i32(raw) - 256, raw >= 128u);
+        sum = sum + activations[row * INNER + k] * scale * f32(quantized);
+    }
+    output[row * OUTPUT_CHANNELS + channel] = sum;
+}
+)wgsl";
+
 constexpr char kQ8_0DequantizeWgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> encoded: array<u32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
@@ -350,6 +388,89 @@ Status decode_q8_0_blocks(const uint8_t* source, size_t source_bytes,
 
 
 
+
+
+Status build_q8_0_matmul_candidate(const Tensor& activations,
+                                  const std::shared_ptr<Buffer>& quantized_weights,
+                                  uint64_t weight_bytes,
+                                  const Tensor& output,
+                                  ComputeDispatch& dispatch) {
+    dispatch = ComputeDispatch{};
+    if (!quantized_weights || !is_contiguous_f32(activations) ||
+        !is_contiguous_f32(output) || activations.descriptor().shape.size() != 2 ||
+        output.descriptor().shape.size() != 2)
+        return {StatusCode::Unsupported, "Q8_0 MatMul requires F32 [M,K] activations and F32 [M,N] output"};
+    const auto& a = activations.descriptor().shape;
+    const auto& o = output.descriptor().shape;
+    if (a[0] == 0 || a[1] == 0 || a[1] % 32 != 0 ||
+        o[0] != a[0] || o[1] == 0 || a[0] > UINT32_MAX ||
+        a[1] > UINT32_MAX || o[1] > UINT32_MAX ||
+        activations.element_count() > UINT32_MAX || output.element_count() > UINT32_MAX)
+        return {StatusCode::InvalidArgument, "Q8_0 MatMul dimensions are invalid or inner dimension is not block-aligned"};
+    const uint64_t blocks_per_row = a[1] / 32;
+    if (blocks_per_row > UINT64_MAX / 34 ||
+        o[1] > UINT64_MAX / (blocks_per_row * 34))
+        return {StatusCode::InvalidArgument, "Q8_0 weight byte size overflows"};
+    const uint64_t expected_bytes = o[1] * blocks_per_row * 34;
+    if (weight_bytes != expected_bytes || weight_bytes > static_cast<uint64_t>(UINT32_MAX) - 3)
+        return {StatusCode::InvalidArgument, "Q8_0 weight byte count does not match [N,K] shape"};
+    const uint64_t padded_bytes = (weight_bytes + 3) & ~uint64_t{3};
+    if (quantized_weights->size_bytes() < padded_bytes ||
+        output.byte_size() != output.element_count() * sizeof(float) ||
+        output.buffer().get() == activations.buffer().get() ||
+        output.buffer().get() == quantized_weights.get())
+        return {StatusCode::InvalidArgument, "Q8_0 MatMul buffer ranges are inconsistent"};
+    dispatch.label = "q8-0-matmul-f32-activation-generic-unverified";
+    dispatch.wgsl_source = kQ8_0MatMulWgsl;
+    const std::pair<std::string, std::string> constants[] = {
+        {"const ROWS: u32 = 1u;", "const ROWS: u32 = " + std::to_string(a[0]) + "u;"},
+        {"const OUTPUT_CHANNELS: u32 = 1u;", "const OUTPUT_CHANNELS: u32 = " + std::to_string(o[1]) + "u;"},
+        {"const INNER: u32 = 32u;", "const INNER: u32 = " + std::to_string(a[1]) + "u;"},
+        {"const WEIGHT_ROW_BYTES: u32 = 34u;", "const WEIGHT_ROW_BYTES: u32 = " +
+            std::to_string(blocks_per_row * 34) + "u;"},
+    };
+    for (const auto& constant : constants) {
+        const size_t position = dispatch.wgsl_source.find(constant.first);
+        if (position == std::string::npos)
+            return {StatusCode::BackendFailure, "Q8_0 MatMul WGSL placeholder is missing"};
+        dispatch.wgsl_source.replace(position, constant.first.size(), constant.second);
+    }
+    dispatch.workgroups_x = static_cast<uint32_t>((o[1] + 7) / 8);
+    dispatch.workgroups_y = static_cast<uint32_t>((a[0] + 7) / 8);
+    dispatch.bindings = {
+        {0, activations.buffer(), activations.byte_offset(), activations.byte_size()},
+        {1, quantized_weights, 0, padded_bytes},
+        {2, output.buffer(), output.byte_offset(), output.byte_size()},
+    };
+    return Status::success();
+}
+
+Status reference_q8_0_matmul(const float* activations, const uint8_t* quantized_weights,
+                             uint64_t weight_bytes, float* output,
+                             uint32_t rows, uint32_t output_channels, uint32_t inner) {
+    if ((!activations || !quantized_weights || !output) && rows && output_channels && inner)
+        return {StatusCode::InvalidArgument, "Q8_0 MatMul reference received a null pointer"};
+    if (rows == 0 || output_channels == 0 || inner == 0 || inner % 32 != 0)
+        return {StatusCode::InvalidArgument, "Q8_0 MatMul dimensions must be non-zero and inner block-aligned"};
+    const uint64_t blocks_per_row = inner / 32;
+    if (blocks_per_row > UINT64_MAX / 34 ||
+        output_channels > UINT64_MAX / (blocks_per_row * 34) ||
+        weight_bytes != static_cast<uint64_t>(output_channels) * blocks_per_row * 34)
+        return {StatusCode::InvalidArgument, "Q8_0 MatMul weight byte size is inconsistent"};
+    std::vector<float> decoded(inner);
+    for (uint32_t channel = 0; channel < output_channels; ++channel) {
+        const uint8_t* row_weights = quantized_weights + static_cast<uint64_t>(channel) * blocks_per_row * 34;
+        Status status = decode_q8_0_blocks(row_weights, blocks_per_row * 34, decoded.data(), inner);
+        if (!status.ok()) return status;
+        for (uint32_t row = 0; row < rows; ++row) {
+            float sum = 0.0f;
+            for (uint32_t k = 0; k < inner; ++k)
+                sum += activations[static_cast<uint64_t>(row) * inner + k] * decoded[k];
+            output[static_cast<uint64_t>(row) * output_channels + channel] = sum;
+        }
+    }
+    return Status::success();
+}
 
 const char* q5_0_dequantize_wgsl_source() noexcept { return kQ5_0DequantizeWgsl; }
 

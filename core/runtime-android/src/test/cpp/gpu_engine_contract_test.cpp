@@ -416,6 +416,44 @@ void test_q8_0_decoder_and_registry() {
     assert(build_q5_0_dequantize_candidate(q5_encoded, 22, q4_output_tensor, q5_0_dispatch).ok());
     assert(build_q5_1_dequantize_candidate(q5_encoded, 24, q4_output_tensor, q5_1_dispatch).ok());
     assert(q5_0_dispatch.bindings.size() == 2 && q5_1_dispatch.bindings.size() == 2);
+
+    std::vector<uint8_t> q8_weights(68, 0);
+    q8_weights[0] = 0x00; q8_weights[1] = 0x38;
+    q8_weights[34] = 0x00; q8_weights[35] = 0x38;
+    for (size_t i = 0; i < 32; ++i) {
+        q8_weights[2 + i] = 1;
+        q8_weights[36 + i] = 2;
+    }
+    float activation_values[32];
+    std::fill(std::begin(activation_values), std::end(activation_values), 1.0f);
+    float q8_matmul_output[2] = {};
+    assert(reference_q8_0_matmul(activation_values, q8_weights.data(), q8_weights.size(),
+                                 q8_matmul_output, 1, 2, 32).ok());
+    assert(q8_matmul_output[0] == 16.0f && q8_matmul_output[1] == 32.0f);
+
+    BufferDesc q8_weights_desc{68, 4, MemoryDomain::Device, false, "q8-matmul-weights"};
+    std::shared_ptr<Buffer> q8_weights_buffer;
+    assert(backend.allocate(q8_weights_desc, q8_weights_buffer).ok());
+    BufferDesc activation_desc{128, 4, MemoryDomain::Device, false, "q8-matmul-activations"};
+    std::shared_ptr<Buffer> activation_buffer;
+    assert(backend.allocate(activation_desc, activation_buffer).ok());
+    BufferDesc output_mat_desc{8, 4, MemoryDomain::Device, false, "q8-matmul-output"};
+    std::shared_ptr<Buffer> output_mat_buffer;
+    assert(backend.allocate(output_mat_desc, output_mat_buffer).ok());
+    TensorDesc activation_tensor_desc;
+    activation_tensor_desc.shape = {1, 32};
+    activation_tensor_desc.data_type = DataType::F32;
+    Tensor activation_tensor, output_mat_tensor;
+    assert(Tensor::create(activation_tensor_desc, activation_buffer, 0, activation_tensor).ok());
+    TensorDesc output_mat_tensor_desc;
+    output_mat_tensor_desc.shape = {1, 2};
+    output_mat_tensor_desc.data_type = DataType::F32;
+    assert(Tensor::create(output_mat_tensor_desc, output_mat_buffer, 0, output_mat_tensor).ok());
+    ComputeDispatch q8_matmul_dispatch;
+    assert(build_q8_0_matmul_candidate(activation_tensor, q8_weights_buffer, 68,
+                                       output_mat_tensor, q8_matmul_dispatch).ok());
+    assert(q8_matmul_dispatch.bindings.size() == 3);
+    assert(q8_matmul_dispatch.label.find("unverified") != std::string::npos);
 }
 
 void test_independent_sampler_and_stop_controller() {
