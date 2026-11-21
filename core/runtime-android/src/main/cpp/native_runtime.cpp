@@ -1051,10 +1051,12 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         append_native_trace(universal_gpu_caps.diagnostic_line().c_str());
         g_universal_gles_version_known =
             universal_gpu_caps.egl_context_created && universal_gpu_caps.gles_major > 0;
-        g_universal_gles_compute_supported = universal_gpu_caps.gles_compute_supported;
+        g_universal_gles_compute_supported = universal_gpu_caps.gles_compute_supported &&
+            universal_gpu_caps.gles_compute_self_test_passed;
         append_native_trace((std::string("UNIVERSAL_GPU_ADAPTER_STATUS compute=") +
             (universal_gpu_caps.gles_compute_supported ? "supported" : "unavailable") +
             " eglContext=" + (universal_gpu_caps.egl_context_created ? "created" : "not_created") +
+            " computeSelfTest=" + (universal_gpu_caps.gles_compute_self_test_passed ? "passed" : "failed") +
             " executionBackend=GGML_WEBGPU_DAWN").c_str());
         // Use the same portable OpenCL policy on every Android GPU vendor.
         // Do not force Q6_K kernel variants globally: let upstream choose the
