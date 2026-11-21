@@ -354,9 +354,9 @@ Status ComputeGraph::add_node(GraphNode node, const OperatorRegistry& registry, 
         }
     }
     if (node.name.empty()) return {StatusCode::InvalidArgument, "Graph node name cannot be empty"};
-    if (node.dispatch.backend == BackendKind::Unknown)
-        return {StatusCode::InvalidArgument, "Graph node dispatch must identify its backend"};
     if (node.dispatch.copy_only) {
+        if (node.dispatch.backend == BackendKind::Unknown)
+            return {StatusCode::InvalidArgument, "Copy-only graph node must identify its backend"};
         if (node.dispatch.buffer_copies.empty() || !node.dispatch.wgsl_source.empty() ||
             !node.dispatch.glsl_source.empty() || !node.dispatch.bindings.empty())
             return {StatusCode::InvalidArgument, "Copy-only graph nodes require only validated buffer-copy commands"};
@@ -369,7 +369,7 @@ Status ComputeGraph::add_node(GraphNode node, const OperatorRegistry& registry, 
                 return {StatusCode::InvalidArgument, "Graph buffer-copy range is invalid"};
         }
     } else if (node.dispatch.validation != KernelValidation::Validated ||
-               node.dispatch.kernel_id.empty() ||
+               node.dispatch.kernel_id.empty() || node.dispatch.backend == BackendKind::Unknown ||
                !registry.is_validated_kernel(node.dispatch.kernel_id, node.dispatch.backend)) {
         return {StatusCode::Unsupported, "Compute graph rejects kernels not authorized by the active registry"};
     }
