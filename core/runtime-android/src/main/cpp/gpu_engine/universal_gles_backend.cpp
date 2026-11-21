@@ -122,6 +122,45 @@ Status dispatch_gles(const ComputeDispatch& d, const ai_chat::gpu::UniversalGpuC
     return error==GL_NO_ERROR?Status::success():gl_error("glDispatchCompute",error);
 }
 
+Status self_test_gles_backend(const ai_chat::gpu::UniversalGpuCapabilities& caps) {
+    constexpr uint32_t input[4] = {1u, 2u, 3u, 4u};
+    constexpr uint32_t expected[4] = {10u, 13u, 16u, 19u};
+    GLuint id = 0;
+    clear_errors();
+    glGenBuffers(1, &id);
+    if (!id) return {StatusCode::OutOfMemory, "GLES backend self-test buffer allocation failed"};
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, id);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(input), input, GL_DYNAMIC_COPY);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+    Status status = glGetError() == GL_NO_ERROR ? Status::success() : gl_error("self-test buffer allocation", glGetError());
+    if (!status.ok()) { glDeleteBuffers(1, &id); return status; }
+    auto buffer = std::make_shared<GlesBuffer>(id, sizeof(input), MemoryDomain::Device);
+    ComputeDispatch dispatch;
+    dispatch.label = "universal-gles-backend-self-test";
+    dispatch.kernel_id = "internal-gles-u32-transform-v1";
+    dispatch.backend = BackendKind::OpenGles;
+    dispatch.validation = KernelValidation::Validated;
+    dispatch.glsl_source = "#version 310 es\\n"
+        "layout(local_size_x=4) in;\\n"
+        "layout(std430,binding=0) buffer Data { uint values[]; };\\n"
+        "void main(){ uint i=gl_GlobalInvocationID.x; values[i]=values[i]*3u+7u; }";
+    dispatch.bindings.push_back({0, buffer, 0, sizeof(input)});
+    dispatch.workgroups_x = 1;
+    status = dispatch_gles(dispatch, caps);
+    if (!status.ok()) return status;
+    glFinish();
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, id);
+    void* mapped = glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(input), GL_MAP_READ_BIT);
+    if (!mapped) { glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0); return {StatusCode::BackendFailure, "GLES backend self-test readback map failed"}; }
+    uint32_t output[4] = {};
+    std::memcpy(output, mapped, sizeof(output));
+    const GLboolean unmapped = glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+    if (unmapped != GL_TRUE || std::memcmp(output, expected, sizeof(expected)) != 0)
+        return {StatusCode::NumericalFailure, "GLES backend self-test output mismatch"};
+    return gl_status("GLES backend self-test");
+}
+
 class UniversalGlesBackend final : public Backend {
 public:
     BackendKind kind() const noexcept override { return BackendKind::OpenGles; }
@@ -149,7 +188,14 @@ public:
         if(d.backend!=BackendKind::OpenGles) return {StatusCode::InvalidArgument,"GLES backend received foreign device"};
         const auto c=ai_chat::gpu::probe_universal_gpu_adapter();
         if(!c.egl_context_created||!c.gles_compute_supported||!c.gles_compute_self_test_passed) { healthy_=false; return {StatusCode::DeviceLost,"Universal GLES context/self-test unavailable"}; }
-        caps_=c; healthy_=true; return Status::success();
+        caps_=c;
+        Status self_test = Status::success();
+        std::string task_error;
+        const bool ran = ai_chat::gpu::run_universal_gpu_task([&]() { self_test = self_test_gles_backend(caps_); }, task_error);
+        if (!ran) { healthy_=false; return {StatusCode::BackendFailure, task_error}; }
+        if (!self_test.ok()) { healthy_=false; return self_test; }
+        healthy_=true;
+        return Status::success();
     }
     Status allocate(const BufferDesc& d,std::shared_ptr<Buffer>& out) override {
         out.reset();
