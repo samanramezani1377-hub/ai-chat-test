@@ -145,6 +145,7 @@ include("${AI_CHAT_NATIVE_CMAKE_DIR}/cmake/patch_android_opencl.cmake")
 add_library(ai_chat_gpu_engine STATIC
     gpu_engine/gpu_engine.cpp
     gpu_engine/universal_adapter_bridge.cpp
+    gpu_engine/execution_engine.cpp
 )
 target_include_directories(ai_chat_gpu_engine PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}
