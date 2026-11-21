@@ -447,21 +447,25 @@ Status build_q8_0_matmul_candidate(const Tensor& activations,
                                   ComputeDispatch& dispatch) {
     dispatch = ComputeDispatch{};
     if (!quantized_weights || !is_device_contiguous_f32(activations) ||
-        !is_device_contiguous_f32(output) || !activations.buffer() || !output.buffer() || activations.descriptor().shape.size() != 2 ||
-        output.descriptor().shape.size() != 2)
-        return {StatusCode::Unsupported, "Q8_0 MatMul requires F32 [M,K] activations and F32 [M,N] output"};
+        !is_device_contiguous_f32(output) || !activations.buffer() || !output.buffer() ||
+        activations.descriptor().shape.size() != 2 ||
+        (output.descriptor().shape.size() != 2 && output.descriptor().shape.size() != 3))
+        return {StatusCode::Unsupported, "Q8_0 MatMul requires F32 [M,K] activations and F32 [M,N] or [M,H,D] output"};
     const auto& a = activations.descriptor().shape;
     const auto& o = output.descriptor().shape;
+    uint64_t output_channels = 0;
+    if (o.size() == 2) output_channels = o[1];
+    else if (o[1] <= UINT64_MAX / o[2]) output_channels = o[1] * o[2];
     if (a[0] == 0 || a[1] == 0 || a[1] % 32 != 0 ||
-        o[0] != a[0] || o[1] == 0 || a[0] > UINT32_MAX ||
-        a[1] > UINT32_MAX || o[1] > UINT32_MAX ||
+        o[0] != a[0] || output_channels == 0 || a[0] > UINT32_MAX ||
+        a[1] > UINT32_MAX || output_channels > UINT32_MAX ||
         activations.element_count() > UINT32_MAX || output.element_count() > UINT32_MAX)
         return {StatusCode::InvalidArgument, "Q8_0 MatMul dimensions are invalid or inner dimension is not block-aligned"};
     const uint64_t blocks_per_row = a[1] / 32;
     if (blocks_per_row > UINT64_MAX / 34 ||
-        o[1] > UINT64_MAX / (blocks_per_row * 34))
+        output_channels > UINT64_MAX / (blocks_per_row * 34))
         return {StatusCode::InvalidArgument, "Q8_0 weight byte size overflows"};
-    const uint64_t expected_bytes = o[1] * blocks_per_row * 34;
+    const uint64_t expected_bytes = output_channels * blocks_per_row * 34;
     if (weight_bytes != expected_bytes || weight_bytes > static_cast<uint64_t>(UINT32_MAX) - 3)
         return {StatusCode::InvalidArgument, "Q8_0 weight byte count does not match [N,K] shape"};
     const uint64_t padded_bytes = (weight_bytes + 3) & ~uint64_t{3};
@@ -478,7 +482,7 @@ Status build_q8_0_matmul_candidate(const Tensor& activations,
     dispatch.workgroup_size_y = 8;
     const std::pair<std::string, std::string> constants[] = {
         {"const ROWS: u32 = 1u;", "const ROWS: u32 = " + std::to_string(a[0]) + "u;"},
-        {"const OUTPUT_CHANNELS: u32 = 1u;", "const OUTPUT_CHANNELS: u32 = " + std::to_string(o[1]) + "u;"},
+        {"const OUTPUT_CHANNELS: u32 = 1u;", "const OUTPUT_CHANNELS: u32 = " + std::to_string(output_channels) + "u;"},
         {"const INNER: u32 = 32u;", "const INNER: u32 = " + std::to_string(a[1]) + "u;"},
         {"const WEIGHT_ROW_BYTES: u32 = 34u;", "const WEIGHT_ROW_BYTES: u32 = " +
             std::to_string(blocks_per_row * 34) + "u;"},
@@ -621,7 +625,7 @@ Status build_q8_0_matmul_gles_candidate(const Tensor& activations,
     dispatch.glsl_source = kQ8_0MatMulGlsl;
     const std::pair<std::string, std::string> constants[] = {
         {"const uint ROWS = 1u;", "const uint ROWS = " + std::to_string(activations.descriptor().shape[0]) + "u;"},
-        {"const uint OUTPUT_CHANNELS = 1u;", "const uint OUTPUT_CHANNELS = " + std::to_string(output.descriptor().shape[1]) + "u;"},
+        {"const uint OUTPUT_CHANNELS = 1u;", "const uint OUTPUT_CHANNELS = " + std::to_string(output.element_count() / activations.descriptor().shape[0]) + "u;"},
         {"const uint INNER = 32u;", "const uint INNER = " + std::to_string(activations.descriptor().shape[1]) + "u;"},
         {"const uint WEIGHT_ROW_BYTES = 34u;", "const uint WEIGHT_ROW_BYTES = " + std::to_string(blocks_per_row * 34) + "u;"}
     };
@@ -886,13 +890,28 @@ Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry
     q8.min_input_count = 2;
     q8.max_input_count = 2;
     q8.min_rank = 2;
-    q8.max_rank = 2;
+    q8.max_rank = 3;
     q8.validation = KernelValidation::Unverified;
     q8.kernel_id = "dawn-q8-0-matmul-f32-activation-v1";
     q8.wgsl_source = q8_0_matmul_wgsl_source();
-    return registry.register_kernel(std::move(q8));
-}
+    Status status = registry.register_kernel(std::move(q8));
+    if (!status.ok()) return status;
 
+    KernelDefinition q8_gles;
+    q8_gles.operator_name = "MatMul_Q8_0";
+    q8_gles.backend = BackendKind::OpenGles;
+    q8_gles.input_type = DataType::F32;
+    q8_gles.input_types = {DataType::F32, DataType::U32};
+    q8_gles.output_type = DataType::F32;
+    q8_gles.min_input_count = 2;
+    q8_gles.max_input_count = 2;
+    q8_gles.min_rank = 2;
+    q8_gles.max_rank = 3;
+    q8_gles.validation = KernelValidation::Unverified;
+    q8_gles.kernel_id = "gles-q8-0-matmul-f32-activation-v1";
+    q8_gles.glsl_source = q8_0_matmul_glsl_source();
+    return registry.register_kernel(std::move(q8_gles));
+}
 
 ModelQuantizationBackendReport evaluate_model_quantization_backend(
         const GgufFileInfo& model, const QuantizationRegistry& registry, BackendKind backend) {
