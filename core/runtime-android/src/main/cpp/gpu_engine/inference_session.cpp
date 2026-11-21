@@ -662,6 +662,8 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";peak_operation_weight_bytes=" << peak_operation_weight_bytes_
            << ";kv_cache_bytes=" << kv_cache_bytes_
            << ";memory_budget_bytes=" << memory_budget_bytes_
+           << ";memory_active_bytes=" << (memory_ ? memory_->allocated_bytes() : 0)
+           << ";memory_available_bytes=" << (memory_ ? memory_->available_bytes() : 0)
            << ";memory_required_bytes=" << memory_estimate_.plan.required_bytes
            << ";gpu_memory_total=unknown"
            << ";gpu_memory_free=unknown"
