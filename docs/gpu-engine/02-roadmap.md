@@ -26,7 +26,7 @@ The first architecture pass exposed two runtime components that were implicit in
 
 ## Universal GPU Adapter integration status
 
-The engine now exposes `GpuEngine::probe_universal_adapter(DeviceInfo&)` and maps the existing persistent EGL/OpenGL ES probe, limits, renderer/vendor strings and real compute self-test result into engine diagnostics. This is deliberately discovery-only: it does not create an executable OpenGL ES backend, because the current UniversalGpuAdapter does not yet expose a safe owner-thread command/buffer API to the engine. The OpenGL ES compute execution backend remains **UNVERIFIED / NOT IMPLEMENTED**.
+The Universal GPU Adapter now exposes serialized synchronous and asynchronous tasks on its dedicated EGL/GLES owner thread. The separate `ai_chat_gpu_backend_gles` target uses that API for buffers, copies, uploads, readback, GLSL ES compute dispatch and synchronization. Backend initialization runs its own integer compute/readback self-test. Production operator kernels, model execution and real-device qualification remain **UNVERIFIED**.
 
 ## Immediate next increments
 
@@ -54,3 +54,6 @@ The engine now exposes `GpuEngine::probe_universal_adapter(DeviceInfo&)` and map
 ## Validation policy
 
 CI/source checks are useful but not hardware evidence. Do not wait for CI to proceed with independent implementation work, but never describe a CI pass as real-device compatibility. Real-device qualification requires the exact GPU, OS, driver, Dawn version, features/limits, test suite and test result to be recorded.
+
+- **2026-11-21 / Universal GLES backend:** added an owner-thread task queue to the existing Universal GPU Adapter and a separate GLES backend implementing device discovery, buffer allocation/deferred destruction, copy, upload/readback, GLSL ES dispatch, SSBO/workgroup validation and synchronization. Backend initialization includes a second compute/readback self-test. No production GLES operator kernel is validated and no model inference route uses this backend yet.
+- **2026-11-21 / backend isolation:** moved Universal adapter probing out of the backend-neutral `GpuEngine` class; the adapter bridge now belongs to the GLES backend target. The host contract test script checks that both Dawn and GLES backends remain free of llama.cpp/GGML execution includes. Hardware behavior remains **UNVERIFIED**.
