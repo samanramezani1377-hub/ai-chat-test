@@ -374,6 +374,14 @@ void test_q8_0_decoder_and_registry() {
     assert(build_q4_0_dequantize_candidate(q4_encoded, 18, q4_output_tensor, q4_dispatch).ok());
     assert(q4_dispatch.bindings.size() == 2);
     assert(q4_dispatch.label.find("unverified") != std::string::npos);
+
+    BufferDesc q4_1_encoded_desc{20, 4, MemoryDomain::Device, false, "q4-1-encoded"};
+    std::shared_ptr<Buffer> q4_1_encoded;
+    assert(backend.allocate(q4_1_encoded_desc, q4_1_encoded).ok());
+    ComputeDispatch q4_1_dispatch;
+    assert(build_q4_1_dequantize_candidate(q4_1_encoded, 20, q4_output_tensor, q4_1_dispatch).ok());
+    assert(q4_1_dispatch.bindings.size() == 2);
+    assert(q4_1_dispatch.label.find("unverified") != std::string::npos);
 }
 
 void test_independent_sampler_and_stop_controller() {
