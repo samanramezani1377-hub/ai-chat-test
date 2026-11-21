@@ -1083,10 +1083,14 @@ Status build_rms_norm_f32_candidate(const Tensor& input, const Tensor& weight,
         return {StatusCode::Unsupported, "RMSNorm candidate requires contiguous device/shared F32 tensors"};
     const auto& x = input.descriptor().shape;
     const auto& w = weight.descriptor().shape;
-    if (x.size() != 2 || w.size() != 1 || output.descriptor().shape != x ||
-        w[0] != x[1] || x[0] == 0 || x[1] == 0 || x[0] > UINT32_MAX || x[1] > UINT32_MAX ||
-        input.element_count() > UINT32_MAX || output.element_count() > UINT32_MAX)
-        return {StatusCode::InvalidArgument, "RMSNorm expects input/output [rows,columns] and weight [columns]"};
+    if ((x.size() != 2 && x.size() != 3) || w.size() != 1 ||
+        output.descriptor().shape != x || x.back() == 0 || w[0] != x.back() ||
+        input.element_count() == 0 || input.element_count() % x.back() != 0 ||
+        input.element_count() > UINT32_MAX || output.element_count() > UINT32_MAX ||
+        input.element_count() / x.back() > UINT32_MAX)
+        return {StatusCode::InvalidArgument, "RMSNorm expects input/output [rows,columns] or [tokens,heads,dimension] and weight [dimension]"};
+    const uint64_t columns = x.back();
+    const uint64_t rows = input.element_count() / columns;
     if (!std::isfinite(epsilon) || epsilon <= 0.0f)
         return {StatusCode::InvalidArgument, "RMSNorm epsilon must be finite and positive"};
     if (!input.buffer() || !weight.buffer() || !output.buffer() ||
@@ -1098,14 +1102,14 @@ Status build_rms_norm_f32_candidate(const Tensor& input, const Tensor& weight,
     dispatch.wgsl_source = kRmsNormF32Wgsl;
     dispatch.workgroup_size_x = 64;
     dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source), "const COLUMNS: u32 = 1u;",
-        "const COLUMNS: u32 = " + std::to_string(x[1]) + "u;");
+        "const COLUMNS: u32 = " + std::to_string(columns) + "u;");
     std::ostringstream epsilon_literal;
     epsilon_literal << std::setprecision(9) << epsilon;
     std::string epsilon_text = epsilon_literal.str();
     if (epsilon_text.find_first_of(".eE") == std::string::npos) epsilon_text += ".0";
     dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source), "const EPSILON: f32 = 0.00001;",
         "const EPSILON: f32 = " + epsilon_text + ";");
-    dispatch.workgroups_x = static_cast<uint32_t>(x[0]);
+    dispatch.workgroups_x = static_cast<uint32_t>(rows);
     dispatch.bindings = {
         {0, input.buffer(), input.byte_offset(), input.byte_size()},
         {1, weight.buffer(), weight.byte_offset(), weight.byte_size()},
@@ -1485,7 +1489,7 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     rms.min_input_count = 2;
     rms.max_input_count = 2;
     rms.min_rank = 1;
-    rms.max_rank = 2;
+    rms.max_rank = 3;
     rms.validation = KernelValidation::Unverified;
     rms.kernel_id = "dawn-rms-norm-f32-generic-v1";
     rms.wgsl_source = kRmsNormF32Wgsl;
