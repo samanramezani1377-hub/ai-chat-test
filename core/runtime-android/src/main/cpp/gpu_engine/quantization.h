@@ -27,6 +27,12 @@ const char* q8_0_matmul_wgsl_source() noexcept;
 // Q4_0 packed-block kernels are candidates until backend-specific numerical parity passes.
 const char* q4_0_matmul_wgsl_source() noexcept;
 const char* q4_0_matmul_glsl_source() noexcept;
+const char* q4_1_matmul_wgsl_source() noexcept;
+const char* q4_1_matmul_glsl_source() noexcept;
+Status build_q4_1_matmul_candidate(const Tensor& activations, const std::shared_ptr<Buffer>& quantized_weights, uint64_t weight_bytes, const Tensor& output, ComputeDispatch& dispatch);
+Status build_q4_1_matmul_gles_candidate(const Tensor& activations, const std::shared_ptr<Buffer>& quantized_weights, uint64_t weight_bytes, const Tensor& output, ComputeDispatch& dispatch);
+Status reference_q4_1_matmul(const float* activations, const uint8_t* quantized_weights, uint64_t weight_bytes, float* output, uint32_t rows, uint32_t output_channels, uint32_t inner);
+Status validate_q4_1_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
 Status build_q4_0_matmul_candidate(const Tensor& activations, const std::shared_ptr<Buffer>& quantized_weights, uint64_t weight_bytes, const Tensor& output, ComputeDispatch& dispatch);
 Status build_q4_0_matmul_gles_candidate(const Tensor& activations, const std::shared_ptr<Buffer>& quantized_weights, uint64_t weight_bytes, const Tensor& output, ComputeDispatch& dispatch);
 Status reference_q4_0_matmul(const float* activations, const uint8_t* quantized_weights, uint64_t weight_bytes, float* output, uint32_t rows, uint32_t output_channels, uint32_t inner);
