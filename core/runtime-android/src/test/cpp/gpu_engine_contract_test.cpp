@@ -503,6 +503,13 @@ void test_gguf_weight_streaming() {
         }).ok());
     assert(streamed_chunks == 2);
     assert(memory.allocated_bytes() == 0); // each chunk is released after its consumer returns
+    const Status consumer_failure = GgufWeightStreamer::stream_tensor(reader, reader.info().tensors[0],
+        backend, memory, device, policy,
+        [](WeightChunk&&) {
+            return Status{StatusCode::BackendFailure, "intentional consumer failure"};
+        });
+    assert(consumer_failure.code == StatusCode::BackendFailure);
+    assert(memory.allocated_bytes() == 0);
     std::remove(path.c_str());
 }
 
