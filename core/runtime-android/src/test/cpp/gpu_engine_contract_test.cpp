@@ -3,6 +3,7 @@
 #include "model_registry.h"
 #include "operators.h"
 #include "weight_streamer.h"
+#include "sampler.h"
 
 #include <algorithm>
 #include <cassert>
@@ -214,6 +215,36 @@ private:
 
 
 
+
+void test_independent_sampler_and_stop_controller() {
+    SamplingConfig greedy;
+    greedy.temperature = 0.0f;
+    greedy.seed = 42;
+    Sampler sampler(greedy);
+    int32_t token = -1;
+    const std::vector<float> logits = {0.1f, 0.9f, 0.3f};
+    assert(sampler.sample(logits, {}, token).ok());
+    assert(token == 1);
+
+    SamplingConfig random_config;
+    random_config.temperature = 0.8f;
+    random_config.top_k = 2;
+    random_config.top_p = 0.9f;
+    random_config.seed = 1234;
+    Sampler first(random_config), second(random_config);
+    int32_t first_token = -1, second_token = -1;
+    assert(first.sample(logits, {}, first_token).ok());
+    assert(second.sample(logits, {}, second_token).ok());
+    assert(first_token == second_token);
+
+    StopController stop(2, {{7, 8}});
+    assert(!stop.push(7));
+    assert(stop.push(8));
+    stop.reset();
+    assert(!stop.push(1));
+    assert(stop.push(2));
+}
+
 void test_gguf_weight_streaming() {
     const std::string path = "/tmp/ai_chat_gpu_engine_weight.gguf";
     {
@@ -419,6 +450,7 @@ int main() {
     test_add_operator_candidate_and_reference();
     test_gpu_engine_lifecycle();
     test_gguf_weight_streaming();
+    test_independent_sampler_and_stop_controller();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";
     return 0;
