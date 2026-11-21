@@ -217,6 +217,15 @@ Status OperatorRegistry::select_kernel(const std::string& operator_name, Backend
     return Status::success();
 }
 
+bool OperatorRegistry::is_validated_kernel(const std::string& kernel_id,
+                                           BackendKind backend) const noexcept {
+    return std::any_of(kernels_.begin(), kernels_.end(),
+        [&kernel_id, backend](const KernelDefinition& definition) {
+            return definition.kernel_id == kernel_id && definition.backend == backend &&
+                   definition.validation == KernelValidation::Validated;
+        });
+}
+
 Status OperatorRegistry::authorize_dispatch(const std::string& kernel_id, BackendKind backend,
                                              ComputeDispatch& dispatch) const {
     const auto found = std::find_if(kernels_.begin(), kernels_.end(),
