@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstring>
 #include <limits>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -185,7 +186,7 @@ public:
         device.inference_ready = false;
         if (has_limits) {
             device.limits.max_buffer_size = supported.maxBufferSize;
-            max_buffer_size_ = supported.limits.maxBufferSize;
+            max_buffer_size_ = supported.maxBufferSize;
             device.limits.max_storage_buffer_binding_size = supported.maxStorageBufferBindingSize;
             device.limits.max_compute_workgroup_size_x = supported.maxComputeWorkgroupSizeX;
             device.limits.max_compute_workgroup_size_y = supported.maxComputeWorkgroupSizeY;
