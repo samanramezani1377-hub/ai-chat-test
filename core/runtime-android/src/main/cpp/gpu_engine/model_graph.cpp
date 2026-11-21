@@ -228,8 +228,9 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
     plan.execution_validated = false;
     plan.gpu_ready = false;
     if (!plan.structurally_validated || !plan.operator_coverage_validated ||
-        backend.kind() == BackendKind::Unknown || !backend.healthy() || token_count == 0)
-        return {StatusCode::NotReady, "Streamed execution requires a validated plan, healthy backend and non-zero token count"};
+        plan.operations.empty() || backend.kind() == BackendKind::Unknown ||
+        !backend.healthy() || token_count == 0)
+        return {StatusCode::NotReady, "Streamed execution requires a non-empty validated plan, healthy backend and non-zero token count"};
     context.backend = &backend;
     if (context.token_ids.size() != token_count)
         return {StatusCode::InvalidArgument, "Streamed execution token count does not match the bound token IDs"};
