@@ -197,7 +197,7 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
             buf_name.c_str(), size);
         return nullptr;
     }
-    return ggml_backend_buffer_init(buft, ggml_backend_buffer_interface, buf_ctx, size);]=]
+    return ggml_backend_buffer_init(buft, ggml_backend_webgpu_buffer_interface, buf_ctx, size);]=]
         "validate and safely construct WebGPU tensor buffers")
     ai_chat_replace_once(_webgpu
         [=[    return dev_ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize;]=]
