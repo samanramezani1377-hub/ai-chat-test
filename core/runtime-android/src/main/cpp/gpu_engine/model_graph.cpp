@@ -172,6 +172,33 @@ Status execute_model_execution_plan(ModelExecutionPlan& plan, Backend& backend,
         report.errors.push_back("GRAPH_EXECUTION_FAILED:" + status.message);
         return status;
     }
+    for (const auto& operation : plan.operations) {
+        if (operation.operator_name != "KVCacheAppend") continue;
+        if (!context.kv_cache) {
+            report.errors.emplace_back("KV_CACHE_COMMIT_CONTEXT_MISSING");
+            return {StatusCode::InvalidArgument, "KV cache context disappeared before commit"};
+        }
+        const auto layer_attr = operation.integer_attributes.find("layer_index");
+        if (layer_attr == operation.integer_attributes.end() || layer_attr->second > UINT32_MAX ||
+            operation.inputs.size() != 2) {
+            report.errors.push_back(operation.id + ":KV_CACHE_COMMIT_METADATA_INVALID");
+            return {StatusCode::InvalidArgument, "KV cache append commit metadata is invalid"};
+        }
+        const auto keys = context.tensors.find(operation.inputs[0]);
+        if (keys == context.tensors.end() || keys->second.descriptor().shape.empty() ||
+            keys->second.descriptor().shape[0] > UINT32_MAX) {
+            report.errors.push_back(operation.id + ":KV_CACHE_COMMIT_TENSOR_MISSING");
+            return {StatusCode::InvalidArgument, "KV cache append source tensor is missing at commit"};
+        }
+        status = context.kv_cache->commit_device_append(
+            static_cast<uint32_t>(layer_attr->second),
+            static_cast<uint32_t>(context.past_length),
+            static_cast<uint32_t>(keys->second.descriptor().shape[0]));
+        if (!status.ok()) {
+            report.errors.push_back(operation.id + ":KV_CACHE_COMMIT_FAILED:" + status.message);
+            return status;
+        }
+    }
     report.executed = true;
     plan.execution_validated = true;
     // One successful graph run is not a model-family or quantization certification.
@@ -191,6 +218,10 @@ Status validate_model_plan_operator_coverage(ModelExecutionPlan& plan,
     std::unordered_set<std::string> seen;
     for (const auto& operation : plan.operations) {
         if (!seen.insert(operation.operator_name).second) continue;
+        if (operation.operator_name == "KVCacheAppend") {
+            report.supported_operators.push_back(operation.operator_name);
+            continue;
+        }
         if (registry.has_validated_kernel(operation.operator_name, backend))
             report.supported_operators.push_back(operation.operator_name);
         else

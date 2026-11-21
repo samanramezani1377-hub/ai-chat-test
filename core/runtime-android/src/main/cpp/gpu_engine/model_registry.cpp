@@ -169,7 +169,7 @@ public:
         if (plan.rotary_dimensions == 0 || plan.rotary_dimensions > head_dimension ||
             (plan.rotary_dimensions & 1u) != 0)
             plan.blockers.emplace_back("INVALID_ROTARY_DIMENSION");
-        plan.external_inputs = {"token_ids", "kv_cache"};
+        plan.external_inputs = {"token_ids"};
         auto add = [&plan, head_dimension, kv_heads](std::string id, std::string op,
                            std::vector<std::string> inputs,
                            std::vector<std::string> weights,
@@ -190,6 +190,8 @@ public:
             }
             if (operation.operator_name == "Embedding")
                 operation.integer_attributes["vocabulary_size"] = plan.vocabulary_size;
+            if (operation.operator_name == "KVCacheAppend")
+                operation.side_effect = true;
             plan.operations.push_back(std::move(operation));
         };
         add("embedding", "Embedding", {"token_ids"}, {embedding_weight},
@@ -216,8 +218,13 @@ public:
             }
             add(x + "q_rope", "RoPE", {uses_qk_norm_ ? x + "q_normalized" : x + "q"}, {}, x + "q_rotated", {0, heads, head_dimension});
             add(x + "k_rope", "RoPE", {uses_qk_norm_ ? x + "k_normalized" : x + "k"}, {}, x + "k_rotated", {0, kv_heads, head_dimension});
-            add(x + "attention", "Attention", {x + "q_rotated", x + "k_rotated", x + "v", "kv_cache"},
-                {}, x + "attention_output", {0, heads, head_dimension});
+            add(x + "kv_cache_append", "KVCacheAppend", {x + "k_rotated", x + "v"}, {},
+                x + "kv_cache_updated");
+            plan.operations.back().integer_attributes["layer_index"] = layer;
+            add(x + "attention", "Attention",
+                {x + "q_rotated", x + "cache_key", x + "cache_value"}, {},
+                x + "attention_output", {0, heads, head_dimension});
+            plan.operations.back().control_inputs.push_back(x + "kv_cache_updated");
             if (uses_qkv_bias_) {
                 add(x + "attention_output", "MatMul", {x + "attention_output"},
                     {p + "attn_output.weight"}, x + "attention_projected_linear", {0, embedding});

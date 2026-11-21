@@ -213,6 +213,64 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
         });
     if (!status.ok()) return status;
 
+
+    status = registry.register_lowering(backend, "KVCacheAppend",
+        [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
+                  ComputeDispatch& dispatch) {
+            if (!context.kv_cache || operation.inputs.size() != 2 ||
+                !operation.weight_tensors.empty())
+                return Status{StatusCode::InvalidArgument, "KVCacheAppend requires a cache and K/V activation tensors"};
+            uint32_t layer = 0;
+            Status result = required_integer(operation, "layer_index", layer);
+            if (!result.ok()) return result;
+            const Tensor *keys = nullptr, *values = nullptr;
+            result = lookup_operand(operation, context, 0, keys);
+            if (!result.ok()) return result;
+            result = lookup_operand(operation, context, 1, values);
+            if (!result.ok()) return result;
+            if (keys->descriptor().shape.empty() ||
+                keys->descriptor().shape[0] > UINT32_MAX ||
+                (context.sequence_length != 0 &&
+                 keys->descriptor().shape[0] != context.sequence_length))
+                return Status{StatusCode::InvalidArgument, "KVCacheAppend token count does not match the execution context"};
+            std::vector<BufferCopy> copies;
+            result = context.kv_cache->prepare_device_append(
+                layer, static_cast<uint32_t>(context.past_length),
+                static_cast<uint32_t>(keys->descriptor().shape[0]), *keys, *values, copies);
+            if (!result.ok()) return result;
+            dispatch = ComputeDispatch{};
+            dispatch.label = "kv-cache-append-device-copy";
+            dispatch.kernel_id = "internal-kv-cache-append";
+            dispatch.backend = backend;
+            dispatch.copy_only = true;
+            dispatch.buffer_copies = std::move(copies);
+            return Status::success();
+        });
+    if (!status.ok()) return status;
+
+    status = registry.register_lowering(backend, "Attention",
+        [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
+                  ComputeDispatch& dispatch) {
+            if (operation.inputs.size() != 3 || !operation.weight_tensors.empty() ||
+                context.past_length > UINT32_MAX)
+                return Status{StatusCode::InvalidArgument, "Attention requires Q and valid-prefix K/V cache tensors"};
+            const Tensor *query = nullptr, *key = nullptr, *value = nullptr, *output = nullptr;
+            Status result = lookup_operand(operation, context, 0, query);
+            if (!result.ok()) return result;
+            result = lookup_operand(operation, context, 1, key);
+            if (!result.ok()) return result;
+            result = lookup_operand(operation, context, 2, value);
+            if (!result.ok()) return result;
+            result = lookup_output(operation, context, output);
+            if (!result.ok()) return result;
+            return backend == BackendKind::OpenGles
+                ? build_attention_f32_gles_candidate(*query, *key, *value, *output,
+                    static_cast<uint32_t>(context.past_length), dispatch)
+                : build_attention_f32_candidate(*query, *key, *value, *output,
+                    static_cast<uint32_t>(context.past_length), dispatch);
+        });
+    if (!status.ok()) return status;
+
     // Attention remains unregistered until KV-cache append/read semantics are
     // sequenced with the graph and validated on each backend.
     return Status::success();
