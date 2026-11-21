@@ -220,6 +220,25 @@ endif()
 
 # A failed MapAsync must not be followed by GetConstMappedRange on an unmapped buffer.
 if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_READBACK_GUARDS_V2")
+    if (_webgpu MATCHES "AI_CHAT_WEBGPU_READBACK_GUARDS_V1")
+        ai_chat_replace_once(_webgpu
+            "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->set_rows_host_error_buf, wgpu::MapMode::Read, 0,\\n                                   ctx->set_rows_host_error_buf.GetSize());\\n    if (g_webgpu_graph_error.load(std::memory_order_acquire)) return;\\n    const uint32_t * error_data"
+            "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->set_rows_host_error_buf, wgpu::MapMode::Read, 0,\\n                                   ctx->set_rows_host_error_buf.GetSize());\\n    if (ctx->global_ctx->device_error.load(std::memory_order_acquire) || g_webgpu_graph_error.load(std::memory_order_acquire)) return;\\n    const uint32_t * error_data"
+            "upgrade cached SET_ROWS readback guard")
+        ai_chat_replace_once(_webgpu
+            "    ggml_backend_webgpu_map_buffer(buf_ctx->global_ctx, buf_ctx->global_ctx->get_tensor_staging_buf,\\n                                   wgpu::MapMode::Read, 0, final_size);\\n    if (g_webgpu_graph_error.load(std::memory_order_acquire)) return;\\n    // Must specify size here"
+            "    ggml_backend_webgpu_map_buffer(buf_ctx->global_ctx, buf_ctx->global_ctx->get_tensor_staging_buf,\\n                                   wgpu::MapMode::Read, 0, final_size);\\n    if (buf_ctx->global_ctx->device_error.load(std::memory_order_acquire) || g_webgpu_graph_error.load(std::memory_order_acquire)) return;\\n    // Must specify size here"
+            "upgrade cached tensor readback guard")
+        ai_chat_replace_once(_webgpu
+            "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->profile_timestamp_host_buf, wgpu::MapMode::Read, 0,\\n                                   mapped_size);\\n    if (g_webgpu_graph_error.load(std::memory_order_acquire)) return;\\n    const uint64_t * ts_data"
+            "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->profile_timestamp_host_buf, wgpu::MapMode::Read, 0,\\n                                   mapped_size);\\n    if (ctx->global_ctx->device_error.load(std::memory_order_acquire) || g_webgpu_graph_error.load(std::memory_order_acquire)) return;\\n    const uint64_t * ts_data"
+            "upgrade cached timestamp readback guard")
+        ai_chat_replace_once(_webgpu
+            "    ggml_backend_webgpu_map_buffer(ctx, ctx->debug_host_buf, wgpu::MapMode::Read, 0, ctx->debug_host_buf.GetSize());\\n    if (g_webgpu_graph_error.load(std::memory_order_acquire)) return;\\n    const float * debug_data"
+            "    ggml_backend_webgpu_map_buffer(ctx, ctx->debug_host_buf, wgpu::MapMode::Read, 0, ctx->debug_host_buf.GetSize());\\n    if (ctx->device_error.load(std::memory_order_acquire) || g_webgpu_graph_error.load(std::memory_order_acquire)) return;\\n    const float * debug_data"
+            "upgrade cached debug readback guard")
+        string(REPLACE "AI_CHAT_WEBGPU_READBACK_GUARDS_V1" "AI_CHAT_WEBGPU_READBACK_GUARDS_V2" _webgpu "${_webgpu}")
+    else()
 ai_chat_replace_once(_webgpu
     "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->set_rows_host_error_buf, wgpu::MapMode::Read, 0,\n                                   ctx->set_rows_host_error_buf.GetSize());\n    const uint32_t * error_data"
     "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->set_rows_host_error_buf, wgpu::MapMode::Read, 0,\n                                   ctx->set_rows_host_error_buf.GetSize());\n    if (ctx->global_ctx->device_error.load(std::memory_order_acquire) || g_webgpu_graph_error.load(std::memory_order_acquire)) return;\n    const uint32_t * error_data"
@@ -244,6 +263,11 @@ ai_chat_replace_once(_webgpu
     "    if (status != wgpu::WaitStatus::Success) {\n        g_webgpu_graph_error.store(true, std::memory_order_release);\n        GGML_LOG_ERROR(\"AI_CHAT_WEBGPU_EVENT_WAIT_FAILED status=%d timeoutMs=%u\\n\", static_cast<int>(status), WEBGPU_RUNTIME_WAIT_TIMEOUT_MS);\n    }\n    event_ctx->recorded = false;"
     "replace event synchronization abort with a graph failure")
 string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_READBACK_GUARDS_V2\n")
+endif()
+
+
+    endif()
+    string(APPEND _webgpu "\\n// AI_CHAT_WEBGPU_READBACK_GUARDS_V2\\n")
 endif()
 
 file(WRITE "${_webgpu_file}" "${_webgpu}")
