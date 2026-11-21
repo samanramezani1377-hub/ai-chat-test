@@ -44,13 +44,13 @@ static bool ggml_backend_webgpu_check_wait_status(wgpu::WaitStatus wait_status,
     if (!wait_ok || !callback_ok) {
         g_webgpu_device_error.store(true, std::memory_order_release);
         if (wait_status == wgpu::WaitStatus::TimedOut) {
-            GGML_LOG_ERROR("AI_CHAT_WEBGPU_WAIT_FAILED kind=%s reason=timeout timeoutMs=%u callbackStatus=%d message=%s\\n",
+            GGML_LOG_ERROR("AI_CHAT_WEBGPU_WAIT_FAILED kind=%s reason=timeout timeoutMs=%u callbackStatus=%d message=%s\n",
                 wait_name, WEBGPU_RUNTIME_WAIT_TIMEOUT_MS, static_cast<int>(callback_status), callback_message);
         } else if (wait_status == wgpu::WaitStatus::Error) {
-            GGML_LOG_ERROR("AI_CHAT_WEBGPU_WAIT_FAILED kind=%s reason=wait_error callbackStatus=%d message=%s\\n",
+            GGML_LOG_ERROR("AI_CHAT_WEBGPU_WAIT_FAILED kind=%s reason=wait_error callbackStatus=%d message=%s\n",
                 wait_name, static_cast<int>(callback_status), callback_message);
         } else {
-            GGML_LOG_ERROR("AI_CHAT_WEBGPU_WAIT_FAILED kind=%s reason=callback_error callbackKind=%s callbackStatus=%d message=%s\\n",
+            GGML_LOG_ERROR("AI_CHAT_WEBGPU_WAIT_FAILED kind=%s reason=callback_error callbackKind=%s callbackStatus=%d message=%s\n",
                 wait_name, failure_name, static_cast<int>(callback_status), callback_message);
         }
         return false;
@@ -91,7 +91,7 @@ static bool ggml_backend_webgpu_wait_queue(webgpu_global_context & ctx) {
         : static_cast<wgpu::QueueWorkDoneStatus>(status_value);
     if (status_value < 0) {
         g_webgpu_device_error.store(true, std::memory_order_release);
-        GGML_LOG_ERROR("AI_CHAT_WEBGPU_WAIT_FAILED kind=queue reason=callback_not_delivered waitStatus=%d\\n",
+        GGML_LOG_ERROR("AI_CHAT_WEBGPU_WAIT_FAILED kind=queue reason=callback_not_delivered waitStatus=%d\n",
             static_cast<int>(wait_status));
         return false;
     }
@@ -127,7 +127,7 @@ static bool ggml_backend_webgpu_map_buffer(webgpu_global_context & ctx,
         : static_cast<wgpu::MapAsyncStatus>(status_value);
     if (status_value < 0) {
         g_webgpu_device_error.store(true, std::memory_order_release);
-        GGML_LOG_ERROR("AI_CHAT_WEBGPU_WAIT_FAILED kind=map reason=callback_not_delivered waitStatus=%d\\n",
+        GGML_LOG_ERROR("AI_CHAT_WEBGPU_WAIT_FAILED kind=map reason=callback_not_delivered waitStatus=%d\n",
             static_cast<int>(wait_status));
         return false;
     }
@@ -154,18 +154,18 @@ endif()
 if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_NONFATAL_CALLBACKS_V1")
     ai_chat_replace_once(_webgpu
         [=[            GGML_UNUSED(device);
-            GGML_LOG_ERROR("ggml_webgpu: Device lost! Reason: %d, Message: %s\\n", static_cast<int>(reason),
+            GGML_LOG_ERROR("ggml_webgpu: Device lost! Reason: %d, Message: %s\n", static_cast<int>(reason),
                            std::string(message).c_str());]=]
         [=[            GGML_UNUSED(device);
             g_webgpu_device_error.store(true, std::memory_order_release);
-            GGML_LOG_ERROR("AI_CHAT_WEBGPU_DEVICE_LOST reason=%d message=%s\\n", static_cast<int>(reason),
+            GGML_LOG_ERROR("AI_CHAT_WEBGPU_DEVICE_LOST reason=%d message=%s\n", static_cast<int>(reason),
                            std::string(message).c_str());]=]
         "persist device loss before later graph placement")
     ai_chat_replace_once(_webgpu
-        [=[            GGML_ABORT("ggml_webgpu: Device error! Reason: %d, Message: %s\\n", static_cast<int>(reason),
+        [=[            GGML_ABORT("ggml_webgpu: Device error! Reason: %d, Message: %s\n", static_cast<int>(reason),
                        std::string(message).c_str());]=]
         [=[            g_webgpu_device_error.store(true, std::memory_order_release);
-            GGML_LOG_ERROR("AI_CHAT_WEBGPU_UNCAPTURED_ERROR reason=%d message=%s\\n",
+            GGML_LOG_ERROR("AI_CHAT_WEBGPU_UNCAPTURED_ERROR reason=%d message=%s\n",
                            static_cast<int>(reason), std::string(message).c_str());]=]
         "replace uncaptured-error abort with explicit backend failure state")
     string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_NONFATAL_CALLBACKS_V1\n")
