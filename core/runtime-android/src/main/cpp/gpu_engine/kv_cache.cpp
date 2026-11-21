@@ -131,6 +131,12 @@ Status KvCache::prepare_device_append(uint32_t layer, uint32_t start_position,
         values.buffer()->memory_domain() == MemoryDomain::Host)
         return {StatusCode::InvalidArgument, "Device KV cache source tensors must match the configured contiguous K/V shape, type and memory domain"};
     const Layer& state = layers_[layer];
+    if (keys.buffer().get() == state.keys.buffer().get() ||
+        keys.buffer().get() == state.values.buffer().get() ||
+        values.buffer().get() == state.keys.buffer().get() ||
+        values.buffer().get() == state.values.buffer().get() ||
+        keys.buffer().get() == values.buffer().get())
+        return {StatusCode::InvalidArgument, "KV cache append source and destination buffers must not alias"};
     if (start_position != state.valid_tokens || start_position > config_.maximum_sequence_length ||
         token_count > config_.maximum_sequence_length - start_position)
         return {StatusCode::InvalidArgument, "Device KV cache append must be sequential and remain within capacity"};
