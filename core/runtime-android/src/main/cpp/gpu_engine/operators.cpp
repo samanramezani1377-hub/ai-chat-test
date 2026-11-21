@@ -111,6 +111,53 @@ void main() {
 }
 )glsl";
 
+constexpr char kAttentionF32Glsl[] = R"glsl(#version 310 es
+precision highp float;
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+layout(std430, binding = 0) readonly buffer Query { float query_values[]; };
+layout(std430, binding = 1) readonly buffer Key { float key_values[]; };
+layout(std430, binding = 2) readonly buffer Value { float value_values[]; };
+layout(std430, binding = 3) writeonly buffer Output { float output_values[]; };
+const uint TOKENS = 1u;
+const uint QUERY_HEADS = 1u;
+const uint KV_HEADS = 1u;
+const uint HEAD_DIM = 2u;
+const uint PAST_LENGTH = 0u;
+const uint SEQUENCE_LENGTH = 1u;
+const float SCALE = 0.70710678118;
+void main() {
+    uint token = gl_WorkGroupID.x;
+    uint query_head = gl_WorkGroupID.y;
+    if (token >= TOKENS || query_head >= QUERY_HEADS) return;
+    uint kv_head = query_head / (QUERY_HEADS / KV_HEADS);
+    uint head_task = token * QUERY_HEADS + query_head;
+    uint query_base = head_task * HEAD_DIM;
+    uint kv_head_offset = kv_head * HEAD_DIM;
+    float accumulator[256];
+    for (uint d = 0u; d < HEAD_DIM; ++d) accumulator[d] = 0.0;
+    float maximum = -3.402823466e+38;
+    float denominator = 0.0;
+    uint allowed = PAST_LENGTH + token + 1u;
+    for (uint sequence = 0u; sequence < allowed; ++sequence) {
+        float score = 0.0;
+        for (uint d = 0u; d < HEAD_DIM; ++d)
+            score += query_values[query_base + d] * key_values[sequence * KV_HEADS * HEAD_DIM + kv_head_offset + d];
+        score *= SCALE;
+        float next_maximum = max(maximum, score);
+        float old_weight = exp(maximum - next_maximum);
+        float new_weight = exp(score - next_maximum);
+        denominator = denominator * old_weight + new_weight;
+        for (uint d = 0u; d < HEAD_DIM; ++d)
+            accumulator[d] = accumulator[d] * old_weight +
+                value_values[sequence * KV_HEADS * HEAD_DIM + kv_head_offset + d] * new_weight;
+        maximum = next_maximum;
+    }
+    uint output_base = head_task * HEAD_DIM;
+    for (uint d = 0u; d < HEAD_DIM; ++d)
+        output_values[output_base + d] = accumulator[d] / denominator;
+}
+)glsl";
+
 constexpr char kRopeF32Glsl[] = R"glsl(#version 310 es
 precision highp float;
 precision highp int;
@@ -687,6 +734,40 @@ Status build_attention_f32_candidate(const Tensor& query, const Tensor& key,
         {2, value.buffer(), value.byte_offset(), value.byte_size()},
         {3, output.buffer(), output.byte_offset(), output.byte_size()},
     };
+    return Status::success();
+}
+
+Status build_attention_f32_gles_candidate(const Tensor& query, const Tensor& key,
+                                          const Tensor& value, const Tensor& output,
+                                          uint32_t past_length, ComputeDispatch& dispatch) {
+    Status status = build_attention_f32_candidate(query, key, value, output, past_length, dispatch);
+    if (!status.ok()) return status;
+    const auto& q = query.descriptor().shape;
+    const auto& k = key.descriptor().shape;
+    const double scale = 1.0 / std::sqrt(static_cast<double>(q[2]));
+    std::ostringstream scale_literal;
+    scale_literal << std::setprecision(12) << scale;
+    std::string scale_text = scale_literal.str();
+    if (scale_text.find_first_of(".eE") == std::string::npos) scale_text += ".0";
+    dispatch.backend = BackendKind::OpenGles;
+    dispatch.kernel_id = "gles-attention-f32-causal-gqa-v1";
+    dispatch.label = "gles-attention-f32-causal-gqa-unverified";
+    dispatch.wgsl_source.clear();
+    dispatch.glsl_source = kAttentionF32Glsl;
+    const std::pair<std::string, std::string> constants[] = {
+        {"const uint TOKENS = 1u;", "const uint TOKENS = " + std::to_string(q[0]) + "u;"},
+        {"const uint QUERY_HEADS = 1u;", "const uint QUERY_HEADS = " + std::to_string(q[1]) + "u;"},
+        {"const uint KV_HEADS = 1u;", "const uint KV_HEADS = " + std::to_string(k[1]) + "u;"},
+        {"const uint HEAD_DIM = 2u;", "const uint HEAD_DIM = " + std::to_string(q[2]) + "u;"},
+        {"const uint PAST_LENGTH = 0u;", "const uint PAST_LENGTH = " + std::to_string(past_length) + "u;"},
+        {"const uint SEQUENCE_LENGTH = 1u;", "const uint SEQUENCE_LENGTH = " + std::to_string(k[0]) + "u;"},
+        {"const float SCALE = 0.70710678118;", "const float SCALE = " + scale_text + ";"}
+    };
+    for (const auto& constant : constants) {
+        const size_t pos = dispatch.glsl_source.find(constant.first);
+        if (pos == std::string::npos) return {StatusCode::BackendFailure, "Attention GLSL constant placeholder is missing"};
+        dispatch.glsl_source.replace(pos, constant.first.size(), constant.second);
+    }
     return Status::success();
 }
 
@@ -1806,7 +1887,22 @@ Status register_builtin_gles_operator_candidates(OperatorRegistry& registry) {
     embedding.validation = KernelValidation::Unverified;
     embedding.kernel_id = "gles-embedding-f32-generic-v1";
     embedding.glsl_source = kEmbeddingF32Glsl;
-    return registry.register_kernel(std::move(embedding));
+    status = registry.register_kernel(std::move(embedding));
+    if (!status.ok()) return status;
+
+    KernelDefinition attention;
+    attention.operator_name = "Attention";
+    attention.backend = BackendKind::OpenGles;
+    attention.input_type = DataType::F32;
+    attention.output_type = DataType::F32;
+    attention.min_input_count = 3;
+    attention.max_input_count = 3;
+    attention.min_rank = 3;
+    attention.max_rank = 3;
+    attention.validation = KernelValidation::Unverified;
+    attention.kernel_id = "gles-attention-f32-causal-gqa-v1";
+    attention.glsl_source = kAttentionF32Glsl;
+    return registry.register_kernel(std::move(attention));
 }
 
 } // namespace ai_chat::gpu_engine

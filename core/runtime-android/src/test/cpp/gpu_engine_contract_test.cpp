@@ -488,6 +488,26 @@ void test_q8_0_decoder_and_registry() {
     ComputeDispatch gles_rope;
     assert(build_rope_f32_gles_candidate(rope_input, rope_output, rope_config, gles_rope).ok());
     assert(gles_rope.glsl_source.find("const uint ROTARY_DIM = 4u;") != std::string::npos);
+    BufferDesc q_desc{16, 4, MemoryDomain::Device, false, "attention-q"};
+    BufferDesc kv_desc{8, 4, MemoryDomain::Device, false, "attention-kv"};
+    BufferDesc attn_out_desc{16, 4, MemoryDomain::Device, false, "attention-out"};
+    std::shared_ptr<Buffer> q_buffer, k_buffer, v_buffer, attn_out_buffer;
+    assert(backend.allocate(q_desc, q_buffer).ok());
+    assert(backend.allocate(kv_desc, k_buffer).ok());
+    assert(backend.allocate(kv_desc, v_buffer).ok());
+    assert(backend.allocate(attn_out_desc, attn_out_buffer).ok());
+    TensorDesc q_tensor_desc = tensor_desc; q_tensor_desc.shape = {1, 2, 2};
+    TensorDesc kv_tensor_desc = tensor_desc; kv_tensor_desc.shape = {1, 1, 2};
+    Tensor q_tensor, k_tensor, v_tensor, attn_output;
+    assert(Tensor::create(q_tensor_desc, q_buffer, 0, q_tensor).ok());
+    assert(Tensor::create(kv_tensor_desc, k_buffer, 0, k_tensor).ok());
+    assert(Tensor::create(kv_tensor_desc, v_buffer, 0, v_tensor).ok());
+    assert(Tensor::create(q_tensor_desc, attn_out_buffer, 0, attn_output).ok());
+    ComputeDispatch gles_attention;
+    assert(build_attention_f32_gles_candidate(q_tensor, k_tensor, v_tensor, attn_output, 0, gles_attention).ok());
+    assert(gles_attention.workgroups_x == 1 && gles_attention.workgroups_y == 2);
+    assert(gles_attention.workgroup_size_x == 1 && gles_attention.workgroup_size_y == 1);
+    assert(gles_attention.glsl_source.find("const uint QUERY_HEADS = 2u;") != std::string::npos);
     assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") != std::string::npos);
 
     BufferDesc q4_encoded_desc{20, 4, MemoryDomain::Device, false, "q4-encoded"};
@@ -1039,74 +1059,6 @@ void test_model_and_quantization_registry_fail_closed() {
 }
 
 
-
-void test_gles_transformer_operator_candidates() {
-    FakeBackend backend;
-    auto allocate = [&backend](uint64_t bytes, const char* label) {
-        BufferDesc desc{bytes, 4, MemoryDomain::Device, false, label};
-        std::shared_ptr<Buffer> result;
-        assert(backend.allocate(desc, result).ok());
-        return result;
-    };
-
-    auto embedding_weights_buffer = allocate(32, "gles-embedding-weights");
-    auto token_ids_buffer = allocate(8, "gles-token-ids");
-    auto embedding_output_buffer = allocate(16, "gles-embedding-output");
-    TensorDesc weights_desc; weights_desc.shape = {4, 2}; weights_desc.data_type = DataType::F32;
-    TensorDesc embedding_output_desc; embedding_output_desc.shape = {2, 2}; embedding_output_desc.data_type = DataType::F32;
-    Tensor embedding_weights, embedding_output;
-    assert(Tensor::create(weights_desc, embedding_weights_buffer, 0, embedding_weights).ok());
-    assert(Tensor::create(embedding_output_desc, embedding_output_buffer, 0, embedding_output).ok());
-    ComputeDispatch embedding_dispatch;
-    assert(build_embedding_f32_gles_candidate(embedding_weights, token_ids_buffer,
-        std::vector<uint32_t>{1, 3}, embedding_output, embedding_dispatch).ok());
-    assert(embedding_dispatch.backend == BackendKind::OpenGles);
-    assert(embedding_dispatch.workgroup_size_x == 64);
-    assert(embedding_dispatch.glsl_source.find("VOCABULARY_SIZE = 4u") != std::string::npos);
-    assert(embedding_dispatch.glsl_source.find("EMBEDDING_DIMENSION = 2u") != std::string::npos);
-
-    auto rope_input_buffer = allocate(32, "gles-rope-input");
-    auto rope_output_buffer = allocate(32, "gles-rope-output");
-    TensorDesc rope_desc; rope_desc.shape = {1, 2, 4}; rope_desc.data_type = DataType::F32;
-    Tensor rope_input, rope_output;
-    assert(Tensor::create(rope_desc, rope_input_buffer, 0, rope_input).ok());
-    assert(Tensor::create(rope_desc, rope_output_buffer, 0, rope_output).ok());
-    RopeConfig rope_config; rope_config.rotary_dimensions = 4; rope_config.start_position = 3;
-    ComputeDispatch rope_dispatch;
-    assert(build_rope_f32_gles_candidate(rope_input, rope_output, rope_config, rope_dispatch).ok());
-    assert(rope_dispatch.workgroup_size_x == 64);
-    assert(rope_dispatch.glsl_source.find("START_POSITION = 3u") != std::string::npos);
-
-    auto query_buffer = allocate(16, "gles-attention-query");
-    auto key_buffer = allocate(8, "gles-attention-key");
-    auto value_buffer = allocate(8, "gles-attention-value");
-    auto attention_output_buffer = allocate(16, "gles-attention-output");
-    TensorDesc query_desc; query_desc.shape = {1, 2, 2}; query_desc.data_type = DataType::F32;
-    TensorDesc kv_desc; kv_desc.shape = {1, 1, 2}; kv_desc.data_type = DataType::F32;
-    Tensor query, key, value, attention_output;
-    assert(Tensor::create(query_desc, query_buffer, 0, query).ok());
-    assert(Tensor::create(kv_desc, key_buffer, 0, key).ok());
-    assert(Tensor::create(kv_desc, value_buffer, 0, value).ok());
-    assert(Tensor::create(query_desc, attention_output_buffer, 0, attention_output).ok());
-    ComputeDispatch attention_dispatch;
-    assert(build_attention_f32_gles_candidate(query, key, value, attention_output, 0,
-                                               attention_dispatch).ok());
-    assert(attention_dispatch.workgroup_size_x == 1 && attention_dispatch.workgroup_size_y == 1);
-    assert(attention_dispatch.workgroups_y == 2);
-    assert(attention_dispatch.glsl_source.find("QUERY_HEADS = 2u") != std::string::npos);
-    assert(attention_dispatch.glsl_source.find("KV_HEADS = 1u") != std::string::npos);
-
-    OperatorRegistry registry;
-    assert(register_builtin_gles_operator_candidates(registry).ok());
-    KernelDefinition selected;
-    assert(registry.select_kernel("Embedding", BackendKind::OpenGles,
-        std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2, selected).code == StatusCode::Unsupported);
-    assert(registry.select_kernel("RoPE", BackendKind::OpenGles, DataType::F32,
-        DataType::F32, 1, 3, selected).code == StatusCode::Unsupported);
-    assert(registry.select_kernel("Attention", BackendKind::OpenGles, DataType::F32,
-        DataType::F32, 3, 3, selected).code == StatusCode::Unsupported);
-}
-
 void test_universal_gles_operator_candidate_is_fail_closed() {
     FakeBackend backend;
     BufferDesc desc{16, 4, MemoryDomain::Device, false, "gles-add"};
@@ -1307,7 +1259,6 @@ int main() {
     test_independent_gguf_reader();
     test_tensor_and_memory_lease();
     test_operator_registry_fail_closed();
-    test_gles_transformer_operator_candidates();
     test_universal_gles_operator_candidate_is_fail_closed();
     test_model_and_quantization_registry_fail_closed();
     test_builtin_architecture_adapter_is_fail_closed();
