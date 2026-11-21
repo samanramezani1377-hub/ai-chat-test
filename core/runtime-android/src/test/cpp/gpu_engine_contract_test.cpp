@@ -8,6 +8,7 @@
 #include "kv_cache.h"
 #include "runtime_router.h"
 #include "memory_planner.h"
+#include "tokenizer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -587,6 +588,69 @@ void test_q8_0_decoder_and_registry() {
     assert(gles_registry.select_kernel("MatMul_Q8_0", BackendKind::OpenGles,
         std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
         q8_gles_unverified).code == StatusCode::Unsupported);
+}
+
+class FakeTokenizerAdapter final : public TokenizerAdapter {
+public:
+    FakeTokenizerAdapter() {
+        descriptor_.model = "test-bpe";
+        descriptor_.pre_tokenizer = "test-pretokenizer";
+        descriptor_.algorithm = "test-only";
+        descriptor_.validation = SupportState::Validated;
+    }
+    const TokenizerDescriptor& descriptor() const noexcept override { return descriptor_; }
+    Status validate_metadata(const GgufTokenizerInfo& metadata) const override {
+        return metadata.tokens.size() == 2 ? Status::success()
+            : Status{StatusCode::InvalidArgument, "fake tokenizer expects exactly two tokens"};
+    }
+    Status encode(const GgufTokenizerInfo&, const std::string& text,
+                  std::vector<uint32_t>& ids) const override {
+        if (text == "a") { ids = {0}; return Status::success(); }
+        if (text == "b") { ids = {1}; return Status::success(); }
+        return {StatusCode::Unsupported, "fake tokenizer only accepts a or b"};
+    }
+    Status decode(const GgufTokenizerInfo& metadata, const std::vector<uint32_t>& ids,
+                  std::string& text) const override {
+        text.clear();
+        for (uint32_t id : ids) text += metadata.tokens[id];
+        return Status::success();
+    }
+private:
+    TokenizerDescriptor descriptor_;
+};
+
+void test_tokenizer_engine_contracts() {
+    GgufTokenizerInfo metadata;
+    metadata.model = "test-bpe";
+    metadata.pre_tokenizer = "test-pretokenizer";
+    metadata.tokens = {"a", "b"};
+    metadata.bos_token_id = 0;
+    metadata.eos_token_id = 1;
+    TokenizerRegistry registry;
+    auto report = evaluate_tokenizer_preflight(metadata, registry);
+    assert(report.metadata_valid);
+    assert(!report.adapter_registered && !report.ready);
+    assert(std::find(report.blockers.begin(), report.blockers.end(),
+                     "TOKENIZER_ADAPTER_NOT_REGISTERED") != report.blockers.end());
+
+    assert(registry.register_adapter(std::make_shared<FakeTokenizerAdapter>()).ok());
+    report = evaluate_tokenizer_preflight(metadata, registry);
+    assert(report.metadata_valid && report.adapter_registered &&
+           report.adapter_validated && report.ready);
+    TokenizerEngine tokenizer(registry);
+    std::vector<uint32_t> ids;
+    assert(tokenizer.encode(metadata, "a", ids).ok());
+    assert(ids.size() == 1 && ids[0] == 0);
+    std::string decoded;
+    assert(tokenizer.decode(metadata, ids, decoded).ok() && decoded == "a");
+    assert(tokenizer.encode(metadata, "invalid", ids).code == StatusCode::Unsupported);
+    assert(ids.empty());
+
+    metadata.bos_token_id = 9;
+    report = evaluate_tokenizer_preflight(metadata, registry);
+    assert(!report.metadata_valid && !report.ready);
+    assert(std::find(report.blockers.begin(), report.blockers.end(),
+                     "TOKENIZER_SPECIAL_TOKEN_ID_OUT_OF_RANGE") != report.blockers.end());
 }
 
 void test_independent_sampler_and_stop_controller() {
@@ -1277,6 +1341,7 @@ int main() {
     test_add_operator_candidate_and_reference();
     test_gpu_engine_lifecycle();
     test_gguf_weight_streaming();
+    test_tokenizer_engine_contracts();
     test_independent_sampler_and_stop_controller();
     test_q4_decoders();
     test_q5_decoders();
