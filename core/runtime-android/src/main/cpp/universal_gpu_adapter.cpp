@@ -6,6 +6,9 @@
 #include <GLES2/gl2ext.h>
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
+#include <cstring>
 #include <cstdio>
 #include <sstream>
 #include <string>
@@ -177,6 +180,130 @@ std::string safe_token(std::string value) {
     return value.empty() ? "unknown" : value;
 }
 
+bool run_gles_compute_self_test(std::string &failure_reason) {
+    // A minimal integer-only compute kernel proves shader compilation, SSBO
+    // binding, dispatch, barriers and GPU-to-CPU readback without assuming FP16.
+    static constexpr char shader_source[] = R"glsl(#version 310 es
+layout(local_size_x = 4, local_size_y = 1, local_size_z = 1) in;
+layout(std430, binding = 0) buffer SelfTestData {
+    uint values[];
+};
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    values[index] = values[index] * 3u + 7u;
+}
+)glsl";
+
+    GLuint shader = 0;
+    GLuint program = 0;
+    GLuint buffer = 0;
+    auto cleanup = [&]() {
+        if (buffer != 0) glDeleteBuffers(1, &buffer);
+        if (program != 0) glDeleteProgram(program);
+        if (shader != 0) glDeleteShader(shader);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+        glUseProgram(0);
+    };
+
+    while (glGetError() != GL_NO_ERROR) {}
+    shader = glCreateShader(GL_COMPUTE_SHADER);
+    if (shader == 0) {
+        failure_reason = "compute_self_test_shader_create_failed";
+        cleanup();
+        return false;
+    }
+    const GLchar *source = shader_source;
+    glShaderSource(shader, 1, &source, nullptr);
+    glCompileShader(shader);
+    GLint compiled = GL_FALSE;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+    if (compiled != GL_TRUE) {
+        GLint log_length = 0;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &log_length);
+        std::string log(static_cast<size_t>(std::max(1, log_length)), '\0');
+        GLsizei written = 0;
+        glGetShaderInfoLog(shader, static_cast<GLsizei>(log.size()), &written, log.data());
+        failure_reason = "compute_self_test_shader_compile_failed";
+        if (written > 0) failure_reason += "_" + log.substr(0, static_cast<size_t>(written));
+        cleanup();
+        return false;
+    }
+
+    program = glCreateProgram();
+    if (program == 0) {
+        failure_reason = "compute_self_test_program_create_failed";
+        cleanup();
+        return false;
+    }
+    glAttachShader(program, shader);
+    glLinkProgram(program);
+    GLint linked = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (linked != GL_TRUE) {
+        GLint log_length = 0;
+        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &log_length);
+        std::string log(static_cast<size_t>(std::max(1, log_length)), '\0');
+        GLsizei written = 0;
+        glGetProgramInfoLog(program, static_cast<GLsizei>(log.size()), &written, log.data());
+        failure_reason = "compute_self_test_program_link_failed";
+        if (written > 0) failure_reason += "_" + log.substr(0, static_cast<size_t>(written));
+        cleanup();
+        return false;
+    }
+
+    constexpr std::array<uint32_t, 4> input = {1u, 2u, 3u, 4u};
+    constexpr std::array<uint32_t, 4> expected = {10u, 13u, 16u, 19u};
+    glGenBuffers(1, &buffer);
+    if (buffer == 0) {
+        failure_reason = "compute_self_test_ssbo_create_failed";
+        cleanup();
+        return false;
+    }
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, buffer);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, static_cast<GLsizeiptr>(sizeof(input)),
+        input.data(), GL_DYNAMIC_COPY);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, buffer);
+    glUseProgram(program);
+    glDispatchCompute(1, 1, 1);
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+
+    const GLenum dispatch_error = glGetError();
+    if (dispatch_error != GL_NO_ERROR) {
+        failure_reason = "compute_self_test_dispatch_failed";
+        cleanup();
+        return false;
+    }
+
+    void *mapped = glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0,
+        static_cast<GLsizeiptr>(sizeof(input)), GL_MAP_READ_BIT);
+    if (!mapped) {
+        failure_reason = "compute_self_test_readback_map_failed";
+        cleanup();
+        return false;
+    }
+    std::array<uint32_t, 4> output{};
+    std::memcpy(output.data(), mapped, sizeof(output));
+    const GLboolean unmapped = glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+    if (unmapped != GL_TRUE) {
+        failure_reason = "compute_self_test_readback_unmap_failed";
+        cleanup();
+        return false;
+    }
+    cleanup();
+
+    if (output != expected) {
+        failure_reason = "compute_self_test_result_mismatch";
+        return false;
+    }
+    const GLenum cleanup_error = glGetError();
+    if (cleanup_error != GL_NO_ERROR) {
+        failure_reason = "compute_self_test_cleanup_gl_error";
+        return false;
+    }
+    failure_reason.clear();
+    return true;
+}
+
 void read_compute_limits(UniversalGpuCapabilities &caps) {
     glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS, &caps.max_compute_invocations);
     glGetIntegerv(GL_MAX_COMPUTE_SHARED_MEMORY_SIZE, &caps.max_compute_shared_memory_bytes);
@@ -210,6 +337,7 @@ std::string UniversalGpuCapabilities::diagnostic_line() const {
         << " eglVendor=" << safe_token(egl_vendor)
         << " glesVersion=" << gles_major << "." << gles_minor
         << " glesCompute=" << (gles_compute_supported ? 1 : 0)
+        << " glesComputeSelfTest=" << (gles_compute_self_test_passed ? 1 : 0)
         << " glesFp16ShaderHint=" << (gles_fp16_shader_hint ? 1 : 0)
         << " vendor=" << safe_token(vendor)
         << " renderer=" << safe_token(renderer)
@@ -320,6 +448,13 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
         if (error != GL_NO_ERROR) {
             caps.failure_reason = "gles_compute_limit_query_failed";
             caps.gles_compute_supported = false;
+        } else {
+            std::string self_test_failure;
+            caps.gles_compute_self_test_passed = run_gles_compute_self_test(self_test_failure);
+            if (!caps.gles_compute_self_test_passed && caps.failure_reason.empty()) {
+                caps.failure_reason = self_test_failure.empty()
+                    ? "gles_compute_self_test_failed" : self_test_failure;
+            }
         }
     } else if (caps.failure_reason.empty()) {
         caps.failure_reason = "opengles_3_1_compute_not_supported";
