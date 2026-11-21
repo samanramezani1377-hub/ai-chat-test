@@ -10,6 +10,7 @@
 #include "memory_planner.h"
 #include "tokenizer.h"
 #include "model_graph.h"
+#include "model_lowerings.h"
 
 #include <algorithm>
 #include <cmath>

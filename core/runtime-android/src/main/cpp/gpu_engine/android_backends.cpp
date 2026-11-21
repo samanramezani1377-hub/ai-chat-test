@@ -5,6 +5,7 @@
 #include "operators.h"
 #include "quantization.h"
 #include "tokenizer.h"
+#include "model_lowerings.h"
 
 namespace ai_chat::gpu_engine {
 
@@ -25,7 +26,8 @@ Status initialize_android_gpu_engine(GpuEngine& engine) {
 Status register_android_gpu_runtime_components(OperatorRegistry& operators,
                                                QuantizationRegistry& quantizations,
                                                ArchitectureRegistry& architectures,
-                                               TokenizerRegistry& tokenizers) {
+                                               TokenizerRegistry& tokenizers,
+                                               ModelLoweringRegistry& lowerings) {
     Status status = register_builtin_operator_candidates(operators);
     if (!status.ok()) return status;
     status = register_builtin_gles_operator_candidates(operators);
@@ -36,16 +38,21 @@ Status register_android_gpu_runtime_components(OperatorRegistry& operators,
     if (!status.ok()) return status;
     status = register_builtin_architecture_adapters(architectures);
     if (!status.ok()) return status;
-    return register_builtin_tokenizer_adapters(tokenizers);
+    status = register_builtin_tokenizer_adapters(tokenizers);
+    if (!status.ok()) return status;
+    status = register_builtin_model_lowerings(BackendKind::DawnWebGpu, lowerings);
+    if (!status.ok()) return status;
+    return register_builtin_model_lowerings(BackendKind::OpenGles, lowerings);
 }
 
 Status initialize_android_gpu_runtime(GpuEngine& engine, OperatorRegistry& operators,
                                       QuantizationRegistry& quantizations,
                                       ArchitectureRegistry& architectures,
-                                      TokenizerRegistry& tokenizers) {
+                                      TokenizerRegistry& tokenizers,
+                                      ModelLoweringRegistry& lowerings) {
     Status status = register_android_gpu_backends(engine);
     if (!status.ok()) return status;
-    status = register_android_gpu_runtime_components(operators, quantizations, architectures, tokenizers);
+    status = register_android_gpu_runtime_components(operators, quantizations, architectures, tokenizers, lowerings);
     if (!status.ok()) return status;
     return engine.initialize_with_fallback({BackendKind::DawnWebGpu, BackendKind::OpenGles});
 }
