@@ -175,7 +175,7 @@ public:
                            std::vector<std::string> weights,
                            std::string output, std::vector<uint64_t> shape = {}) {
             ModelPlanOperation operation{std::move(id), std::move(op), std::move(inputs),
-                                         std::move(weights), std::move(output), std::move(shape), {}, {}, {}};
+                                         std::move(weights), std::move(output), std::move(shape), {}, {}, {}, {}, false};
             if (operation.operator_name == "RMSNorm")
                 operation.float_attributes["epsilon"] = plan.rms_norm_epsilon;
             if (operation.operator_name == "RoPE") {
