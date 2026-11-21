@@ -1493,6 +1493,9 @@ void test_model_kv_cache_view_binding_uses_planned_sequence_length() {
     assert(context.tensors.at("layer.0.cache_key").descriptor().shape ==
            std::vector<uint64_t>({5, 2, 2}));
     assert(context.tensors.at("layer.0.cache_value").element_count() == 20);
+    assert(bind_model_kv_cache_views(plan, *cache, 4, 1, context).ok());
+    assert(context.tensors.at("layer.0.cache_key").descriptor().shape ==
+           std::vector<uint64_t>({5, 2, 2}));
     ModelExecutionContext invalid_context;
     assert(bind_model_kv_cache_views(plan, *cache, 7, 2, invalid_context).code ==
            StatusCode::InvalidArgument);

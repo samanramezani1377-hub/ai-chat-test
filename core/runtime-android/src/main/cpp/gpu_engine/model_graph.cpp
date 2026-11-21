@@ -217,6 +217,7 @@ Status bind_model_kv_cache_views(const ModelExecutionPlan& plan, KvCache& cache,
         sequence_length > UINT32_MAX - past_length)
         return {StatusCode::InvalidArgument, "KV cache view sequence range is invalid"};
     const uint32_t total_length = static_cast<uint32_t>(past_length + sequence_length);
+    std::vector<std::pair<std::string, Tensor>> pending_views;
     for (const auto& operation : plan.operations) {
         if (operation.operator_name != "Attention") continue;
         if (operation.inputs.size() != 3)
@@ -224,9 +225,6 @@ Status bind_model_kv_cache_views(const ModelExecutionPlan& plan, KvCache& cache,
         const auto layer_attr = operation.integer_attributes.find("layer_index");
         if (layer_attr == operation.integer_attributes.end() || layer_attr->second > UINT32_MAX)
             return {StatusCode::InvalidArgument, "Attention plan is missing a valid KV cache layer index"};
-        if (context.tensors.find(operation.inputs[1]) != context.tensors.end() ||
-            context.tensors.find(operation.inputs[2]) != context.tensors.end())
-            return {StatusCode::InvalidArgument, "KV cache key/value tensor binding already exists"};
         Tensor keys, values;
         Status status = cache.key_tensor_for_length(static_cast<uint32_t>(layer_attr->second),
                                                     total_length, keys);
@@ -234,9 +232,16 @@ Status bind_model_kv_cache_views(const ModelExecutionPlan& plan, KvCache& cache,
         status = cache.value_tensor_for_length(static_cast<uint32_t>(layer_attr->second),
                                                total_length, values);
         if (!status.ok()) return status;
-        context.tensors.emplace(operation.inputs[1], std::move(keys));
-        context.tensors.emplace(operation.inputs[2], std::move(values));
+        pending_views.emplace_back(operation.inputs[1], std::move(keys));
+        pending_views.emplace_back(operation.inputs[2], std::move(values));
     }
+
+    // Rebind only cache-view names after all new views have been created
+    // successfully. This supports repeated prefill/decode calls with a growing
+    // valid prefix without disturbing weights or activation allocations.
+    for (const auto& entry : pending_views) context.tensors.erase(entry.first);
+    for (auto& entry : pending_views)
+        context.tensors.emplace(std::move(entry.first), std::move(entry.second));
     context.kv_cache = &cache;
     context.past_length = past_length;
     context.sequence_length = sequence_length;
