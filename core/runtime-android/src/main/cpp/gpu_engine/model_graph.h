@@ -23,6 +23,7 @@ struct ModelPlanOperation {
     std::vector<std::string> inputs;
     std::vector<std::string> weight_tensors;
     std::string output;
+    // A leading zero denotes the dynamic token/sequence dimension.
     std::vector<uint64_t> output_shape;
 };
 
@@ -33,6 +34,8 @@ struct ModelExecutionPlan {
     uint64_t attention_heads = 0;
     uint64_t kv_heads = 0;
     uint64_t feed_forward_length = 0;
+    uint64_t vocabulary_size = 0;
+    uint64_t head_dimension = 0;
     std::vector<std::string> external_inputs;
     std::vector<ModelPlanOperation> operations;
     std::vector<std::string> blockers;
