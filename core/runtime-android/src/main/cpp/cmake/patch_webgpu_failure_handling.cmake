@@ -156,13 +156,16 @@ endif()
 
 # The bounded-allocation patch already marks device loss; give the event a clear marker.
 if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_NONFATAL_CALLBACKS_V2")
-    ai_chat_replace_once(_webgpu
+    if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_DEVICE_LOST reason=")
+        ai_chat_replace_once(_webgpu
         [=[            GGML_LOG_ERROR("ggml_webgpu: Device lost! Reason: %d, Message: %s\n", static_cast<int>(reason),
                            std::string(message).c_str());]=]
         [=[            GGML_LOG_ERROR("AI_CHAT_WEBGPU_DEVICE_LOST reason=%d message=%s\n", static_cast<int>(reason),
                            std::string(message).c_str());]=]
         "identify terminal device loss in diagnostics")
-    ai_chat_replace_once(_webgpu
+    endif()
+    if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_UNCAPTURED_ERROR")
+        ai_chat_replace_once(_webgpu
         [=[        [](const wgpu::Device & device, wgpu::ErrorType reason, wgpu::StringView message) {
             GGML_UNUSED(device);
             g_webgpu_device_error.store(true, std::memory_order_release);
@@ -176,6 +179,7 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_NONFATAL_CALLBACKS_V2")
                            static_cast<int>(reason), std::string(message).c_str());
         });]=]
         "separate uncaptured validation failures from terminal device loss")
+    endif()
     string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_NONFATAL_CALLBACKS_V2\n")
 endif()
 
