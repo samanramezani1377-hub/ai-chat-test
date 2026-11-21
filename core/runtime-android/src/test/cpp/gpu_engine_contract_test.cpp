@@ -1868,8 +1868,8 @@ void test_streamed_execution_loads_and_releases_quantized_weights_per_operation(
     plan.structurally_validated = true;
     plan.operator_coverage_validated = true;
     plan.operations.push_back({"q4-matmul", "MatMul_Q4_0", {"hidden"},
-        {"q4_weight"}, "projection", {1, 2}, {}, {}, {}, {}, false});
-    plan.retained_outputs = {"projection"};
+        {"q4_weight"}, "logits", {1, 2}, {}, {}, {}, {}, false});
+    plan.retained_outputs = {"logits"};
 
     BufferDesc input_desc{2 * 32 * sizeof(float), alignof(float), MemoryDomain::Device, false, "streamed-hidden"};
     std::shared_ptr<Buffer> input_buffer;
@@ -1906,7 +1906,7 @@ void test_streamed_execution_loads_and_releases_quantized_weights_per_operation(
     assert(report.compiled && report.executed && report.compiled_nodes == 1);
     assert(context.quantized_weights.empty());
     assert(context.tensors.find("q4_weight") == context.tensors.end());
-    assert(context.tensors.at("projection").descriptor().shape == std::vector<uint64_t>({1, 2}));
+    assert(context.tensors.at("logits").descriptor().shape == std::vector<uint64_t>({1, 2}));
     assert(context.weight_leases.empty());
     assert(plan.execution_validated && !plan.gpu_ready);
     std::remove(path.c_str());
