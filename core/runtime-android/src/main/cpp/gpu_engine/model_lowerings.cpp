@@ -350,6 +350,50 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
                     token_buffer, context.token_ids, *output, dispatch);
         });
     if (!status.ok()) return status;
+    status = registry.register_lowering(backend, "Embedding_Q8_0",
+        [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
+                  ComputeDispatch& dispatch) {
+            if (operation.inputs.size() != 1 || operation.inputs[0] != "token_ids" ||
+                operation.weight_tensors.size() != 1 || !context.backend ||
+                context.token_ids.empty() || context.token_ids.size() > UINT32_MAX)
+                return Status{StatusCode::InvalidArgument, "Q8_0 Embedding requires token IDs, one quantized weight and an active backend"};
+            const Tensor* output = nullptr;
+            Status result = lookup_output(operation, context, output);
+            if (!result.ok()) return result;
+            const auto weight = context.quantized_weights.find(operation.weight_tensors.front());
+            if (weight == context.quantized_weights.end() || !weight->second.buffer ||
+                weight->second.byte_size == 0 || weight->second.file_type_id != 8 ||
+                weight->second.dimensions.size() != 2 ||
+                weight->second.dimensions[0] > UINT32_MAX || weight->second.dimensions[1] > UINT32_MAX)
+                return Status{StatusCode::InvalidArgument, "Q8_0 embedding weight binding is missing or has invalid metadata"};
+            const uint64_t embedding_dimension = weight->second.dimensions[0];
+            const uint64_t vocabulary_size = weight->second.dimensions[1];
+            if (output->descriptor().shape.size() != 2 ||
+                output->descriptor().shape[0] != context.token_ids.size() ||
+                output->descriptor().shape[1] != embedding_dimension)
+                return Status{StatusCode::InvalidArgument, "Q8_0 embedding output shape does not match tokens and weight dimensions"};
+            BufferDesc token_desc;
+            token_desc.size_bytes = context.token_ids.size() * sizeof(uint32_t);
+            token_desc.alignment = alignof(uint32_t);
+            token_desc.memory = MemoryDomain::Device;
+            token_desc.persistent = false;
+            token_desc.label = "q8-0-model-token-ids";
+            std::shared_ptr<Buffer> token_buffer;
+            result = context.backend->allocate(token_desc, token_buffer);
+            if (!result.ok()) return result;
+            if (!token_buffer || token_buffer->size_bytes() < token_desc.size_bytes)
+                return Status{StatusCode::BackendFailure, "Backend returned an undersized Q8_0 token-ID buffer"};
+            result = context.backend->upload(token_buffer, 0, context.token_ids.data(), token_desc.size_bytes);
+            if (!result.ok()) return result;
+            return backend == BackendKind::OpenGles
+                ? build_q8_0_embedding_gles_candidate(weight->second.buffer, weight->second.byte_size,
+                    static_cast<uint32_t>(vocabulary_size), static_cast<uint32_t>(embedding_dimension),
+                    token_buffer, context.token_ids, *output, dispatch)
+                : build_q8_0_embedding_candidate(weight->second.buffer, weight->second.byte_size,
+                    static_cast<uint32_t>(vocabulary_size), static_cast<uint32_t>(embedding_dimension),
+                    token_buffer, context.token_ids, *output, dispatch);
+        });
+    if (!status.ok()) return status;
     status = registry.register_lowering(backend, "Embedding_Q4_1",
         [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
                   ComputeDispatch& dispatch) {
