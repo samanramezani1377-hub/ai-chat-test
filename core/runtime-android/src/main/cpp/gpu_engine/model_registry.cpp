@@ -25,10 +25,11 @@ bool metadata_u64(const GgufFileInfo& model, const std::string& key, uint64_t& v
     return false;
 }
 
-class LlamaDenseArchitectureAdapter final : public ArchitectureAdapter {
+class DenseTransformerArchitectureAdapter final : public ArchitectureAdapter {
 public:
-    LlamaDenseArchitectureAdapter() {
-        descriptor_.name = "llama";
+    DenseTransformerArchitectureAdapter(std::string architecture_name, bool uses_qk_norm)
+        : architecture_name_(std::move(architecture_name)), uses_qk_norm_(uses_qk_norm) {
+        descriptor_.name = architecture_name_;
         descriptor_.family = ArchitectureFamily::DenseTransformer;
         descriptor_.required_operators = {"Embedding", "MatMul", "RMSNorm", "RoPE",
                                           "Attention", "SiLU", "Multiply", "Add", "Softmax"};
@@ -46,12 +47,13 @@ public:
         Status status = validate_metadata(model);
         if (!status.ok()) return status;
         uint64_t layers = 0, embedding = 0, heads = 0, kv_heads = 0, feed_forward = 0;
-        if (!metadata_u64(model, "llama.block_count", layers) ||
-            !metadata_u64(model, "llama.embedding_length", embedding) ||
-            !metadata_u64(model, "llama.attention.head_count", heads) ||
-            !metadata_u64(model, "llama.feed_forward_length", feed_forward))
+        const std::string metadata_prefix = architecture_name_ + ".";
+        if (!metadata_u64(model, metadata_prefix + "block_count", layers) ||
+            !metadata_u64(model, metadata_prefix + "embedding_length", embedding) ||
+            !metadata_u64(model, metadata_prefix + "attention.head_count", heads) ||
+            !metadata_u64(model, metadata_prefix + "feed_forward_length", feed_forward))
             return {StatusCode::InvalidArgument, "Llama execution plan metadata is incomplete"};
-        if (!metadata_u64(model, "llama.attention.head_count_kv", kv_heads)) kv_heads = heads;
+        if (!metadata_u64(model, metadata_prefix + "attention.head_count_kv", kv_heads)) kv_heads = heads;
 
         std::unordered_map<std::string, const GgufTensorInfo*> tensors;
         for (const auto& tensor : model.tensors) tensors.emplace(tensor.name, &tensor);
@@ -82,7 +84,7 @@ public:
         const uint64_t kv_dimension = head_dimension * kv_heads;
         bool tied_output = false;
         if (!has_tensor("output.weight")) {
-            const auto tie = model.metadata.find("llama.tie_word_embeddings");
+            const auto tie = model.metadata.find(metadata_prefix + "tie_word_embeddings");
             const bool* tied = tie == model.metadata.end() ? nullptr : std::get_if<bool>(&tie->second);
             if (!tied || !*tied)
                 plan.blockers.emplace_back("OUTPUT_WEIGHT_MISSING_WITHOUT_EXPLICIT_TIED_EMBEDDINGS_METADATA");
@@ -96,6 +98,10 @@ public:
             expect_shape(prefix + "attn_norm.weight", {embedding});
             expect_shape(prefix + "attn_q.weight", {embedding, embedding});
             expect_shape(prefix + "attn_k.weight", {embedding, kv_dimension});
+            if (uses_qk_norm_) {
+                expect_shape(prefix + "attn_q_norm.weight", {head_dimension});
+                expect_shape(prefix + "attn_k_norm.weight", {head_dimension});
+            }
             expect_shape(prefix + "attn_v.weight", {embedding, kv_dimension});
             expect_shape(prefix + "attn_output.weight", {embedding, embedding});
             expect_shape(prefix + "ffn_norm.weight", {embedding});
@@ -127,8 +133,12 @@ public:
             add(x + "q_proj", "MatMul", {x + "normalized"}, {p + "attn_q.weight"}, x + "q");
             add(x + "k_proj", "MatMul", {x + "normalized"}, {p + "attn_k.weight"}, x + "k");
             add(x + "v_proj", "MatMul", {x + "normalized"}, {p + "attn_v.weight"}, x + "v");
-            add(x + "q_rope", "RoPE", {x + "q"}, {}, x + "q_rotated");
-            add(x + "k_rope", "RoPE", {x + "k"}, {}, x + "k_rotated");
+            if (uses_qk_norm_) {
+                add(x + "q_norm", "RMSNorm", {x + "q"}, {p + "attn_q_norm.weight"}, x + "q_normalized");
+                add(x + "k_norm", "RMSNorm", {x + "k"}, {p + "attn_k_norm.weight"}, x + "k_normalized");
+            }
+            add(x + "q_rope", "RoPE", {uses_qk_norm_ ? x + "q_normalized" : x + "q"}, {}, x + "q_rotated");
+            add(x + "k_rope", "RoPE", {uses_qk_norm_ ? x + "k_normalized" : x + "k"}, {}, x + "k_rotated");
             add(x + "attention", "Attention", {x + "q_rotated", x + "k_rotated", x + "v", "kv_cache"},
                 {}, x + "attention_output");
             add(x + "attention_output", "MatMul", {x + "attention_output"},
