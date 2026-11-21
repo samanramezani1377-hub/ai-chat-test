@@ -45,13 +45,6 @@ import java.nio.file.LinkOption
 
 /** Application composition root: local GGUF and optional provider-backed inference share one agent path. */
 class AppContainer(context: Context? = null) {
-    companion object {
-        @Volatile var latest: AppContainer? = null
-            private set
-    }
-
-    init { latest = this }
-
     private val appContext = context?.applicationContext
     private val workspaceRoot = appContext?.filesDir?.toPath()?.resolve("workspace")
     private val appVersion = runCatching { BuildConfig.VERSION_NAME }.getOrDefault("unknown")
