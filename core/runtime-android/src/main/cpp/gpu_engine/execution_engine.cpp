@@ -181,33 +181,35 @@ Status OperatorRegistry::register_kernel(KernelDefinition definition) {
 }
 
 Status OperatorRegistry::select_kernel(const std::string& operator_name, BackendKind backend,
-                                       DataType input_type, DataType output_type,
-                                       uint32_t input_count, uint32_t rank,
-                                       KernelDefinition& out) const {
-    const auto found = std::find_if(kernels_.begin(), kernels_.end(),
-        [&](const KernelDefinition& candidate) {
-            return candidate.operator_name == operator_name && candidate.backend == backend &&
-                   candidate.input_type == input_type && candidate.output_type == output_type &&
-                   input_count >= candidate.min_input_count && input_count <= candidate.max_input_count &&
-                   rank >= candidate.min_rank && rank <= candidate.max_rank &&
-                   candidate.validation == KernelValidation::Validated;
-        });
-    if (found == kernels_.end()) {
-        return {StatusCode::Unsupported, "No validated kernel matches the requested operator signature"};
-    }
-    out = *found;
-    return Status::success();
+                                            DataType input_type, DataType output_type,
+                                            uint32_t input_count, uint32_t rank,
+                                            KernelDefinition& out) const {
+    return select_kernel(operator_name, backend,
+                         std::vector<DataType>(input_count, input_type),
+                         output_type, rank, out);
 }
 
-
-
-bool OperatorRegistry::is_validated_kernel(const std::string& kernel_id,
-                                           BackendKind backend) const noexcept {
-    return std::any_of(kernels_.begin(), kernels_.end(),
-        [&kernel_id, backend](const KernelDefinition& definition) {
-            return definition.kernel_id == kernel_id && definition.backend == backend &&
-                   definition.validation == KernelValidation::Validated;
+Status OperatorRegistry::select_kernel(const std::string& operator_name, BackendKind backend,
+                                            const std::vector<DataType>& input_types,
+                                            DataType output_type, uint32_t rank,
+                                            KernelDefinition& out) const {
+    out = KernelDefinition{};
+    const auto found = std::find_if(kernels_.begin(), kernels_.end(),
+        [&operator_name, backend, &input_types, output_type, rank](const KernelDefinition& definition) {
+            if (definition.operator_name != operator_name || definition.backend != backend ||
+                definition.output_type != output_type ||
+                input_types.size() < definition.min_input_count ||
+                input_types.size() > definition.max_input_count ||
+                rank < definition.min_rank || rank > definition.max_rank ||
+                definition.validation != KernelValidation::Validated) return false;
+            if (!definition.input_types.empty()) return definition.input_types == input_types;
+            return std::all_of(input_types.begin(), input_types.end(),
+                [&definition](DataType type) { return type == definition.input_type; });
         });
+    if (found == kernels_.end())
+        return {StatusCode::Unsupported, "No validated kernel matches operator, backend, input types, output type and rank"};
+    out = *found;
+    return Status::success();
 }
 
 Status OperatorRegistry::authorize_dispatch(const std::string& kernel_id, BackendKind backend,

@@ -79,6 +79,9 @@ public:
                          DataType input_type, DataType output_type,
                          uint32_t input_count, uint32_t rank,
                          KernelDefinition& out) const;
+    Status select_kernel(const std::string& operator_name, BackendKind backend,
+                         const std::vector<DataType>& input_types, DataType output_type,
+                         uint32_t rank, KernelDefinition& out) const;
     Status authorize_dispatch(const std::string& kernel_id, BackendKind backend,
                               ComputeDispatch& dispatch) const;
     bool is_validated_kernel(const std::string& kernel_id, BackendKind backend) const noexcept;
