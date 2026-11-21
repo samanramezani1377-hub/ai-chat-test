@@ -45,6 +45,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -255,6 +256,8 @@ internal fun VoiceConversationHost(
                 val missing = if (ready == null) store.missingKoochikComponents() else emptyList()
                 updateVoiceStatus(if (ready != null) "مدل اصلی Shenava Koochik آماده و انتخاب شد."
                     else "فایل ${label} ذخیره شد؛ برای تکمیل Koochik هنوز لازم است: ${missing.joinToString(" و ")}.")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (t: Throwable) {
                 updateVoiceStatus("VOICE-STT-IMPORT: ${t.message ?: t.javaClass.simpleName}")
             } finally { refreshImportProgress(); busy = false }
@@ -276,6 +279,8 @@ internal fun VoiceConversationHost(
                 withContext(Dispatchers.IO) { store.importArchive(uri, VoiceModelKind.STT) }
                 refreshModels()
                 updateVoiceStatus("مدل STT وارد شد. مدل سازگار با زبان فارسی باید انتخاب شود.")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (t: Throwable) {
                 updateVoiceStatus("VOICE-STT-IMPORT: ${t.message ?: t.javaClass.simpleName}")
             } finally { busy = false }
@@ -297,6 +302,8 @@ internal fun VoiceConversationHost(
                 val missing = if (ready == null) store.missingPiperComponents() else emptyList()
                 updateVoiceStatus(if (ready != null) "مدل گفتار ${ready.title} آماده و انتخاب شد."
                     else "فایل ${label} ذخیره شد؛ برای تکمیل مدل Piper هنوز لازم است: ${missing.joinToString(" و ")}.")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (t: Throwable) {
                 updateVoiceStatus("VOICE-PIPER-IMPORT: ${t.message ?: t.javaClass.simpleName}")
             } finally { refreshImportProgress(); busy = false }
@@ -321,6 +328,8 @@ internal fun VoiceConversationHost(
                 withContext(Dispatchers.IO) { store.importArchive(uri, VoiceModelKind.TTS) }
                 refreshModels()
                 updateVoiceStatus("مدل TTS وارد شد.")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (t: Throwable) {
                 updateVoiceStatus("VOICE-TTS-IMPORT: ${t.message ?: t.javaClass.simpleName}")
             } finally { busy = false }
@@ -335,6 +344,8 @@ internal fun VoiceConversationHost(
                 layaStatus = withContext(Dispatchers.IO) { layaStore.importBundle(uri) }
                 layaReady = layaStore.isReady()
                 updateVoiceStatus(layaStatus)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (t: Throwable) {
                 layaStatus = "LAYA-IMPORT: ${t.message ?: t.javaClass.simpleName}"
                 updateVoiceStatus(layaStatus)
@@ -361,6 +372,9 @@ internal fun VoiceConversationHost(
                 layaReady = layaStore.isReady()
                 layaStatus = result
                 updateVoiceStatus(result)
+            } catch (cancelled: CancellationException) {
+                downloadFinished.set(true)
+                throw cancelled
             } catch (t: Throwable) {
                 downloadFinished.set(true)
                 layaReady = layaStore.isReady()
@@ -707,7 +721,9 @@ internal class VoiceConversationController(
                     onStatus("در حال گوش‌دادن؛ گفتار و پردازش کاملاً روی دستگاه است.")
                     for (frame in frames) {
                         val asrStartedAtMs = SystemClock.elapsedRealtime()
-                        val update = try { recognizer?.accept(frame.samples, 16000, frame.speech) } catch (t: Throwable) {
+                        val update = try { recognizer?.accept(frame.samples, 16000, frame.speech) } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (t: Throwable) {
                             onDiagnostic("VOICE-STT-002\n${t.stackTraceToString()}")
                             onStatus("VOICE-STT-002: خطا در تشخیص گفتار: ${t.message ?: t.javaClass.simpleName}")
                             null
@@ -777,6 +793,13 @@ internal class VoiceConversationController(
                 } else if (acknowledgeWake) {
                     scope.launch { speakWakeAcknowledgement() }
                 }
+            } catch (cancelled: CancellationException) {
+                runCatching { microphone?.stop() }
+                microphone = null
+                cleanupEngines()
+                restoreAudioMode()
+                onListening(false)
+                throw cancelled
             } catch (t: Throwable) {
                 startInProgress.set(false)
                 onDiagnostic("VOICE-START-001\n${t.stackTraceToString()}")
@@ -1015,6 +1038,7 @@ internal class VoiceConversationController(
         } catch (t: CancellationException) {
             queue.close()
             activeSpeechJob.cancel()
+            throw t
         } catch (t: Throwable) {
             queue.close()
             activeSpeechJob.cancel()
@@ -1029,7 +1053,9 @@ internal class VoiceConversationController(
             turnRunning.set(false)
             bargeInTriggered.set(false)
             val pending = pendingUtterances.poll()
-            if (!closed && pending != null && turnRunning.compareAndSet(false, true)) {
+            if (!closed && currentCoroutineContext().isActive && pending != null &&
+                turnRunning.compareAndSet(false, true)
+            ) {
                 onStatus("در حال پردازش گفتار جدید…")
                 turnJob = scope.launch { processTurn(pending) }
             }
@@ -1096,6 +1122,8 @@ internal class VoiceConversationController(
                 },
             )
             onLine("دستیار", "متوجه شدم")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
             onDiagnostic("VOICE-TTS-ACK-001: ${t.stackTraceToString()}")
             onStatus("VOICE-TTS-ACK-001: پخش تأیید بیدارباش ناموفق بود: ${t.message ?: t.javaClass.simpleName}")
