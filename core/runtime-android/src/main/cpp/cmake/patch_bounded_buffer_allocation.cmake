@@ -176,7 +176,7 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
     ggml_webgpu_create_buffer(ctx->webgpu_global_ctx->device, buf, aligned_size,
                               wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst,
                               buf_name.c_str());
-    if (!buf) {
+    if (!buf || ctx->webgpu_global_ctx->device_error.load()) {
         ctx->webgpu_global_ctx->device_error.store(true);
         GGML_LOG_ERROR("ggml_webgpu: Dawn did not create tensor buffer name=%s requested=%zu aligned=%zu\n",
             buf_name.c_str(), size, aligned_size);
