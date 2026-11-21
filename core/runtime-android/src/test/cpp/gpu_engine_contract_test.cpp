@@ -386,7 +386,7 @@ void test_q8_0_decoder_and_registry() {
     assert(build_q8_0_dequantize_candidate(encoded_buffer, 34, output_tensor, dispatch).ok());
     assert(dispatch.bindings.size() == 2);
     assert(dispatch.label.find("unverified") != std::string::npos);
-    assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") == std::string::npos);
+    assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") != std::string::npos);
 
     BufferDesc q4_encoded_desc{20, 4, MemoryDomain::Device, false, "q4-encoded"};
     std::shared_ptr<Buffer> q4_encoded;
