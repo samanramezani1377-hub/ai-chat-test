@@ -36,11 +36,6 @@ Status build_embedding_f32_gles_candidate(const Tensor& embedding_weights,
                                           const std::vector<uint32_t>& validated_token_ids,
                                           const Tensor& output, ComputeDispatch& dispatch);
 
-Status build_embedding_f32_gles_candidate(const Tensor& embedding_weights,
-                                          const std::shared_ptr<Buffer>& token_ids_buffer,
-                                          const std::vector<uint32_t>& validated_token_ids,
-                                          const Tensor& output,
-                                          ComputeDispatch& dispatch);
 Status build_attention_f32_gles_candidate(const Tensor& query, const Tensor& key,
                                           const Tensor& value, const Tensor& output,
                                           uint32_t past_length, ComputeDispatch& dispatch);
