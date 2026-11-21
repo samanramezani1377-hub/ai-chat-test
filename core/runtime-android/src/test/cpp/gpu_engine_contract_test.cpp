@@ -654,6 +654,10 @@ void test_q8_0_decoder_and_registry() {
     assert(Tensor::create(output_desc_tensor, output_buffer, 0, output_tensor).ok());
     ComputeDispatch dispatch;
     assert(build_q8_0_dequantize_candidate(encoded_buffer, 34, output_tensor, dispatch).ok());
+    ComputeDispatch q8_gles_dequant;
+    assert(build_q8_0_dequantize_gles_candidate(encoded_buffer, 34, output_tensor, q8_gles_dequant).ok());
+    assert(q8_gles_dequant.backend == BackendKind::OpenGles);
+    assert(q8_gles_dequant.glsl_source.find("#version 310 es") == 0);
     assert(dispatch.bindings.size() == 2);
     assert(dispatch.label.find("unverified") != std::string::npos);
 
@@ -761,6 +765,13 @@ void test_q8_0_decoder_and_registry() {
     assert(build_q4_1_dequantize_candidate(q4_1_encoded, 20, q4_output_tensor, q4_1_dequant_dispatch).ok());
     assert(q4_1_dequant_dispatch.bindings.size() == 2);
     assert(q4_1_dequant_dispatch.label.find("unverified") != std::string::npos);
+    ComputeDispatch q4_gles_dequant, q4_1_gles_dequant;
+    assert(build_q4_0_dequantize_gles_candidate(q4_encoded, 18, q4_output_tensor, q4_gles_dequant).ok());
+    assert(build_q4_1_dequantize_gles_candidate(q4_1_encoded, 20, q4_output_tensor, q4_1_gles_dequant).ok());
+    assert(q4_gles_dequant.backend == BackendKind::OpenGles && q4_1_gles_dequant.backend == BackendKind::OpenGles);
+    assert(q4_gles_dequant.glsl_source.find("#version 310 es") == 0);
+    assert(q4_1_gles_dequant.glsl_source.find("#version 310 es") == 0);
+
 
     BufferDesc q5_encoded_desc{24, 4, MemoryDomain::Device, false, "q5-encoded"};
     std::shared_ptr<Buffer> q5_encoded;

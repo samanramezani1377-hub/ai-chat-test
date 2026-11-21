@@ -84,6 +84,12 @@ ModelQuantizationBackendReport evaluate_model_quantization_backend(
 
 Status register_builtin_quantization_formats(QuantizationRegistry& registry);
 Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry);
+const char* q4_0_dequantize_glsl_source() noexcept;
+const char* q4_1_dequantize_glsl_source() noexcept;
+const char* q8_0_dequantize_glsl_source() noexcept;
+Status build_q4_0_dequantize_gles_candidate(const std::shared_ptr<Buffer>& encoded, uint64_t encoded_bytes, const Tensor& output, ComputeDispatch& dispatch);
+Status build_q4_1_dequantize_gles_candidate(const std::shared_ptr<Buffer>& encoded, uint64_t encoded_bytes, const Tensor& output, ComputeDispatch& dispatch);
+Status build_q8_0_dequantize_gles_candidate(const std::shared_ptr<Buffer>& encoded, uint64_t encoded_bytes, const Tensor& output, ComputeDispatch& dispatch);
 const char* q5_0_dequantize_wgsl_source() noexcept;
 const char* q5_0_dequantize_glsl_source() noexcept;
 const char* q5_1_dequantize_glsl_source() noexcept;
