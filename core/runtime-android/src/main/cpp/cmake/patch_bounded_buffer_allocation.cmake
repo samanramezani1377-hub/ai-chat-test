@@ -86,6 +86,35 @@ if (NOT _alloc MATCHES "AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V1")
 
     // set the node_allocs from the hash table]=]
         "propagate allocator failure from graph planning")
+    ai_chat_replace_once(_alloc
+        [=[    if (!ggml_gallocr_is_allocated(galloc, node) && !ggml_impl_is_view(node)) {
+        hn->allocated = true;
+        assert(hn->addr.offset == 0);]=]
+        [=[    if (!ggml_gallocr_is_allocated(galloc, node) && !ggml_impl_is_view(node)) {
+        struct ggml_dyn_tallocr * alloc = galloc->buf_tallocs[buffer_id];
+        if (alloc->failed) {
+            return;
+        }
+        hn->allocated = true;
+        assert(hn->addr.offset == 0);]=]
+        "skip allocations after a bounded allocator failure")
+    ai_chat_replace_once(_alloc
+        [=[        struct ggml_dyn_tallocr * alloc = galloc->buf_tallocs[buffer_id];
+        ggml_backend_buffer_type_t buft = galloc->bufts[buffer_id];]=]
+        [=[        ggml_backend_buffer_type_t buft = galloc->bufts[buffer_id];]=]
+        "reuse allocator pointer after failure guard")
+    ai_chat_replace_once(_alloc
+        [=[    struct ggml_dyn_tallocr * alloc = galloc->buf_tallocs[buffer_id];
+    ggml_backend_buffer_type_t buft = galloc->bufts[buffer_id];
+    size_t size = ggml_backend_buft_get_alloc_size(buft, node);]=]
+        [=[    struct ggml_dyn_tallocr * alloc = galloc->buf_tallocs[buffer_id];
+    if (alloc->failed) {
+        return;
+    }
+    ggml_backend_buffer_type_t buft = galloc->bufts[buffer_id];
+    size_t size = ggml_backend_buft_get_alloc_size(buft, node);]=]
+        "avoid freeing invalid allocator addresses after exhaustion")
+    string(APPEND _alloc "\n// AI_CHAT_BOUNDED_ALLOCATOR_FAILURE_GUARDS_V1\n")
     string(APPEND _alloc "\n// AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V1\n")
     file(WRITE "${_alloc_file}" "${_alloc}")
 endif()
@@ -93,6 +122,10 @@ endif()
 # WebGPU: reject allocations exceeding either the whole-buffer or storage-binding
 # limit before calling Dawn. A failed buffer allocation is returned to ggml-alloc
 # as NULL so graph reservation can fail cleanly and the caller can select fallback.
+ai_chat_replace_once(_webgpu
+    "#include <memory>"
+    "#include <memory>\n#include <new> // AI_CHAT_WEBGPU_NOTHROW_INCLUDE_V1"
+    "include std::nothrow declaration")
 file(READ "${_webgpu_file}" _webgpu)
 if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
     ai_chat_replace_once(_webgpu
