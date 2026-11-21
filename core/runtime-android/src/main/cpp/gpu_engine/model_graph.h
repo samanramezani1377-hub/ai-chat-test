@@ -64,6 +64,7 @@ struct ModelExecutionPlan {
     bool graph_compiled = false;
     bool execution_validated = false;
     bool gpu_ready = false;
+    std::vector<std::string> retained_outputs;
 };
 
 struct ModelGraphCoverageReport {

@@ -196,10 +196,11 @@ public:
         };
         add("embedding", "Embedding", {"token_ids"}, {embedding_weight},
             "hidden", {0, embedding});
+        std::string hidden_name = "hidden";
         for (uint64_t layer = 0; layer < layers; ++layer) {
             const std::string p = "blk." + std::to_string(layer) + ".";
             const std::string x = "layer." + std::to_string(layer) + ".";
-            add(x + "attn_norm", "RMSNorm", {"hidden"}, {p + "attn_norm.weight"}, x + "normalized", {0, embedding});
+            add(x + "attn_norm", "RMSNorm", {hidden_name}, {p + "attn_norm.weight"}, x + "normalized", {0, embedding});
             if (uses_qkv_bias_) {
                 add(x + "q_proj", "MatMul", {x + "normalized"}, {p + "attn_q.weight"}, x + "q_linear", {0, heads, head_dimension});
                 add(x + "q_bias.apply", "Add", {x + "q_linear"}, {p + "attn_q.bias"}, x + "q", {0, heads, head_dimension});
@@ -235,7 +236,7 @@ public:
                 add(x + "attention_output", "MatMul", {x + "attention_output"},
                     {p + "attn_output.weight"}, x + "attention_projected", {0, embedding});
             }
-            add(x + "attention_residual", "Add", {"hidden", x + "attention_projected"}, {},
+            add(x + "attention_residual", "Add", {hidden_name, x + "attention_projected"}, {},
                 x + "attention_residual", {0, embedding});
             add(x + "ffn_norm", "RMSNorm", {x + "attention_residual"},
                 {p + "ffn_norm.weight"}, x + "ffn_normalized", {0, embedding});
@@ -250,11 +251,13 @@ public:
             add(x + "ffn_down", "MatMul", {x + "ffn_product"},
                 {p + "ffn_down.weight"}, x + "ffn_down_projected", {0, embedding});
             add(x + "ffn_residual", "Add", {x + "attention_residual", x + "ffn_down_projected"},
-                {}, "hidden", {0, embedding});
+                {}, x + "hidden", {0, embedding});
+            hidden_name = x + "hidden";
         }
-        add("final_norm", "RMSNorm", {"hidden"}, {output_norm}, "final_hidden", {0, embedding});
+        add("final_norm", "RMSNorm", {hidden_name}, {output_norm}, "final_hidden", {0, embedding});
         add("logits", "MatMul", {"final_hidden"},
             {tied_output ? embedding_weight : "output.weight"}, "logits", {0, model.tokenizer.tokens.size()});
+        plan.retained_outputs = {"logits"};
         plan.structurally_validated = true;
         plan.blockers.emplace_back("TOKENIZER_EXECUTION_NOT_VALIDATED");
         plan.blockers.emplace_back("OPERATOR_KERNEL_COVERAGE_NOT_VALIDATED");
