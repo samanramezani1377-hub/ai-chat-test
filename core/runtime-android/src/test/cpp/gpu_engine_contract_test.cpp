@@ -1094,6 +1094,64 @@ void test_builtin_architecture_adapter_is_fail_closed() {
     assert(adapter->validate_metadata(model).code == StatusCode::InvalidArgument);
 }
 
+
+void test_model_plan_graph_compilation_is_fail_closed() {
+    ModelExecutionPlan plan;
+    plan.structurally_validated = true;
+    plan.operator_coverage_validated = true;
+    plan.operations = {
+        {"add", "Add", {"input_a", "input_b"}, {}, "sum", {4}},
+        {"mul", "Multiply", {"sum", "input_c"}, {}, "product", {4}}
+    };
+    OperatorRegistry operators;
+    for (const auto& entry : std::vector<std::pair<std::string, std::string>>{
+            {"Add", "test-add"}, {"Multiply", "test-mul"}}) {
+        KernelDefinition kernel;
+        kernel.operator_name = entry.first;
+        kernel.kernel_id = entry.second;
+        kernel.backend = BackendKind::OpenGles;
+        kernel.input_type = DataType::F32;
+        kernel.output_type = DataType::F32;
+        kernel.min_input_count = 2;
+        kernel.max_input_count = 2;
+        kernel.min_rank = 1;
+        kernel.max_rank = 1;
+        kernel.validation = KernelValidation::Validated;
+        kernel.glsl_source = "#version 310 es\nvoid main(){}";
+        assert(operators.register_kernel(std::move(kernel)).ok());
+    }
+    ModelLoweringRegistry lowerings;
+    for (const auto& item : std::vector<std::pair<std::string, std::string>>{
+            {"Add", "test-add"}, {"Multiply", "test-mul"}}) {
+        assert(lowerings.register_lowering(BackendKind::OpenGles, item.first,
+            [kernel_id = item.second](const ModelPlanOperation&, ComputeDispatch& dispatch) {
+                dispatch.backend = BackendKind::OpenGles;
+                dispatch.kernel_id = kernel_id;
+                dispatch.glsl_source = "#version 310 es\nvoid main(){}";
+                dispatch.workgroups_x = 1;
+                return Status::success();
+            }).ok());
+    }
+    ComputeGraph graph;
+    ModelGraphCompileReport report;
+    assert(compile_model_execution_plan(plan, BackendKind::OpenGles, lowerings, operators,
+        {"input_a", "input_b", "input_c"}, {}, graph, report).ok());
+    assert(report.compiled && report.compiled_nodes == 2);
+    assert(graph.node_count() == 2);
+    std::vector<size_t> order;
+    assert(graph.topological_order(order).ok());
+    assert(order.size() == 2 && order[0] == 0 && order[1] == 1);
+    assert(plan.graph_compiled && !plan.gpu_ready && !plan.execution_validated);
+
+    ModelExecutionPlan blocked = plan;
+    blocked.graph_compiled = false;
+    blocked.operator_coverage_validated = false;
+    ComputeGraph blocked_graph;
+    assert(compile_model_execution_plan(blocked, BackendKind::OpenGles, lowerings, operators,
+        {"input_a", "input_b", "input_c"}, {}, blocked_graph, report).code == StatusCode::NotReady);
+    assert(blocked_graph.node_count() == 0);
+}
+
 void test_llama_model_execution_plan_is_structural_only() {
     ArchitectureRegistry registry;
     assert(register_builtin_architecture_adapters(registry).ok());
@@ -1394,6 +1452,7 @@ int main() {
     test_tensor_and_memory_lease();
     test_operator_registry_fail_closed();
     test_universal_gles_operator_candidate_is_fail_closed();
+    test_model_plan_graph_compilation_is_fail_closed();
     test_llama_model_execution_plan_is_structural_only();
     test_model_and_quantization_registry_fail_closed();
     test_builtin_architecture_adapter_is_fail_closed();
