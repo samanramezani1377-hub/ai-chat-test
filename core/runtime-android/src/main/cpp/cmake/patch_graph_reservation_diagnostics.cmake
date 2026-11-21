@@ -15,6 +15,9 @@ if (NOT _backend MATCHES "AI_CHAT_GRAPH_RESERVE_DIAGNOSTICS_V2")
     if (NOT _backend MATCHES "#include <chrono>")
         string(REPLACE "#include <algorithm>" "#include <algorithm>\n#include <chrono>" _backend "${_backend}")
     endif()
+    if (NOT _backend MATCHES "#include <stdexcept>")
+        string(REPLACE "#include <chrono>" "#include <chrono>\n#include <stdexcept>" _backend "${_backend}")
+    endif()
 
     # Replace the complete function body by locating stable function boundaries.
     # This upgrades the previous V1 patch even when FetchContent reuses its source tree.
@@ -88,7 +91,7 @@ bool ggml_backend_sched_reserve(ggml_backend_sched_t sched, struct ggml_cgraph *
 
     ai_chat_replace_once(_backend
         "    sched->ctx = ggml_init(params);\n    if (sched->ctx == NULL) {\n        GGML_ABORT(\"%s: failed to initialize context\\n\", __func__);\n    }"
-        "    GGML_LOG_INFO(\"AI_CHAT_GRAPH_SPLIT_CONTEXT_CREATE_BEGIN bytes=%zu\\n\", sched->context_buffer_size);\n    sched->ctx = ggml_init(params);\n    if (sched->ctx == NULL) {\n        GGML_LOG_ERROR(\"AI_CHAT_GRAPH_SPLIT_CONTEXT_CREATE_FAILED bytes=%zu\\n\", sched->context_buffer_size);\n        GGML_ABORT(\"%s: failed to initialize context\\n\", __func__);\n    }\n    GGML_LOG_INFO(\"AI_CHAT_GRAPH_SPLIT_CONTEXT_CREATE_END success=1\\n\");"
+        "    GGML_LOG_INFO(\"AI_CHAT_GRAPH_SPLIT_CONTEXT_CREATE_BEGIN bytes=%zu\\n\", sched->context_buffer_size);\n    sched->ctx = ggml_init(params);\n    if (sched->ctx == NULL) {\n        GGML_LOG_ERROR(\"AI_CHAT_GRAPH_SPLIT_CONTEXT_CREATE_FAILED bytes=%zu\\n\", sched->context_buffer_size);\n        throw std::runtime_error(\"failed to initialize backend scheduler graph context\");\n    }\n    GGML_LOG_INFO(\"AI_CHAT_GRAPH_SPLIT_CONTEXT_CREATE_END success=1\\n\");"
         "record scheduler context allocation failures before upstream abort")
 
     file(WRITE "${_backend_file}" "${_backend}")
