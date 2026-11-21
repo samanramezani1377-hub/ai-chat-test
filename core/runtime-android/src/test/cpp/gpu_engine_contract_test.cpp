@@ -411,6 +411,22 @@ void test_dawn_q8_0_operator_registration_is_unverified() {
         selected).code == StatusCode::Unsupported);
 }
 
+
+void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
+    FakeBackend backend;
+    OperatorRegistry operators;
+    QuantizationRegistry quantizations;
+    assert(register_builtin_gles_operator_candidates(operators).ok());
+    assert(register_builtin_quantization_formats(quantizations).ok());
+    assert(validate_q8_0_matmul_kernel(backend, operators, quantizations).code == StatusCode::NumericalFailure);
+    const QuantizationFormat* format = quantizations.find(8);
+    assert(format != nullptr && format->gpu_kernel_state == SupportState::Unverified);
+    KernelDefinition selected;
+    assert(operators.select_kernel("MatMul_Q8_0", BackendKind::OpenGles,
+        std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
+        selected).code == StatusCode::Unsupported);
+}
+
 void test_q8_0_decoder_and_registry() {
     std::vector<uint8_t> encoded(34, 0);
     encoded[0] = 0x00;
@@ -1609,6 +1625,7 @@ int main() {
     test_q4_decoders();
     test_q5_decoders();
     test_dawn_q8_0_operator_registration_is_unverified();
+    test_q8_0_gpu_validation_does_not_promote_fake_backend();
     test_q8_0_decoder_and_registry();
     test_kv_cache_memory_and_sequential_append();
     test_gpu_backend_fallback_order();

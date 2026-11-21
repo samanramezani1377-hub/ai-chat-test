@@ -502,19 +502,37 @@ Status build_q8_0_matmul_candidate(const Tensor& activations,
 const char* q8_0_matmul_glsl_source() noexcept { return kQ8_0MatMulGlsl; }
 
 
-Status validate_gles_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& registry) {
-    if (backend.kind() != BackendKind::OpenGles || !backend.healthy())
-        return {StatusCode::NotReady, "GLES Q8_0 MatMul validation requires an initialized healthy backend"};
-    auto kernel = std::find_if(registry.kernels_.begin(), registry.kernels_.end(),
-        [](const KernelDefinition& definition) {
-            return definition.kernel_id == "gles-q8-0-matmul-f32-activation-v1" &&
-                   definition.backend == BackendKind::OpenGles;
+
+Status validate_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& operators,
+                                   QuantizationRegistry& quantizations) {
+    const BackendKind backend_kind = backend.kind();
+    if ((backend_kind != BackendKind::DawnWebGpu && backend_kind != BackendKind::OpenGles) ||
+        !backend.healthy())
+        return {StatusCode::NotReady, "Q8_0 MatMul validation requires a healthy Dawn or GLES backend"};
+    constexpr uint32_t kQ8_0TypeId = 8;
+    auto format = quantizations.formats_.find(kQ8_0TypeId);
+    if (format == quantizations.formats_.end() || format->second.decoder_state != SupportState::Validated)
+        return {StatusCode::NotReady, "Q8_0 host decoder must be validated before GPU kernel promotion"};
+    if (format->second.gpu_kernel_state == SupportState::Validated) return Status::success();
+
+    const bool use_gles = backend_kind == BackendKind::OpenGles;
+    const std::string kernel_id = use_gles ? "gles-q8-0-matmul-f32-activation-v1"
+                                           : "dawn-q8-0-matmul-f32-activation-v1";
+    auto kernel = std::find_if(operators.kernels_.begin(), operators.kernels_.end(),
+        [&](const KernelDefinition& definition) {
+            return definition.kernel_id == kernel_id && definition.backend == backend_kind;
         });
-    if (kernel == registry.kernels_.end())
-        return {StatusCode::NotReady, "GLES Q8_0 MatMul candidate is not registered"};
-    if (kernel->validation == KernelValidation::Validated) return Status::success();
-    if (kernel->validation != KernelValidation::Unverified || kernel->glsl_source.empty())
-        return {StatusCode::Unsupported, "GLES Q8_0 MatMul candidate is rejected or has no GLSL ES source"};
+    if (kernel == operators.kernels_.end())
+        return {StatusCode::NotReady, "Q8_0 MatMul candidate is not registered for the selected backend"};
+    if (kernel->validation == KernelValidation::Validated) {
+        format->second.gpu_kernel_state = SupportState::Validated;
+        return Status::success();
+    }
+    if (kernel->validation != KernelValidation::Unverified)
+        return {StatusCode::Unsupported, "Q8_0 MatMul candidate is rejected"};
+    const std::string& registered_source = use_gles ? kernel->glsl_source : kernel->wgsl_source;
+    if (registered_source.empty())
+        return {StatusCode::Unsupported, "Q8_0 MatMul candidate has no source for its selected backend"};
 
     constexpr uint32_t rows = 2, output_channels = 2, inner = 64;
     std::vector<float> activations(rows * inner);
@@ -525,7 +543,7 @@ Status validate_gles_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& regi
     for (uint32_t block = 0; block < output_channels * (inner / 32); ++block) {
         const size_t offset = static_cast<size_t>(block) * 34;
         encoded[offset] = 0x00;
-        encoded[offset + 1] = 0x38; // FP16 0.5 scale
+        encoded[offset + 1] = 0x38; // FP16 scale 0.5
         for (uint32_t i = 0; i < 32; ++i)
             encoded[offset + 2 + i] = static_cast<uint8_t>(static_cast<int8_t>(static_cast<int>(i % 11) - 5));
     }
@@ -536,11 +554,11 @@ Status validate_gles_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& regi
     if (!status.ok()) return status;
 
     BufferDesc activation_desc{activations.size() * sizeof(float), alignof(float), MemoryDomain::Device,
-        false, "gles-q8-validation-activations"};
+        false, "q8-validation-activations"};
     BufferDesc weights_desc{(weight_bytes + 3) & ~uint64_t{3}, 4, MemoryDomain::Device,
-        true, "gles-q8-validation-weights"};
+        true, "q8-validation-weights"};
     BufferDesc output_desc{sizeof(actual), alignof(float), MemoryDomain::Device,
-        false, "gles-q8-validation-output"};
+        false, "q8-validation-output"};
     std::shared_ptr<Buffer> activation_buffer, weights_buffer, output_buffer;
     status = backend.allocate(activation_desc, activation_buffer); if (!status.ok()) return status;
     status = backend.allocate(weights_desc, weights_buffer); if (!status.ok()) return status;
@@ -561,11 +579,13 @@ Status validate_gles_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& regi
     if (!status.ok()) return status;
 
     ComputeDispatch dispatch;
-    status = build_q8_0_matmul_gles_candidate(activation_tensor, weights_buffer,
-        weight_bytes, output_tensor, dispatch);
+    status = use_gles
+        ? build_q8_0_matmul_gles_candidate(activation_tensor, weights_buffer, weight_bytes, output_tensor, dispatch)
+        : build_q8_0_matmul_candidate(activation_tensor, weights_buffer, weight_bytes, output_tensor, dispatch);
     if (!status.ok()) return status;
-    if (dispatch.kernel_id != kernel->kernel_id || dispatch.glsl_source != kernel->glsl_source)
-        return {StatusCode::InvalidArgument, "GLES Q8_0 MatMul validation source differs from the registered candidate"};
+    const std::string& candidate_source = use_gles ? dispatch.glsl_source : dispatch.wgsl_source;
+    if (dispatch.kernel_id != kernel_id || candidate_source != registered_source)
+        return {StatusCode::InvalidArgument, "Q8_0 MatMul validation source differs from the registered candidate"};
     dispatch.validation = KernelValidation::Validated;
     std::unique_ptr<CommandBatch> commands;
     status = backend.begin_commands(commands); if (!status.ok()) return status;
@@ -576,11 +596,13 @@ Status validate_gles_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& regi
     for (size_t i = 0; i < rows * output_channels; ++i) {
         const float tolerance = 1.0e-4f * std::max(1.0f, std::fabs(expected[i]));
         if (!std::isfinite(actual[i]) || std::fabs(actual[i] - expected[i]) > tolerance)
-            return {StatusCode::NumericalFailure, "GLES Q8_0 MatMul output differs from the independent block decoder reference"};
+            return {StatusCode::NumericalFailure, "Q8_0 MatMul GPU output differs from the independent block-decoder reference"};
     }
     kernel->validation = KernelValidation::Validated;
+    format->second.gpu_kernel_state = SupportState::Validated;
     return Status::success();
 }
+
 
 Status build_q8_0_matmul_gles_candidate(const Tensor& activations,
                                        const std::shared_ptr<Buffer>& quantized_weights,
