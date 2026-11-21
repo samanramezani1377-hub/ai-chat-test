@@ -493,7 +493,7 @@ Status build_q8_0_matmul_candidate(const Tensor& activations,
             return {StatusCode::BackendFailure, "Q8_0 MatMul WGSL placeholder is missing"};
         dispatch.wgsl_source.replace(position, constant.first.size(), constant.second);
     }
-    dispatch.workgroups_x = static_cast<uint32_t>((o[1] + 7) / 8);
+    dispatch.workgroups_x = static_cast<uint32_t>((output_channels + 7) / 8);
     dispatch.workgroups_y = static_cast<uint32_t>((a[0] + 7) / 8);
     dispatch.bindings = {
         {0, activations.buffer(), activations.byte_offset(), activations.byte_size()},
