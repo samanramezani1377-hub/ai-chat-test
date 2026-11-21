@@ -23,8 +23,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-internal fun WorkspacePage(execution: ExecutionState?, model: ModelDescriptor?, onDiagnostics: () -> Unit) {
-    val container = AppContainer.latest
+internal fun WorkspacePage(container: AppContainer, execution: ExecutionState?, model: ModelDescriptor?, onDiagnostics: () -> Unit) {
     val scope = rememberCoroutineScope()
     val liveTraces by ActionTraceStore.events.collectAsState()
     var checkpoint by remember(execution?.id) { mutableStateOf<PreparedAction?>(null) }

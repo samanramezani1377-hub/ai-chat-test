@@ -9,7 +9,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import com.samanramezani.aichattest.AppContainer
 import com.samanramezani.aichattest.InferenceSettingsAccess
 import com.samanramezani.aichattest.providers.CloudflareConfig
 import com.samanramezani.aichattest.providers.CloudflareProvider
@@ -59,6 +58,7 @@ fun SettingsScreen(
     onRefresh: () -> Unit, onActivate: (String) -> Unit, onDeactivate: (() -> Unit)? = null, onDelete: (String) -> Unit,
     onProviderChanged: () -> Unit = {},
     providerStore: CloudflareProviderStore? = null,
+    onGpuLayersChanged: (Int) -> Unit = {},
     voiceSettingsContent: @Composable () -> Unit = {},
     initialSection: String = "مدل",
     onSectionChanged: (String) -> Unit = {},
@@ -100,7 +100,7 @@ fun SettingsScreen(
                 item {
                     when (section) {
                         "مدل" -> ModelManagement(active, models, error, onImport, onRefresh, onActivate, onDeactivate, onDelete, onProviderChanged, providerStore)
-                        "GPU" -> GpuLayerControls()
+                        "GPU" -> GpuLayerControls(onGpuLayersChanged)
                         "پاسخ" -> InferenceControls()
                         "زمینه" -> ContextControls()
                         "عامل" -> AgentControls()
@@ -297,7 +297,7 @@ private fun CloudflareProviderSettings(onProviderChanged: () -> Unit, sharedStor
 }
 
 @Composable
-private fun GpuLayerControls() {
+private fun GpuLayerControls(onGpuLayersChanged: (Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val preferences = remember(context) { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
     var selected by remember(preferences) { mutableStateOf(preferences.getInt(KEY_GPU_LAYERS, -1)) }
@@ -320,12 +320,12 @@ private fun GpuLayerControls() {
         }
         SaveRow(dirty, apply = {
             preferences.edit().putInt(KEY_GPU_LAYERS, selected).apply()
-            AppContainer.latest?.setGpuLayers(selected)
+            onGpuLayersChanged(selected)
             dirty = false
         }, reset = {
             selected = -1
             preferences.edit().putInt(KEY_GPU_LAYERS, -1).apply()
-            AppContainer.latest?.setGpuLayers(-1)
+            onGpuLayersChanged(-1)
             dirty = false
         })
     }
