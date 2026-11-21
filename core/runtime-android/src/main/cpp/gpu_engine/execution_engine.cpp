@@ -103,17 +103,55 @@ Status Tensor::create(TensorDesc descriptor, std::shared_ptr<Buffer> buffer,
 }
 
 struct MemoryManager::State {
+    struct PooledBuffer {
+        std::shared_ptr<Buffer> buffer;
+        uint64_t bytes = 0;
+        uint64_t alignment = 1;
+        MemoryDomain domain = MemoryDomain::Device;
+    };
+
     explicit State(uint64_t maximum) : budget(maximum) {}
     const uint64_t budget;
-    std::atomic<uint64_t> allocated{0};
+    std::atomic<uint64_t> active_bytes{0};
+    std::atomic<uint64_t> reserved_bytes{0};
+    std::mutex pool_mutex;
+    std::vector<PooledBuffer> pool;
+    uint64_t pooled_bytes = 0;
+
+    void release(std::shared_ptr<Buffer> buffer, uint64_t logical_bytes,
+                 uint64_t physical_bytes, uint64_t alignment,
+                 MemoryDomain domain, bool persistent) noexcept {
+        if (logical_bytes != 0) active_bytes.fetch_sub(logical_bytes, std::memory_order_relaxed);
+        if (!buffer || physical_bytes == 0) {
+            if (physical_bytes != 0) reserved_bytes.fetch_sub(physical_bytes, std::memory_order_relaxed);
+            return;
+        }
+        // Keep a bounded transient pool. Persistent model/KV allocations are
+        // returned to the backend when their owner releases them.
+        const uint64_t pool_limit = budget / 2;
+        if (!persistent && physical_bytes <= pool_limit) {
+            std::lock_guard<std::mutex> lock(pool_mutex);
+            if (pooled_bytes <= pool_limit - physical_bytes) {
+                pool.push_back({std::move(buffer), physical_bytes, alignment, domain});
+                pooled_bytes += physical_bytes;
+                return;
+            }
+        }
+        reserved_bytes.fetch_sub(physical_bytes, std::memory_order_relaxed);
+    }
 };
 
 struct MemoryLease::Control {
     std::shared_ptr<Buffer> buffer;
     std::shared_ptr<MemoryManager::State> state;
-    uint64_t bytes = 0;
+    uint64_t logical_bytes = 0;
+    uint64_t physical_bytes = 0;
+    uint64_t alignment = 1;
+    MemoryDomain domain = MemoryDomain::Device;
+    bool persistent = false;
     ~Control() {
-        if (state && bytes != 0) state->allocated.fetch_sub(bytes, std::memory_order_relaxed);
+        if (state) state->release(std::move(buffer), logical_bytes, physical_bytes,
+                                  alignment, domain, persistent);
     }
 };
 
@@ -128,34 +166,67 @@ MemoryManager::MemoryManager(Backend& backend, uint64_t budget_bytes)
 
 Status MemoryManager::allocate(const BufferDesc& descriptor, MemoryLease& out) {
     out = MemoryLease{};
-    if (descriptor.size_bytes == 0) return {StatusCode::InvalidArgument, "Cannot allocate an empty GPU buffer"};
-    uint64_t current = state_->allocated.load(std::memory_order_relaxed);
-    for (;;) {
-        if (descriptor.size_bytes > state_->budget || current > state_->budget - descriptor.size_bytes) {
-            return {StatusCode::OutOfMemory, "GPU engine memory budget would be exceeded"};
-        }
-        if (state_->allocated.compare_exchange_weak(current, current + descriptor.size_bytes,
-                std::memory_order_acq_rel, std::memory_order_relaxed)) break;
+    if (descriptor.size_bytes == 0 || descriptor.alignment == 0 ||
+        (descriptor.alignment & (descriptor.alignment - 1)) != 0) {
+        return {StatusCode::InvalidArgument, "GPU buffer size and alignment must be valid"};
     }
 
     std::shared_ptr<Buffer> buffer;
-    Status status = backend_.allocate(descriptor, buffer);
-    if (!status.ok() || !buffer) {
-        state_->allocated.fetch_sub(descriptor.size_bytes, std::memory_order_relaxed);
-        return status.ok() ? Status{StatusCode::BackendFailure, "Backend returned success without a buffer"} : status;
+    uint64_t physical_bytes = descriptor.size_bytes;
+    {
+        std::lock_guard<std::mutex> lock(state_->pool_mutex);
+        auto best = state_->pool.end();
+        for (auto it = state_->pool.begin(); it != state_->pool.end(); ++it) {
+            if (it->domain != descriptor.memory || it->alignment < descriptor.alignment ||
+                it->bytes < descriptor.size_bytes) continue;
+            if (best == state_->pool.end() || it->bytes < best->bytes) best = it;
+        }
+        if (best != state_->pool.end()) {
+            physical_bytes = best->bytes;
+            buffer = std::move(best->buffer);
+            state_->pooled_bytes -= best->bytes;
+            state_->pool.erase(best);
+        }
     }
+
+    if (buffer) {
+        state_->active_bytes.fetch_add(descriptor.size_bytes, std::memory_order_relaxed);
+    } else {
+        uint64_t reserved = state_->reserved_bytes.load(std::memory_order_relaxed);
+        for (;;) {
+            if (descriptor.size_bytes > state_->budget ||
+                reserved > state_->budget - descriptor.size_bytes) {
+                return {StatusCode::OutOfMemory, "GPU engine memory budget would be exceeded"};
+            }
+            if (state_->reserved_bytes.compare_exchange_weak(reserved,
+                    reserved + descriptor.size_bytes, std::memory_order_acq_rel,
+                    std::memory_order_relaxed)) break;
+        }
+        state_->active_bytes.fetch_add(descriptor.size_bytes, std::memory_order_relaxed);
+        Status status = backend_.allocate(descriptor, buffer);
+        if (!status.ok() || !buffer) {
+            state_->active_bytes.fetch_sub(descriptor.size_bytes, std::memory_order_relaxed);
+            state_->reserved_bytes.fetch_sub(descriptor.size_bytes, std::memory_order_relaxed);
+            return status.ok() ? Status{StatusCode::BackendFailure, "Backend returned success without a buffer"} : status;
+        }
+    }
+
     auto control = std::make_shared<MemoryLease::Control>();
     control->buffer = std::move(buffer);
     control->state = state_;
-    control->bytes = descriptor.size_bytes;
+    control->logical_bytes = descriptor.size_bytes;
+    control->physical_bytes = physical_bytes;
+    control->alignment = descriptor.alignment;
+    control->domain = descriptor.memory;
+    control->persistent = descriptor.persistent;
     out = MemoryLease(std::move(control));
     return Status::success();
 }
 
 uint64_t MemoryManager::budget_bytes() const noexcept { return state_->budget; }
-uint64_t MemoryManager::allocated_bytes() const noexcept { return state_->allocated.load(std::memory_order_relaxed); }
+uint64_t MemoryManager::allocated_bytes() const noexcept { return state_->active_bytes.load(std::memory_order_relaxed); }
 uint64_t MemoryManager::available_bytes() const noexcept {
-    const uint64_t used = allocated_bytes();
+    const uint64_t used = state_->reserved_bytes.load(std::memory_order_relaxed);
     return used >= state_->budget ? 0 : state_->budget - used;
 }
 

@@ -182,6 +182,7 @@ void test_tensor_and_memory_lease() {
     assert(memory.allocate(allocation, lease).ok());
     assert(memory.allocated_bytes() == 64);
     auto backing = lease.buffer();
+    Buffer* original_buffer = backing.get();
 
     TensorDesc desc;
     desc.shape = {2, 3};
@@ -199,7 +200,14 @@ void test_tensor_and_memory_lease() {
     assert(memory.allocated_bytes() == 64);
     tensor = Tensor{};
     assert(memory.allocated_bytes() == 0);
+    assert(memory.available_bytes() == 64); // transient storage is retained in a bounded reusable pool
+    MemoryLease reused_lease;
+    assert(memory.allocate(allocation, reused_lease).ok());
+    assert(reused_lease.buffer().get() == original_buffer); // best-fit pool reuse avoids a second GPU allocation
+    assert(memory.allocated_bytes() == 64);
 
+    reused_lease = MemoryLease{};
+    assert(memory.allocated_bytes() == 0);
     desc.shape = {UINT64_MAX, 8};
     uint64_t bytes = 0;
     assert(Tensor::required_bytes(desc, bytes).code == StatusCode::InvalidArgument);
