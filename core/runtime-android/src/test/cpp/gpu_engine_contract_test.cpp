@@ -1824,6 +1824,93 @@ void test_q4_0_embedding_model_lowering_supports_gles() {
     assert(dispatch.validation == KernelValidation::Unverified);
 }
 
+void test_streamed_execution_loads_and_releases_quantized_weights_per_operation() {
+    const std::string path = "/tmp/ai_chat_gpu_engine_streamed_q4.gguf";
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write("GGUF", 4);
+        write_u32(out, 3);
+        write_u64(out, 1);
+        write_u64(out, 2);
+        write_string(out, "general.architecture");
+        write_u32(out, 8); write_string(out, "test-architecture");
+        write_string(out, "general.alignment");
+        write_u32(out, 4); write_u32(out, 32);
+        write_string(out, "q4_weight");
+        write_u32(out, 2);
+        write_u64(out, 32); write_u64(out, 2);
+        write_u32(out, 2);
+        write_u64(out, 0);
+        const auto pos = static_cast<uint64_t>(out.tellp());
+        const auto data_start = (pos + 31u) & ~31ULL;
+        for (uint64_t i = pos; i < data_start; ++i) out.put('\0');
+        uint8_t q4_weights[36] = {};
+        for (uint32_t row = 0; row < 2; ++row) {
+            const size_t offset = row * 18;
+            q4_weights[offset] = 0x00;
+            q4_weights[offset + 1] = 0x38;
+            for (uint32_t i = 0; i < 16; ++i)
+                q4_weights[offset + 2 + i] = static_cast<uint8_t>((8u + i % 8u) | ((8u + (i + 1u) % 8u) << 4u));
+        }
+        out.write(reinterpret_cast<const char*>(q4_weights), sizeof(q4_weights));
+    }
+    GgufReader reader;
+    assert(GgufReader::open(path, reader).ok());
+
+    FakeBackend backend(BackendKind::OpenGles);
+    MemoryManager memory(backend, 1024);
+    DeviceInfo device;
+    device.max_buffer_size = 1024;
+    device.max_storage_buffer_binding_size = 1024;
+    device.max_compute_workgroups_per_dimension = 65535;
+
+    ModelExecutionPlan plan;
+    plan.structurally_validated = true;
+    plan.operator_coverage_validated = true;
+    plan.operations.push_back({"q4-matmul", "MatMul_Q4_0", {"hidden"},
+        {"q4_weight"}, "projection", {0, 2}, {}, {}, {}, {}, false});
+    plan.retained_outputs = {"projection"};
+
+    BufferDesc input_desc{32 * sizeof(float), alignof(float), MemoryDomain::Device, false, "streamed-hidden"};
+    std::shared_ptr<Buffer> input_buffer;
+    assert(backend.allocate(input_desc, input_buffer).ok());
+    TensorDesc input_td; input_td.shape = {1, 32}; input_td.data_type = DataType::F32;
+    Tensor input;
+    assert(Tensor::create(input_td, input_buffer, 0, input).ok());
+
+    ModelExecutionContext context;
+    context.tensors.emplace("hidden", input);
+    context.token_ids = {0};
+
+    OperatorRegistry operators;
+    KernelDefinition q4_kernel;
+    q4_kernel.operator_name = "MatMul_Q4_0";
+    q4_kernel.backend = BackendKind::OpenGles;
+    q4_kernel.input_type = DataType::F32;
+    q4_kernel.input_types = {DataType::F32, DataType::U32};
+    q4_kernel.output_type = DataType::F32;
+    q4_kernel.min_input_count = q4_kernel.max_input_count = 2;
+    q4_kernel.min_rank = 2;
+    q4_kernel.max_rank = 3;
+    q4_kernel.validation = KernelValidation::Validated;
+    q4_kernel.kernel_id = "gles-q4-0-matmul-f32-activation-v1";
+    q4_kernel.glsl_source = q4_0_matmul_glsl_source();
+    assert(operators.register_kernel(std::move(q4_kernel)).ok());
+
+    ModelLoweringRegistry lowerings;
+    assert(register_builtin_model_lowerings(BackendKind::OpenGles, lowerings).ok());
+    ModelGraphCompileReport report;
+    assert(execute_model_execution_plan_streamed(plan, backend, lowerings, operators,
+        {}, reader, memory, device, 1, nullptr, context, report).ok());
+    assert(report.compiled && report.executed && report.compiled_nodes == 1);
+    assert(context.quantized_weights.empty());
+    assert(context.tensors.find("q4_weight") == context.tensors.end());
+    assert(context.tensors.at("projection").descriptor().shape == std::vector<uint64_t>({1, 2}));
+    assert(context.weight_leases.empty());
+    assert(plan.execution_validated && !plan.gpu_ready);
+    std::remove(path.c_str());
+}
+
 void test_q4_1_embedding_model_lowering_supports_gles() {
     FakeBackend backend(BackendKind::OpenGles);
     ModelLoweringRegistry lowerings;
@@ -2591,6 +2678,7 @@ int main() {
     test_activation_allocator_reuses_non_overlapping_tensor_slots();
     test_q4_0_embedding_model_lowering_supports_gles();
     test_q4_1_embedding_model_lowering_supports_gles();
+    test_streamed_execution_loads_and_releases_quantized_weights_per_operation();
     test_embedding_model_lowering_uploads_token_ids_and_binds_buffer();
     test_q8_0_model_lowering_supports_gles_3d_projection();
     test_q4_0_model_lowering_supports_gles_3d_projection();
