@@ -278,6 +278,7 @@ Status build_embedding_f32_candidate(const Tensor& embedding_weights,
         output_shape[0] == 0 || output_shape[1] != weights_shape[1] ||
         validated_token_ids.size() != output_shape[0] ||
         weights_shape[0] > UINT32_MAX || weights_shape[1] > UINT32_MAX ||
+        embedding_weights.element_count() > UINT32_MAX ||
         output_shape[0] > UINT32_MAX || output.element_count() > UINT32_MAX)
         return {StatusCode::InvalidArgument, "Embedding expects weights [vocabulary,dimension] and output [tokens,dimension]"};
     for (uint32_t token : validated_token_ids) {
