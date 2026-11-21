@@ -1860,9 +1860,9 @@ void test_streamed_execution_loads_and_releases_quantized_weights_per_operation(
     FakeBackend backend(BackendKind::OpenGles);
     MemoryManager memory(backend, 1024);
     DeviceInfo device;
-    device.max_buffer_size = 1024;
-    device.max_storage_buffer_binding_size = 1024;
-    device.max_compute_workgroups_per_dimension = 65535;
+    device.limits.max_buffer_size = 1024;
+    device.limits.max_storage_buffer_binding_size = 1024;
+    device.limits.max_compute_workgroups_per_dimension = 65535;
 
     ModelExecutionPlan plan;
     plan.structurally_validated = true;
