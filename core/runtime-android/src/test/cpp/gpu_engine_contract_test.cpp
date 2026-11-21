@@ -1295,14 +1295,32 @@ void test_dense_model_plan_selects_q8_0_matmul_adapter() {
     model.metadata["llama.attention.head_count"] = uint64_t{1};
     model.metadata["llama.feed_forward_length"] = uint64_t{32};
     model.tokenizer.tokens = {"a", "b"};
-    GgufTensorInfo q8_weight;
-    q8_weight.name = "blk.0.attn_q.weight";
-    q8_weight.type_id = 8;
-    q8_weight.type = GgufReader::tensor_type_info(8);
-    q8_weight.dimensions = {32, 32};
-    q8_weight.byte_size = 32 * 34;
-    q8_weight.byte_size_known = true;
-    model.tensors.push_back(q8_weight);
+    const std::vector<std::pair<std::string, std::vector<uint64_t>>> tensors = {
+        {"token_embd.weight", {32, 2}},
+        {"output.weight", {32, 2}},
+        {"output_norm.weight", {32}},
+        {"blk.0.attn_norm.weight", {32}},
+        {"blk.0.attn_q.weight", {32, 32}},
+        {"blk.0.attn_k.weight", {32, 32}},
+        {"blk.0.attn_v.weight", {32, 32}},
+        {"blk.0.attn_output.weight", {32, 32}},
+        {"blk.0.ffn_norm.weight", {32}},
+        {"blk.0.ffn_gate.weight", {32, 32}},
+        {"blk.0.ffn_up.weight", {32, 32}},
+        {"blk.0.ffn_down.weight", {32, 32}},
+    };
+    for (const auto& item : tensors) {
+        GgufTensorInfo tensor;
+        tensor.name = item.first;
+        tensor.dimensions = item.second;
+        tensor.type_id = tensor.name == "blk.0.attn_q.weight" ? 8u : 0u;
+        tensor.type = GgufReader::tensor_type_info(tensor.type_id);
+        uint64_t elements = 1;
+        for (uint64_t dimension : tensor.dimensions) elements *= dimension;
+        tensor.byte_size_known = true;
+        tensor.byte_size = tensor.type_id == 8 ? 32 * 34 : elements * sizeof(float);
+        model.tensors.push_back(std::move(tensor));
+    }
     ModelExecutionPlan plan;
     assert(adapter->build_execution_plan(model, plan).ok());
     const auto projection = std::find_if(plan.operations.begin(), plan.operations.end(),
