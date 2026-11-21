@@ -909,6 +909,54 @@ void test_gguf_weight_streaming() {
     context = ModelExecutionContext{};
     assert(model_memory.allocated_bytes() == 0);
 
+    const std::string q4_path = "/tmp/ai_chat_gpu_engine_q4_weight.gguf";
+    {
+        std::ofstream out(q4_path, std::ios::binary | std::ios::trunc);
+        out.write("GGUF", 4);
+        write_u32(out, 3);
+        write_u64(out, 1);
+        write_u64(out, 2);
+        write_string(out, "general.architecture");
+        write_u32(out, 8); write_string(out, "test-architecture");
+        write_string(out, "general.alignment");
+        write_u32(out, 4); write_u32(out, 32);
+        write_string(out, "q4_weight");
+        write_u32(out, 1);
+        write_u64(out, 32);
+        write_u32(out, 2);
+        write_u64(out, 0);
+        const auto pos = static_cast<uint64_t>(out.tellp());
+        const auto data_start = (pos + 31u) & ~31ULL;
+        for (uint64_t i = pos; i < data_start; ++i) out.put('\0');
+        uint8_t q4_block[18] = {0x00, 0x38};
+        for (uint32_t i = 0; i < 16; ++i)
+            q4_block[2 + i] = static_cast<uint8_t>((8u + (i % 8u)) | ((8u + ((i + 2u) % 8u)) << 4u));
+        out.write(reinterpret_cast<const char*>(q4_block), sizeof(q4_block));
+    }
+    GgufReader q4_reader;
+    assert(GgufReader::open(q4_path, q4_reader).ok());
+    assert(q4_reader.info().tensors.size() == 1);
+    assert(q4_reader.info().tensors[0].type.name == "Q4_0");
+    MemoryManager q4_memory(backend, 64);
+    ModelExecutionPlan q4_plan;
+    ModelPlanOperation q4_operation;
+    q4_operation.id = "q4-weight-consumer";
+    q4_operation.operator_name = "MatMul_Q4_0";
+    q4_operation.weight_tensors = {"q4_weight"};
+    q4_plan.operations.push_back(q4_operation);
+    ModelExecutionContext q4_context;
+    assert(load_model_execution_weights(q4_reader, q4_plan, backend, model_device,
+                                         q4_context).ok());
+    const auto q4_binding = q4_context.quantized_weights.find("q4_weight");
+    assert(q4_binding != q4_context.quantized_weights.end());
+    assert(q4_binding->second.file_type_id == 2);
+    assert(q4_binding->second.byte_size == 18);
+    assert(q4_binding->second.buffer->size_bytes() >= 20);
+    assert(q4_context.weight_leases.size() == 1);
+    q4_context = ModelExecutionContext{};
+    assert(q4_memory.allocated_bytes() == 0);
+    std::remove(q4_path.c_str());
+
     assert(memory.allocated_bytes() == 0); // each chunk is released after its consumer returns
     const Status consumer_failure = GgufWeightStreamer::stream_tensor(reader, reader.info().tensors[0],
         backend, memory, device, policy,
