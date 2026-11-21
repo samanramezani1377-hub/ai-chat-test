@@ -62,3 +62,5 @@ The audit above is a historical snapshot at `07890ec925240671c29a1a485b525511014
 - Independent sampler/stop handling and GGUF tokenizer metadata parsing. No complete tokenizer implementation or generation loop is connected yet.
 
 The active Android inference route is still llama.cpp/GGML for both current GPU and CPU modes. No migration or route switch has been performed. The current branch still does not meet the goal of replacing llama.cpp GPU inference.
+
+- An independent per-layer KV cache primitive now estimates and allocates key/value buffers under the GPU memory budget, enforces sequential appends and tracks logical valid-token lengths. It is not yet wired into an Attention operator or model generation.
