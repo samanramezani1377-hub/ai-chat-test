@@ -955,6 +955,16 @@ void test_operator_registry_fail_closed() {
     assert(registry.register_kernel(definition).ok());
     assert(registry.select_kernel("Add", BackendKind::DawnWebGpu, DataType::F32,
                                   DataType::F32, 2, 2, selected).ok());
+    ComputeDispatch authorized;
+    authorized.kernel_id = selected.kernel_id;
+    authorized.wgsl_source = selected.wgsl_source;
+    assert(registry.authorize_dispatch(selected.kernel_id, selected.backend, authorized).ok());
+    assert(authorized.validation == KernelValidation::Validated);
+    ComputeDispatch unknown;
+    unknown.kernel_id = "not-registered";
+    unknown.wgsl_source = selected.wgsl_source;
+    assert(registry.authorize_dispatch(unknown.kernel_id, selected.backend, unknown).code ==
+           StatusCode::Unsupported);
 }
 
 void test_graph_scheduler_order_and_cancel() {
