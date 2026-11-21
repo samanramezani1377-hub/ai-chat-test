@@ -57,6 +57,7 @@ grep -q 'AI_CHAT_RECURRENT_BUFFER_ALLOC_BEGIN' "$RECURRENT_PATCH" || fail "Recur
 grep -q 'AI_CHAT_RECURRENT_BUFFER_ALLOC_FAILED' "$RECURRENT_PATCH" || fail "Recurrent allocation failure must be recorded before throwing"
 grep -q 'AI_CHAT_RECURRENT_MEMORY_ALLOCATION_V3' "$RECURRENT_PATCH" || fail "Recurrent row arithmetic and tensor handles must be validated"
 grep -q 'AI_CHAT_GRAPH_SPLIT_BEGIN' "$GRAPH_PATCH" || fail "Graph splitting must have a pre-stage checkpoint"
+grep -q 'throw std::runtime_error' "$GRAPH_PATCH" || fail "Scheduler context allocation must fail through the recoverable llama initialization path"
 grep -q 'AI_CHAT_GRAPH_ALLOCATOR_RESERVE_BEGIN' "$GRAPH_PATCH" || fail "Graph allocator reservation must have a pre-stage checkpoint"
 grep -q 'AI_CHAT_GRAPH_BACKEND_RESERVATION' "$GRAPH_PATCH" || fail "Graph reservation must report per-backend buffer sizes"
 grep -q 'AI_CHAT_WEBGPU_WAIT_RESULT_V2' "$WEBGPU_FAILURE_PATCH" || fail "Dawn callbacks must use heap-owned wait result state"
