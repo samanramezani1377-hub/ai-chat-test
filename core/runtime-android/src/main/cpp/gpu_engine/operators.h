@@ -106,6 +106,17 @@ Status reference_attention_f32(const float* query, const float* key, const float
                                uint32_t kv_heads, uint32_t head_dimension,
                                uint32_t past_length);
 
+struct KernelValidationReport {
+    std::vector<std::string> validated;
+    std::vector<std::string> rejected;
+    std::vector<std::string> unavailable;
+    bool complete = false;
+};
+
+// Runs deterministic GPU-vs-reference tests and promotes only kernels that
+// pass readback parity on the selected physical backend.
+Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& registry,
+                                         KernelValidationReport& report);
 Status register_builtin_operator_candidates(OperatorRegistry& registry);
 
 } // namespace ai_chat::gpu_engine

@@ -76,6 +76,8 @@ struct KernelDefinition {
     std::string entry_point = "main";
 };
 
+struct KernelValidationReport;
+
 class OperatorRegistry {
     friend Status validate_gles_add_f32_kernel(Backend& backend, OperatorRegistry& registry);
     friend Status validate_dawn_add_f32_kernel(Backend& backend, OperatorRegistry& registry);
@@ -97,6 +99,9 @@ public:
     std::vector<std::string> registered_operators() const;
 
 private:
+    friend Status validate_builtin_operator_kernels(Backend& backend,
+                                                    OperatorRegistry& registry,
+                                                    KernelValidationReport& report);
     std::vector<KernelDefinition> kernels_;
 };
 
