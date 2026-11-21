@@ -714,6 +714,15 @@ void test_add_operator_candidate_and_reference() {
     assert(std::abs(gqa_output[2] - 4.679046f) < 1e-4f);
     assert(std::abs(gqa_output[3] - 6.679046f) < 1e-4f);
 
+    const float causal_query[] = {1, 1};
+    const float causal_key[] = {1, 1};
+    const float causal_value[] = {2, 6};
+    float causal_output[2] = {};
+    assert(reference_attention_f32(causal_query, causal_key, causal_value, causal_output,
+                                   2, 1, 1, 1, 0).ok());
+    assert(std::abs(causal_output[0] - 2.0f) < 1e-6f);
+    assert(std::abs(causal_output[1] - 4.0f) < 1e-6f);
+
     BufferDesc gqa_query_desc{16, 4, MemoryDomain::Device, false, "gqa-query"};
     BufferDesc gqa_kv_desc{16, 4, MemoryDomain::Device, false, "gqa-kv"};
     std::shared_ptr<Buffer> gqa_query_buffer, gqa_key_buffer, gqa_value_buffer, gqa_output_buffer;
