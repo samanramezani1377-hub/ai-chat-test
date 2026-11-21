@@ -216,7 +216,7 @@ constexpr char kAddF32Wgsl[] = R"wgsl(
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x < arrayLength(&output)) {
-        output[gid.x] = lhs[gid.x] + rhs[gid.x];
+        output[gid.x] = lhs[gid.x] + rhs[gid.x % arrayLength(&rhs)];
     }
 }
 )wgsl";
@@ -229,7 +229,7 @@ layout(std430, binding = 1) readonly buffer Rhs { float rhs[]; };
 layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
 void main() {
     uint index = gl_GlobalInvocationID.x;
-    if (index < uint(output_values.length())) output_values[index] = lhs[index] + rhs[index];
+    if (index < uint(output_values.length())) output_values[index] = lhs[index] + rhs[index % uint(rhs.length())];
 }
 )glsl";
 
@@ -534,20 +534,27 @@ bool is_contiguous_f32(const Tensor& tensor) {
 
 Status build_binary_f32_candidate(const Tensor& lhs, const Tensor& rhs,
                                     const Tensor& output, ComputeDispatch& dispatch,
-                                    const char* label, const char* kernel_id, const char* shader) {
+                                    const char* label, const char* kernel_id, const char* shader, bool allow_trailing_vector_broadcast = false) {
     dispatch = ComputeDispatch{};
     if (!is_contiguous_f32(lhs) || !is_contiguous_f32(rhs) || !is_contiguous_f32(output))
         return {StatusCode::Unsupported, "Binary F32 operator requires contiguous device/shared tensors"};
-    if (lhs.descriptor().shape != rhs.descriptor().shape ||
-        lhs.descriptor().shape != output.descriptor().shape ||
+    const auto& lhs_shape = lhs.descriptor().shape;
+    const auto& rhs_shape = rhs.descriptor().shape;
+    const auto& output_shape = output.descriptor().shape;
+    const bool same_shape = lhs_shape == rhs_shape && lhs_shape == output_shape;
+    const bool trailing_vector_broadcast = allow_trailing_vector_broadcast &&
+        lhs_shape == output_shape && rhs_shape.size() == 1 && !lhs_shape.empty() &&
+        rhs.element_count() > 0 && lhs.element_count() % rhs.element_count() == 0;
+    if ((!same_shape && !trailing_vector_broadcast) ||
         lhs.element_count() == 0 || lhs.element_count() > UINT32_MAX ||
-        lhs.element_count() != rhs.element_count() || lhs.element_count() != output.element_count())
-        return {StatusCode::InvalidArgument, "Binary F32 operator tensor shapes or element counts do not match"};
+        rhs.element_count() == 0 || rhs.element_count() > UINT32_MAX ||
+        lhs.element_count() != output.element_count())
+        return {StatusCode::InvalidArgument, "Binary F32 operator shapes are incompatible"};
     if (!lhs.buffer() || !rhs.buffer() || !output.buffer() ||
         output.buffer().get() == lhs.buffer().get() || output.buffer().get() == rhs.buffer().get())
         return {StatusCode::Unsupported, "Binary F32 output must use a distinct valid buffer"};
-    if (lhs.byte_size() != rhs.byte_size() || lhs.byte_size() != output.byte_size() ||
-        lhs.byte_size() != lhs.element_count() * sizeof(float))
+    if (lhs.byte_size() != output.byte_size() || lhs.byte_size() != lhs.element_count() * sizeof(float) ||
+        rhs.byte_size() != rhs.element_count() * sizeof(float))
         return {StatusCode::InvalidArgument, "Binary F32 tensor byte ranges are inconsistent"};
     dispatch.label = label;
     dispatch.kernel_id = kernel_id;
@@ -816,7 +823,7 @@ const char* add_f32_wgsl_source() noexcept { return kAddF32Wgsl; }
 Status build_add_f32_candidate(const Tensor& lhs, const Tensor& rhs,
                                const Tensor& output, ComputeDispatch& dispatch) {
     return build_binary_f32_candidate(lhs, rhs, output, dispatch,
-                                      "add-f32-generic-unverified", "dawn-add-f32-generic-v1", kAddF32Wgsl);
+                                      "add-f32-generic-unverified", "dawn-add-f32-generic-v1", kAddF32Wgsl, true);
 }
 
 const char* multiply_f32_wgsl_source() noexcept { return kMultiplyF32Wgsl; }
@@ -830,7 +837,7 @@ Status build_multiply_f32_candidate(const Tensor& lhs, const Tensor& rhs,
 Status build_add_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
                                     const Tensor& output, ComputeDispatch& dispatch) {
     Status status = build_binary_f32_candidate(lhs, rhs, output, dispatch,
-        "gles-add-f32-generic-unverified", "gles-add-f32-generic-v1", kAddF32Wgsl);
+        "gles-add-f32-generic-unverified", "gles-add-f32-generic-v1", kAddF32Wgsl, true);
     if (!status.ok()) return status;
     dispatch.backend = BackendKind::OpenGles;
     dispatch.kernel_id = "gles-add-f32-generic-v1";
@@ -983,18 +990,24 @@ Status build_matmul_f32_candidate(const Tensor& lhs, const Tensor& rhs,
     const auto& a = lhs.descriptor().shape;
     const auto& b = rhs.descriptor().shape;
     const auto& c = output.descriptor().shape;
-    if (a.size() != 2 || b.size() != 2 || c.size() != 2 || a[1] != b[0] ||
-        c[0] != a[0] || c[1] != b[1])
-        return {StatusCode::InvalidArgument, "MatMul expects [M,K] x [K,N] -> [M,N]"};
+    uint64_t output_columns = 0;
+    if (c.size() == 2) {
+        output_columns = c[1];
+    } else if (c.size() == 3 && c[1] <= UINT64_MAX / c[2]) {
+        output_columns = c[1] * c[2];
+    }
+    if (a.size() != 2 || b.size() != 2 || (c.size() != 2 && c.size() != 3) ||
+        a[1] != b[0] || c[0] != a[0] || output_columns != b[1])
+        return {StatusCode::InvalidArgument, "MatMul expects [M,K] x [K,N] -> [M,N] or [M,H,D] with H*D=N"};
     if (!lhs.buffer() || !rhs.buffer() || !output.buffer() ||
         output.buffer().get() == lhs.buffer().get() || output.buffer().get() == rhs.buffer().get())
         return {StatusCode::Unsupported, "MatMul output must use a distinct buffer"};
-    if (a[0] > UINT32_MAX || a[1] > UINT32_MAX || b[1] > UINT32_MAX ||
+    if (a[0] > UINT32_MAX || a[1] > UINT32_MAX || output_columns > UINT32_MAX ||
         lhs.element_count() > UINT32_MAX || rhs.element_count() > UINT32_MAX ||
         output.element_count() > UINT32_MAX ||
         a[0] == 0 || a[1] == 0 || b[1] == 0)
         return {StatusCode::Unsupported, "MatMul dimensions exceed the generic WGSL kernel range"};
-    const uint64_t groups_x = (b[1] + 7) / 8;
+    const uint64_t groups_x = (output_columns + 7) / 8;
     const uint64_t groups_y = (a[0] + 7) / 8;
     if (groups_x > UINT32_MAX || groups_y > UINT32_MAX)
         return {StatusCode::Unsupported, "MatMul dispatch dimensions exceed uint32"};
@@ -1007,7 +1020,7 @@ Status build_matmul_f32_candidate(const Tensor& lhs, const Tensor& rhs,
     dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source), "const ROWS: u32 = 1u;",
         "const ROWS: u32 = " + std::to_string(a[0]) + "u;");
     dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source), "const COLUMNS: u32 = 1u;",
-        "const COLUMNS: u32 = " + std::to_string(b[1]) + "u;");
+        "const COLUMNS: u32 = " + std::to_string(output_columns) + "u;");
     dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source), "const INNER: u32 = 1u;",
         "const INNER: u32 = " + std::to_string(a[1]) + "u;");
     dispatch.workgroups_x = static_cast<uint32_t>(groups_x);
@@ -1034,7 +1047,7 @@ Status build_matmul_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
     dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const uint ROWS = 1u;",
         "const uint ROWS = " + std::to_string(a[0]) + "u;");
     dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const uint COLUMNS = 1u;",
-        "const uint COLUMNS = " + std::to_string(b[1]) + "u;");
+        "const uint COLUMNS = " + std::to_string(output_columns) + "u;");
     dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const uint INNER = 1u;",
         "const uint INNER = " + std::to_string(a[1]) + "u;");
     return Status::success();
