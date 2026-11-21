@@ -173,7 +173,10 @@ public:
         while(pos<text.size()){size_t found=std::string::npos,len=0;uint32_t id=0;
             for(const auto&item:special){size_t p=text.find(item.first,pos);if(p<found||(p==found&&item.first.size()>len)){found=p;len=item.first.size();id=item.second;}}
             size_t end=found==std::string::npos?text.size():found;if(end>pos){for(const auto&chunk:split(text.substr(pos,end-pos))){s=encode_chunk(m,map,ranks,chunk,out);if(!s.ok()){out.clear();return s;}}}
-            if(found==std::string::npos)break;out.push_back(id);pos=found+len;}
+            if (found == std::string::npos) break;
+            out.push_back(id);
+            pos = found + len;
+        }
         add_eos(m,out);return Status::success();
     }
     Status decode(const GgufTokenizerInfo&m,const std::vector<uint32_t>&ids,std::string&out)const override{
@@ -212,7 +215,10 @@ private:
                         const std::unordered_map<std::string,uint32_t>&ranks,const std::string&chunk,std::vector<uint32_t>&out)const{
         std::vector<std::string> symbols;for(unsigned char b:chunk)symbols.push_back(encoder_.at(b));
         while(symbols.size()>1){uint32_t best=UINT32_MAX;size_t at=symbols.size();for(size_t i=0;i+1<symbols.size();++i){auto it=ranks.find(symbols[i]+"\x1f"+symbols[i+1]);if(it!=ranks.end()&&it->second<best){best=it->second;at=i;}}
-            if(at==symbols.size())break;symbols[at]+=symbols[at+1];symbols.erase(symbols.begin()+static_cast<std::ptrdiff_t>(at+1));}
+            if (at == symbols.size()) break;
+            symbols[at] += symbols[at + 1];
+            symbols.erase(symbols.begin() + static_cast<std::ptrdiff_t>(at + 1));
+        }
         for(const auto&p:symbols){Status s=append_piece(m,map,p,out);if(!s.ok())return s;}return Status::success();
     }
     TokenizerDescriptor desc_;std::unordered_map<uint8_t,std::string> encoder_;std::unordered_map<uint32_t,uint8_t> decoder_;
