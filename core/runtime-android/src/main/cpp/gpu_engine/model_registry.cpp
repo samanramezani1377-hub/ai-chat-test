@@ -131,6 +131,39 @@ std::vector<std::string> ArchitectureRegistry::registered_architectures() const 
     return result;
 }
 
+
+Status GgufModelLoader::inspect(const std::string& path,
+                                const ArchitectureRegistry& architectures,
+                                const QuantizationRegistry& quantizations) {
+    unload();
+    GgufReader candidate;
+    Status status = GgufReader::open(path, candidate);
+    if (!status.ok()) return status;
+    ModelPreflightReport report = evaluate_model_preflight(candidate.info(), architectures, quantizations);
+    reader_ = std::move(candidate);
+    preflight_ = std::move(report);
+    loaded_ = true;
+    return Status::success();
+}
+
+void GgufModelLoader::unload() noexcept {
+    reader_ = GgufReader{};
+    preflight_ = ModelPreflightReport{};
+    loaded_ = false;
+}
+
+const GgufReader* GgufModelLoader::reader() const noexcept {
+    return loaded_ ? &reader_ : nullptr;
+}
+
+const ModelPreflightReport& GgufModelLoader::preflight_report() const noexcept {
+    return preflight_;
+}
+
+bool GgufModelLoader::gpu_ready() const noexcept {
+    return loaded_ && preflight_.gpu_execution_ready;
+}
+
 ModelPreflightReport evaluate_model_preflight(const GgufFileInfo& model,
                                               const ArchitectureRegistry& architectures,
                                               const QuantizationRegistry& quantizations) {

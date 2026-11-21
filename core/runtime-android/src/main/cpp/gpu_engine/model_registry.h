@@ -94,6 +94,24 @@ struct ModelPreflightReport {
 
 Status register_builtin_architecture_adapters(ArchitectureRegistry& registry);
 
+class GgufModelLoader {
+public:
+    // Opens and inspects a GGUF file. A successful parse does not imply GPU readiness;
+    // callers must inspect preflight_report() and honor all blockers.
+    Status inspect(const std::string& path,
+                   const ArchitectureRegistry& architectures,
+                   const QuantizationRegistry& quantizations);
+    void unload() noexcept;
+    const GgufReader* reader() const noexcept;
+    const ModelPreflightReport& preflight_report() const noexcept;
+    bool gpu_ready() const noexcept;
+
+private:
+    GgufReader reader_;
+    ModelPreflightReport preflight_;
+    bool loaded_ = false;
+};
+
 ModelPreflightReport evaluate_model_preflight(const GgufFileInfo& model,
                                               const ArchitectureRegistry& architectures,
                                               const QuantizationRegistry& quantizations);
