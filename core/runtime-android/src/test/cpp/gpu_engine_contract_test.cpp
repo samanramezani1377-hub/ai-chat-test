@@ -1185,6 +1185,44 @@ void test_builtin_architecture_adapter_is_fail_closed() {
 
 
 
+
+void test_model_execution_never_promotes_unvalidated_kernels() {
+    FakeBackend backend(BackendKind::OpenGles);
+    ModelExecutionPlan plan;
+    plan.structurally_validated = true;
+    plan.operator_coverage_validated = true;
+    ModelPlanOperation operation;
+    operation.id = "add";
+    operation.operator_name = "Add";
+    operation.inputs = {"lhs", "rhs"};
+    operation.output = "sum";
+    operation.output_shape = {4};
+    plan.operations.push_back(operation);
+
+    ModelExecutionContext context;
+    for (const char* name : {"lhs", "rhs", "sum"}) {
+        BufferDesc desc{16, 4, MemoryDomain::Device, false, name};
+        std::shared_ptr<Buffer> buffer;
+        assert(backend.allocate(desc, buffer).ok());
+        TensorDesc td; td.shape = {4}; td.data_type = DataType::F32;
+        Tensor tensor;
+        assert(Tensor::create(td, buffer, 0, tensor).ok());
+        context.tensors.emplace(name, tensor);
+    }
+    ModelLoweringRegistry lowerings;
+    assert(register_builtin_model_lowerings(BackendKind::OpenGles, lowerings).ok());
+    OperatorRegistry unvalidated;
+    ModelGraphCompileReport report;
+    const Status result = execute_model_execution_plan(
+        plan, backend, lowerings, unvalidated, {}, context, nullptr, report);
+    assert(result.code == StatusCode::Unsupported);
+    assert(!report.compiled);
+    assert(!report.executed);
+    assert(!plan.execution_validated);
+    assert(!plan.gpu_ready);
+    assert(backend.submit_count == 0);
+}
+
 void test_builtin_model_lowerings_are_backend_scoped_and_fail_closed() {
     ModelLoweringRegistry dawn, gles;
     assert(register_builtin_model_lowerings(BackendKind::DawnWebGpu, dawn).ok());
@@ -1681,6 +1719,7 @@ int main() {
     test_universal_gles_operator_candidate_is_fail_closed();
     test_model_plan_graph_compilation_is_fail_closed();
     test_builtin_model_lowerings_are_backend_scoped_and_fail_closed();
+    test_model_execution_never_promotes_unvalidated_kernels();
     test_llama_model_execution_plan_is_structural_only();
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
     test_model_and_quantization_registry_fail_closed();
