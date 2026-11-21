@@ -130,6 +130,76 @@ uint16_t read_u16_le(const uint8_t* source) {
 } // namespace
 
 
+
+Status decode_q5_0_blocks(const uint8_t* source, size_t source_bytes,
+                          float* destination, size_t destination_elements) {
+    constexpr size_t kElementsPerBlock = 32;
+    constexpr size_t kBytesPerBlock = 22;
+    if ((!source || !destination) && (source_bytes != 0 || destination_elements != 0))
+        return {StatusCode::InvalidArgument, "Q5_0 decoder received a null buffer"};
+    if (destination_elements == 0 || destination_elements % kElementsPerBlock != 0)
+        return {StatusCode::InvalidArgument, "Q5_0 destination must contain complete blocks"};
+    const size_t blocks = destination_elements / kElementsPerBlock;
+    if (blocks > std::numeric_limits<size_t>::max() / kBytesPerBlock ||
+        source_bytes != blocks * kBytesPerBlock)
+        return {StatusCode::InvalidArgument, "Q5_0 source and destination sizes do not match complete blocks"};
+    for (size_t block = 0; block < blocks; ++block) {
+        const uint8_t* encoded = source + block * kBytesPerBlock;
+        const float scale = half_to_float(read_u16_le(encoded));
+        if (!std::isfinite(scale))
+            return {StatusCode::NumericalFailure, "Q5_0 block has a non-finite FP16 scale"};
+        const uint32_t high_bits = static_cast<uint32_t>(encoded[2]) |
+            (static_cast<uint32_t>(encoded[3]) << 8) |
+            (static_cast<uint32_t>(encoded[4]) << 16) |
+            (static_cast<uint32_t>(encoded[5]) << 24);
+        for (size_t i = 0; i < 16; ++i) {
+            const uint8_t packed = encoded[6 + i];
+            const int32_t low = static_cast<int32_t>(packed & 0x0fu) |
+                                static_cast<int32_t>(((high_bits >> i) & 1u) << 4);
+            const int32_t high = static_cast<int32_t>(packed >> 4) |
+                                 static_cast<int32_t>(((high_bits >> (i + 16)) & 1u) << 4);
+            destination[block * 32 + i] = scale * static_cast<float>(low - 16);
+            destination[block * 32 + i + 16] = scale * static_cast<float>(high - 16);
+        }
+    }
+    return Status::success();
+}
+
+Status decode_q5_1_blocks(const uint8_t* source, size_t source_bytes,
+                          float* destination, size_t destination_elements) {
+    constexpr size_t kElementsPerBlock = 32;
+    constexpr size_t kBytesPerBlock = 24;
+    if ((!source || !destination) && (source_bytes != 0 || destination_elements != 0))
+        return {StatusCode::InvalidArgument, "Q5_1 decoder received a null buffer"};
+    if (destination_elements == 0 || destination_elements % kElementsPerBlock != 0)
+        return {StatusCode::InvalidArgument, "Q5_1 destination must contain complete blocks"};
+    const size_t blocks = destination_elements / kElementsPerBlock;
+    if (blocks > std::numeric_limits<size_t>::max() / kBytesPerBlock ||
+        source_bytes != blocks * kBytesPerBlock)
+        return {StatusCode::InvalidArgument, "Q5_1 source and destination sizes do not match complete blocks"};
+    for (size_t block = 0; block < blocks; ++block) {
+        const uint8_t* encoded = source + block * kBytesPerBlock;
+        const float scale = half_to_float(read_u16_le(encoded));
+        const float minimum = half_to_float(read_u16_le(encoded + 2));
+        if (!std::isfinite(scale) || !std::isfinite(minimum))
+            return {StatusCode::NumericalFailure, "Q5_1 block has a non-finite FP16 scale or minimum"};
+        const uint32_t high_bits = static_cast<uint32_t>(encoded[4]) |
+            (static_cast<uint32_t>(encoded[5]) << 8) |
+            (static_cast<uint32_t>(encoded[6]) << 16) |
+            (static_cast<uint32_t>(encoded[7]) << 24);
+        for (size_t i = 0; i < 16; ++i) {
+            const uint8_t packed = encoded[8 + i];
+            const uint32_t low = static_cast<uint32_t>(packed & 0x0fu) |
+                                 (((high_bits >> i) & 1u) << 4);
+            const uint32_t high = static_cast<uint32_t>(packed >> 4) |
+                                  (((high_bits >> (i + 16)) & 1u) << 4);
+            destination[block * 32 + i] = scale * static_cast<float>(low) + minimum;
+            destination[block * 32 + i + 16] = scale * static_cast<float>(high) + minimum;
+        }
+    }
+    return Status::success();
+}
+
 Status decode_q4_0_blocks(const uint8_t* source, size_t source_bytes,
                           float* destination, size_t destination_elements) {
     constexpr size_t kElementsPerBlock = 32;
@@ -369,6 +439,28 @@ Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
     q4_1.decoder_state = SupportState::Validated;
     q4_1.gpu_kernel_state = SupportState::Unverified;
     status = registry.register_format(std::move(q4_1));
+    if (!status.ok()) return status;
+
+    QuantizationFormat q5_0;
+    q5_0.file_type_id = 6;
+    q5_0.name = "Q5_0";
+    q5_0.block_elements = 32;
+    q5_0.bytes_per_block = 22;
+    q5_0.quantized = true;
+    q5_0.decoder_state = SupportState::Validated;
+    q5_0.gpu_kernel_state = SupportState::Unverified;
+    status = registry.register_format(std::move(q5_0));
+    if (!status.ok()) return status;
+
+    QuantizationFormat q5_1;
+    q5_1.file_type_id = 7;
+    q5_1.name = "Q5_1";
+    q5_1.block_elements = 32;
+    q5_1.bytes_per_block = 24;
+    q5_1.quantized = true;
+    q5_1.decoder_state = SupportState::Validated;
+    q5_1.gpu_kernel_state = SupportState::Unverified;
+    status = registry.register_format(std::move(q5_1));
     if (!status.ok()) return status;
 
     QuantizationFormat q8;

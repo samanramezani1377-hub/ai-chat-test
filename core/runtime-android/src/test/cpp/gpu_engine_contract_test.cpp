@@ -382,6 +382,14 @@ void test_q8_0_decoder_and_registry() {
     assert(build_q4_1_dequantize_candidate(q4_1_encoded, 20, q4_output_tensor, q4_1_dispatch).ok());
     assert(q4_1_dispatch.bindings.size() == 2);
     assert(q4_1_dispatch.label.find("unverified") != std::string::npos);
+
+    BufferDesc q5_encoded_desc{24, 4, MemoryDomain::Device, false, "q5-encoded"};
+    std::shared_ptr<Buffer> q5_encoded;
+    assert(backend.allocate(q5_encoded_desc, q5_encoded).ok());
+    ComputeDispatch q5_0_dispatch, q5_1_dispatch;
+    assert(build_q5_0_dequantize_candidate(q5_encoded, 22, q4_output_tensor, q5_0_dispatch).ok());
+    assert(build_q5_1_dequantize_candidate(q5_encoded, 24, q4_output_tensor, q5_1_dispatch).ok());
+    assert(q5_0_dispatch.bindings.size() == 2 && q5_1_dispatch.bindings.size() == 2);
 }
 
 void test_independent_sampler_and_stop_controller() {

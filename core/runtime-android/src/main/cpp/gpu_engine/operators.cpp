@@ -674,6 +674,36 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     status = registry.register_kernel(std::move(rope));
     if (!status.ok()) return status;
 
+    KernelDefinition q5_0;
+    q5_0.operator_name = "Dequantize_Q5_0";
+    q5_0.backend = BackendKind::DawnWebGpu;
+    q5_0.input_type = DataType::U32;
+    q5_0.output_type = DataType::F32;
+    q5_0.min_input_count = 1;
+    q5_0.max_input_count = 1;
+    q5_0.min_rank = 1;
+    q5_0.max_rank = 16;
+    q5_0.validation = KernelValidation::Unverified;
+    q5_0.kernel_id = "dawn-q5-0-dequantize-generic-v1";
+    q5_0.wgsl_source = q5_0_dequantize_wgsl_source();
+    status = registry.register_kernel(std::move(q5_0));
+    if (!status.ok()) return status;
+
+    KernelDefinition q5_1;
+    q5_1.operator_name = "Dequantize_Q5_1";
+    q5_1.backend = BackendKind::DawnWebGpu;
+    q5_1.input_type = DataType::U32;
+    q5_1.output_type = DataType::F32;
+    q5_1.min_input_count = 1;
+    q5_1.max_input_count = 1;
+    q5_1.min_rank = 1;
+    q5_1.max_rank = 16;
+    q5_1.validation = KernelValidation::Unverified;
+    q5_1.kernel_id = "dawn-q5-1-dequantize-generic-v1";
+    q5_1.wgsl_source = q5_1_dequantize_wgsl_source();
+    status = registry.register_kernel(std::move(q5_1));
+    if (!status.ok()) return status;
+
     KernelDefinition q4_1;
     q4_1.operator_name = "Dequantize_Q4_1";
     q4_1.backend = BackendKind::DawnWebGpu;
