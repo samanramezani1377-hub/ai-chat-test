@@ -893,6 +893,49 @@ Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry
     return registry.register_kernel(std::move(q8));
 }
 
+
+ModelQuantizationBackendReport evaluate_model_quantization_backend(
+        const GgufFileInfo& model, const QuantizationRegistry& registry, BackendKind backend) {
+    ModelQuantizationBackendReport report;
+    report.backend = backend;
+    if (backend != BackendKind::DawnWebGpu && backend != BackendKind::OpenGles) {
+        report.blockers.emplace_back("UNSUPPORTED_OR_UNKNOWN_GPU_BACKEND");
+        return report;
+    }
+    for (const auto& tensor : model.tensors) {
+        const GgufTensorTypeInfo type = GgufReader::tensor_type_info(tensor.type_id);
+        if (!type.storage_size_known) {
+            report.blockers.push_back("UNKNOWN_TENSOR_STORAGE_TYPE:" + tensor.name);
+            report.unsupported_file_type_ids.push_back(tensor.type_id);
+            continue;
+        }
+        if (!type.quantized) continue;
+        const QuantizationFormat* format = registry.find(tensor.type_id);
+        if (!format || format->decoder_state != SupportState::Validated) {
+            report.blockers.push_back("QUANTIZATION_DECODER_NOT_VALIDATED:" + tensor.name);
+            report.unsupported_file_type_ids.push_back(tensor.type_id);
+            continue;
+        }
+        if (format->block_elements != type.block_elements ||
+            format->bytes_per_block != type.bytes_per_block) {
+            report.blockers.push_back("QUANTIZATION_FORMAT_METADATA_MISMATCH:" + tensor.name);
+            report.unsupported_file_type_ids.push_back(tensor.type_id);
+            continue;
+        }
+        if (!registry.can_execute_on_gpu(tensor.type_id, backend)) {
+            report.blockers.push_back("GPU_QUANTIZATION_KERNEL_NOT_VALIDATED:" + tensor.name +
+                ":backend=" + std::to_string(static_cast<unsigned>(backend)));
+            report.unsupported_file_type_ids.push_back(tensor.type_id);
+        }
+    }
+    std::sort(report.unsupported_file_type_ids.begin(), report.unsupported_file_type_ids.end());
+    report.unsupported_file_type_ids.erase(
+        std::unique(report.unsupported_file_type_ids.begin(), report.unsupported_file_type_ids.end()),
+        report.unsupported_file_type_ids.end());
+    report.compatible = report.blockers.empty();
+    return report;
+}
+
 Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
     const auto initialize_backend_states = [](QuantizationFormat& format) {
         format.backend_gpu_kernel_states[BackendKind::DawnWebGpu] = SupportState::Unverified;

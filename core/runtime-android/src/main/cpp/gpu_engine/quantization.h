@@ -40,6 +40,17 @@ Status reference_q8_0_matmul(const float* activations, const uint8_t* quantized_
                              uint64_t weight_bytes, float* output,
                              uint32_t rows, uint32_t output_channels, uint32_t inner);
 
+
+struct ModelQuantizationBackendReport {
+    bool compatible = false;
+    BackendKind backend = BackendKind::Unknown;
+    std::vector<uint32_t> unsupported_file_type_ids;
+    std::vector<std::string> blockers;
+};
+
+ModelQuantizationBackendReport evaluate_model_quantization_backend(
+    const GgufFileInfo& model, const QuantizationRegistry& registry, BackendKind backend);
+
 Status register_builtin_quantization_formats(QuantizationRegistry& registry);
 Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry);
 const char* q5_0_dequantize_wgsl_source() noexcept;

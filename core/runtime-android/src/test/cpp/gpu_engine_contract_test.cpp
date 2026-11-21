@@ -429,6 +429,26 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
         selected).code == StatusCode::Unsupported);
 }
 
+
+void test_quantization_backend_compatibility_is_backend_specific() {
+    QuantizationRegistry registry;
+    assert(register_builtin_quantization_formats(registry).ok());
+    GgufFileInfo model;
+    GgufTensorInfo tensor;
+    tensor.name = "blk.0.attn_q.weight";
+    tensor.type_id = 8;
+    tensor.type = GgufReader::tensor_type_info(8);
+    tensor.byte_size_known = true;
+    tensor.byte_size = 68;
+    model.tensors.push_back(tensor);
+    const auto dawn = evaluate_model_quantization_backend(model, registry, BackendKind::DawnWebGpu);
+    const auto gles = evaluate_model_quantization_backend(model, registry, BackendKind::OpenGles);
+    assert(!dawn.compatible && !gles.compatible);
+    assert(!dawn.blockers.empty() && !gles.blockers.empty());
+    const auto unknown = evaluate_model_quantization_backend(model, registry, BackendKind::Unknown);
+    assert(!unknown.compatible && !unknown.blockers.empty());
+}
+
 void test_q8_0_decoder_and_registry() {
     std::vector<uint8_t> encoded(34, 0);
     encoded[0] = 0x00;
@@ -1657,6 +1677,7 @@ int main() {
     test_q5_decoders();
     test_dawn_q8_0_operator_registration_is_unverified();
     test_q8_0_gpu_validation_does_not_promote_fake_backend();
+    test_quantization_backend_compatibility_is_backend_specific();
     test_q8_0_decoder_and_registry();
     test_kv_cache_memory_and_sequential_append();
     test_gpu_backend_fallback_order();
