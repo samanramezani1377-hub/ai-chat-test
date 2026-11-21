@@ -2,6 +2,8 @@
 
 #include <limits>
 #include <algorithm>
+#include <unordered_set>
+#include <iterator>
 #include <limits>
 
 namespace ai_chat::gpu_engine {
@@ -46,7 +48,7 @@ Status allocate_model_activation_tensors(const ModelExecutionPlan& model, Memory
     std::vector<MemoryLease> leases;
     std::unordered_map<std::string, Tensor> pending_tensors;
     std::unordered_map<std::string, size_t> producers;
-    const std::unordered_map<std::string, bool> retained(
+    const std::unordered_set<std::string> retained(
         model.retained_outputs.begin(), model.retained_outputs.end());
 
     for (size_t index = 0; index < model.operations.size(); ++index) {
