@@ -2183,7 +2183,8 @@ Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry
     q4_1_embedding_gles.validation = KernelValidation::Unverified;
     q4_1_embedding_gles.kernel_id = "gles-q4-1-embedding-f32-v1";
     q4_1_embedding_gles.glsl_source = q4_1_embedding_glsl_source();
-    return registry.register_kernel(std::move(q4_1_embedding_gles));
+    status = registry.register_kernel(std::move(q4_1_embedding_gles));
+    if (!status.ok()) return status;
 
     KernelDefinition q4_1;
     q4_1.operator_name = "MatMul_Q4_1";

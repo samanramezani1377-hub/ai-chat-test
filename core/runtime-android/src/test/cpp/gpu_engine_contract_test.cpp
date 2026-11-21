@@ -507,6 +507,8 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
            StatusCode::NumericalFailure);
     assert(validate_q4_0_matmul_kernel(backend, operators, quantizations).code ==
            StatusCode::NumericalFailure);
+    assert(validate_q4_1_matmul_kernel(backend, operators, quantizations).code ==
+           StatusCode::NumericalFailure);
     assert(validate_q4_0_embedding_kernel(backend, operators).code ==
            StatusCode::NumericalFailure);
     assert(validate_q4_1_embedding_kernel(backend, operators).code ==
