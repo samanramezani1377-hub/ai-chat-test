@@ -147,12 +147,13 @@ ModelPreflightReport evaluate_model_preflight(const GgufFileInfo& model,
     report.architecture_known = static_cast<bool>(adapter);
     if (!adapter) {
         report.blockers.emplace_back("UNSUPPORTED_ARCHITECTURE:" + model.architecture);
-    } else if (adapter->descriptor().validation != SupportState::Validated) {
-        report.blockers.emplace_back("UNVERIFIED_ARCHITECTURE_ADAPTER:" + model.architecture);
     } else {
         const Status metadata_status = adapter->validate_metadata(model);
         if (!metadata_status.ok()) {
             report.blockers.emplace_back("ARCHITECTURE_METADATA_INVALID:" + metadata_status.message);
+        }
+        if (adapter->descriptor().validation != SupportState::Validated) {
+            report.blockers.emplace_back("UNVERIFIED_ARCHITECTURE_ADAPTER:" + model.architecture);
         }
     }
 

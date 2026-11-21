@@ -466,6 +466,10 @@ void test_builtin_architecture_adapter_is_fail_closed() {
     model.metadata["llama.attention.head_count_kv"] = uint64_t{4};
     model.metadata["llama.feed_forward_length"] = uint64_t{5632};
     assert(adapter->validate_metadata(model).ok());
+    auto valid_report = evaluate_model_preflight(model, registry, QuantizationRegistry{});
+    assert(valid_report.architecture_known);
+    assert(std::find(valid_report.blockers.begin(), valid_report.blockers.end(),
+                     "UNVERIFIED_ARCHITECTURE_ADAPTER:llama") != valid_report.blockers.end());
 
     model.metadata["llama.attention.head_count_kv"] = uint64_t{32};
     assert(adapter->validate_metadata(model).code == StatusCode::InvalidArgument);
