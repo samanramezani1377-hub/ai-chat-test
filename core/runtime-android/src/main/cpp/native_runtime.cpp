@@ -67,7 +67,6 @@ static void append_native_trace(const char *text);
 static void checkpoint(const char *event);
 static bool init_generation_context(bool use_webgpu_backend);
 static ggml_backend_dev_t find_webgpu_gpu_device();
-static bool init_speculative_runtime();
 static int available_cpu_cores() {
     // Use every CPU core reported by Android's native runtime. This is the
     // device's available hardware concurrency, not a fixed 2-4 worker cap.
@@ -941,10 +940,6 @@ static void checkpoint(const char *event) {
 }
 
 static void free_all() {
-    if (g_spec) { common_speculative_free(g_spec); g_spec = nullptr; }
-    g_spec_init.reset();
-    g_spec_requested = false;
-    g_spec_draft_path.clear();
     clear_android_generation_cache();
     if (g_sampler) { llama_sampler_free(g_sampler); g_sampler = nullptr; }
     if (g_context) { llama_synchronize(g_context); llama_free(g_context); g_context = nullptr; }
@@ -1305,21 +1300,10 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     const char *path = env->GetStringUTFChars(jpath, nullptr);
     if (!path) { checkpoint("PATH_UTF8_FAILED"); return 3; }
     const std::string stable_model_path(path);
-    g_spec_draft_path.clear(); g_spec_requested = false; g_spec_mtp = false; g_target_model_path.clear(); g_spec_accept_ema = 1.0;
     // Draft/speculative decoding is removed from the product; retain the legacy JNI argument but never use it.
     (void) jdraftpath;
-    g_spec_draft_path.clear();
-    g_spec_requested = false;
-    g_spec_mtp = false;
-    g_spec_accept_ema = 1.0;
     append_native_trace("DRAFT_FEATURE_REMOVED");
-    g_target_model_path = path;
     const std::string preflight = gguf_preflight(path); checkpoint(preflight.c_str());
-    // Target activation must never implicitly enable speculative/MTP.
-    // A target GGUF may contain MTP metadata, but that is not a request to
-    // allocate a second context during activation. Draft/speculative setup
-    // happens only after the target runtime is fully ready.
-    append_native_trace("SPECULATIVE_AUTO_DETECTION_DISABLED_DURING_TARGET_LOAD");
     ggml_backend_dev_t webgpu_device = find_webgpu_gpu_device();
     const bool universal_gles_rejects_compute = g_universal_gles_version_known && !g_universal_gles_compute_supported;
     const bool gpu_available = g_webgpu_backend_loaded && webgpu_device != nullptr && gpu_layers != 0 && !universal_gles_rejects_compute;
@@ -1445,12 +1429,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         " selectedBackend=" + (g_gpu ? "WEBGPU" : "CPU") +
         " fallbackReason=" + gpu_failure_reason +
         " cpuFallbackAllowed=1").c_str());
-    append_native_trace((std::string("TARGET_RUNTIME_READY_BEFORE_SPECULATIVE execution=") + (g_gpu ? "WEBGPU_GPU" : "CPU_FALLBACK")).c_str());
-    if (g_spec_requested) {
-        append_native_trace("SPECULATIVE_ATTACH_AFTER_TARGET_READY");
-        const bool spec_ready = init_speculative_runtime();
-        checkpoint(spec_ready ? "SPECULATIVE_INIT_RETURNED_SUCCESS" : "SPECULATIVE_INIT_RETURNED_FAILED");
-    }
+    append_native_trace((std::string("TARGET_RUNTIME_READY execution=") + (g_gpu ? "WEBGPU_GPU" : "CPU_FALLBACK")).c_str());
     set_android_cache_model_key(stable_model_path, g_context_length);
     env->ReleaseStringUTFChars(jpath, path);
     checkpoint("NATIVE_LOAD_COMPLETED"); return 0;
