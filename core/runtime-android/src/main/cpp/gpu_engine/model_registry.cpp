@@ -63,9 +63,12 @@ public:
             const auto found = tensors.find(name);
             if (found == tensors.end()) {
                 plan.blockers.emplace_back("MISSING_TENSOR:" + name);
-            } else if (found->second->dimensions != expected) {
-                plan.blockers.emplace_back("TENSOR_SHAPE_MISMATCH:" + name);
+                return;
             }
+            if (found->second->dimensions != expected)
+                plan.blockers.emplace_back("TENSOR_SHAPE_MISMATCH:" + name);
+            if (!found->second->byte_size_known || found->second->byte_size == 0)
+                plan.blockers.emplace_back("TENSOR_STORAGE_SIZE_UNKNOWN:" + name);
         };
         const std::string embedding_weight = "token_embd.weight";
         const std::string output_norm = "output_norm.weight";
@@ -77,7 +80,15 @@ public:
         expect_shape(output_norm, {embedding});
         const uint64_t head_dimension = embedding / heads;
         const uint64_t kv_dimension = head_dimension * kv_heads;
-        const bool tied_output = !has_tensor("output.weight");
+        bool tied_output = false;
+        if (!has_tensor("output.weight")) {
+            const auto tie = model.metadata.find("llama.tie_word_embeddings");
+            const bool* tied = tie == model.metadata.end() ? nullptr : std::get_if<bool>(&tie->second);
+            if (!tied || !*tied)
+                plan.blockers.emplace_back("OUTPUT_WEIGHT_MISSING_WITHOUT_EXPLICIT_TIED_EMBEDDINGS_METADATA");
+            else
+                tied_output = true;
+        }
         if (!tied_output && !model.tokenizer.tokens.empty())
             expect_shape("output.weight", {embedding, model.tokenizer.tokens.size()});
         for (uint64_t layer = 0; layer < layers; ++layer) {

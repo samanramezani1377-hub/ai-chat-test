@@ -1107,24 +1107,33 @@ void test_llama_model_execution_plan_is_structural_only() {
     model.metadata["llama.attention.head_count_kv"] = uint64_t{1};
     model.metadata["llama.feed_forward_length"] = uint64_t{16};
     const std::vector<std::string> names = {
-        "token_embd.weight", "output_norm.weight",
+        "token_embd.weight", "output.weight", "output_norm.weight",
         "blk.0.attn_norm.weight", "blk.0.attn_q.weight",
         "blk.0.attn_k.weight", "blk.0.attn_v.weight",
         "blk.0.attn_output.weight", "blk.0.ffn_norm.weight",
         "blk.0.ffn_gate.weight", "blk.0.ffn_up.weight", "blk.0.ffn_down.weight"
     };
     model.tokenizer.tokens = {"a", "b"};
+    const auto ends_with = [](const std::string& value, const std::string& suffix) {
+        return value.size() >= suffix.size() &&
+               value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
+    };
     for (const auto& name : names) {
         GgufTensorInfo tensor; tensor.name = name;
-        if (name == "token_embd.weight") tensor.dimensions = {8, 2};
-        else if (name == "output_norm.weight" || name.ends_with("attn_norm.weight") ||
-                 name.ends_with("ffn_norm.weight")) tensor.dimensions = {8};
-        else if (name.ends_with("attn_k.weight") || name.ends_with("attn_v.weight"))
+        if (name == "token_embd.weight" || name == "output.weight") tensor.dimensions = {8, 2};
+        else if (name == "output_norm.weight" || ends_with(name, "attn_norm.weight") ||
+                 ends_with(name, "ffn_norm.weight")) tensor.dimensions = {8};
+        else if (ends_with(name, "attn_k.weight") || ends_with(name, "attn_v.weight"))
             tensor.dimensions = {8, 4};
-        else if (name.ends_with("ffn_gate.weight") || name.ends_with("ffn_up.weight"))
+        else if (ends_with(name, "ffn_gate.weight") || ends_with(name, "ffn_up.weight"))
             tensor.dimensions = {8, 16};
-        else if (name.ends_with("ffn_down.weight")) tensor.dimensions = {16, 8};
+        else if (ends_with(name, "ffn_down.weight")) tensor.dimensions = {16, 8};
         else tensor.dimensions = {8, 8};
+        uint64_t elements = 1;
+        for (uint64_t dimension : tensor.dimensions) elements *= dimension;
+        tensor.byte_size_known = true;
+        tensor.byte_size = elements * 4;
+        tensor.type_id = 0;
         model.tensors.push_back(tensor);
     }
     ModelExecutionPlan plan;
