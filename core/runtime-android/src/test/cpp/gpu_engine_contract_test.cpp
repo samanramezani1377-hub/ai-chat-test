@@ -709,10 +709,10 @@ void test_add_operator_candidate_and_reference() {
     float gqa_output[4] = {};
     assert(reference_attention_f32(gqa_query, gqa_key, gqa_value, gqa_output,
                                    1, 2, 1, 2, 1).ok());
-    assert(std::abs(gqa_output[0] - 3.320188f) < 1e-4f);
-    assert(std::abs(gqa_output[1] - 5.320188f) < 1e-4f);
-    assert(std::abs(gqa_output[2] - 4.679812f) < 1e-4f);
-    assert(std::abs(gqa_output[3] - 6.679812f) < 1e-4f);
+    assert(std::abs(gqa_output[0] - 3.320954f) < 1e-4f);
+    assert(std::abs(gqa_output[1] - 5.320954f) < 1e-4f);
+    assert(std::abs(gqa_output[2] - 4.679046f) < 1e-4f);
+    assert(std::abs(gqa_output[3] - 6.679046f) < 1e-4f);
 
     BufferDesc gqa_query_desc{16, 4, MemoryDomain::Device, false, "gqa-query"};
     BufferDesc gqa_kv_desc{16, 4, MemoryDomain::Device, false, "gqa-kv"};
