@@ -69,7 +69,7 @@ public:
         wgpu::ShaderSourceWGSL wgsl{};
         wgsl.code = dispatch.wgsl_source.c_str();
         wgpu::ShaderModuleDescriptor module_desc{};
-        module_desc.nextInChain = &wgsl.chain;
+        module_desc.nextInChain = &wgsl;
         module_desc.label = dispatch.label.c_str();
         wgpu::ShaderModule module = device_.CreateShaderModule(&module_desc);
         if (!module) return backend_error("CreateShaderModule", dispatch.label);
@@ -185,6 +185,7 @@ public:
         device.inference_ready = false;
         if (has_limits) {
             device.limits.max_buffer_size = supported.limits.maxBufferSize;
+            max_buffer_size_ = supported.limits.maxBufferSize;
             device.limits.max_storage_buffer_binding_size = supported.limits.maxStorageBufferBindingSize;
             device.limits.max_compute_workgroup_size_x = supported.limits.maxComputeWorkgroupSizeX;
             device.limits.max_compute_workgroup_size_y = supported.limits.maxComputeWorkgroupSizeY;
@@ -241,6 +242,14 @@ public:
         device_ = std::move(requested_device);
         queue_ = device_.GetQueue();
         health_->store(true, std::memory_order_relaxed);
+        const Status self_test = run_compute_self_test();
+        if (!self_test.ok()) {
+            health_->store(false, std::memory_order_relaxed);
+            device_.Destroy();
+            queue_ = nullptr;
+            device_ = nullptr;
+            return self_test;
+        }
         return Status::success();
     }
 
@@ -380,6 +389,94 @@ public:
     }
 
 private:
+    Status run_compute_self_test() {
+        constexpr uint32_t input[] = {1u, 2u, 3u, 4u};
+        constexpr uint32_t expected[] = {10u, 13u, 16u, 19u};
+        constexpr uint64_t byte_size = sizeof(input);
+
+        wgpu::BufferDescriptor data_desc{};
+        data_desc.size = byte_size;
+        data_desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc |
+                          wgpu::BufferUsage::CopyDst;
+        wgpu::Buffer data = device_.CreateBuffer(&data_desc);
+        if (!data) return backend_error("DawnSelfTest", "storage buffer allocation failed");
+        queue_.WriteBuffer(data, 0, input, byte_size);
+
+        static constexpr char shader[] = R"wgsl(
+@group(0) @binding(0) var<storage, read_write> values: array<u32>;
+@compute @workgroup_size(4)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    values[gid.x] = values[gid.x] * 3u + 7u;
+}
+)wgsl";
+        wgpu::ShaderSourceWGSL wgsl{};
+        wgsl.code = shader;
+        wgpu::ShaderModuleDescriptor module_desc{};
+        module_desc.nextInChain = &wgsl;
+        wgpu::ShaderModule module = device_.CreateShaderModule(&module_desc);
+        if (!module) return backend_error("DawnSelfTest", "WGSL shader compilation failed");
+
+        wgpu::ComputePipelineDescriptor pipeline_desc{};
+        pipeline_desc.compute.module = module;
+        pipeline_desc.compute.entryPoint = "main";
+        pipeline_desc.layout = nullptr;
+        wgpu::ComputePipeline pipeline = device_.CreateComputePipeline(&pipeline_desc);
+        if (!pipeline) return backend_error("DawnSelfTest", "compute pipeline creation failed");
+
+        wgpu::BindGroupLayout layout = pipeline.GetBindGroupLayout(0);
+        wgpu::BindGroupEntry entry{};
+        entry.binding = 0;
+        entry.buffer = data;
+        entry.offset = 0;
+        entry.size = byte_size;
+        wgpu::BindGroupDescriptor bind_desc{};
+        bind_desc.layout = layout;
+        bind_desc.entryCount = 1;
+        bind_desc.entries = &entry;
+        wgpu::BindGroup bind_group = device_.CreateBindGroup(&bind_desc);
+        if (!bind_group) return backend_error("DawnSelfTest", "bind group creation failed");
+
+        wgpu::BufferDescriptor staging_desc{};
+        staging_desc.size = byte_size;
+        staging_desc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+        wgpu::Buffer staging = device_.CreateBuffer(&staging_desc);
+        if (!staging) return {StatusCode::OutOfMemory, "Dawn self-test readback allocation failed"};
+
+        wgpu::CommandEncoder encoder = device_.CreateCommandEncoder();
+        wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
+        if (!pass) return backend_error("DawnSelfTest", "compute pass creation failed");
+        pass.SetPipeline(pipeline);
+        pass.SetBindGroup(0, bind_group);
+        pass.DispatchWorkgroups(1, 1, 1);
+        pass.End();
+        encoder.CopyBufferToBuffer(data, 0, staging, 0, byte_size);
+        wgpu::CommandBuffer commands = encoder.Finish();
+        if (!commands) return backend_error("DawnSelfTest", "command buffer creation failed");
+        queue_.Submit(1, &commands);
+
+        wgpu::MapAsyncStatus map_status = wgpu::MapAsyncStatus::Error;
+        std::string map_message;
+        const wgpu::Future future = staging.MapAsync(
+            wgpu::MapMode::Read, 0, byte_size, wgpu::CallbackMode::AllowSpontaneous,
+            [&map_status, &map_message](wgpu::MapAsyncStatus status, wgpu::StringView message) {
+                map_status = status;
+                map_message = std::string(message);
+            });
+        const wgpu::WaitStatus wait = instance_.WaitAny(future, std::numeric_limits<uint64_t>::max());
+        if (wait != wgpu::WaitStatus::Success || map_status != wgpu::MapAsyncStatus::Success) {
+            return backend_error("DawnSelfTest", map_message.empty() ? "readback map failed" : map_message);
+        }
+        const auto* output = static_cast<const uint32_t*>(staging.GetConstMappedRange(0, byte_size));
+        if (!output) {
+            staging.Unmap();
+            return backend_error("DawnSelfTest", "mapped pointer is null");
+        }
+        const bool matches = std::equal(std::begin(expected), std::end(expected), output);
+        staging.Unmap();
+        if (!matches) return {StatusCode::NumericalFailure, "Dawn compute self-test output mismatch"};
+        return Status::success();
+    }
+
     mutable std::mutex mutex_;
     wgpu::Instance instance_;
     wgpu::Adapter adapter_;

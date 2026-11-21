@@ -24,7 +24,7 @@ All unvalidated items are **UNVERIFIED**. This roadmap is cumulative; do not ski
 4. Bridge Universal GPU Adapter's verified GLES probe results into generic diagnostics without treating them as inference readiness.
 5. Add source-level architecture guards ensuring the standalone engine target does not include GGML/llama headers.
 6. Implement Dawn as a separate backend target linked directly to the pinned Dawn build, after verifying the available Dawn C API and lifecycle constraints.
-7. Implement a real command queue/buffer API and test it before adding tensor kernels.
+7. Implement a real command queue/buffer API and test it before adding tensor kernels.\n\n## Implemented increments\n\n- **2026-11-21 / contract + bridge:** backend-neutral device/buffer/command/tensor contracts, registry, and a diagnostics bridge from Universal GPU Adapter. The bridge deliberately reports `inference_ready=0`.\n- **2026-11-21 / Dawn backend foundation:** a separate `ai_chat_gpu_backend_dawn` target requests the OpenGL ES Compatibility adapter, reads Dawn limits/features, creates buffers, uploads/downloads, records buffer copies and WGSL compute dispatches, and runs a small integer compute/readback self-test. It is not yet selected by the Android runtime and does not yet implement model operators, quantization, GGUF tensor loading, or inference. **UNVERIFIED:** Android NDK build and real-device Dawn self-test until run on hardware/CI.
 
 ## Validation policy
 
