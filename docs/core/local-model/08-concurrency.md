@@ -37,6 +37,12 @@ Generation acquires generationMutex before briefly reading the persisted active 
 
 Cancellation is not an ordinary inference failure. Always rethrow CancellationException after required cleanup. Do not wrap suspending lifecycle cleanup in runCatching, because it can swallow cancellation. Native stop is best-effort; the generation mutex remains the definitive barrier before unload.
 
+## Runtime configuration invalidation
+
+GPU-layer preference changes increment a monotonic runtime-configuration revision. The service records the revision applied by the last successful activation. A same-model activation may return early only when those revisions match. This avoids losing a settings change that arrives during an in-flight load.
+
+The Android adapter independently reuses an already loaded model only when the model path, context length, and requested GPU-layer mode all match. The requested GPU mode is tracked separately from the actual GPU layers used, because a successful CPU fallback must not cause an unnecessary reload on every activation.
+
 ## Tests
 
 LocalModelServiceConcurrencyTest covers serialized lifecycle operations, persisted-but-unloaded model rejection, stop without deadlock, and cancellation during native activation followed by cleanup before the next activation.
