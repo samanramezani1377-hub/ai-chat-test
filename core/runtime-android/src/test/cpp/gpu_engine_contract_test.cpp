@@ -5,6 +5,7 @@
 #include "weight_streamer.h"
 #include "sampler.h"
 #include "quantization.h"
+#include "kv_cache.h"
 
 #include <algorithm>
 #include <cmath>
@@ -218,6 +219,44 @@ private:
 
 
 
+
+
+void test_kv_cache_memory_and_sequential_append() {
+    FakeBackend backend;
+    MemoryManager memory(backend, 512);
+    KvCacheConfig config;
+    config.layers = 2;
+    config.kv_heads = 2;
+    config.head_dimension = 2;
+    config.maximum_sequence_length = 4;
+    config.data_type = DataType::F32;
+    uint64_t estimate = 0;
+    assert(KvCache::estimate_bytes(config, estimate).ok());
+    assert(estimate == 256);
+    std::unique_ptr<KvCache> cache;
+    assert(KvCache::create(backend, memory, config, cache).ok());
+    assert(cache && cache->total_bytes() == estimate);
+    assert(memory.allocated_bytes() == estimate);
+    assert(cache->bytes_per_token() == 16);
+
+    const float keys[] = {1, 2, 3, 4, 5, 6, 7, 8};
+    const float values[] = {9, 10, 11, 12, 13, 14, 15, 16};
+    assert(cache->append(0, 0, 2, keys, values).ok());
+    assert(cache->valid_tokens(0) == 2);
+    assert(cache->valid_tokens(1) == 0);
+    assert(cache->append(0, 1, 1, keys, values).code == StatusCode::InvalidArgument);
+    assert(cache->append(1, 0, 2, keys, values).ok());
+    float readback[8] = {};
+    assert(backend.readback(cache->key_buffer(0), 0, readback, sizeof(readback)).ok());
+    assert(readback[0] == 1.0f && readback[7] == 8.0f);
+    assert(cache->reset_layer(0).ok());
+    assert(cache->valid_tokens(0) == 0);
+    cache.reset();
+    assert(memory.allocated_bytes() == 0);
+
+    config.data_type = DataType::I8;
+    assert(KvCache::estimate_bytes(config, estimate).code == StatusCode::InvalidArgument);
+}
 
 void test_q8_0_decoder_and_registry() {
     std::vector<uint8_t> encoded(34, 0);
@@ -620,6 +659,7 @@ int main() {
     test_gguf_weight_streaming();
     test_independent_sampler_and_stop_controller();
     test_q8_0_decoder_and_registry();
+    test_kv_cache_memory_and_sequential_append();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";
     return 0;
