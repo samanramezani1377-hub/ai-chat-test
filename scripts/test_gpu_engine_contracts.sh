@@ -16,6 +16,7 @@ trap 'rm -rf "$TMP"' EXIT
   "$ENGINE/model_graph.cpp" \
   "$ENGINE/model_lowerings.cpp" \
   "$ENGINE/operators.cpp" \
+  "$ENGINE/kernel_validation.cpp" \
   "$ENGINE/weight_streamer.cpp" \
   "$ENGINE/sampler.cpp" \
   "$ENGINE/quantization.cpp" \
