@@ -212,6 +212,8 @@ struct RuntimeDiagnostics {
     uint64_t host_memory_bytes = 0;
     uint64_t device_memory_bytes = 0;
     bool cpu_fallback_available = true;
+    bool fallback_used = false;
+    std::string fallback_reason;
     std::string last_error;
 };
 
