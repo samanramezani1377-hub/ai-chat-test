@@ -217,42 +217,46 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
                            static_cast<int>(reason), std::string(message).c_str());]=]
         "do not turn recoverable WebGPU validation errors into SIGABRT")
     ai_chat_replace_once(_webgpu
+        "#define WEBGPU_STORAGE_BUF_BINDING_MULT          4"
+        "#define WEBGPU_STORAGE_BUF_BINDING_MULT          4\n\n// Dawn C++ callback wrappers require non-capturing function pointers; keep a process-wide fail-closed state.\nstatic std::atomic<bool> g_webgpu_device_error{false};"
+        "track WebGPU device errors without userdata callbacks")
+    ai_chat_replace_once(_webgpu
         "    wgpu::Queue    queue;"
-        "    wgpu::Queue    queue;\n    std::atomic<bool> device_error{false};"
-        "track unrecoverable WebGPU device errors")
+        "    wgpu::Queue    queue;\n    std::atomic<bool> & device_error = g_webgpu_device_error;"
+        "share fail-closed device error state with non-capturing Dawn callbacks")
     ai_chat_replace_once(_webgpu
         [=[        [](const wgpu::Device & device, wgpu::DeviceLostReason reason, wgpu::StringView message) {
             if (reason == wgpu::DeviceLostReason::Destroyed) {
                 return;
             }
             GGML_UNUSED(device);
+            g_webgpu_device_error.store(true, std::memory_order_release);
             GGML_LOG_ERROR("ggml_webgpu: Device lost! Reason: %d, Message: %s\n", static_cast<int>(reason),
                            std::string(message).c_str());
         });]=]
-        [=[        [ctx](const wgpu::Device & device, wgpu::DeviceLostReason reason, wgpu::StringView message) {
+        [=[        [](const wgpu::Device & device, wgpu::DeviceLostReason reason, wgpu::StringView message) {
             if (reason == wgpu::DeviceLostReason::Destroyed) {
                 return;
             }
             GGML_UNUSED(device);
-            ctx->webgpu_global_ctx->device_error.store(true);
+            g_webgpu_device_error.store(true, std::memory_order_release);
             GGML_LOG_ERROR("ggml_webgpu: Device lost! Reason: %d, Message: %s\n", static_cast<int>(reason),
                            std::string(message).c_str());
         });]=]
-        "mark device lost and force future operation placement away from WebGPU")
+        "mark device lost using Dawn's non-capturing callback signature")
     ai_chat_replace_once(_webgpu
         [=[        [](const wgpu::Device & device, wgpu::ErrorType reason, wgpu::StringView message) {
             GGML_UNUSED(device);
-            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error (non-fatal diagnostic): reason=%d message=%s\\n",
+            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error (non-fatal diagnostic): reason=%d message=%s\n",
                            static_cast<int>(reason), std::string(message).c_str());
         });]=]
-        [=[        [](const wgpu::Device & device, wgpu::ErrorType reason, wgpu::StringView message, void * userdata) {
+        [=[        [](const wgpu::Device & device, wgpu::ErrorType reason, wgpu::StringView message) {
             GGML_UNUSED(device);
-            auto * callback_ctx = static_cast<ggml_backend_webgpu_reg_context *>(userdata);
-            callback_ctx->webgpu_global_ctx->device_error.store(true);
-            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error; disabling WebGPU backend for subsequent graph placement: reason=%d message=%s\\n",
+            g_webgpu_device_error.store(true, std::memory_order_release);
+            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error; disabling WebGPU backend for subsequent graph placement: reason=%d message=%s\n",
                            static_cast<int>(reason), std::string(message).c_str());
-        }, ctx);]=]
-        "use Dawn's userdata callback overload for repeatable uncaptured errors")
+        });]=]
+        "use Dawn's supported non-capturing uncaptured-error callback signature")
     # Device-error guard is applied atomically with the diagnostic buffer-allocation replacement.
     ai_chat_replace_once(_webgpu
         [=[    ggml_backend_webgpu_device_context * ctx = static_cast<ggml_backend_webgpu_device_context *>(dev->context);
