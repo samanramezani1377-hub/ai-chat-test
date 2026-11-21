@@ -107,7 +107,7 @@ Status GpuEngine::initialize_with_fallback(const std::vector<BackendKind>& prefe
             }
             return Status::success();
         }
-        failures.emplace_back(to_string(kind) + ": " + last_status.message);
+        failures.emplace_back((kind == BackendKind::DawnWebGpu ? "DawnWebGPU" : "OpenGLES") + std::string(": ") + last_status.message);
     }
     diagnostics_.last_error = "No preferred GPU backend initialized";
     for (const auto& failure : failures) diagnostics_.last_error += " | " + failure;
