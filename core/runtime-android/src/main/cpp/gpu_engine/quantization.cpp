@@ -666,6 +666,164 @@ void main() {
 }
 )glsl";
 
+
+constexpr char kQ5_0EmbeddingWgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> weights: array<u32>;
+@group(0) @binding(1) var<storage, read> token_ids: array<u32>;
+@group(0) @binding(2) var<storage, read_write> output: array<f32>;
+const VOCABULARY_SIZE: u32 = 1u;
+const EMBEDDING_DIMENSION: u32 = 32u;
+const TOKEN_COUNT: u32 = 1u;
+const TOTAL_ELEMENTS: u32 = 32u;
+const WEIGHT_ROW_BYTES: u32 = 22u;
+fn read_u8(byte_offset: u32) -> u32 {
+    let word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 255u;
+}
+fn read_u16(byte_offset: u32) -> u32 {
+    let word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= TOTAL_ELEMENTS) { return; }
+    let token_row = gid.x / EMBEDDING_DIMENSION;
+    let dimension = gid.x % EMBEDDING_DIMENSION;
+    let token_id = token_ids[token_row];
+    if (token_id >= VOCABULARY_SIZE) { return; }
+    let block = dimension / 32u;
+    let within = dimension % 32u;
+    let offset = token_id * WEIGHT_ROW_BYTES + block * 22u;
+    let scale = unpack2x16float(vec2<u32>(read_u16(offset), 0u)).x;
+    let high_bits = read_u8(offset + 2u) | (read_u8(offset + 3u) << 8u) |
+                    (read_u8(offset + 4u) << 16u) | (read_u8(offset + 5u) << 24u);
+    let packed = read_u8(offset + 6u + (within % 16u));
+    let nibble = select(packed & 15u, packed >> 4u, within >= 16u);
+    let high = (high_bits >> within) & 1u;
+    output[gid.x] = scale * f32(i32(nibble | (high << 4u)) - 16);
+}
+)wgsl";
+
+constexpr char kQ5_0EmbeddingGlsl[] = R"glsl(#version 310 es
+precision highp float;
+precision highp int;
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Weights { uint weights[]; };
+layout(std430, binding = 1) readonly buffer TokenIds { uint token_ids[]; };
+layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
+const uint VOCABULARY_SIZE = 1u;
+const uint EMBEDDING_DIMENSION = 32u;
+const uint TOKEN_COUNT = 1u;
+const uint TOTAL_ELEMENTS = 32u;
+const uint WEIGHT_ROW_BYTES = 22u;
+uint read_u8(uint byte_offset) {
+    uint word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 255u;
+}
+uint read_u16(uint byte_offset) {
+    uint word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= TOTAL_ELEMENTS) return;
+    uint token_row = index / EMBEDDING_DIMENSION;
+    uint dimension = index % EMBEDDING_DIMENSION;
+    uint token_id = token_ids[token_row];
+    if (token_id >= VOCABULARY_SIZE) return;
+    uint block = dimension / 32u;
+    uint within = dimension % 32u;
+    uint offset = token_id * WEIGHT_ROW_BYTES + block * 22u;
+    float scale = unpackHalf2x16(read_u16(offset)).x;
+    uint high_bits = read_u8(offset + 2u) | (read_u8(offset + 3u) << 8u) |
+                     (read_u8(offset + 4u) << 16u) | (read_u8(offset + 5u) << 24u);
+    uint packed = read_u8(offset + 6u + (within % 16u));
+    uint nibble = within < 16u ? (packed & 15u) : (packed >> 4u);
+    uint high = (high_bits >> within) & 1u;
+    output_values[index] = scale * float(int(nibble | (high << 4u)) - 16);
+}
+)glsl";
+
+
+constexpr char kQ5_1EmbeddingWgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> weights: array<u32>;
+@group(0) @binding(1) var<storage, read> token_ids: array<u32>;
+@group(0) @binding(2) var<storage, read_write> output: array<f32>;
+const VOCABULARY_SIZE: u32 = 1u;
+const EMBEDDING_DIMENSION: u32 = 32u;
+const TOKEN_COUNT: u32 = 1u;
+const TOTAL_ELEMENTS: u32 = 32u;
+const WEIGHT_ROW_BYTES: u32 = 24u;
+fn read_u8(byte_offset: u32) -> u32 {
+    let word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 255u;
+}
+fn read_u16(byte_offset: u32) -> u32 {
+    let word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= TOTAL_ELEMENTS) { return; }
+    let token_row = gid.x / EMBEDDING_DIMENSION;
+    let dimension = gid.x % EMBEDDING_DIMENSION;
+    let token_id = token_ids[token_row];
+    if (token_id >= VOCABULARY_SIZE) { return; }
+    let block = dimension / 32u;
+    let within = dimension % 32u;
+    let offset = token_id * WEIGHT_ROW_BYTES + block * 24u;
+    let scale = unpack2x16float(vec2<u32>(read_u16(offset), 0u)).x;
+    let minimum = unpack2x16float(vec2<u32>(read_u16(offset + 2u), 0u)).x;
+    let high_bits = read_u8(offset + 4u) | (read_u8(offset + 5u) << 8u) |
+                    (read_u8(offset + 6u) << 16u) | (read_u8(offset + 7u) << 24u);
+    let packed = read_u8(offset + 8u + (within % 16u));
+    let nibble = select(packed & 15u, packed >> 4u, within >= 16u);
+    let high = (high_bits >> within) & 1u;
+    output[gid.x] = scale * f32(nibble | (high << 4u)) + minimum;
+}
+)wgsl";
+
+constexpr char kQ5_1EmbeddingGlsl[] = R"glsl(#version 310 es
+precision highp float;
+precision highp int;
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Weights { uint weights[]; };
+layout(std430, binding = 1) readonly buffer TokenIds { uint token_ids[]; };
+layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
+const uint VOCABULARY_SIZE = 1u;
+const uint EMBEDDING_DIMENSION = 32u;
+const uint TOKEN_COUNT = 1u;
+const uint TOTAL_ELEMENTS = 32u;
+const uint WEIGHT_ROW_BYTES = 24u;
+uint read_u8(uint byte_offset) {
+    uint word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 255u;
+}
+uint read_u16(uint byte_offset) {
+    uint word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= TOTAL_ELEMENTS) return;
+    uint token_row = index / EMBEDDING_DIMENSION;
+    uint dimension = index % EMBEDDING_DIMENSION;
+    uint token_id = token_ids[token_row];
+    if (token_id >= VOCABULARY_SIZE) return;
+    uint block = dimension / 32u;
+    uint within = dimension % 32u;
+    uint offset = token_id * WEIGHT_ROW_BYTES + block * 24u;
+    float scale = unpackHalf2x16(read_u16(offset)).x;
+    float minimum = unpackHalf2x16(read_u16(offset + 2u)).x;
+    uint high_bits = read_u8(offset + 4u) | (read_u8(offset + 5u) << 8u) |
+                     (read_u8(offset + 6u) << 16u) | (read_u8(offset + 7u) << 24u);
+    uint packed = read_u8(offset + 8u + (within % 16u));
+    uint nibble = within < 16u ? (packed & 15u) : (packed >> 4u);
+    uint high = (high_bits >> within) & 1u;
+    output_values[index] = scale * float(nibble | (high << 4u)) + minimum;
+}
+)glsl";
+
 constexpr char kQ4_0EmbeddingWgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> weights: array<u32>;
 @group(0) @binding(1) var<storage, read> token_ids: array<u32>;
@@ -3375,4 +3533,94 @@ Status validate_q5_matmul_kernel_impl(Backend& backend, OperatorRegistry& operat
 }
 Status validate_q5_0_matmul_kernel(Backend& b,OperatorRegistry& o,QuantizationRegistry& q){return validate_q5_matmul_kernel_impl(b,o,q,false);}
 Status validate_q5_1_matmul_kernel(Backend& b,OperatorRegistry& o,QuantizationRegistry& q){return validate_q5_matmul_kernel_impl(b,o,q,true);}
+
+namespace {
+Status build_q5_embedding_candidate_impl(const std::shared_ptr<Buffer>& weights,uint64_t weight_bytes,
+        uint32_t vocabulary,uint32_t dimension,const std::shared_ptr<Buffer>& token_buffer,
+        const std::vector<uint32_t>& token_ids,const Tensor& output,ComputeDispatch& dispatch,bool q5_1) {
+    dispatch=ComputeDispatch{};
+    const uint64_t block_bytes=q5_1?24:22;
+    const std::string type=q5_1?"Q5_1":"Q5_0",suffix=q5_1?"q5-1":"q5-0";
+    if(!weights||!token_buffer||!output.buffer()||weights->memory_domain()==MemoryDomain::Host||
+       token_buffer->memory_domain()==MemoryDomain::Host||output.descriptor().data_type!=DataType::F32||
+       output.descriptor().layout!=TensorLayout::Contiguous||output.descriptor().memory==MemoryDomain::Host||
+       output.descriptor().shape.size()!=2||token_ids.empty())
+        return {StatusCode::Unsupported,type+" Embedding requires packed weights, device token IDs and contiguous F32 output"};
+    if(!vocabulary||!dimension||dimension%32||token_ids.size()!=output.descriptor().shape[0]||
+       output.descriptor().shape[1]!=dimension||token_ids.size()>UINT32_MAX||output.element_count()>UINT32_MAX)
+        return {StatusCode::InvalidArgument,type+" Embedding dimensions or token count are invalid"};
+    for(uint32_t id:token_ids)if(id>=vocabulary)return {StatusCode::InvalidArgument,type+" Embedding token ID is outside vocabulary"};
+    const uint64_t row_bytes=static_cast<uint64_t>(dimension/32)*block_bytes;
+    if(row_bytes>UINT64_MAX/vocabulary||weight_bytes!=row_bytes*vocabulary||weight_bytes>UINT32_MAX-3ull)
+        return {StatusCode::InvalidArgument,type+" Embedding weight byte size does not match [vocabulary,dimension]"};
+    const uint64_t padded=(weight_bytes+3)&~uint64_t{3},token_bytes=token_ids.size()*sizeof(uint32_t);
+    if(weights->size_bytes()<padded||token_buffer->size_bytes()<token_bytes||
+       output.byte_size()!=output.element_count()*sizeof(float)||output.buffer().get()==weights.get()||
+       output.buffer().get()==token_buffer.get()||weights.get()==token_buffer.get())
+        return {StatusCode::InvalidArgument,type+" Embedding buffer ranges are inconsistent"};
+    dispatch.label=suffix+"-embedding-f32-generic-unverified";
+    dispatch.kernel_id="dawn-"+suffix+"-embedding-f32-v1";
+    dispatch.backend=BackendKind::DawnWebGpu;
+    dispatch.wgsl_source=q5_1?kQ5_1EmbeddingWgsl:kQ5_0EmbeddingWgsl;
+    dispatch.workgroup_size_x=64;
+    const std::pair<std::string,std::string> constants[]={
+        {"const VOCABULARY_SIZE: u32 = 1u;","const VOCABULARY_SIZE: u32 = "+std::to_string(vocabulary)+"u;"},
+        {"const EMBEDDING_DIMENSION: u32 = 32u;","const EMBEDDING_DIMENSION: u32 = "+std::to_string(dimension)+"u;"},
+        {"const TOKEN_COUNT: u32 = 1u;","const TOKEN_COUNT: u32 = "+std::to_string(token_ids.size())+"u;"},
+        {"const TOTAL_ELEMENTS: u32 = 32u;","const TOTAL_ELEMENTS: u32 = "+std::to_string(output.element_count())+"u;"},
+        {q5_1?"const WEIGHT_ROW_BYTES: u32 = 24u;":"const WEIGHT_ROW_BYTES: u32 = 22u;","const WEIGHT_ROW_BYTES: u32 = "+std::to_string(row_bytes)+"u;"}
+    };
+    for(const auto& item:constants){const size_t pos=dispatch.wgsl_source.find(item.first);if(pos==std::string::npos)return {StatusCode::BackendFailure,type+" Embedding WGSL placeholder missing"};dispatch.wgsl_source.replace(pos,item.first.size(),item.second);}
+    dispatch.workgroups_x=static_cast<uint32_t>((output.element_count()+63)/64);
+    dispatch.bindings={{0,weights,0,padded},{1,token_buffer,0,token_bytes},{2,output.buffer(),output.byte_offset(),output.byte_size()}};
+    return Status::success();
+}
+}
+Status build_q5_0_embedding_candidate(const std::shared_ptr<Buffer>&w,uint64_t b,uint32_t v,uint32_t d,const std::shared_ptr<Buffer>&tb,const std::vector<uint32_t>&ids,const Tensor&o,ComputeDispatch&x){return build_q5_embedding_candidate_impl(w,b,v,d,tb,ids,o,x,false);}
+Status build_q5_1_embedding_candidate(const std::shared_ptr<Buffer>&w,uint64_t b,uint32_t v,uint32_t d,const std::shared_ptr<Buffer>&tb,const std::vector<uint32_t>&ids,const Tensor&o,ComputeDispatch&x){return build_q5_embedding_candidate_impl(w,b,v,d,tb,ids,o,x,true);}
+static Status build_q5_embedding_gles_candidate_impl(const std::shared_ptr<Buffer>&weights,uint64_t bytes,uint32_t vocabulary,uint32_t dimension,
+        const std::shared_ptr<Buffer>&token_buffer,const std::vector<uint32_t>&token_ids,const Tensor&output,ComputeDispatch&dispatch,bool q5_1){
+    Status status=build_q5_embedding_candidate_impl(weights,bytes,vocabulary,dimension,token_buffer,token_ids,output,dispatch,q5_1);
+    if(!status.ok())return status;
+    const uint64_t block_bytes=q5_1?24:22,row_bytes=static_cast<uint64_t>(dimension/32)*block_bytes;
+    const std::string suffix=q5_1?"q5-1":"q5-0";
+    dispatch.label=suffix+"-embedding-gles-f32-generic-unverified";
+    dispatch.kernel_id="gles-"+suffix+"-embedding-f32-v1";dispatch.backend=BackendKind::OpenGles;
+    dispatch.wgsl_source.clear();dispatch.glsl_source=q5_1?kQ5_1EmbeddingGlsl:kQ5_0EmbeddingGlsl;
+    const std::pair<std::string,std::string> constants[]={
+        {"const uint VOCABULARY_SIZE = 1u;","const uint VOCABULARY_SIZE = "+std::to_string(vocabulary)+"u;"},
+        {"const uint EMBEDDING_DIMENSION = 32u;","const uint EMBEDDING_DIMENSION = "+std::to_string(dimension)+"u;"},
+        {"const uint TOKEN_COUNT = 1u;","const uint TOKEN_COUNT = "+std::to_string(token_ids.size())+"u;"},
+        {"const uint TOTAL_ELEMENTS = 32u;","const uint TOTAL_ELEMENTS = "+std::to_string(output.element_count())+"u;"},
+        {q5_1?"const uint WEIGHT_ROW_BYTES = 24u;":"const uint WEIGHT_ROW_BYTES = 22u;","const uint WEIGHT_ROW_BYTES = "+std::to_string(row_bytes)+"u;"}
+    };
+    for(const auto& item:constants){const size_t pos=dispatch.glsl_source.find(item.first);if(pos==std::string::npos)return {StatusCode::BackendFailure,"Q5 GLES Embedding GLSL placeholder missing"};dispatch.glsl_source.replace(pos,item.first.size(),item.second);}
+    return Status::success();
+}
+Status build_q5_0_embedding_gles_candidate(const std::shared_ptr<Buffer>&w,uint64_t b,uint32_t v,uint32_t d,const std::shared_ptr<Buffer>&tb,const std::vector<uint32_t>&ids,const Tensor&o,ComputeDispatch&x){return build_q5_embedding_gles_candidate_impl(w,b,v,d,tb,ids,o,x,false);}
+Status build_q5_1_embedding_gles_candidate(const std::shared_ptr<Buffer>&w,uint64_t b,uint32_t v,uint32_t d,const std::shared_ptr<Buffer>&tb,const std::vector<uint32_t>&ids,const Tensor&o,ComputeDispatch&x){return build_q5_embedding_gles_candidate_impl(w,b,v,d,tb,ids,o,x,true);}
+
+Status reference_q5_0_embedding(const uint8_t*w,uint64_t bytes,uint32_t vocabulary,uint32_t dimension,const std::vector<uint32_t>&ids,float*out){
+    if((!w||!out)&&!ids.empty())return {StatusCode::InvalidArgument,"Q5_0 Embedding reference received a null pointer"};
+    if(!vocabulary||!dimension||dimension%32||ids.empty())return {StatusCode::InvalidArgument,"Q5_0 Embedding dimensions are invalid"};
+    const uint64_t row_bytes=static_cast<uint64_t>(dimension/32)*22;
+    if(row_bytes>UINT64_MAX/vocabulary||bytes!=row_bytes*vocabulary)return {StatusCode::InvalidArgument,"Q5_0 Embedding weight bytes mismatch"};
+    std::vector<float> decoded(dimension);
+    for(size_t row=0;row<ids.size();++row){if(ids[row]>=vocabulary)return {StatusCode::InvalidArgument,"Q5_0 Embedding token ID out of range"};
+        Status st=decode_q5_0_blocks(w+ids[row]*row_bytes,row_bytes,decoded.data(),decoded.size());if(!st.ok())return st;
+        std::copy(decoded.begin(),decoded.end(),out+row*dimension);}
+    return Status::success();
+}
+Status reference_q5_1_embedding(const uint8_t*w,uint64_t bytes,uint32_t vocabulary,uint32_t dimension,const std::vector<uint32_t>&ids,float*out){
+    if((!w||!out)&&!ids.empty())return {StatusCode::InvalidArgument,"Q5_1 Embedding reference received a null pointer"};
+    if(!vocabulary||!dimension||dimension%32||ids.empty())return {StatusCode::InvalidArgument,"Q5_1 Embedding dimensions are invalid"};
+    const uint64_t row_bytes=static_cast<uint64_t>(dimension/32)*24;
+    if(row_bytes>UINT64_MAX/vocabulary||bytes!=row_bytes*vocabulary)return {StatusCode::InvalidArgument,"Q5_1 Embedding weight bytes mismatch"};
+    std::vector<float> decoded(dimension);
+    for(size_t row=0;row<ids.size();++row){if(ids[row]>=vocabulary)return {StatusCode::InvalidArgument,"Q5_1 Embedding token ID out of range"};
+        Status st=decode_q5_1_blocks(w+ids[row]*row_bytes,row_bytes,decoded.data(),decoded.size());if(!st.ok())return st;
+        std::copy(decoded.begin(),decoded.end(),out+row*dimension);}
+    return Status::success();
+}
+
 } // namespace ai_chat::gpu_engine

@@ -755,6 +755,26 @@ void test_q8_0_decoder_and_registry() {
     assert(q5_1_matmul_gles_dispatch.backend == BackendKind::OpenGles);
     assert(q5_0_matmul_gles_dispatch.glsl_source.find("WEIGHT_ROW_BYTES = 44u") != std::string::npos);
     assert(q5_1_matmul_gles_dispatch.glsl_source.find("WEIGHT_ROW_BYTES = 48u") != std::string::npos);
+    BufferDesc q5_embedding_weights_desc{96,4,MemoryDomain::Device,true,"q5-embedding-weights"};
+    BufferDesc q5_embedding_tokens_desc{2*sizeof(uint32_t),4,MemoryDomain::Device,false,"q5-embedding-token-ids"};
+    BufferDesc q5_embedding_output_desc{2*32*sizeof(float),4,MemoryDomain::Device,false,"q5-embedding-output"};
+    std::shared_ptr<Buffer> q5_embedding_weights,q5_embedding_tokens,q5_embedding_output;
+    assert(backend.allocate(q5_embedding_weights_desc,q5_embedding_weights).ok());
+    assert(backend.allocate(q5_embedding_tokens_desc,q5_embedding_tokens).ok());
+    assert(backend.allocate(q5_embedding_output_desc,q5_embedding_output).ok());
+    TensorDesc q5_embedding_td;q5_embedding_td.shape={2,32};q5_embedding_td.data_type=DataType::F32;
+    Tensor q5_embedding_tensor;assert(Tensor::create(q5_embedding_td,q5_embedding_output,0,q5_embedding_tensor).ok());
+    const std::vector<uint32_t> q5_embedding_ids={1,0};
+    ComputeDispatch q5_0_embedding_dispatch,q5_1_embedding_dispatch;
+    assert(build_q5_0_embedding_candidate(q5_embedding_weights,88,2,32,q5_embedding_tokens,q5_embedding_ids,q5_embedding_tensor,q5_0_embedding_dispatch).ok());
+    assert(build_q5_1_embedding_candidate(q5_embedding_weights,96,2,32,q5_embedding_tokens,q5_embedding_ids,q5_embedding_tensor,q5_1_embedding_dispatch).ok());
+    ComputeDispatch q5_0_embedding_gles_dispatch,q5_1_embedding_gles_dispatch;
+    assert(build_q5_0_embedding_gles_candidate(q5_embedding_weights,88,2,32,q5_embedding_tokens,q5_embedding_ids,q5_embedding_tensor,q5_0_embedding_gles_dispatch).ok());
+    assert(build_q5_1_embedding_gles_candidate(q5_embedding_weights,96,2,32,q5_embedding_tokens,q5_embedding_ids,q5_embedding_tensor,q5_1_embedding_gles_dispatch).ok());
+    assert(q5_0_embedding_gles_dispatch.backend==BackendKind::OpenGles&&q5_1_embedding_gles_dispatch.backend==BackendKind::OpenGles);
+    assert(q5_0_embedding_gles_dispatch.glsl_source.find("#version 310 es")==0);
+    assert(q5_1_embedding_gles_dispatch.glsl_source.find("#version 310 es")==0);
+
 
 
     BufferDesc q4_embedding_weights_desc{36, 4, MemoryDomain::Device, true, "q4-embedding-weights"};

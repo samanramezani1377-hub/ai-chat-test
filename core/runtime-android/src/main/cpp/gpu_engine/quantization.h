@@ -56,6 +56,14 @@ Status validate_q5_matmul_kernel_impl(Backend& backend, OperatorRegistry& operat
 Status validate_q5_0_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
 Status validate_q5_1_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
 
+
+Status build_q5_0_embedding_candidate(const std::shared_ptr<Buffer>&,uint64_t,uint32_t,uint32_t,const std::shared_ptr<Buffer>&,const std::vector<uint32_t>&,const Tensor&,ComputeDispatch&);
+Status build_q5_0_embedding_gles_candidate(const std::shared_ptr<Buffer>&,uint64_t,uint32_t,uint32_t,const std::shared_ptr<Buffer>&,const std::vector<uint32_t>&,const Tensor&,ComputeDispatch&);
+Status reference_q5_0_embedding(const uint8_t*,uint64_t,uint32_t,uint32_t,const std::vector<uint32_t>&,float*);
+Status build_q5_1_embedding_candidate(const std::shared_ptr<Buffer>&,uint64_t,uint32_t,uint32_t,const std::shared_ptr<Buffer>&,const std::vector<uint32_t>&,const Tensor&,ComputeDispatch&);
+Status build_q5_1_embedding_gles_candidate(const std::shared_ptr<Buffer>&,uint64_t,uint32_t,uint32_t,const std::shared_ptr<Buffer>&,const std::vector<uint32_t>&,const Tensor&,ComputeDispatch&);
+Status reference_q5_1_embedding(const uint8_t*,uint64_t,uint32_t,uint32_t,const std::vector<uint32_t>&,float*);
+
 Status build_q5_0_matmul_candidate(const Tensor&, const std::shared_ptr<Buffer>&, uint64_t, const Tensor&, ComputeDispatch&);
 Status build_q5_0_matmul_gles_candidate(const Tensor&, const std::shared_ptr<Buffer>&, uint64_t, const Tensor&, ComputeDispatch&);
 Status reference_q5_0_matmul(const float*, const uint8_t*, uint64_t, float*, uint32_t, uint32_t, uint32_t);
