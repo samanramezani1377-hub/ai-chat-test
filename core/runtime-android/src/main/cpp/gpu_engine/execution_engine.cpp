@@ -290,6 +290,9 @@ Status ExecutionScheduler::execute(Backend& backend, const ComputeGraph& graph,
         if (cancellation && cancellation->load(std::memory_order_relaxed)) {
             return {StatusCode::Cancelled, "Graph execution was cancelled before submission"};
         }
+        if (graph.nodes_[index].dispatch.backend != backend.kind()) {
+            return {StatusCode::Unsupported, "Graph kernel backend does not match the active device backend"};
+        }
         status = batch->dispatch_compute(graph.nodes_[index].dispatch);
         if (!status.ok()) return status;
     }
