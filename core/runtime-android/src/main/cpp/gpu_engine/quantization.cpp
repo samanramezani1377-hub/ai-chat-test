@@ -2876,4 +2876,137 @@ Status build_q8_0_dequantize_gles_candidate(const std::shared_ptr<Buffer>& encod
     return Status::success();
 }
 
+
+namespace {
+using DequantizeDecoder = Status (*)(const uint8_t*, size_t, float*, size_t);
+
+template <typename Builder>
+Status validate_dequantize_candidate(Backend& backend, const std::vector<uint8_t>& source,
+                                     uint32_t block_bytes, DequantizeDecoder decoder,
+                                     Builder&& builder, ComputeDispatch& validated_dispatch) {
+    validated_dispatch = ComputeDispatch{};
+    if (!backend.healthy() ||
+        (backend.kind() != BackendKind::DawnWebGpu && backend.kind() != BackendKind::OpenGles))
+        return {StatusCode::NotReady, "Quantized dequantization validation requires a healthy supported GPU backend"};
+    if (source.empty() || block_bytes == 0 || source.size() % block_bytes != 0)
+        return {StatusCode::InvalidArgument, "Quantized dequantization validation requires complete encoded blocks"};
+    const uint64_t elements = (source.size() / block_bytes) * 32ull;
+    if (elements == 0 || elements > UINT32_MAX || elements > UINT64_MAX / sizeof(float))
+        return {StatusCode::Unsupported, "Quantized dequantization validation tensor exceeds supported indexing"};
+    const uint64_t padded_bytes = (source.size() + 3ull) & ~3ull;
+    std::vector<uint8_t> padded(static_cast<size_t>(padded_bytes), 0);
+    std::copy(source.begin(), source.end(), padded.begin());
+
+    BufferDesc input_desc;
+    input_desc.size_bytes = padded_bytes;
+    input_desc.alignment = 4;
+    input_desc.memory = MemoryDomain::Device;
+    input_desc.persistent = false;
+    input_desc.label = "quant-dequant-validation-input";
+    std::shared_ptr<Buffer> encoded;
+    Status status = backend.allocate(input_desc, encoded);
+    if (!status.ok()) return status;
+    if (!encoded || encoded->size_bytes() < padded_bytes)
+        return {StatusCode::BackendFailure, "Backend returned an undersized quantized validation buffer"};
+    status = backend.upload(encoded, 0, padded.data(), padded_bytes);
+    if (!status.ok()) return status;
+
+    BufferDesc output_desc;
+    output_desc.size_bytes = elements * sizeof(float);
+    output_desc.alignment = alignof(float);
+    output_desc.memory = MemoryDomain::Device;
+    output_desc.persistent = false;
+    output_desc.label = "quant-dequant-validation-output";
+    std::shared_ptr<Buffer> output_buffer;
+    status = backend.allocate(output_desc, output_buffer);
+    if (!status.ok()) return status;
+    TensorDesc tensor_desc;
+    tensor_desc.shape = {elements};
+    tensor_desc.data_type = DataType::F32;
+    tensor_desc.layout = TensorLayout::Contiguous;
+    tensor_desc.memory = MemoryDomain::Device;
+    tensor_desc.alignment = alignof(float);
+    Tensor output;
+    status = Tensor::create(std::move(tensor_desc), output_buffer, 0, output);
+    if (!status.ok()) return status;
+
+    std::vector<float> expected(static_cast<size_t>(elements));
+    status = decoder(source.data(), source.size(), expected.data(), expected.size());
+    if (!status.ok()) return status;
+    ComputeDispatch candidate;
+    status = builder(encoded, source.size(), output, candidate);
+    if (!status.ok()) return status;
+    if (candidate.backend != backend.kind() || candidate.kernel_id.empty())
+        return {StatusCode::InvalidArgument, "Quantized dequantization candidate backend identity mismatch"};
+
+    ComputeDispatch validation_dispatch = candidate;
+    validation_dispatch.validation = KernelValidation::Validated;
+    std::unique_ptr<CommandBatch> commands;
+    status = backend.begin_commands(commands);
+    if (!status.ok()) return status;
+    if (!commands) return {StatusCode::BackendFailure, "Backend returned an empty dequantization validation command batch"};
+    status = commands->dispatch_compute(validation_dispatch);
+    if (!status.ok()) return status;
+    status = backend.submit(std::move(commands));
+    if (!status.ok()) return status;
+    if (!backend.healthy()) return {StatusCode::DeviceLost, "GPU backend was lost during quantized dequantization validation"};
+    status = backend.synchronize();
+    if (!status.ok()) return status;
+    std::vector<float> actual(static_cast<size_t>(elements));
+    status = backend.readback(output_buffer, 0, actual.data(), output_desc.size_bytes);
+    if (!status.ok()) return status;
+    constexpr float absolute_tolerance = 2.0e-4f;
+    constexpr float relative_tolerance = 2.0e-4f;
+    for (size_t i = 0; i < actual.size(); ++i) {
+        if (!std::isfinite(actual[i]) || !std::isfinite(expected[i]))
+            return {StatusCode::NumericalFailure, "Quantized dequantization produced a non-finite value"};
+        const float tolerance = absolute_tolerance +
+            relative_tolerance * std::max(std::fabs(expected[i]), 1.0f);
+        if (std::fabs(actual[i] - expected[i]) > tolerance)
+            return {StatusCode::NumericalFailure, "GPU dequantization differs from the independent CPU decoder"};
+    }
+    candidate.validation = KernelValidation::Validated;
+    validated_dispatch = std::move(candidate);
+    return Status::success();
+}
+
+template <typename GlesBuilder, typename DawnBuilder>
+Status validate_dequantizer_for_backend(Backend& backend, uint32_t block_bytes,
+                                        DequantizeDecoder decoder,
+                                        GlesBuilder&& gles_builder, DawnBuilder&& dawn_builder,
+                                        ComputeDispatch& out) {
+    auto builder = [&](const std::shared_ptr<Buffer>& encoded, uint64_t bytes,
+                       const Tensor& output, ComputeDispatch& dispatch) {
+        return backend.kind() == BackendKind::OpenGles
+            ? gles_builder(encoded, bytes, output, dispatch)
+            : dawn_builder(encoded, bytes, output, dispatch);
+    };
+    std::vector<uint8_t> sample(block_bytes, 0);
+    sample[0] = 0x00;
+    sample[1] = 0x3c; // little-endian FP16 1.0 scale
+    return validate_dequantize_candidate(backend, sample, block_bytes, decoder, builder, out);
+}
+} // namespace
+
+Status validate_q4_0_dequantize_kernel(Backend& backend, ComputeDispatch& out) {
+    return validate_dequantizer_for_backend(backend, 18, decode_q4_0_blocks,
+        build_q4_0_dequantize_gles_candidate, build_q4_0_dequantize_candidate, out);
+}
+Status validate_q4_1_dequantize_kernel(Backend& backend, ComputeDispatch& out) {
+    return validate_dequantizer_for_backend(backend, 20, decode_q4_1_blocks,
+        build_q4_1_dequantize_gles_candidate, build_q4_1_dequantize_candidate, out);
+}
+Status validate_q5_0_dequantize_kernel(Backend& backend, ComputeDispatch& out) {
+    return validate_dequantizer_for_backend(backend, 22, decode_q5_0_blocks,
+        build_q5_0_dequantize_gles_candidate, build_q5_0_dequantize_candidate, out);
+}
+Status validate_q5_1_dequantize_kernel(Backend& backend, ComputeDispatch& out) {
+    return validate_dequantizer_for_backend(backend, 24, decode_q5_1_blocks,
+        build_q5_1_dequantize_gles_candidate, build_q5_1_dequantize_candidate, out);
+}
+Status validate_q8_0_dequantize_kernel(Backend& backend, ComputeDispatch& out) {
+    return validate_dequantizer_for_backend(backend, 34, decode_q8_0_blocks,
+        build_q8_0_dequantize_gles_candidate, build_q8_0_dequantize_candidate, out);
+}
+
 } // namespace ai_chat::gpu_engine

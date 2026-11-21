@@ -90,6 +90,13 @@ const char* q8_0_dequantize_glsl_source() noexcept;
 Status build_q4_0_dequantize_gles_candidate(const std::shared_ptr<Buffer>& encoded, uint64_t encoded_bytes, const Tensor& output, ComputeDispatch& dispatch);
 Status build_q4_1_dequantize_gles_candidate(const std::shared_ptr<Buffer>& encoded, uint64_t encoded_bytes, const Tensor& output, ComputeDispatch& dispatch);
 Status build_q8_0_dequantize_gles_candidate(const std::shared_ptr<Buffer>& encoded, uint64_t encoded_bytes, const Tensor& output, ComputeDispatch& dispatch);
+
+Status validate_q4_0_dequantize_kernel(Backend& backend, ComputeDispatch& validated_dispatch);
+Status validate_q4_1_dequantize_kernel(Backend& backend, ComputeDispatch& validated_dispatch);
+Status validate_q5_0_dequantize_kernel(Backend& backend, ComputeDispatch& validated_dispatch);
+Status validate_q5_1_dequantize_kernel(Backend& backend, ComputeDispatch& validated_dispatch);
+Status validate_q8_0_dequantize_kernel(Backend& backend, ComputeDispatch& validated_dispatch);
+
 const char* q5_0_dequantize_wgsl_source() noexcept;
 const char* q5_0_dequantize_glsl_source() noexcept;
 const char* q5_1_dequantize_glsl_source() noexcept;
