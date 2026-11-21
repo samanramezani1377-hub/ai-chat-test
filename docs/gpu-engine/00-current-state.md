@@ -66,3 +66,18 @@ The active Android inference route is still llama.cpp/GGML for both current GPU 
 - An independent per-layer KV cache primitive now estimates and allocates key/value buffers under the GPU memory budget, enforces sequential appends and tracks logical valid-token lengths. It is not yet wired into an Attention operator or model generation.
 - A GGUF model inspection loader now orchestrates independent parsing and fail-closed architecture/quantization preflight; it does not yet load an executable graph or claim GPU readiness.
 - Operator candidates now also include F32 Embedding and RoPE, plus direct Q8_0 quantized-weight MatMul for F32 activations. These GPU paths remain unverified and are not selected for inference.
+
+
+## Latest Universal GLES backend increment — 2026-11-21
+
+The Universal GPU Adapter now exposes a serialized task queue on the same dedicated thread that owns its EGL/GLES context. Synchronous tasks return structured callback errors; asynchronous tasks support safe resource cleanup without recursively blocking the context owner thread.
+
+A separate `ai_chat_gpu_backend_gles` target now implements the generic Backend contract over that adapter-owned context:
+- device discovery and GLES capability mapping;
+- device buffer allocation and deferred destruction;
+- staged buffer upload/readback and buffer copies;
+- GLSL ES compute shader compile/link/dispatch;
+- SSBO binding/range validation, workgroup-limit checks, memory barriers and synchronization;
+- a backend-level integer compute/readback self-test.
+
+The backend rejects dispatches unless their kernel identity is marked `Validated` and a GLSL ES source is supplied. The engine core remains independent of EGL/GLES; the adapter bridge and GLES backend are separate targets. This does **not** establish model inference support: no production operator is validated for GLES, the backend is not connected to the Android model router, and hardware compatibility remains **UNVERIFIED** until real-device tests run.
