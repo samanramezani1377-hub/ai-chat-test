@@ -137,6 +137,21 @@ class LocalModelServiceConcurrencyTest {
     }
 
     @Test
+    fun failedDeactivationUnloadForcesCleanupBeforeNextActivation() = runBlocking {
+        val runtime = RecordingRuntime().apply { failNextUnload = true }
+        val repository = RecordingRepository(model()).apply { activeId = "model-a" }
+        val service = LocalModelService(NoOpImporter(), repository, runtime)
+
+        assertTrue(service.deactivate() is ModelResult.Failure)
+        assertEquals(null, service.activeModelId())
+        assertEquals("model-a", repository.activeId)
+
+        assertTrue(service.activate("model-a") is ModelResult.Success<*>)
+        assertEquals(2, runtime.unloadCount.get(), "unknown native state must be unloaded again before reactivation")
+        assertEquals(1, runtime.loadCount.get())
+    }
+
+    @Test
     fun concurrentLifecycleOperationsAreSerialized() = runBlocking {
         val runtime = RecordingRuntime()
         val repository = RecordingRepository(model())
@@ -226,6 +241,9 @@ class LocalModelServiceConcurrencyTest {
         val loadCount = AtomicInteger(0)
         val unloadCount = AtomicInteger(0)
         val stopCount = AtomicInteger(0)
+
+        @Volatile
+        var failNextUnload = false
         val generationStarted = CompletableDeferred<Unit>()
         val loadStarted = CompletableDeferred<Unit>()
         val generateCount = AtomicInteger(0)
@@ -247,6 +265,10 @@ class LocalModelServiceConcurrencyTest {
 
         override suspend fun unload() {
             unloadCount.incrementAndGet()
+            if (failNextUnload) {
+                failNextUnload = false
+                throw IllegalStateException("simulated native unload failure")
+            }
             operation()
         }
 

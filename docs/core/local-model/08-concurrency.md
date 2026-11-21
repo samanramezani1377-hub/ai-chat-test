@@ -39,7 +39,7 @@ Cancellation is not an ordinary inference failure. Always rethrow CancellationEx
 
 ## Runtime configuration invalidation
 
-GPU-layer preference changes increment a monotonic runtime-configuration revision. The service records the revision applied by the last successful activation. A same-model activation may return early only when those revisions match. This avoids losing a settings change that arrives during an in-flight load.
+GPU-layer preference changes increment a monotonic runtime-configuration revision. The service records the revision applied by the last successful activation. A same-model activation may return early only when those revisions match. Failed or cancelled native unloads mark the runtime state unknown; the next activation must successfully unload again before loading a model. This avoids losing a settings change that arrives during an in-flight load.
 
 The Android adapter independently reuses an already loaded model only when the model path, context length, and requested GPU-layer mode all match. The requested GPU mode is tracked separately from the actual GPU layers used, because a successful CPU fallback must not cause an unnecessary reload on every activation.
 
