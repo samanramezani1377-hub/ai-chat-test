@@ -172,16 +172,10 @@ target_include_directories(ai_chat_gpu_backend_dawn PUBLIC
 target_compile_features(ai_chat_gpu_backend_dawn PUBLIC cxx_std_17)
 target_link_libraries(ai_chat_gpu_backend_dawn PUBLIC ai_chat_gpu_engine PRIVATE dawn::webgpu_dawn)
 
-# OpenGL ES backend reuses the process-lifetime Universal GPU Adapter context.
-add_library(ai_chat_gpu_backend_gles STATIC gpu_engine/universal_gles_backend.cpp)
-target_include_directories(ai_chat_gpu_backend_gles PUBLIC ${CMAKE_CURRENT_LIST_DIR})
-target_compile_features(ai_chat_gpu_backend_gles PUBLIC cxx_std_17)
-target_link_libraries(ai_chat_gpu_backend_gles PUBLIC ai_chat_gpu_engine PRIVATE EGL GLESv3)
-
 # OpenGL ES compute backend reuses UniversalGpuAdapter's dedicated EGL context thread.
 # Keep EGL/GLES implementation outside the backend-neutral engine core.
 add_library(ai_chat_gpu_backend_gles STATIC
-    gpu_engine/gles_backend.cpp
+    gpu_engine/universal_gles_backend.cpp
     gpu_engine/universal_adapter_bridge.cpp
 )
 target_include_directories(ai_chat_gpu_backend_gles PUBLIC ${CMAKE_CURRENT_LIST_DIR})

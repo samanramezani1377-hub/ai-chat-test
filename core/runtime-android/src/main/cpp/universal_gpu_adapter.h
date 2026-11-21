@@ -55,6 +55,8 @@ UniversalGpuCapabilities probe_universal_gpu_adapter();
 // Executes GLES work on the dedicated thread that owns the persistent EGL context.
 // The callback must not retain GL thread-local assumptions or recursively enqueue work.
 bool run_universal_gpu_task(const std::function<void()>& task, std::string& error);
+// Enqueues cleanup/work without waiting; safe from objects released on the context owner thread.
+bool post_universal_gpu_task(const std::function<void()>& task, std::string& error);
 
 void shutdown_universal_gpu_adapter();
 

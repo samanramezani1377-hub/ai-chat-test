@@ -309,6 +309,23 @@ public:
         return false;
     }
 
+    bool post_task(const std::function<void()>& task, std::string& error) {
+        error.clear();
+        if (!task) { error = "gles_task_callback_is_empty"; return false; }
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!worker_.joinable() || stopping_) {
+                error = "gles_owner_thread_is_stopping";
+                return false;
+            }
+            tasks_.emplace_back([task]() {
+                try { task(); } catch (...) {}
+            });
+        }
+        task_cv_.notify_one();
+        return true;
+    }
+
     void shutdown() {
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -512,6 +529,10 @@ UniversalGpuCapabilities probe_universal_gpu_adapter() {
 
 bool run_universal_gpu_task(const std::function<void()>& task, std::string& error) {
     return persistent_gles_probe().run_task(task, error);
+}
+
+bool post_universal_gpu_task(const std::function<void()>& task, std::string& error) {
+    return persistent_gles_probe().post_task(task, error);
 }
 
 void shutdown_universal_gpu_adapter() {
