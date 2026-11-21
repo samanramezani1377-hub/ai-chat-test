@@ -1,5 +1,6 @@
 #include "gpu_engine.h"
 #include "../universal_gpu_adapter.h"
+#include "universal_adapter_bridge.h"
 #include <GLES3/gl31.h>
 #include <algorithm>
 #include <atomic>
@@ -13,7 +14,7 @@
 namespace ai_chat::gpu_engine {
 namespace {
 Status gl_error(const char* op, GLenum code) {
-    return {StatusCode::BackendFailure, std::string(op) + " failed (GLES error " + std::to_string(code) + ")"};
+    return {code == GL_CONTEXT_LOST ? StatusCode::DeviceLost : StatusCode::BackendFailure, std::string(op) + " failed (GLES error " + std::to_string(code) + ")"};
 }
 void clear_errors() { while (glGetError() != GL_NO_ERROR) {} }
 
@@ -22,7 +23,7 @@ public:
     GlesBuffer(GLuint id, uint64_t size, MemoryDomain domain) : id_(id), size_(size), domain_(domain) {}
     ~GlesBuffer() override {
         const GLuint id = id_;
-        if (id) { std::string ignored; ai_chat::gpu::run_universal_gpu_task([id]() { glDeleteBuffers(1, &id); }, ignored); }
+        if (id) { std::string ignored; ai_chat::gpu::post_universal_gpu_task([id]() { glDeleteBuffers(1, &id); }, ignored); }
     }
     uint64_t size_bytes() const noexcept override { return size_; }
     MemoryDomain memory_domain() const noexcept override { return domain_; }
