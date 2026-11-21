@@ -1,5 +1,6 @@
 #include "quantization.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -131,36 +132,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 )wgsl";
 
 
-constexpr char kQ8_0MatMulGlsl[] = R"glsl(#version 310 es
-precision highp float;
-precision highp int;
-layout(local_size_x = 8, local_size_y = 8) in;
-layout(std430, binding = 0) readonly buffer Activations { float activations[]; };
-layout(std430, binding = 1) readonly buffer Weights { uint weights[]; };
-layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
-const uint ROWS = 1u;
-const uint OUTPUT_CHANNELS = 1u;
-const uint INNER = 32u;
-const uint WEIGHT_ROW_BYTES = 34u;
-uint read_u8(uint offset) { return (weights[offset >> 2u] >> ((offset & 3u) * 8u)) & 255u; }
-uint read_u16(uint offset) { return (weights[offset >> 2u] >> ((offset & 3u) * 8u)) & 65535u; }
-void main() {
-    uint row = gl_GlobalInvocationID.y;
-    uint channel = gl_GlobalInvocationID.x;
-    if (row >= ROWS || channel >= OUTPUT_CHANNELS) return;
-    float sum = 0.0;
-    for (uint k = 0u; k < INNER; ++k) {
-        uint block = k / 32u;
-        uint within = k % 32u;
-        uint offset = channel * WEIGHT_ROW_BYTES + block * 34u;
-        float scale = unpackHalf2x16(read_u16(offset)).x;
-        uint raw = read_u8(offset + 2u + within);
-        int quantized = raw >= 128u ? int(raw) - 256 : int(raw);
-        sum += activations[row * INNER + k] * scale * float(quantized);
-    }
-    output_values[row * OUTPUT_CHANNELS + channel] = sum;
-}
-)glsl";
 constexpr char kQ8_0MatMulWgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> activations: array<f32>;
 @group(0) @binding(1) var<storage, read> weights: array<u32>;

@@ -4,6 +4,8 @@
 
 namespace ai_chat::gpu_engine {
 
+struct RopeConfig;
+
 // Generic backend-specific candidates remain UNVERIFIED until GPU dispatch/readback
 // has passed numerical parity tests on the selected backend.
 const char* add_f32_wgsl_source() noexcept;
