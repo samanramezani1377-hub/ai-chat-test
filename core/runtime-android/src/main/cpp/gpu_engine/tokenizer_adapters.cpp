@@ -185,6 +185,16 @@ private:
     std::vector<std::string> split(const std::string&s)const{
         std::vector<std::string> out;size_t i=0;const size_t digit_group=(desc_.pre_tokenizer=="qwen2"||desc_.pre_tokenizer=="qwen3")?1:3;
         while(i<s.size()){size_t n=0;uint32_t cp=codepoint(s,i,n);size_t start=i;
+            if(cp==0x20 && i+n<s.size()){
+                size_t next_n=0;uint32_t next=codepoint(s,i+n,next_n);
+                if(!space(next)){
+                    i+=n;
+                    if(letter(next)){i+=next_n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(!letter(c))break;i+=k;}}
+                    else if(digit(next)){size_t count=0;while(i<s.size()&&count<digit_group){size_t k=0;uint32_t c=codepoint(s,i,k);if(!digit(c))break;i+=k;++count;}}
+                    else{i+=next_n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(space(c)||letter(c)||digit(c))break;i+=k;}}
+                    out.emplace_back(s.substr(start,i-start));continue;
+                }
+            }
             if(space(cp)){i+=n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(!space(c))break;i+=k;}}
             else if(letter(cp)){i+=n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(!letter(c))break;i+=k;}}
             else if(digit(cp)){size_t count=0;while(i<s.size()&&count<digit_group){size_t k=0;uint32_t c=codepoint(s,i,k);if(!digit(c))break;i+=k;++count;}}
