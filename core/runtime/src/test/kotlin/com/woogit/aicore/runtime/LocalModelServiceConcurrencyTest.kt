@@ -111,7 +111,7 @@ class LocalModelServiceConcurrencyTest {
             assertTrue(Files.exists(modelPath))
             assertEquals("known-good-model", Files.readString(modelPath))
             assertTrue(repository.registered)
-            assertEquals(0, Files.list(directory).use { stream -> stream.count() }.toInt())
+            assertEquals(1, directory.toFile().listFiles()?.size)
         } finally {
             directory.toFile().deleteRecursively()
         }
@@ -129,7 +129,7 @@ class LocalModelServiceConcurrencyTest {
             assertTrue(service.deleteModel("model-a") is ModelResult.Success)
             assertTrue(!Files.exists(modelPath))
             assertTrue(!repository.registered)
-            assertEquals(0, Files.list(directory).use { stream -> stream.count() }.toInt())
+            assertEquals(0, directory.toFile().listFiles()?.size)
         } finally {
             directory.toFile().deleteRecursively()
         }
