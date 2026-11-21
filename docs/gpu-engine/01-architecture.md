@@ -142,3 +142,8 @@ KVCacheAppend is represented as an internal copy-only graph node. It records two
 ### Activation allocation and liveness
 
 The activation allocator derives each output shape from the model plan and runtime token count, computes last-use indices from data dependencies, and reuses a device buffer only when its prior tensor's final consumer precedes the new producer. Retained outputs (currently logits) are pinned until the caller releases the execution context. Each unique slot is backed by a MemoryLease retained by the context. This is a simple graph-order liveness allocator for the current sequential scheduler; it does not yet model parallel branches or asynchronous multi-queue overlap.
+
+
+### Android diagnostic entry point
+
+The Android JNI probe is explicitly diagnostic-only: it initializes the independent backend composition, reports device identity/capabilities/fallback state and shuts down the engine. It neither loads weights nor changes the active llama.cpp model/context. A successful probe proves backend initialization/self-test only, not operator or model inference readiness.

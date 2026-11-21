@@ -7,6 +7,7 @@
 #include "quantization.h"
 #include "tokenizer.h"
 
+#include <exception>
 #include <sstream>
 #include <string>
 

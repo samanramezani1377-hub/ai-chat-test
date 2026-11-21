@@ -73,3 +73,5 @@ CI/source checks are useful but not hardware evidence. Do not wait for CI to pro
 - **2026-11-22 / graph-ordered KV cache:** introduced internal copy-only graph nodes, explicit control dependencies and side-effect outputs; dense plans now sequence K/V cache append before Attention. Added typed planned-prefix K/V tensor views and post-sync valid-token commits. The host contract validates ordering and cache state; real-device ordering and Attention parity remain UNVERIFIED.
 
 - **2026-11-22 / activation liveness allocation:** added dynamic-shape F32 activation allocation with last-consumer tracking, safe slot reuse for non-overlapping tensor lifetimes and retained-output pinning. Residual hidden states are versioned per layer to prevent output/input aliasing. Parallel graph lifetime analysis remains future work.
+
+- **2026-11-22 / Android backend probe:** added an opt-in JNI diagnostics method to exercise the Dawn-first / Universal GLES backend composition and expose actual Android device limits/features without changing the llama.cpp load/generate path. Physical-device execution remains pending.
