@@ -3647,4 +3647,81 @@ Status reference_q5_1_embedding(const uint8_t*w,uint64_t bytes,uint32_t vocabula
     return Status::success();
 }
 
+
+Status validate_q5_embedding_kernel_impl(Backend& backend,OperatorRegistry& operators,bool q5_1){
+    const BackendKind kind=backend.kind();
+    if((kind!=BackendKind::DawnWebGpu&&kind!=BackendKind::OpenGles)||!backend.healthy())
+        return {StatusCode::NotReady,"Q5 Embedding validation requires a healthy Dawn or GLES backend"};
+    const std::string suffix=q5_1?"q5-1":"q5-0";
+    const std::string kernel_id=(kind==BackendKind::OpenGles?"gles-":"dawn-")+suffix+"-embedding-f32-v1";
+    auto kernel=std::find_if(operators.kernels_.begin(),operators.kernels_.end(),[&](const KernelDefinition& k){
+        return k.kernel_id==kernel_id&&k.backend==kind;
+    });
+    if(kernel==operators.kernels_.end())return {StatusCode::NotReady,"Q5 Embedding candidate is not registered for selected backend"};
+    if(kernel->validation==KernelValidation::Validated)return Status::success();
+    if(kernel->validation!=KernelValidation::Unverified)return {StatusCode::Unsupported,"Q5 Embedding candidate is rejected"};
+    const bool gles=kind==BackendKind::OpenGles;
+    const std::string& registered=gles?kernel->glsl_source:kernel->wgsl_source;
+    const std::string& canonical=q5_1?(gles?q5_1_embedding_glsl_source():q5_1_embedding_wgsl_source())
+                                    :(gles?q5_0_embedding_glsl_source():q5_0_embedding_wgsl_source());
+    if(registered.empty()||registered!=canonical)return {StatusCode::InvalidArgument,"Q5 Embedding registered shader differs from canonical source"};
+    constexpr uint32_t vocabulary=2,dimension=32;
+    const uint32_t block_bytes=q5_1?24u:22u;
+    const uint64_t bytes=static_cast<uint64_t>(vocabulary)*block_bytes;
+    const std::vector<uint32_t> token_ids={1,0};
+    std::vector<uint8_t> encoded(static_cast<size_t>(bytes),0);
+    for(uint32_t row=0;row<vocabulary;++row){
+        const size_t off=static_cast<size_t>(row)*block_bytes;
+        encoded[off]=0x00;encoded[off+1]=0x38;
+        const uint32_t qh=q5_1?4u:2u,qs=q5_1?8u:6u;
+        if(q5_1){encoded[off+2]=0x00;encoded[off+3]=0xbc;}
+        for(uint32_t i=0;i<4;++i)encoded[off+qh+i]=static_cast<uint8_t>(0x69u+row+i*29u);
+        for(uint32_t i=0;i<16;++i){
+            const uint8_t low=static_cast<uint8_t>((i+row)%16);
+            const uint8_t high=static_cast<uint8_t>((i+row+7)%16);
+            encoded[off+qs+i]=static_cast<uint8_t>(low|(high<<4));
+        }
+    }
+    std::vector<float> expected(token_ids.size()*dimension),actual(token_ids.size()*dimension);
+    Status status=q5_1?reference_q5_1_embedding(encoded.data(),bytes,vocabulary,dimension,token_ids,expected.data())
+                      :reference_q5_0_embedding(encoded.data(),bytes,vocabulary,dimension,token_ids,expected.data());
+    if(!status.ok())return status;
+    const uint64_t padded=(bytes+3)&~uint64_t{3};
+    BufferDesc wd{padded,4,MemoryDomain::Device,true,"q5-embedding-validation-weights"};
+    BufferDesc td{token_ids.size()*sizeof(uint32_t),alignof(uint32_t),MemoryDomain::Device,false,"q5-embedding-validation-ids"};
+    BufferDesc od{actual.size()*sizeof(float),alignof(float),MemoryDomain::Device,false,"q5-embedding-validation-output"};
+    std::shared_ptr<Buffer> wb,tb,ob;
+    status=backend.allocate(wd,wb);if(!status.ok())return status;
+    status=backend.allocate(td,tb);if(!status.ok())return status;
+    status=backend.allocate(od,ob);if(!status.ok())return status;
+    status=backend.upload(wb,0,encoded.data(),bytes);if(!status.ok())return status;
+    status=backend.upload(tb,0,token_ids.data(),td.size_bytes);if(!status.ok())return status;
+    TensorDesc otd;otd.shape={token_ids.size(),dimension};otd.data_type=DataType::F32;
+    Tensor output;status=Tensor::create(otd,ob,0,output);if(!status.ok())return status;
+    ComputeDispatch dispatch;
+    if(q5_1)status=gles?build_q5_1_embedding_gles_candidate(wb,bytes,vocabulary,dimension,tb,token_ids,output,dispatch)
+                       :build_q5_1_embedding_candidate(wb,bytes,vocabulary,dimension,tb,token_ids,output,dispatch);
+    else status=gles?build_q5_0_embedding_gles_candidate(wb,bytes,vocabulary,dimension,tb,token_ids,output,dispatch)
+                    :build_q5_0_embedding_candidate(wb,bytes,vocabulary,dimension,tb,token_ids,output,dispatch);
+    if(!status.ok())return status;
+    if(dispatch.kernel_id!=kernel_id||dispatch.backend!=kind)return {StatusCode::InvalidArgument,"Q5 Embedding candidate identity mismatch"};
+    dispatch.validation=KernelValidation::Validated;
+    std::unique_ptr<CommandBatch> commands;status=backend.begin_commands(commands);if(!status.ok())return status;
+    if(!commands)return {StatusCode::BackendFailure,"Q5 Embedding backend returned empty command batch"};
+    status=commands->dispatch_compute(dispatch);if(!status.ok())return status;
+    status=backend.submit(std::move(commands));if(!status.ok())return status;
+    status=backend.synchronize();if(!status.ok())return status;
+    status=backend.readback(ob,0,actual.data(),actual.size()*sizeof(float));if(!status.ok())return status;
+    for(size_t i=0;i<actual.size();++i){
+        const float tolerance=1.0e-4f*std::max(1.0f,std::fabs(expected[i]));
+        if(!std::isfinite(actual[i])||std::fabs(actual[i]-expected[i])>tolerance)
+            return {StatusCode::NumericalFailure,"Q5 Embedding GPU output differs from independent decoder reference"};
+    }
+    kernel->validation=KernelValidation::Validated;
+    return Status::success();
+}
+Status validate_q5_0_embedding_kernel(Backend& b,OperatorRegistry& o){return validate_q5_embedding_kernel_impl(b,o,false);}
+Status validate_q5_1_embedding_kernel(Backend& b,OperatorRegistry& o){return validate_q5_embedding_kernel_impl(b,o,true);}
+
+
 } // namespace ai_chat::gpu_engine
