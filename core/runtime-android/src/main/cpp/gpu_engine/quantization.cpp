@@ -3292,7 +3292,6 @@ Status reference_q5_1_matmul(const float* a,const uint8_t*w,uint64_t bytes,float
 }
 
 
-namespace {
 Status validate_q5_matmul_kernel_impl(Backend& backend, OperatorRegistry& operators,
                                       QuantizationRegistry& quantizations, bool q5_1) {
     const BackendKind kind=backend.kind();
@@ -3373,7 +3372,6 @@ Status validate_q5_matmul_kernel_impl(Backend& backend, OperatorRegistry& operat
     format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;
     format->second.gpu_kernel_state=SupportState::Validated;
     return Status::success();
-}
 }
 Status validate_q5_0_matmul_kernel(Backend& b,OperatorRegistry& o,QuantizationRegistry& q){return validate_q5_matmul_kernel_impl(b,o,q,false);}
 Status validate_q5_1_matmul_kernel(Backend& b,OperatorRegistry& o,QuantizationRegistry& q){return validate_q5_matmul_kernel_impl(b,o,q,true);}

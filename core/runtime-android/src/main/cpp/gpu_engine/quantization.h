@@ -52,6 +52,7 @@ const char* q5_0_matmul_wgsl_source() noexcept;
 const char* q5_0_matmul_glsl_source() noexcept;
 const char* q5_1_matmul_wgsl_source() noexcept;
 const char* q5_1_matmul_glsl_source() noexcept;
+Status validate_q5_matmul_kernel_impl(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations, bool q5_1);
 Status validate_q5_0_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
 Status validate_q5_1_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
 

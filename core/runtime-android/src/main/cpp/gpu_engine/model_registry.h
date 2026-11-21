@@ -34,6 +34,7 @@ class QuantizationRegistry {
     friend Status validate_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
     friend Status validate_q4_0_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
     friend Status validate_q4_1_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
+    friend Status validate_q5_matmul_kernel_impl(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations, bool q5_1);
     friend Status validate_q5_0_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
     friend Status validate_q5_1_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
 public:
