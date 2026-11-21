@@ -213,9 +213,8 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
         });
     if (!status.ok()) return status;
 
-    // Embedding needs a backend-owned token-id upload and lifetime contract.
-    // Attention needs the KV-cache append/read contract. Both intentionally stay
-    // unregistered until those resource paths are implemented and validated.
+    // Attention remains unregistered until KV-cache append/read semantics are
+    // sequenced with the graph and validated on each backend.
     return Status::success();
 }
 

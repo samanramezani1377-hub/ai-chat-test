@@ -67,3 +67,5 @@ CI/source checks are useful but not hardware evidence. Do not wait for CI to pro
 - **2026-11-22 / graph execution orchestration:** added a fail-closed plan-to-graph-to-scheduler entry point. Every dispatch still requires a backend-specific validated kernel; execution success is recorded separately and does not imply model-family readiness.
 
 - **2026-11-22 / device KV cache path:** added typed tensor validation, device-to-device K/V cache append via command-buffer copies (no host readback), post-synchronization valid-token accounting, and tensor views over valid cache prefixes. Integration into staged model graph execution remains pending.
+
+- **2026-11-22 / Embedding lowering:** added backend-owned token-ID upload and dispatch-lifetime binding for the F32 Embedding candidate; graph compilation now resolves `token_ids` as a declared external input. Tokenizer and GPU numerical parity remain UNVERIFIED.

@@ -102,3 +102,5 @@ The backend rejects dispatches unless their kernel identity is marked `Validated
 - The model lowering layer and full app inference integration remain UNVERIFIED; no model generation route has been switched away from llama.cpp.
 
 - KV cache now supports typed, contiguous device-to-device K/V appends through the backend command-copy path, advances valid-token state only after successful submit/synchronization, and exposes valid-prefix K/V tensor views. The primitive is host-contract-tested; it is not yet sequenced between projection/RoPE and Attention nodes in an end-to-end model graph.
+
+- Added an Embedding model lowering that uploads the current token-ID vector through the selected backend and retains the upload buffer through the dispatch binding. Model graph compilation now recognizes `token_ids` as a typed external host input rather than requiring a fake Tensor binding. The upload/lowering is contract-tested but remains UNVERIFIED for numerical GPU execution.

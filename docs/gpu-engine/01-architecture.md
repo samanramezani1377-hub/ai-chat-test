@@ -127,3 +127,8 @@ Tokenizer behavior is separate from model architecture and from GGUF parsing. `T
 ### Model graph lowering and execution
 
 The lowering registry is keyed by backend and operator, and resolves tensors through an explicit model execution context. Built-in F32 lowerings currently cover Add, Multiply, MatMul, RMSNorm, SiLU, Softmax and RoPE candidates. Embedding and Attention are deliberately absent until token-ID upload ownership and KV-cache semantics are implemented. Lowering produces only a candidate dispatch: OperatorRegistry must independently authorize a backend-specific validated kernel before a graph node can be added. The execution wrapper compiles the complete graph before submitting it, then marks only that graph run as executed after synchronization. It never promotes a model to gpu_ready on the strength of one graph run.
+
+
+### Token-ID and embedding binding
+
+The model execution context carries token IDs and the selected backend. The Embedding lowering allocates a device token-ID buffer, uploads the exact token sequence, and binds it with the weight/output tensors. The graph compiler treats `token_ids` as a declared external host input and does not fabricate a Tensor for it. The upload buffer lifetime is held by the compute dispatch. This is a structural path only; tokenizer and Embedding kernel parity remain separate validation gates.
