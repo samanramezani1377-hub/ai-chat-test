@@ -76,6 +76,7 @@ struct KernelDefinition {
 
 class OperatorRegistry {
     friend Status validate_gles_add_f32_kernel(Backend& backend, OperatorRegistry& registry);
+    friend Status validate_dawn_add_f32_kernel(Backend& backend, OperatorRegistry& registry);
     friend Status validate_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
     friend Status validate_gles_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& registry);
 public:

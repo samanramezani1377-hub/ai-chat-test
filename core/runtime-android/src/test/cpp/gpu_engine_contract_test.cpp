@@ -809,6 +809,17 @@ void test_gpu_engine_lifecycle() {
     assert(!engine.ready());
 }
 
+
+void test_dawn_add_validation_does_not_promote_fake_backend() {
+    FakeBackend backend(BackendKind::DawnWebGpu, true);
+    OperatorRegistry registry;
+    assert(register_builtin_operator_candidates(registry).ok());
+    assert(validate_dawn_add_f32_kernel(backend, registry).code == StatusCode::NumericalFailure);
+    KernelDefinition selected;
+    assert(registry.select_kernel("Add", BackendKind::DawnWebGpu, DataType::F32,
+        DataType::F32, 2, 1, selected).code == StatusCode::Unsupported);
+}
+
 void test_add_operator_candidate_and_reference() {
     OperatorRegistry registry;
     assert(register_builtin_gles_operator_candidates(registry).ok());
@@ -1616,6 +1627,7 @@ int main() {
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
     test_model_and_quantization_registry_fail_closed();
     test_builtin_architecture_adapter_is_fail_closed();
+    test_dawn_add_validation_does_not_promote_fake_backend();
     test_add_operator_candidate_and_reference();
     test_gpu_engine_lifecycle();
     test_gpu_engine_backend_fallback();
