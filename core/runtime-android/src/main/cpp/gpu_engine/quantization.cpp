@@ -429,6 +429,81 @@ void main() {
 }
 )glsl";
 
+constexpr char kQ4_1EmbeddingWgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> weights: array<u32>;
+@group(0) @binding(1) var<storage, read> token_ids: array<u32>;
+@group(0) @binding(2) var<storage, read_write> output: array<f32>;
+const VOCABULARY_SIZE: u32 = 1u;
+const EMBEDDING_DIMENSION: u32 = 32u;
+const TOKEN_COUNT: u32 = 1u;
+const TOTAL_ELEMENTS: u32 = 32u;
+const WEIGHT_ROW_BYTES: u32 = 20u;
+fn read_u8(byte_offset: u32) -> u32 {
+    let word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 255u;
+}
+fn read_u16(byte_offset: u32) -> u32 {
+    let word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= TOTAL_ELEMENTS) { return; }
+    let token_row = gid.x / EMBEDDING_DIMENSION;
+    let dimension = gid.x % EMBEDDING_DIMENSION;
+    if (token_row >= TOKEN_COUNT) { return; }
+    let token = token_ids[token_row];
+    if (token >= VOCABULARY_SIZE) { return; }
+    let block = dimension / 32u;
+    let within = dimension % 32u;
+    let block_offset = token * WEIGHT_ROW_BYTES + block * 20u;
+    let scale = unpack2x16float(vec2<u32>(read_u16(block_offset), 0u)).x;
+    let minimum = unpack2x16float(vec2<u32>(read_u16(block_offset + 2u), 0u)).x;
+    let packed = read_u8(block_offset + 4u + (within % 16u));
+    let nibble = select(packed & 15u, packed >> 4u, within >= 16u);
+    output[gid.x] = scale * f32(nibble) + minimum;
+}
+)wgsl";
+
+constexpr char kQ4_1EmbeddingGlsl[] = R"glsl(#version 310 es
+precision highp float;
+precision highp int;
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Weights { uint weights[]; };
+layout(std430, binding = 1) readonly buffer TokenIds { uint token_ids[]; };
+layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
+const uint VOCABULARY_SIZE = 1u;
+const uint EMBEDDING_DIMENSION = 32u;
+const uint TOKEN_COUNT = 1u;
+const uint TOTAL_ELEMENTS = 32u;
+const uint WEIGHT_ROW_BYTES = 20u;
+uint read_u8(uint byte_offset) {
+    uint word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 255u;
+}
+uint read_u16(uint byte_offset) {
+    uint word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= TOTAL_ELEMENTS) return;
+    uint token_row = index / EMBEDDING_DIMENSION;
+    uint dimension = index % EMBEDDING_DIMENSION;
+    if (token_row >= TOKEN_COUNT) return;
+    uint token = token_ids[token_row];
+    if (token >= VOCABULARY_SIZE) return;
+    uint block = dimension / 32u;
+    uint within = dimension % 32u;
+    uint block_offset = token * WEIGHT_ROW_BYTES + block * 20u;
+    float scale = unpackHalf2x16(read_u16(block_offset)).x;
+    float minimum = unpackHalf2x16(read_u16(block_offset + 2u)).x;
+    uint packed = read_u8(block_offset + 4u + (within % 16u));
+    uint nibble = within < 16u ? (packed & 15u) : (packed >> 4u);
+    output_values[index] = scale * float(nibble) + minimum;
+}
+)glsl";
+
 constexpr char kQ8_0DequantizeWgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> encoded: array<u32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
@@ -666,6 +741,8 @@ const char* q4_0_matmul_wgsl_source() noexcept { return kQ4_0MatMulWgsl; }
 const char* q4_0_matmul_glsl_source() noexcept { return kQ4_0MatMulGlsl; }
 const char* q4_0_embedding_wgsl_source() noexcept { return kQ4_0EmbeddingWgsl; }
 const char* q4_0_embedding_glsl_source() noexcept { return kQ4_0EmbeddingGlsl; }
+const char* q4_1_embedding_wgsl_source() noexcept { return kQ4_1EmbeddingWgsl; }
+const char* q4_1_embedding_glsl_source() noexcept { return kQ4_1EmbeddingGlsl; }
 const char* q4_1_matmul_wgsl_source() noexcept { return kQ4_1MatMulWgsl; }
 const char* q4_1_matmul_glsl_source() noexcept { return kQ4_1MatMulGlsl; }
 
@@ -1083,6 +1160,120 @@ Status reference_q4_0_embedding(const uint8_t* quantized_weights, uint64_t weigh
         if (token_ids[row] >= vocabulary_size)
             return {StatusCode::InvalidArgument, "Q4_0 Embedding token ID is outside vocabulary"};
         Status status = decode_q4_0_blocks(quantized_weights + token_ids[row] * row_bytes,
+            row_bytes, decoded.data(), decoded.size());
+        if (!status.ok()) return status;
+        std::copy(decoded.begin(), decoded.end(), output + row * embedding_dimension);
+    }
+    return Status::success();
+}
+
+Status build_q4_1_embedding_candidate(const std::shared_ptr<Buffer>& quantized_weights,
+                                      uint64_t weight_bytes, uint32_t vocabulary_size,
+                                      uint32_t embedding_dimension,
+                                      const std::shared_ptr<Buffer>& token_ids_buffer,
+                                      const std::vector<uint32_t>& token_ids,
+                                      const Tensor& output, ComputeDispatch& dispatch) {
+    dispatch = ComputeDispatch{};
+    if (!quantized_weights || !token_ids_buffer || !output.buffer() ||
+        quantized_weights->memory_domain() == MemoryDomain::Host ||
+        token_ids_buffer->memory_domain() == MemoryDomain::Host ||
+        output.descriptor().data_type != DataType::F32 ||
+        output.descriptor().layout != TensorLayout::Contiguous ||
+        output.descriptor().memory == MemoryDomain::Host ||
+        output.descriptor().shape.size() != 2 || token_ids.empty())
+        return {StatusCode::Unsupported, "Q4_1 Embedding requires packed weights, device token IDs and contiguous F32 output"};
+    if (vocabulary_size == 0 || embedding_dimension == 0 || embedding_dimension % 32 != 0 ||
+        token_ids.size() != output.descriptor().shape[0] ||
+        output.descriptor().shape[1] != embedding_dimension ||
+        token_ids.size() > UINT32_MAX || output.element_count() > UINT32_MAX)
+        return {StatusCode::InvalidArgument, "Q4_1 Embedding dimensions or token count are invalid"};
+    for (uint32_t token : token_ids)
+        if (token >= vocabulary_size) return {StatusCode::InvalidArgument, "Q4_1 Embedding token ID is outside vocabulary"};
+    const uint64_t row_bytes = static_cast<uint64_t>(embedding_dimension / 32) * 20;
+    if (row_bytes > UINT64_MAX / vocabulary_size || weight_bytes != row_bytes * vocabulary_size ||
+        weight_bytes > static_cast<uint64_t>(UINT32_MAX) - 3)
+        return {StatusCode::InvalidArgument, "Q4_1 Embedding weight byte size does not match [vocabulary,dimension]"};
+    const uint64_t padded_weights = (weight_bytes + 3) & ~uint64_t{3};
+    const uint64_t token_bytes = token_ids.size() * sizeof(uint32_t);
+    if (quantized_weights->size_bytes() < padded_weights ||
+        token_ids_buffer->size_bytes() < token_bytes ||
+        output.byte_size() != output.element_count() * sizeof(float) ||
+        output.buffer().get() == quantized_weights.get() ||
+        output.buffer().get() == token_ids_buffer.get() ||
+        quantized_weights.get() == token_ids_buffer.get())
+        return {StatusCode::InvalidArgument, "Q4_1 Embedding buffer ranges are inconsistent"};
+    dispatch.label = "q4-1-embedding-f32-activation-generic-unverified";
+    dispatch.kernel_id = "dawn-q4-1-embedding-f32-v1";
+    dispatch.backend = BackendKind::DawnWebGpu;
+    dispatch.wgsl_source = kQ4_1EmbeddingWgsl;
+    dispatch.workgroup_size_x = 64;
+    const std::pair<std::string, std::string> constants[] = {
+        {"const VOCABULARY_SIZE: u32 = 1u;", "const VOCABULARY_SIZE: u32 = " + std::to_string(vocabulary_size) + "u;"},
+        {"const EMBEDDING_DIMENSION: u32 = 32u;", "const EMBEDDING_DIMENSION: u32 = " + std::to_string(embedding_dimension) + "u;"},
+        {"const TOKEN_COUNT: u32 = 1u;", "const TOKEN_COUNT: u32 = " + std::to_string(token_ids.size()) + "u;"},
+        {"const TOTAL_ELEMENTS: u32 = 32u;", "const TOTAL_ELEMENTS: u32 = " + std::to_string(output.element_count()) + "u;"},
+        {"const WEIGHT_ROW_BYTES: u32 = 20u;", "const WEIGHT_ROW_BYTES: u32 = " + std::to_string(row_bytes) + "u;"}
+    };
+    for (const auto& constant : constants) {
+        const size_t pos = dispatch.wgsl_source.find(constant.first);
+        if (pos == std::string::npos) return {StatusCode::BackendFailure, "Q4_1 Embedding WGSL placeholder missing"};
+        dispatch.wgsl_source.replace(pos, constant.first.size(), constant.second);
+    }
+    dispatch.workgroups_x = static_cast<uint32_t>((output.element_count() + 63) / 64);
+    dispatch.bindings = {
+        {0, quantized_weights, 0, padded_weights},
+        {1, token_ids_buffer, 0, token_bytes},
+        {2, output.buffer(), output.byte_offset(), output.byte_size()}
+    };
+    return Status::success();
+}
+
+Status build_q4_1_embedding_gles_candidate(const std::shared_ptr<Buffer>& quantized_weights,
+                                           uint64_t weight_bytes, uint32_t vocabulary_size,
+                                           uint32_t embedding_dimension,
+                                           const std::shared_ptr<Buffer>& token_ids_buffer,
+                                           const std::vector<uint32_t>& token_ids,
+                                           const Tensor& output, ComputeDispatch& dispatch) {
+    Status status = build_q4_1_embedding_candidate(quantized_weights, weight_bytes,
+        vocabulary_size, embedding_dimension, token_ids_buffer, token_ids, output, dispatch);
+    if (!status.ok()) return status;
+    dispatch.backend = BackendKind::OpenGles;
+    dispatch.kernel_id = "gles-q4-1-embedding-f32-v1";
+    dispatch.label = "gles-q4-1-embedding-f32-unverified";
+    dispatch.wgsl_source.clear();
+    dispatch.glsl_source = kQ4_1EmbeddingGlsl;
+    const uint64_t row_bytes = static_cast<uint64_t>(embedding_dimension / 32) * 20;
+    const std::pair<std::string, std::string> constants[] = {
+        {"const uint VOCABULARY_SIZE = 1u;", "const uint VOCABULARY_SIZE = " + std::to_string(vocabulary_size) + "u;"},
+        {"const uint EMBEDDING_DIMENSION = 32u;", "const uint EMBEDDING_DIMENSION = " + std::to_string(embedding_dimension) + "u;"},
+        {"const uint TOKEN_COUNT = 1u;", "const uint TOKEN_COUNT = " + std::to_string(token_ids.size()) + "u;"},
+        {"const uint TOTAL_ELEMENTS = 32u;", "const uint TOTAL_ELEMENTS = " + std::to_string(output.element_count()) + "u;"},
+        {"const uint WEIGHT_ROW_BYTES = 20u;", "const uint WEIGHT_ROW_BYTES = " + std::to_string(row_bytes) + "u;"}
+    };
+    for (const auto& constant : constants) {
+        const size_t pos = dispatch.glsl_source.find(constant.first);
+        if (pos == std::string::npos) return {StatusCode::BackendFailure, "Q4_1 Embedding GLSL placeholder missing"};
+        dispatch.glsl_source.replace(pos, constant.first.size(), constant.second);
+    }
+    return Status::success();
+}
+
+Status reference_q4_1_embedding(const uint8_t* quantized_weights, uint64_t weight_bytes,
+                                uint32_t vocabulary_size, uint32_t embedding_dimension,
+                                const std::vector<uint32_t>& token_ids, float* output) {
+    if ((!quantized_weights || !output) && !token_ids.empty())
+        return {StatusCode::InvalidArgument, "Q4_1 Embedding reference received a null pointer"};
+    if (vocabulary_size == 0 || embedding_dimension == 0 || embedding_dimension % 32 != 0 ||
+        token_ids.empty())
+        return {StatusCode::InvalidArgument, "Q4_1 Embedding dimensions and token list must be non-empty and block-aligned"};
+    const uint64_t row_bytes = static_cast<uint64_t>(embedding_dimension / 32) * 20;
+    if (row_bytes > UINT64_MAX / vocabulary_size || weight_bytes != row_bytes * vocabulary_size)
+        return {StatusCode::InvalidArgument, "Q4_1 Embedding weight byte size is inconsistent"};
+    std::vector<float> decoded(embedding_dimension);
+    for (size_t row = 0; row < token_ids.size(); ++row) {
+        if (token_ids[row] >= vocabulary_size)
+            return {StatusCode::InvalidArgument, "Q4_1 Embedding token ID is outside vocabulary"};
+        Status status = decode_q4_1_blocks(quantized_weights + token_ids[row] * row_bytes,
             row_bytes, decoded.data(), decoded.size());
         if (!status.ok()) return status;
         std::copy(decoded.begin(), decoded.end(), output + row * embedding_dimension);
