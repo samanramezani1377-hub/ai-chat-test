@@ -123,6 +123,29 @@ void main() {
 }
 )glsl";
 
+constexpr char kEmbeddingF32Glsl[] = R"glsl(#version 310 es
+precision highp float;
+precision highp int;
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer EmbeddingWeights { float embedding_weights[]; };
+layout(std430, binding = 1) readonly buffer TokenIds { uint token_ids[]; };
+layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
+const uint VOCABULARY_SIZE = 1u;
+const uint EMBEDDING_DIMENSION = 1u;
+const uint TOKEN_COUNT = 1u;
+const uint TOTAL_ELEMENTS = 1u;
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= TOTAL_ELEMENTS) return;
+    uint token_row = index / EMBEDDING_DIMENSION;
+    uint column = index % EMBEDDING_DIMENSION;
+    if (token_row >= TOKEN_COUNT) return;
+    uint token = token_ids[token_row];
+    if (token >= VOCABULARY_SIZE) { output_values[index] = uintBitsToFloat(0x7fc00000u); return; }
+    output_values[index] = embedding_weights[token * EMBEDDING_DIMENSION + column];
+}
+)glsl";
+
 constexpr char kRopeF32Glsl[] = R"glsl(#version 310 es
 precision highp float;
 layout(local_size_x = 64) in;
@@ -637,6 +660,33 @@ Status build_embedding_f32_candidate(const Tensor& embedding_weights,
         {1, token_ids_buffer, 0, token_bytes},
         {2, output.buffer(), output.byte_offset(), output.byte_size()},
     };
+    return Status::success();
+}
+
+Status build_embedding_f32_gles_candidate(const Tensor& embedding_weights,
+                                          const std::shared_ptr<Buffer>& token_ids_buffer,
+                                          const std::vector<uint32_t>& validated_token_ids,
+                                          const Tensor& output, ComputeDispatch& dispatch) {
+    Status status = build_embedding_f32_candidate(embedding_weights, token_ids_buffer,
+                                                   validated_token_ids, output, dispatch);
+    if (!status.ok()) return status;
+    const auto& shape = embedding_weights.descriptor().shape;
+    dispatch.backend = BackendKind::OpenGles;
+    dispatch.kernel_id = "gles-embedding-f32-generic-v1";
+    dispatch.label = "gles-embedding-f32-generic-unverified";
+    dispatch.wgsl_source.clear();
+    dispatch.glsl_source = kEmbeddingF32Glsl;
+    const std::pair<std::string, std::string> constants[] = {
+        {"const uint VOCABULARY_SIZE = 1u;", "const uint VOCABULARY_SIZE = " + std::to_string(shape[0]) + "u;"},
+        {"const uint EMBEDDING_DIMENSION = 1u;", "const uint EMBEDDING_DIMENSION = " + std::to_string(shape[1]) + "u;"},
+        {"const uint TOKEN_COUNT = 1u;", "const uint TOKEN_COUNT = " + std::to_string(output.descriptor().shape[0]) + "u;"},
+        {"const uint TOTAL_ELEMENTS = 1u;", "const uint TOTAL_ELEMENTS = " + std::to_string(output.element_count()) + "u;"}
+    };
+    for (const auto& constant : constants) {
+        const size_t pos = dispatch.glsl_source.find(constant.first);
+        if (pos == std::string::npos) return {StatusCode::BackendFailure, "Embedding GLSL constant placeholder is missing"};
+        dispatch.glsl_source.replace(pos, constant.first.size(), constant.second);
+    }
     return Status::success();
 }
 
@@ -1462,7 +1512,23 @@ Status register_builtin_gles_operator_candidates(OperatorRegistry& registry) {
     rope.validation = KernelValidation::Unverified;
     rope.kernel_id = "gles-rope-f32-generic-v1";
     rope.glsl_source = kRopeF32Glsl;
-    return registry.register_kernel(std::move(rope));
+    status = registry.register_kernel(std::move(rope));
+    if (!status.ok()) return status;
+
+    KernelDefinition embedding;
+    embedding.operator_name = "Embedding";
+    embedding.backend = BackendKind::OpenGles;
+    embedding.input_type = DataType::F32;
+    embedding.input_types = {DataType::F32, DataType::U32};
+    embedding.output_type = DataType::F32;
+    embedding.min_input_count = 2;
+    embedding.max_input_count = 2;
+    embedding.min_rank = 2;
+    embedding.max_rank = 2;
+    embedding.validation = KernelValidation::Unverified;
+    embedding.kernel_id = "gles-embedding-f32-generic-v1";
+    embedding.glsl_source = kEmbeddingF32Glsl;
+    return registry.register_kernel(std::move(embedding));
 }
 
 } // namespace ai_chat::gpu_engine

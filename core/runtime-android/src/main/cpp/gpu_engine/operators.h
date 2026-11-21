@@ -31,6 +31,10 @@ Status build_softmax_f32_gles_candidate(const Tensor& input, const Tensor& outpu
                                         ComputeDispatch& dispatch);
 Status build_rope_f32_gles_candidate(const Tensor& input, const Tensor& output,
                                      const RopeConfig& config, ComputeDispatch& dispatch);
+Status build_embedding_f32_gles_candidate(const Tensor& embedding_weights,
+                                          const std::shared_ptr<Buffer>& token_ids_buffer,
+                                          const std::vector<uint32_t>& validated_token_ids,
+                                          const Tensor& output, ComputeDispatch& dispatch);
 Status register_builtin_gles_operator_candidates(OperatorRegistry& registry);
 Status reference_multiply_f32(const float* lhs, const float* rhs, float* output,
                               uint64_t element_count);

@@ -765,6 +765,13 @@ void test_add_operator_candidate_and_reference() {
                                          embedding_dispatch).ok());
     assert(embedding_dispatch.bindings.size() == 3);
     assert(embedding_dispatch.wgsl_source.find("const VOCABULARY_SIZE: u32 = 3u;") != std::string::npos);
+    ComputeDispatch gles_embedding;
+    assert(build_embedding_f32_gles_candidate(embedding_weights_tensor, embedding_ids_buffer,
+                                              token_ids, embedding_output_tensor,
+                                              gles_embedding).ok());
+    assert(gles_embedding.backend == BackendKind::OpenGles);
+    assert(gles_embedding.glsl_source.find("const VOCABULARY_SIZE = 3u;") != std::string::npos);
+    assert(gles_embedding.glsl_source.find("const TOTAL_ELEMENTS = 4u;") != std::string::npos);
     const std::vector<uint32_t> invalid_token_ids = {3};
     assert(reference_embedding_f32(embedding_weights, 3, 2, invalid_token_ids, embedding_output).code ==
            StatusCode::InvalidArgument);
