@@ -15,6 +15,7 @@ namespace ai_chat::gpu_engine {
 
 class OperatorRegistry;
 class ComputeGraph;
+class ComputeGraph;
 
 struct ModelPlanOperation {
     std::string id;
@@ -91,7 +92,7 @@ class OperatorDispatchRegistry {
 public:
     Status register_builder(OperatorDispatchBuilderDefinition definition);
     const OperatorDispatchBuilderDefinition* find(const std::string& operator_name,
-                                                   BackendKind backend) const noexcept;
+                                                   BackendKind backend) const;
 private:
     std::unordered_map<std::string, OperatorDispatchBuilderDefinition> builders_;
 };

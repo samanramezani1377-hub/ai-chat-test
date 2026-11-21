@@ -145,7 +145,7 @@ Status OperatorDispatchRegistry::register_builder(OperatorDispatchBuilderDefinit
 }
 
 const OperatorDispatchBuilderDefinition* OperatorDispatchRegistry::find(
-        const std::string& operator_name, BackendKind backend) const noexcept {
+        const std::string& operator_name, BackendKind backend) const {
     const auto found = builders_.find(builder_key(operator_name, backend));
     return found == builders_.end() ? nullptr : &found->second;
 }
@@ -155,7 +155,7 @@ Status ModelGraphCompiler::compile(const ModelExecutionPlan& plan, const TensorB
                                    const OperatorRegistry& operators, BackendKind backend,
                                    ComputeGraph& graph) const {
     if (!plan.structurally_validated || !plan.operator_coverage_validated ||
-        !plan.execution_validated || !plan.blockers.empty()) {
+        !plan.execution_validated || !plan.gpu_ready || !plan.blockers.empty()) {
         return {StatusCode::Unsupported, "Model plan has not passed structural, operator and execution validation"};
     }
     ComputeGraph candidate;

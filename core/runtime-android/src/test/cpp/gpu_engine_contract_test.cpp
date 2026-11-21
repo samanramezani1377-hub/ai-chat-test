@@ -1256,6 +1256,7 @@ void test_model_graph_compiler_requires_validated_dispatch_builders() {
     plan.structurally_validated = true;
     plan.operator_coverage_validated = true;
     plan.execution_validated = true;
+    plan.gpu_ready = true;
     plan.external_inputs = {"input"};
     plan.operations.push_back({"add", "Add", {"input"}, {"weight"}, "output", {4}});
 
