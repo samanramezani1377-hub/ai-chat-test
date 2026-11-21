@@ -50,6 +50,9 @@ struct ModelGpuMemoryEstimateReport {
     std::vector<std::string> blockers;
 };
 
+Status allocate_model_activation_tensors(const ModelExecutionPlan& model, MemoryManager& memory,
+                                         uint64_t token_count, ModelExecutionContext& context);
+
 ModelGpuMemoryEstimateReport estimate_model_gpu_memory(
     const ModelExecutionPlan& model, const ModelGpuMemoryEstimateInput& input);
 

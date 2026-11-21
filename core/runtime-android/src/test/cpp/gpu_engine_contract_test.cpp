@@ -1298,6 +1298,29 @@ void test_embedding_model_lowering_uploads_token_ids_and_binds_buffer() {
 
 
 
+
+void test_activation_allocator_reuses_non_overlapping_tensor_slots() {
+    FakeBackend backend(BackendKind::OpenGles);
+    MemoryManager memory(backend, 128);
+    ModelExecutionPlan plan;
+    plan.structurally_validated = true;
+    ModelPlanOperation first; first.id = "first"; first.operator_name = "Add";
+    first.inputs = {"a", "b"}; first.output = "x"; first.output_shape = {0, 4};
+    ModelPlanOperation second; second.id = "second"; second.operator_name = "Add";
+    second.inputs = {"x", "c"}; second.output = "y"; second.output_shape = {0, 4};
+    ModelPlanOperation third; third.id = "third"; third.operator_name = "Add";
+    third.inputs = {"y", "d"}; third.output = "z"; third.output_shape = {0, 4};
+    plan.operations = {first, second, third};
+    plan.retained_outputs = {"z"};
+    ModelExecutionContext context;
+    assert(allocate_model_activation_tensors(plan, memory, 2, context).ok());
+    assert(context.tensors.at("x").descriptor().shape == std::vector<uint64_t>({2, 4}));
+    assert(context.tensors.at("z").buffer().get() == context.tensors.at("x").buffer().get());
+    assert(context.tensors.at("y").buffer().get() != context.tensors.at("x").buffer().get());
+    assert(context.activation_leases.size() == 2);
+    assert(memory.allocated_bytes() == 64);
+}
+
 void test_model_kv_cache_view_binding_uses_planned_sequence_length() {
     FakeBackend backend(BackendKind::OpenGles);
     MemoryManager memory(backend, 4096);
@@ -1916,6 +1939,7 @@ int main() {
     test_model_execution_never_promotes_unvalidated_kernels();
     test_model_graph_executes_kv_copy_node_before_committing_cache_state();
     test_model_kv_cache_view_binding_uses_planned_sequence_length();
+    test_activation_allocator_reuses_non_overlapping_tensor_slots();
     test_embedding_model_lowering_uploads_token_ids_and_binds_buffer();
     test_llama_model_execution_plan_is_structural_only();
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();

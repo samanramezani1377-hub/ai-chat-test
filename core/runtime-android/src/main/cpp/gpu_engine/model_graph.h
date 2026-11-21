@@ -26,6 +26,7 @@ struct ModelExecutionContext {
     uint64_t sequence_length = 0;
     uint64_t context_length = 0;
     bool prefill = false;
+    std::vector<MemoryLease> activation_leases;
 };
 
 struct ModelPlanOperation {

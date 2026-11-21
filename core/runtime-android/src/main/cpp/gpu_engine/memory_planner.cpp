@@ -24,6 +24,101 @@ bool checked_multiply(uint64_t a, uint64_t b, uint64_t& out) {
 }
 }
 
+
+Status allocate_model_activation_tensors(const ModelExecutionPlan& model, MemoryManager& memory,
+                                         uint64_t token_count, ModelExecutionContext& context) {
+    if (!model.structurally_validated || token_count == 0)
+        return {StatusCode::InvalidArgument, "Activation allocation requires a validated model plan and non-zero token count"};
+
+    std::unordered_map<std::string, size_t> last_use;
+    for (size_t index = 0; index < model.operations.size(); ++index) {
+        const auto& operation = model.operations[index];
+        if (operation.side_effect || operation.output.empty()) continue;
+        for (const auto& input : operation.inputs) last_use[input] = index;
+    }
+
+    struct Slot {
+        std::shared_ptr<Buffer> buffer;
+        uint64_t size_bytes = 0;
+        size_t available_after = 0;
+    };
+    std::vector<Slot> slots;
+    std::vector<MemoryLease> leases;
+    std::unordered_map<std::string, Tensor> pending_tensors;
+    std::unordered_map<std::string, size_t> producers;
+    const std::unordered_map<std::string, bool> retained(
+        model.retained_outputs.begin(), model.retained_outputs.end());
+
+    for (size_t index = 0; index < model.operations.size(); ++index) {
+        const auto& operation = model.operations[index];
+        if (operation.side_effect || operation.output.empty()) continue;
+        if (context.tensors.find(operation.output) != context.tensors.end())
+            continue;
+        if (operation.output_shape.empty())
+            return {StatusCode::InvalidArgument, "Model activation output has no declared shape: " + operation.output};
+        if (producers.find(operation.output) != producers.end())
+            return {StatusCode::InvalidArgument, "Model plan writes the same activation name more than once: " + operation.output};
+        producers.emplace(operation.output, index);
+
+        TensorDesc descriptor;
+        descriptor.shape = operation.output_shape;
+        for (uint64_t& dimension : descriptor.shape) {
+            if (dimension == 0) dimension = token_count;
+            if (dimension == 0)
+                return {StatusCode::InvalidArgument, "Model activation shape contains a zero dimension"};
+        }
+        descriptor.data_type = DataType::F32;
+        descriptor.layout = TensorLayout::Contiguous;
+        descriptor.memory = MemoryDomain::Device;
+        descriptor.alignment = 4;
+        uint64_t required_bytes = 0;
+        Status status = Tensor::required_bytes(descriptor, required_bytes);
+        if (!status.ok()) return status;
+
+        Slot* selected = nullptr;
+        for (auto& slot : slots) {
+            if (slot.available_after < index && slot.size_bytes >= required_bytes) {
+                selected = &slot;
+                break;
+            }
+        }
+        if (!selected) {
+            BufferDesc buffer_desc;
+            buffer_desc.size_bytes = required_bytes;
+            buffer_desc.alignment = descriptor.alignment;
+            buffer_desc.memory = MemoryDomain::Device;
+            buffer_desc.persistent = false;
+            buffer_desc.label = "activation-" + operation.output;
+            MemoryLease lease;
+            status = memory.allocate(buffer_desc, lease);
+            if (!status.ok()) return status;
+            if (!lease || !lease.buffer() || lease.buffer()->size_bytes() < required_bytes)
+                return {StatusCode::BackendFailure, "Memory manager returned an undersized activation lease"};
+            leases.push_back(std::move(lease));
+            slots.push_back({leases.back().buffer(), required_bytes, index});
+            selected = &slots.back();
+        }
+
+        Tensor tensor;
+        status = Tensor::create(std::move(descriptor), selected->buffer, 0, tensor);
+        if (!status.ok()) return status;
+        pending_tensors.emplace(operation.output, std::move(tensor));
+        const auto last = last_use.find(operation.output);
+        selected->available_after = retained.find(operation.output) != retained.end()
+            ? std::numeric_limits<size_t>::max()
+            : (last == last_use.end() ? index : last->second);
+    }
+
+    for (auto& entry : pending_tensors) {
+        if (!context.tensors.emplace(entry.first, std::move(entry.second)).second)
+            return {StatusCode::InvalidArgument, "Activation tensor binding was concurrently created"};
+    }
+    context.activation_leases.insert(context.activation_leases.end(),
+                                     std::make_move_iterator(leases.begin()),
+                                     std::make_move_iterator(leases.end()));
+    return Status::success();
+}
+
 ModelGpuMemoryEstimateReport estimate_model_gpu_memory(
         const ModelExecutionPlan& model, const ModelGpuMemoryEstimateInput& input) {
     ModelGpuMemoryEstimateReport report;
