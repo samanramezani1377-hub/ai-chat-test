@@ -401,6 +401,16 @@ void test_q4_decoders() {
            !registry.can_execute_on_gpu(8));
 }
 
+
+void test_dawn_q8_0_operator_registration_is_unverified() {
+    OperatorRegistry registry;
+    assert(register_builtin_quantized_operator_candidates(registry).ok());
+    KernelDefinition selected;
+    assert(registry.select_kernel("MatMul_Q8_0", BackendKind::DawnWebGpu,
+        std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
+        selected).code == StatusCode::Unsupported);
+}
+
 void test_q8_0_decoder_and_registry() {
     std::vector<uint8_t> encoded(34, 0);
     encoded[0] = 0x00;
@@ -1598,6 +1608,7 @@ int main() {
     test_independent_sampler_and_stop_controller();
     test_q4_decoders();
     test_q5_decoders();
+    test_dawn_q8_0_operator_registration_is_unverified();
     test_q8_0_decoder_and_registry();
     test_kv_cache_memory_and_sequential_append();
     test_gpu_backend_fallback_order();

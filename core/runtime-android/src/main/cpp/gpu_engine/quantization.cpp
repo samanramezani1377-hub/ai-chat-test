@@ -851,6 +851,24 @@ Status build_q8_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
     return Status::success();
 }
 
+
+Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry) {
+    KernelDefinition q8;
+    q8.operator_name = "MatMul_Q8_0";
+    q8.backend = BackendKind::DawnWebGpu;
+    q8.input_type = DataType::F32;
+    q8.input_types = {DataType::F32, DataType::U32};
+    q8.output_type = DataType::F32;
+    q8.min_input_count = 2;
+    q8.max_input_count = 2;
+    q8.min_rank = 2;
+    q8.max_rank = 2;
+    q8.validation = KernelValidation::Unverified;
+    q8.kernel_id = "dawn-q8-0-matmul-f32-activation-v1";
+    q8.wgsl_source = q8_0_matmul_wgsl_source();
+    return registry.register_kernel(std::move(q8));
+}
+
 Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
     QuantizationFormat q4_0;
     q4_0.file_type_id = 2;

@@ -41,6 +41,7 @@ Status reference_q8_0_matmul(const float* activations, const uint8_t* quantized_
                              uint32_t rows, uint32_t output_channels, uint32_t inner);
 
 Status register_builtin_quantization_formats(QuantizationRegistry& registry);
+Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry);
 const char* q5_0_dequantize_wgsl_source() noexcept;
 Status build_q5_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
                                        uint64_t encoded_bytes,
