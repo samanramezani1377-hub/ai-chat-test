@@ -1965,6 +1965,11 @@ void test_operator_registry_fail_closed() {
     authorized.wgsl_source = selected.wgsl_source;
     assert(registry.authorize_dispatch(selected.kernel_id, selected.backend, authorized).ok());
     assert(authorized.validation == KernelValidation::Validated);
+    ComputeDispatch tampered;
+    tampered.kernel_id = selected.kernel_id;
+    tampered.wgsl_source = selected.wgsl_source + "\\n// changed shader body";
+    assert(registry.authorize_dispatch(selected.kernel_id, selected.backend, tampered).code ==
+           StatusCode::InvalidArgument);
     ComputeDispatch unknown;
     unknown.kernel_id = "not-registered";
     unknown.wgsl_source = selected.wgsl_source;

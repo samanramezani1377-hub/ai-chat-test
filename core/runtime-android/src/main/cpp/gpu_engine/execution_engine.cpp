@@ -16,6 +16,48 @@ bool multiply_overflow(uint64_t a, uint64_t b, uint64_t& result) {
     return false;
 }
 
+std::string normalize_kernel_specialization(const std::string& source) {
+    static const std::unordered_set<std::string> kSpecializableConstants = {
+        "VOCABULARY_SIZE", "EMBEDDING_DIMENSION", "TOKEN_COUNT", "TOTAL_ELEMENTS",
+        "TOKENS", "QUERY_HEADS", "KV_HEADS", "HEAD_DIM", "PAST_LENGTH",
+        "SEQUENCE_LENGTH", "SCALE", "HEADS", "ROTARY_DIM", "START_POSITION",
+        "THETA", "NEOX_STYLE", "ROWS", "COLUMNS", "INNER", "EPSILON",
+        "OUTPUT_CHANNELS", "WEIGHT_ROW_BYTES"
+    };
+    std::string normalized;
+    normalized.reserve(source.size());
+    size_t line_start = 0;
+    while (line_start < source.size()) {
+        const size_t line_end = source.find('\n', line_start);
+        const size_t end = line_end == std::string::npos ? source.size() : line_end;
+        std::string line = source.substr(line_start, end - line_start);
+        const size_t constant = line.find("const ");
+        const size_t equals = constant == std::string::npos ? std::string::npos : line.find('=', constant + 6);
+        const size_t semicolon = equals == std::string::npos ? std::string::npos : line.find(';', equals + 1);
+        if (constant != std::string::npos && equals != std::string::npos && semicolon != std::string::npos) {
+            size_t name_end = equals;
+            const size_t colon = line.find(':', constant + 6);
+            if (colon != std::string::npos && colon < equals) name_end = colon;
+            while (name_end > constant + 6 &&
+                   (line[name_end - 1] == ' ' || line[name_end - 1] == '\t')) --name_end;
+            size_t name_start = name_end;
+            while (name_start > constant + 6 &&
+                   ((line[name_start - 1] >= 'A' && line[name_start - 1] <= 'Z') ||
+                    (line[name_start - 1] >= 'a' && line[name_start - 1] <= 'z') ||
+                    (line[name_start - 1] >= '0' && line[name_start - 1] <= '9') ||
+                    line[name_start - 1] == '_')) --name_start;
+            const std::string name = line.substr(name_start, name_end - name_start);
+            if (kSpecializableConstants.find(name) != kSpecializableConstants.end())
+                line.replace(equals + 1, semicolon - equals - 1, " <specialized>");
+        }
+        normalized += line;
+        if (line_end != std::string::npos) normalized.push_back('\n');
+        if (line_end == std::string::npos) break;
+        line_start = line_end + 1;
+    }
+    return normalized;
+}
+
 uint64_t element_size(DataType type) {
     switch (type) {
         case DataType::F32:
@@ -326,11 +368,14 @@ Status OperatorRegistry::authorize_dispatch(const std::string& kernel_id, Backen
         });
     if (found == kernels_.end())
         return {StatusCode::Unsupported, "Kernel is not registered as validated for this backend"};
-    const bool source_present = backend == BackendKind::DawnWebGpu
-        ? !dispatch.wgsl_source.empty()
-        : (backend == BackendKind::OpenGles && !dispatch.glsl_source.empty());
-    if (!source_present || dispatch.kernel_id != kernel_id)
-        return {StatusCode::InvalidArgument, "Dispatch does not match the requested registered kernel source and identity"};
+    const std::string& registered_source = backend == BackendKind::DawnWebGpu
+        ? found->wgsl_source : found->glsl_source;
+    const std::string& dispatch_source = backend == BackendKind::DawnWebGpu
+        ? dispatch.wgsl_source : dispatch.glsl_source;
+    if (dispatch.kernel_id != kernel_id || registered_source.empty() || dispatch_source.empty() ||
+        normalize_kernel_specialization(registered_source) !=
+            normalize_kernel_specialization(dispatch_source))
+        return {StatusCode::InvalidArgument, "Dispatch shader differs from the validated backend kernel outside supported shape specialization"};
     dispatch.backend = backend;
     dispatch.validation = KernelValidation::Validated;
     return Status::success();
