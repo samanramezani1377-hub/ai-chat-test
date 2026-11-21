@@ -437,7 +437,13 @@ Status reference_rope_f32(const float* input, float* output,
         (config.rotary_dimensions & 1u) != 0 || !std::isfinite(config.theta) ||
         config.theta <= 1.0f || tokens > UINT32_MAX - config.start_position)
         return {StatusCode::InvalidArgument, "RoPE reference configuration is invalid"};
-    uint64_t elements = static_cast<uint64_t>(tokens) * heads * head_dimension;
+    uint64_t elements = tokens;
+    if (heads != 0 && elements > std::numeric_limits<uint64_t>::max() / heads)
+        return {StatusCode::InvalidArgument, "RoPE element count overflows"};
+    elements *= heads;
+    if (head_dimension != 0 && elements > std::numeric_limits<uint64_t>::max() / head_dimension)
+        return {StatusCode::InvalidArgument, "RoPE element count overflows"};
+    elements *= head_dimension;
     for (uint64_t i = 0; i < elements; ++i) output[i] = input[i];
     const uint32_t half = config.rotary_dimensions / 2;
     for (uint32_t token = 0; token < tokens; ++token) {
