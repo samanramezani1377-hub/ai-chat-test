@@ -26,6 +26,7 @@ Status decode_q8_0_blocks(const uint8_t* source, size_t source_bytes,
 const char* q8_0_matmul_wgsl_source() noexcept;
 // Candidate only: remains UNVERIFIED until GLES numerical parity tests pass.
 const char* q8_0_matmul_glsl_source() noexcept;
+Status validate_gles_q8_0_matmul_kernel(Backend& backend, OperatorRegistry& registry);
 Status build_q8_0_matmul_gles_candidate(const Tensor& activations,
                                        const std::shared_ptr<Buffer>& quantized_weights,
                                        uint64_t weight_bytes, const Tensor& output,

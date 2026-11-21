@@ -1137,6 +1137,18 @@ void test_model_and_quantization_registry_fail_closed() {
 }
 
 
+
+void test_gles_q8_0_validation_is_fail_closed() {
+    FakeBackend backend;
+    OperatorRegistry registry;
+    assert(register_builtin_gles_operator_candidates(registry).ok());
+    assert(validate_gles_q8_0_matmul_kernel(backend, registry).code == StatusCode::NumericalFailure);
+    KernelDefinition selected;
+    assert(registry.select_kernel("MatMul_Q8_0", BackendKind::OpenGles,
+        std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
+        selected).code == StatusCode::Unsupported);
+}
+
 void test_universal_gles_operator_candidate_is_fail_closed() {
     FakeBackend backend;
     BufferDesc desc{16, 4, MemoryDomain::Device, false, "gles-add"};
@@ -1337,6 +1349,7 @@ int main() {
     test_independent_gguf_reader();
     test_tensor_and_memory_lease();
     test_operator_registry_fail_closed();
+    test_gles_q8_0_validation_is_fail_closed();
     test_universal_gles_operator_candidate_is_fail_closed();
     test_model_and_quantization_registry_fail_closed();
     test_builtin_architecture_adapter_is_fail_closed();
