@@ -19,6 +19,7 @@ internal object NativeLlamaCpp {
     private var nativeInitialized = false
 
     const val GPU_LAYERS_MAX = 99
+    const val GPU_LAYERS_ALL = -1
 
     init {
         Log.i(TAG, "ACTIVATION_NATIVE_LIBRARY_LOAD_STARTED")
@@ -40,7 +41,7 @@ internal object NativeLlamaCpp {
     /** One serialized native activation transaction. Native side owns model/context lifetime. */
     @Synchronized
     fun load(path: String, contextLength: Int, gpuLayers: Int, draftPath: String? = null): Int {
-        require(gpuLayers in 0..GPU_LAYERS_MAX) { "GPU layer preference must be between 0 and $GPU_LAYERS_MAX" }
+        require(gpuLayers == GPU_LAYERS_ALL || gpuLayers in 0..GPU_LAYERS_MAX) { "GPU layer preference must be ALL (-1) or between 0 and $GPU_LAYERS_MAX" }
         require(path.isNotBlank()) { "Model path must not be blank" }
         val file = File(path)
         require(file.isFile && file.canRead()) { "Model file is not readable: $path" }
