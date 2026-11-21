@@ -16,6 +16,8 @@ import com.woogit.aicore.domain.RuntimeCompatibility
 import com.woogit.aicore.domain.ValidationStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
@@ -43,6 +45,11 @@ class LocalModelService(
 
     @Volatile
     private var activeId: String? = null
+
+    // A failed or interrupted native transition leaves the resident state uncertain.
+    // Never load another model until a subsequent unload has completed successfully.
+    @Volatile
+    private var runtimeStateUnknown = false
 
     @Volatile
     private var generationJob: Job? = null
@@ -106,12 +113,20 @@ class LocalModelService(
                         )
                     }
 
+                    if (runtimeStateUnknown) {
+                        runtime.unload()
+                        runtimeStateUnknown = false
+                    }
                     if (activeId != null) {
                         // Clear advertised state before unload so cancellation cannot leave a stale active ID.
                         activeId = null
+                        runtimeStateUnknown = true
                         runtime.unload()
+                        runtimeStateUnknown = false
                     }
+                    runtimeStateUnknown = true
                     runtime.load(model)
+                    runtimeStateUnknown = false
 
                     when (val persisted = repository.setActive(id)) {
                         is ModelResult.Success -> {
@@ -124,24 +139,20 @@ class LocalModelService(
                             )
                         }
                         is ModelResult.Failure -> {
-                            runCatching { runtime.unload() }
-                            activeId = null
+                            resetRuntimeState()
                             persisted
                         }
                     }
                 } catch (cancelled: CancellationException) {
+                    resetRuntimeState()
                     throw cancelled
                 } catch (error: OutOfMemoryError) {
-                    runCatching { runtime.unload() }
-                    runCatching { repository.setActive(null) }
-                    activeId = null
+                    resetRuntimeState()
                     ModelResult.Failure(
                         ModelError.OutOfMemory("Not enough memory to load model", error),
                     )
                 } catch (error: Throwable) {
-                    runCatching { runtime.unload() }
-                    runCatching { repository.setActive(null) }
-                    activeId = null
+                    resetRuntimeState()
                     ModelResult.Failure(
                         ModelError.LoadFailed("Unable to load model", error),
                     )
@@ -228,17 +239,21 @@ class LocalModelService(
                     // Fail closed before native unload: cancellation or unload failure
                     // must never leave this service advertising weights as resident.
                     activeId = null
+                    runtimeStateUnknown = true
                     runtime.unload()
+                    runtimeStateUnknown = false
                     when (val persisted = repository.setActive(null)) {
-                        is ModelResult.Success -> {
-                            activeId = null
+                        is ModelResult.Success -> persisted
+                        is ModelResult.Failure -> {
+                            resetRuntimeState()
                             persisted
                         }
-                        is ModelResult.Failure -> persisted
                     }
                 } catch (cancelled: CancellationException) {
+                    resetRuntimeState()
                     throw cancelled
                 } catch (error: Throwable) {
+                    resetRuntimeState()
                     ModelResult.Failure(
                         ModelError.LoadFailed("Unable to deactivate model", error),
                     )
@@ -256,11 +271,26 @@ class LocalModelService(
                     is ModelResult.Failure -> return@runtimeLock result
                 }
                 if (active?.id == id) {
-                    activeId = null
-                    runtime.unload()
-                    when (val cleared = repository.setActive(null)) {
-                        is ModelResult.Success -> Unit
-                        is ModelResult.Failure -> return@runtimeLock cleared
+                    try {
+                        activeId = null
+                        runtimeStateUnknown = true
+                        runtime.unload()
+                        runtimeStateUnknown = false
+                        when (val cleared = repository.setActive(null)) {
+                            is ModelResult.Success -> Unit
+                            is ModelResult.Failure -> {
+                                resetRuntimeState()
+                                return@runtimeLock cleared
+                            }
+                        }
+                    } catch (cancelled: CancellationException) {
+                        resetRuntimeState()
+                        throw cancelled
+                    } catch (error: Throwable) {
+                        resetRuntimeState()
+                        return@runtimeLock ModelResult.Failure(
+                            ModelError.LoadFailed("Unable to unload active model before deletion", error),
+                        )
                     }
                 }
 
@@ -275,6 +305,29 @@ class LocalModelService(
                 repository.unregister(id)
             }
         }
+
+    /**
+     * Roll back an interrupted or failed lifecycle transition. Cleanup must finish even
+     * after caller cancellation; an unsuccessful unload keeps the state marked unknown
+     * so the next activation retries cleanup before loading anything.
+     */
+    private suspend fun resetRuntimeState() {
+        activeId = null
+        runtimeStateUnknown = true
+        withContext(NonCancellable) {
+            try {
+                runtime.unload()
+                runtimeStateUnknown = false
+            } catch (_: Throwable) {
+                // Keep runtimeStateUnknown=true and fail closed.
+            }
+            try {
+                repository.setActive(null)
+            } catch (_: Throwable) {
+                // activeId remains null, so generation cannot use stale persisted state.
+            }
+        }
+    }
 
     fun activeModelId(): String? = activeId
 

@@ -3,6 +3,7 @@ package com.samanramezani.aichattest.voice
 import android.content.ContentResolver
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.samanramezani.aichattest.storage.AtomicFileReplacement
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
@@ -104,10 +105,7 @@ class VoiceModelStore(
                     output.write(buffer, 0, n)
                 }
             }
-            if (target.exists()) {
-                check(target.delete()) { "$errorCode: جایگزینی فایل قبلی ناموفق بود." }
-            }
-            check(temporary.renameTo(target)) { "$errorCode: ذخیره فایل موقت ناموفق بود." }
+            AtomicFileReplacement.replace(temporary, target)
         } catch (t: Throwable) {
             temporary.delete()
             throw t

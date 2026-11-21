@@ -20,6 +20,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
@@ -56,6 +57,26 @@ class LocalModelServiceConcurrencyTest {
 
         assertTrue(result is ModelResult.Failure)
         assertEquals(0, runtime.generateCount.get(), "native generation must not run for an unloaded model")
+    }
+
+    @Test
+    fun cancelledActivationUnloadsPartialRuntimeBeforeNextActivation() = runBlocking {
+        val runtime = RecordingRuntime().apply { blockLoad = true }
+        val repository = RecordingRepository(model())
+        val service = LocalModelService(NoOpImporter(), repository, runtime)
+
+        val activation = async { service.activate("model-a") }
+        runtime.loadStarted.await()
+        activation.cancelAndJoin()
+
+        assertEquals(1, runtime.unloadCount.get(), "cancelled activation must unload partially loaded native state")
+        assertEquals(null, service.activeModelId())
+        assertEquals(null, repository.activeId)
+
+        runtime.blockLoad = false
+        assertTrue(service.activate("model-a") is ModelResult.Success<*>)
+        assertEquals(2, runtime.loadCount.get())
+        assertEquals("model-a", service.activeModelId())
     }
 
     @Test
@@ -143,13 +164,21 @@ class LocalModelServiceConcurrencyTest {
         val unloadCount = AtomicInteger(0)
         val stopCount = AtomicInteger(0)
         val generationStarted = CompletableDeferred<Unit>()
+        val loadStarted = CompletableDeferred<Unit>()
         val generateCount = AtomicInteger(0)
 
         @Volatile
         var blockGeneration = false
 
+        @Volatile
+        var blockLoad = false
+
         override suspend fun load(model: ModelDescriptor) {
             loadCount.incrementAndGet()
+            if (blockLoad) {
+                loadStarted.complete(Unit)
+                awaitCancellation()
+            }
             operation()
         }
 

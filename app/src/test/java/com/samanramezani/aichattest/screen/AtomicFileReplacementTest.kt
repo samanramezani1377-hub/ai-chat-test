@@ -1,5 +1,7 @@
 package com.samanramezani.aichattest.screen
 
+import com.samanramezani.aichattest.storage.AtomicFileReplacement
+
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
