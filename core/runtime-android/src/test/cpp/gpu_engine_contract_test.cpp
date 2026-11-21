@@ -191,6 +191,10 @@ void test_tensor_and_memory_lease() {
     desc.alignment = 4;
     Tensor tensor;
     assert(Tensor::create(desc, backing, 0, tensor).ok());
+    TensorDesc wrong_domain = desc;
+    wrong_domain.memory = MemoryDomain::Host;
+    Tensor rejected_tensor;
+    assert(Tensor::create(wrong_domain, backing, 0, rejected_tensor).code == StatusCode::InvalidArgument);
     assert(tensor.element_count() == 6);
     assert(tensor.byte_size() == 24);
 

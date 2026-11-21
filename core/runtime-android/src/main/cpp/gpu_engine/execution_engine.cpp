@@ -81,6 +81,9 @@ Status Tensor::create(TensorDesc descriptor, std::shared_ptr<Buffer> buffer,
                       uint64_t byte_offset, Tensor& out) {
     out = Tensor{};
     if (!buffer) return {StatusCode::InvalidArgument, "Tensor requires a valid backing buffer"};
+    if (descriptor.memory != buffer->memory_domain()) {
+        return {StatusCode::InvalidArgument, "Tensor memory domain does not match its backing buffer"};
+    }
     uint64_t required = 0;
     Status status = required_bytes(descriptor, required);
     if (!status.ok()) return status;
@@ -132,9 +135,13 @@ struct MemoryManager::State {
         if (!persistent && physical_bytes <= pool_limit) {
             std::lock_guard<std::mutex> lock(pool_mutex);
             if (pooled_bytes <= pool_limit - physical_bytes) {
-                pool.push_back({std::move(buffer), physical_bytes, alignment, domain});
-                pooled_bytes += physical_bytes;
-                return;
+                try {
+                    pool.push_back({buffer, physical_bytes, alignment, domain});
+                    pooled_bytes += physical_bytes;
+                    return;
+                } catch (...) {
+                    // A pool bookkeeping allocation must never terminate inference.
+                }
             }
         }
         reserved_bytes.fetch_sub(physical_bytes, std::memory_order_relaxed);
