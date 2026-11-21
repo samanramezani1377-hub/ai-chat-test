@@ -47,3 +47,12 @@ does not prove that a particular phone can allocate the selected model's buffers
 The final validation is an on-device model activation/inference test with the
 full native log and tombstone symbols from the exact APK. The runtime does not
 treat reported GPU free-memory values as a guaranteed allocation budget.
+## Dawn callback ABI
+
+The pinned Dawn C++ wrapper requires repeatable uncaptured-error callbacks to be
+non-capturing. The callback therefore receives the registration context through
+Dawn's explicit userdata overload; it marks the shared WebGPU device-error state
+without capturing a local variable. The device-lost callback remains a one-shot
+callback and records the same state. The allocation patch preserves the original
+buffer allocator's single `ctx` and `buf_ctx` declarations, applies the bounded
+checks around the existing allocation, and uses non-throwing host context creation.
