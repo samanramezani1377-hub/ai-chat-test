@@ -1288,7 +1288,7 @@ static llama_model *load_model_android(const char *path, llama_model_params mp, 
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jclass, jstring jpath, jint ctx_len, jint gpu_layers, jstring jdraftpath) {
+Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jclass, jstring jpath, jint ctx_len, jint gpu_layers) {
     // Model/context mutation must never overlap tokenization or generation.
     // nativeStop intentionally remains lock-free so it can interrupt a decode.
     std::lock_guard<std::mutex> runtime_lock(g_native_runtime_mutex);
@@ -1300,8 +1300,6 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
     const char *path = env->GetStringUTFChars(jpath, nullptr);
     if (!path) { checkpoint("PATH_UTF8_FAILED"); return 3; }
     const std::string stable_model_path(path);
-    // Draft/speculative decoding is removed from the product; retain the legacy JNI argument but never use it.
-    (void) jdraftpath;
     append_native_trace("DRAFT_FEATURE_REMOVED");
     const std::string preflight = gguf_preflight(path); checkpoint(preflight.c_str());
     ggml_backend_dev_t webgpu_device = find_webgpu_gpu_device();
