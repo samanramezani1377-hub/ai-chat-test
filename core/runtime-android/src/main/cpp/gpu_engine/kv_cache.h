@@ -27,6 +27,13 @@ public:
     // Copies device-resident K/V tensors into the cache without a host readback.
     Status append_device(uint32_t layer, uint32_t start_position, uint32_t token_count,
                          const Tensor& keys, const Tensor& values);
+    Status prepare_device_append(uint32_t layer, uint32_t start_position, uint32_t token_count,
+                                 const Tensor& keys, const Tensor& values,
+                                 std::vector<BufferCopy>& copies) const;
+    Status commit_device_append(uint32_t layer, uint32_t start_position,
+                                uint32_t token_count);
+    Status key_tensor_for_length(uint32_t layer, uint32_t sequence_length, Tensor& out) const;
+    Status value_tensor_for_length(uint32_t layer, uint32_t sequence_length, Tensor& out) const;
     Status reset_layer(uint32_t layer);
     uint32_t valid_tokens(uint32_t layer) const noexcept;
     std::shared_ptr<Buffer> key_buffer(uint32_t layer) const noexcept;
