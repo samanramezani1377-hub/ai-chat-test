@@ -1369,8 +1369,8 @@ void test_model_graph_executes_kv_copy_node_before_committing_cache_state() {
     assert(register_builtin_model_lowerings(BackendKind::OpenGles, lowerings).ok());
     OperatorRegistry operators;
     ModelGraphCompileReport report;
-    assert(execute_model_execution_plan(plan, backend, lowerings, operators, {},
-                                        context, nullptr, report).ok());
+    assert(execute_model_execution_plan(plan, backend, lowerings, operators,
+                                        {"key", "value"}, context, nullptr, report).ok());
     assert(report.compiled && report.executed && report.compiled_nodes == 1);
     assert(plan.execution_validated && !plan.gpu_ready);
     assert(cache->valid_tokens(0) == 1);
