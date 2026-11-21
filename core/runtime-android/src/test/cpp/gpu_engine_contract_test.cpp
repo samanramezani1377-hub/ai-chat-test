@@ -1015,10 +1015,10 @@ void test_universal_gles_operator_candidate_is_fail_closed() {
     assert(dispatch.backend == BackendKind::OpenGles);
     assert(dispatch.wgsl_source.empty());
     assert(dispatch.glsl_source.find("#version 310 es") != std::string::npos);
-    assert(dispatch.glsl_es_source.find("ELEMENT_COUNT = 4u") != std::string::npos);
+    assert(dispatch.glsl_source.find("output_values.length()") != std::string::npos);
 
     OperatorRegistry registry;
-    assert(register_builtin_operator_candidates(registry).ok());
+    assert(register_builtin_gles_operator_candidates(registry).ok());
     KernelDefinition selected;
     assert(registry.select_kernel("Add", BackendKind::OpenGles, DataType::F32,
                                   DataType::F32, 2, 1, selected).code == StatusCode::Unsupported);
