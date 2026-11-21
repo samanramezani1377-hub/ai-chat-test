@@ -1264,6 +1264,7 @@ void test_qwen2_dense_adapter_builds_bias_aware_structural_plan() {
     };
     for (const auto& item : tensors) {
         GgufTensorInfo tensor; tensor.name=item.first; tensor.dimensions=item.second;
+        if (item.first.find(".bias") != std::string::npos) tensor.type.name = "F32";
         uint64_t elements=1; for(uint64_t d:tensor.dimensions) elements*=d;
         tensor.byte_size_known=true; tensor.byte_size=elements*4; model.tensors.push_back(tensor);
     }
