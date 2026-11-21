@@ -168,6 +168,43 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 )wgsl";
 
+constexpr char kQ8_0MatMulGlsl[] = R"glsl(#version 310 es
+precision highp float;
+precision highp int;
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(std430, binding = 0) readonly buffer Activations { float activations[]; };
+layout(std430, binding = 1) readonly buffer Weights { uint weights[]; };
+layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
+const uint ROWS = 1u;
+const uint OUTPUT_CHANNELS = 1u;
+const uint INNER = 32u;
+const uint WEIGHT_ROW_BYTES = 34u;
+uint read_u8(uint byte_offset) {
+    uint word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 255u;
+}
+uint read_u16(uint byte_offset) {
+    uint word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint channel = gl_GlobalInvocationID.x;
+    if (row >= ROWS || channel >= OUTPUT_CHANNELS) return;
+    float sum = 0.0;
+    for (uint k = 0u; k < INNER; ++k) {
+        uint block = k / 32u;
+        uint within = k % 32u;
+        uint block_offset = channel * WEIGHT_ROW_BYTES + block * 34u;
+        float scale = unpackHalf2x16(read_u16(block_offset)).x;
+        uint raw = read_u8(block_offset + 2u + within);
+        int quantized = raw >= 128u ? int(raw) - 256 : int(raw);
+        sum += activations[row * INNER + k] * scale * float(quantized);
+    }
+    output_values[row * OUTPUT_CHANNELS + channel] = sum;
+}
+)glsl";
+
 constexpr char kQ8_0DequantizeWgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> encoded: array<u32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
@@ -458,6 +495,35 @@ Status build_q8_0_matmul_candidate(const Tensor& activations,
         {1, quantized_weights, 0, padded_bytes},
         {2, output.buffer(), output.byte_offset(), output.byte_size()},
     };
+    return Status::success();
+}
+
+const char* q8_0_matmul_glsl_source() noexcept { return kQ8_0MatMulGlsl; }
+
+Status build_q8_0_matmul_gles_candidate(const Tensor& activations,
+                                       const std::shared_ptr<Buffer>& quantized_weights,
+                                       uint64_t weight_bytes, const Tensor& output,
+                                       ComputeDispatch& dispatch) {
+    Status status = build_q8_0_matmul_candidate(activations, quantized_weights,
+                                                weight_bytes, output, dispatch);
+    if (!status.ok()) return status;
+    const uint64_t blocks_per_row = activations.descriptor().shape[1] / 32;
+    dispatch.backend = BackendKind::OpenGles;
+    dispatch.kernel_id = "gles-q8-0-matmul-f32-activation-v1";
+    dispatch.label = "gles-q8-0-matmul-f32-activation-unverified";
+    dispatch.wgsl_source.clear();
+    dispatch.glsl_source = kQ8_0MatMulGlsl;
+    const std::pair<std::string, std::string> constants[] = {
+        {"const uint ROWS = 1u;", "const uint ROWS = " + std::to_string(activations.descriptor().shape[0]) + "u;"},
+        {"const uint OUTPUT_CHANNELS = 1u;", "const uint OUTPUT_CHANNELS = " + std::to_string(output.descriptor().shape[1]) + "u;"},
+        {"const uint INNER = 32u;", "const uint INNER = " + std::to_string(activations.descriptor().shape[1]) + "u;"},
+        {"const uint WEIGHT_ROW_BYTES = 34u;", "const uint WEIGHT_ROW_BYTES = " + std::to_string(blocks_per_row * 34) + "u;"}
+    };
+    for (const auto& constant : constants) {
+        const size_t pos = dispatch.glsl_source.find(constant.first);
+        if (pos == std::string::npos) return {StatusCode::BackendFailure, "Q8_0 GLES GLSL constant placeholder is missing"};
+        dispatch.glsl_source.replace(pos, constant.first.size(), constant.second);
+    }
     return Status::success();
 }
 

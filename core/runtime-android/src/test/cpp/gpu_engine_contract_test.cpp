@@ -576,6 +576,17 @@ void test_q8_0_decoder_and_registry() {
                                        output_mat_tensor, q8_matmul_dispatch).ok());
     assert(q8_matmul_dispatch.bindings.size() == 3);
     assert(q8_matmul_dispatch.label.find("unverified") != std::string::npos);
+    ComputeDispatch gles_q8_matmul_dispatch;
+    assert(build_q8_0_matmul_gles_candidate(activation_tensor, q8_weights_buffer, 68,
+                                             output_mat_tensor, gles_q8_matmul_dispatch).ok());
+    assert(gles_q8_matmul_dispatch.backend == BackendKind::OpenGles);
+    assert(gles_q8_matmul_dispatch.workgroup_size_x == 8 &&
+           gles_q8_matmul_dispatch.workgroup_size_y == 8);
+    assert(gles_q8_matmul_dispatch.glsl_source.find("const uint WEIGHT_ROW_BYTES = 34u;") != std::string::npos);
+    KernelDefinition q8_gles_unverified;
+    assert(gles_registry.select_kernel("MatMul_Q8_0", BackendKind::OpenGles,
+        std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
+        q8_gles_unverified).code == StatusCode::Unsupported);
 }
 
 void test_independent_sampler_and_stop_controller() {
