@@ -984,6 +984,7 @@ Status build_q4_0_embedding_candidate(const std::shared_ptr<Buffer>& quantized_w
                                       const Tensor& output, ComputeDispatch& dispatch) {
     dispatch = ComputeDispatch{};
     if (!quantized_weights || !token_ids_buffer || !output.buffer() ||
+        quantized_weights->memory_domain() == MemoryDomain::Host ||
         token_ids_buffer->memory_domain() == MemoryDomain::Host ||
         output.descriptor().data_type != DataType::F32 ||
         output.descriptor().layout != TensorLayout::Contiguous ||
