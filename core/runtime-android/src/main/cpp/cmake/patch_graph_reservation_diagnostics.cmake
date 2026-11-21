@@ -110,7 +110,23 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BUFFER_DIAGNOSTICS_V2")
         buffer_id, buf_name.c_str(), buf != nullptr ? 1 : 0, size, ai_chat_aligned_size);
 ]=])
     if (_webgpu MATCHES "AI_CHAT_WEBGPU_BUFFER_DIAGNOSTICS_V1")
-        string(REPLACE "AI_CHAT_WEBGPU_BUFFER_DIAGNOSTICS_V1" "AI_CHAT_WEBGPU_BUFFER_DIAGNOSTICS_V2" _webgpu "${_webgpu}")
+        set(_legacy_buffer_block [=[
+    // AI_CHAT_WEBGPU_BUFFER_DIAGNOSTICS_V1
+    const size_t ai_chat_aligned_size = ROUNDUP_POW2(size, WEBGPU_STORAGE_BUF_BINDING_MULT);
+    GGML_LOG_INFO("AI_CHAT_WEBGPU_BUFFER_BEGIN id=%d name=%s device=%s requestedBytes=%zu alignedBytes=%zu maxStorageBindingBytes=%zu\n",
+        buffer_id, buf_name.c_str(), ctx->device_name.c_str(), size, ai_chat_aligned_size,
+        ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize);
+    ggml_webgpu_create_buffer(ctx->webgpu_global_ctx->device, buf, ai_chat_aligned_size,
+                              wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst,
+                              buf_name.c_str());
+    GGML_LOG_INFO("AI_CHAT_WEBGPU_BUFFER_RETURNED id=%d name=%s requestedBytes=%zu alignedBytes=%zu\n",
+        buffer_id, buf_name.c_str(), size, ai_chat_aligned_size);
+]=])
+        string(FIND "${_webgpu}" "${_legacy_buffer_block}" _legacy_buffer_pos)
+        if (_legacy_buffer_pos LESS 0)
+            message(FATAL_ERROR "AI Chat graph diagnostics: legacy WebGPU buffer block is incomplete")
+        endif()
+        string(REPLACE "${_legacy_buffer_block}" "${_buffer_replacement}" _webgpu "${_webgpu}")
     else()
         string(FIND "${_webgpu}" "${_buffer_anchor}" _buffer_pos)
         if (_buffer_pos LESS 0)
