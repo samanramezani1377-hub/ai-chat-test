@@ -519,6 +519,9 @@ include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_backend_assignment_trace.cmake")
 # Add bounded diagnostics around graph reservation and Dawn buffer allocation.
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_graph_reservation_diagnostics.cmake")
 
+# Prevent unbounded virtual chunks and make Dawn allocation failures recoverable.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_bounded_buffer_allocation.cmake")
+
 # Android OpenCL vendor libraries are often complete OpenCL implementations but
 # not ICDs. Patch only the pinned ggml OpenCL call sites to use our direct API
 # dispatcher; the Khronos loader remains linked for ABI compatibility but is not
