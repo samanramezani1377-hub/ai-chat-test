@@ -24,6 +24,11 @@ Status decode_q4_1_blocks(const uint8_t* source, size_t source_bytes,
 Status decode_q8_0_blocks(const uint8_t* source, size_t source_bytes,
                           float* destination, size_t destination_elements);
 const char* q8_0_matmul_wgsl_source() noexcept;
+Status build_q8_0_matmul_gles_candidate(const Tensor& activations,
+                                      const std::shared_ptr<Buffer>& quantized_weights,
+                                      uint64_t weight_bytes, const Tensor& output,
+                                      ComputeDispatch& dispatch);
+Status register_builtin_gles_quantization_candidates(OperatorRegistry& registry);
 Status build_q8_0_matmul_candidate(const Tensor& activations,
                                   const std::shared_ptr<Buffer>& quantized_weights,
                                   uint64_t weight_bytes,
