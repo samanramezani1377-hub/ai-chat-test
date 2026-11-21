@@ -137,32 +137,13 @@ class AndroidModelManager(
             } finally {
                 Files.deleteIfExists(temp)
             }
-            runtime.setDraftPath(draft?.path?.toString())
-            // A draft assignment is a live runtime connection, not only a persisted
-            // preference. Keep target-only activation intact, then reload the already
-            // active target with the selected draft. Native speculative setup happens
-            // only after the target context is fully ready.
-            val active = (repository.getActive() as? ModelResult.Success)?.value
-            if (draft != null && active != null && active.id == modelId) {
-                when (val reloaded = runtime.loadResult(active)) {
-                    is ModelResult.Failure -> return@withContext reloaded
-                    is ModelResult.Success -> RuntimeDiagnosticsStore.recordNativeEvent(
-                        "SPECULATIVE_DRAFT_CONNECTED target=${active.id} draft=${draft.id}"
-                    )
-                }
-            } else if (draft == null) {
-                val active = (repository.getActive() as? ModelResult.Success)?.value
-                if (active?.id == modelId) {
-                    when (val reloaded = runtime.loadResult(active)) {
-                        is ModelResult.Failure -> return@withContext reloaded
-                        is ModelResult.Success -> RuntimeDiagnosticsStore.recordNativeEvent(
-                            "SPECULATIVE_DRAFT_DISCONNECTED target=$modelId",
-                        )
-                    }
+            RuntimeDiagnosticsStore.recordNativeEvent(
+                if (draft == null) {
+                    "SPECULATIVE_DRAFT_UNASSIGNED target=$modelId"
                 } else {
-                    RuntimeDiagnosticsStore.recordNativeEvent("SPECULATIVE_DRAFT_DISCONNECTED target=$modelId")
-                }
-            }
+                    "SPECULATIVE_DRAFT_SAVED_NATIVE_DISABLED target=$modelId draft=${draft.id}"
+                },
+            )
             ModelResult.Success(Unit)
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -198,9 +179,6 @@ class AndroidModelManager(
     suspend fun activeModel(): ModelResult<ModelDescriptor?> = service.activeModel()
 
     suspend fun restoreActive(): ModelResult<ModelDescriptor?> = withContext(Dispatchers.IO) {
-        // Target activation is deliberately independent from speculative decoding.
-        // Never let a persisted/broken draft participate in target model load.
-        runtime.setDraftPath(null)
         val result = service.restoreActive()
         if (result is ModelResult.Success) {
             val restored = result.value
@@ -213,9 +191,6 @@ class AndroidModelManager(
     }
 
     suspend fun activate(id: String): ModelResult<ModelDescriptor> = withContext(Dispatchers.IO) {
-        // The target must always load with speculative decoding disabled. Draft state
-        // is connected only after the target runtime has reported a successful load.
-        runtime.setDraftPath(null)
         val result = service.activate(id)
         if (result is ModelResult.Success) {
             attachDraftAfterTargetLoad(result.value)
@@ -225,25 +200,17 @@ class AndroidModelManager(
     }
 
     private suspend fun attachDraftAfterTargetLoad(model: ModelDescriptor) {
-        val modelId = model.id
-        val draft = (draftForModel(modelId) as? ModelResult.Success)?.value
-        val draftPath = draft?.path?.takeIf { Files.isRegularFile(it) && Files.isReadable(it) }?.toString()
-        runtime.setDraftPath(draftPath)
-        if (draftPath != null) {
-            // Target activation already succeeded. Re-load the same target with the
-            // now-selected draft so speculative decoding becomes active immediately.
-            when (val connected = runtime.loadResult(model)) {
-                is ModelResult.Failure -> RuntimeDiagnosticsStore.recordNativeEvent("SPECULATIVE_DRAFT_CONNECT_FAILED target=$modelId error=${connected.error.message}")
-                is ModelResult.Success -> RuntimeDiagnosticsStore.recordNativeEvent("SPECULATIVE_DRAFT_CONNECTED target=$modelId draft=${draft.id}")
-            }
-        }
-        if (draft != null && draftPath == null) {
+        val draft = (draftForModel(model.id) as? ModelResult.Success)?.value ?: return
+        if (Files.isRegularFile(draft.path) && Files.isReadable(draft.path)) {
+            RuntimeDiagnosticsStore.recordNativeEvent(
+                "SPECULATIVE_DRAFT_SAVED_NATIVE_DISABLED target=${model.id} draft=${draft.id}",
+            )
+        } else {
             RuntimeDiagnosticsStore.recordNativeEvent("SPECULATIVE_DRAFT_IGNORED_INVALID file=${draft.path}")
         }
     }
 
     suspend fun deactivate(): ModelResult<Unit> = withContext(Dispatchers.IO) {
-        runtime.setDraftPath(null)
         val result = service.deactivate()
         if (result is ModelResult.Success) {
             ModelRuntimeForegroundService.stop(appContext)
