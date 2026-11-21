@@ -1451,7 +1451,8 @@ void test_builtin_model_lowerings_are_backend_scoped_and_fail_closed() {
     assert(register_builtin_model_lowerings(BackendKind::OpenGles, gles).ok());
     assert(dawn.find(BackendKind::DawnWebGpu, "Add") != nullptr);
     assert(gles.find(BackendKind::OpenGles, "MatMul") != nullptr);
-    assert(gles.find(BackendKind::OpenGles, "Attention") == nullptr);
+    assert(gles.find(BackendKind::OpenGles, "Attention") != nullptr);
+    assert(gles.find(BackendKind::OpenGles, "KVCacheAppend") != nullptr);
     assert(register_builtin_model_lowerings(BackendKind::Unknown, dawn).code == StatusCode::Unsupported);
 
     FakeBackend backend(BackendKind::OpenGles);
