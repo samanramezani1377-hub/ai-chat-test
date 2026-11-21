@@ -4,6 +4,7 @@
 #include <cstring>
 #include <array>
 #include <fstream>
+#include <cmath>
 #include <limits>
 #include <set>
 #include <utility>
@@ -210,6 +211,17 @@ T metadata_as(const GgufFileInfo& info, const std::string& key, T fallback) {
     return fallback;
 }
 
+int64_t metadata_as_i64(const GgufFileInfo& info, const std::string& key, int64_t fallback) {
+    const auto found = info.metadata.find(key);
+    if (found == info.metadata.end()) return fallback;
+    if (const auto* value = std::get_if<int64_t>(&found->second)) return *value;
+    if (const auto* value = std::get_if<uint64_t>(&found->second)) {
+        return *value <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max())
+            ? static_cast<int64_t>(*value) : fallback;
+    }
+    return fallback;
+}
+
 bool checked_product(const std::vector<uint64_t>& dimensions, uint64_t& out) {
     out = 1;
     for (uint64_t dimension : dimensions) {
@@ -310,10 +322,10 @@ Status GgufReader::open(const std::string& path, GgufReader& out) {
     info.model_name = metadata_as<std::string>(info, "general.name", "unknown");
     info.tokenizer.model = metadata_as<std::string>(info, "tokenizer.ggml.model", "unknown");
     info.tokenizer.pre_tokenizer = metadata_as<std::string>(info, "tokenizer.ggml.pre", "unknown");
-    info.tokenizer.bos_token_id = metadata_as<int64_t>(info, "tokenizer.ggml.bos_token_id", -1);
-    info.tokenizer.eos_token_id = metadata_as<int64_t>(info, "tokenizer.ggml.eos_token_id", -1);
-    info.tokenizer.unknown_token_id = metadata_as<int64_t>(info, "tokenizer.ggml.unknown_token_id", -1);
-    info.tokenizer.padding_token_id = metadata_as<int64_t>(info, "tokenizer.ggml.padding_token_id", -1);
+    info.tokenizer.bos_token_id = metadata_as_i64(info, "tokenizer.ggml.bos_token_id", -1);
+    info.tokenizer.eos_token_id = metadata_as_i64(info, "tokenizer.ggml.eos_token_id", -1);
+    info.tokenizer.unknown_token_id = metadata_as_i64(info, "tokenizer.ggml.unknown_token_id", -1);
+    info.tokenizer.padding_token_id = metadata_as_i64(info, "tokenizer.ggml.padding_token_id", -1);
     info.tokenizer.add_bos_token = metadata_as<bool>(info, "tokenizer.ggml.add_bos_token", false);
     info.tokenizer.add_eos_token = metadata_as<bool>(info, "tokenizer.ggml.add_eos_token", false);
     if (const auto found = info.metadata.find("tokenizer.ggml.tokens"); found != info.metadata.end()) {
@@ -331,6 +343,18 @@ Status GgufReader::open(const std::string& path, GgufReader& out) {
     if ((!info.tokenizer.scores.empty() && info.tokenizer.scores.size() != info.tokenizer.tokens.size()) ||
         (!info.tokenizer.token_types.empty() && info.tokenizer.token_types.size() != info.tokenizer.tokens.size())) {
         return {StatusCode::InvalidArgument, "GGUF tokenizer metadata arrays have inconsistent vocabulary lengths"};
+    }
+    for (double score : info.tokenizer.scores) {
+        if (!std::isfinite(score)) return {StatusCode::InvalidArgument, "GGUF tokenizer contains a non-finite token score"};
+    }
+    const auto valid_token_id = [&info](int64_t id) {
+        return id < 0 || static_cast<uint64_t>(id) < info.tokenizer.tokens.size();
+    };
+    if (!valid_token_id(info.tokenizer.bos_token_id) ||
+        !valid_token_id(info.tokenizer.eos_token_id) ||
+        !valid_token_id(info.tokenizer.unknown_token_id) ||
+        !valid_token_id(info.tokenizer.padding_token_id)) {
+        return {StatusCode::InvalidArgument, "GGUF tokenizer special token id is outside the vocabulary"};
     }
 
     std::set<std::string> tensor_names;
