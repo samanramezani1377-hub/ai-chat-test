@@ -17,8 +17,17 @@ class ComputeGraph;
 class KvCache;
 using ModelTensorBindings = std::unordered_map<std::string, Tensor>;
 
+struct QuantizedWeightBinding {
+    std::shared_ptr<Buffer> buffer;
+    uint64_t byte_size = 0;
+    uint32_t file_type_id = 0;
+    std::vector<uint64_t> dimensions;
+};
+
 struct ModelExecutionContext {
     ModelTensorBindings tensors;
+    std::unordered_map<std::string, QuantizedWeightBinding> quantized_weights;
+    std::vector<MemoryLease> weight_leases;
     Backend* backend = nullptr;
     std::vector<uint32_t> token_ids;
     KvCache* kv_cache = nullptr;

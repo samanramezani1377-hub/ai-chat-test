@@ -2,6 +2,7 @@
 
 #include "execution_engine.h"
 #include "gguf_reader.h"
+#include "model_graph.h"
 
 #include <functional>
 #include <string>
@@ -29,6 +30,12 @@ struct WeightStreamingPolicy {
     uint64_t maximum_chunk_bytes = 0; // zero means use backend-reported limits
     MemoryDomain target_memory = MemoryDomain::Device;
 };
+
+Status load_model_execution_weights(const GgufReader& reader,
+                                    const ModelExecutionPlan& plan,
+                                    Backend& backend, MemoryManager& memory,
+                                    const DeviceInfo& device,
+                                    ModelExecutionContext& context);
 
 class GgufWeightStreamer {
 public:
