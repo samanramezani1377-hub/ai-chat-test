@@ -1864,8 +1864,8 @@ void test_q8_0_embedding_model_lowering_supports_gles() {
     FakeBackend backend(BackendKind::OpenGles);
     ModelLoweringRegistry lowerings;
     assert(register_builtin_model_lowerings(BackendKind::OpenGles, lowerings).ok());
-    BufferDesc weight_desc{68, 4, MemoryDomain::Device, true, "q4-embedding-weight"};
-    BufferDesc output_desc{2 * 32 * sizeof(float), 4, MemoryDomain::Device, false, "q4-embedding-output"};
+    BufferDesc weight_desc{68, 4, MemoryDomain::Device, true, "q8-embedding-weight"};
+    BufferDesc output_desc{2 * 32 * sizeof(float), 4, MemoryDomain::Device, false, "q8-embedding-output"};
     std::shared_ptr<Buffer> weight_buffer, output_buffer;
     assert(backend.allocate(weight_desc, weight_buffer).ok());
     assert(backend.allocate(output_desc, output_buffer).ok());
