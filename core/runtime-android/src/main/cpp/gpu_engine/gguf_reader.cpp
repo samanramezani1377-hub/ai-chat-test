@@ -328,6 +328,10 @@ Status GgufReader::open(const std::string& path, GgufReader& out) {
     info.tokenizer.padding_token_id = metadata_as_i64(info, "tokenizer.ggml.padding_token_id", -1);
     info.tokenizer.add_bos_token = metadata_as<bool>(info, "tokenizer.ggml.add_bos_token", false);
     info.tokenizer.add_eos_token = metadata_as<bool>(info, "tokenizer.ggml.add_eos_token", false);
+    info.tokenizer.add_space_prefix = metadata_as<bool>(info, "tokenizer.ggml.add_space_prefix", false);
+    info.tokenizer.remove_extra_whitespaces = metadata_as<bool>(info, "tokenizer.ggml.remove_extra_whitespaces", false);
+    info.tokenizer.escape_whitespaces = metadata_as<bool>(info, "tokenizer.ggml.escape_whitespaces", true);
+    info.tokenizer.byte_fallback = metadata_as<bool>(info, "tokenizer.ggml.byte_fallback", false);
     if (const auto found = info.metadata.find("tokenizer.ggml.tokens"); found != info.metadata.end()) {
         if (const auto* values = std::get_if<std::vector<std::string>>(&found->second)) info.tokenizer.tokens = *values;
     }
