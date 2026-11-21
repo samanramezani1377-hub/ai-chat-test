@@ -14,6 +14,19 @@ Status build_add_f32_candidate(const Tensor& lhs, const Tensor& rhs,
 Status reference_add_f32(const float* lhs, const float* rhs, float* output,
                          uint64_t element_count);
 
+const char* matmul_f32_wgsl_source() noexcept;
+Status build_matmul_f32_candidate(const Tensor& lhs, const Tensor& rhs,
+                                  const Tensor& output, ComputeDispatch& dispatch);
+Status reference_matmul_f32(const float* lhs, const float* rhs, float* output,
+                            uint64_t rows, uint64_t columns, uint64_t inner);
+
+const char* rms_norm_f32_wgsl_source() noexcept;
+Status build_rms_norm_f32_candidate(const Tensor& input, const Tensor& weight,
+                                    const Tensor& output, float epsilon,
+                                    ComputeDispatch& dispatch);
+Status reference_rms_norm_f32(const float* input, const float* weight, float* output,
+                              uint64_t rows, uint64_t columns, float epsilon);
+
 Status register_builtin_operator_candidates(OperatorRegistry& registry);
 
 } // namespace ai_chat::gpu_engine

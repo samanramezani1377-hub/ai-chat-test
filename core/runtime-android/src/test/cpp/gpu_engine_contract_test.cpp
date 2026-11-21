@@ -6,6 +6,7 @@
 #include "sampler.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -348,6 +349,20 @@ void test_add_operator_candidate_and_reference() {
     float result[] = {0, 0, 0};
     assert(reference_add_f32(left, right, result, 3).ok());
     assert(result[0] == 5 && result[1] == 7 && result[2] == 9);
+
+    const float matrix_a[] = {1, 2, 3, 4, 5, 6};
+    const float matrix_b[] = {7, 8, 9, 10, 11, 12};
+    float matrix_c[4] = {};
+    assert(reference_matmul_f32(matrix_a, matrix_b, matrix_c, 2, 2, 3).ok());
+    assert(matrix_c[0] == 58.0f && matrix_c[1] == 64.0f &&
+           matrix_c[2] == 139.0f && matrix_c[3] == 154.0f);
+
+    const float norm_input[] = {1, 2, 3, 4};
+    const float norm_weight[] = {1, 1};
+    float norm_output[4] = {};
+    assert(reference_rms_norm_f32(norm_input, norm_weight, norm_output, 2, 2, 1e-5f).ok());
+    assert(std::abs(norm_output[0] - 0.63245f) < 1e-4f);
+    assert(std::abs(norm_output[1] - 1.26491f) < 1e-4f);
 }
 
 void test_model_and_quantization_registry_fail_closed() {

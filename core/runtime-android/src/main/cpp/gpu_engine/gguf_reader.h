@@ -15,7 +15,8 @@ struct GgufArrayInfo {
     uint64_t count = 0;
 };
 
-using GgufMetadataValue = std::variant<uint64_t, int64_t, double, bool, std::string, GgufArrayInfo,\n                                      std::vector<std::string>, std::vector<double>, std::vector<int64_t>>;
+using GgufMetadataValue = std::variant<uint64_t, int64_t, double, bool, std::string, GgufArrayInfo,
+                                      std::vector<std::string>, std::vector<double>, std::vector<int64_t>>;
 
 struct GgufTensorTypeInfo {
     uint32_t type_id = 0;
