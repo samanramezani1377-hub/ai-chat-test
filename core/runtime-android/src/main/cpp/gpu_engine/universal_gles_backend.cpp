@@ -97,49 +97,56 @@ Status compile_program(const std::string& source, GLuint& program) {
 }
 
 Status dispatch_gles(const ComputeDispatch& d, const ai_chat::gpu::UniversalGpuCapabilities& caps) {
-    const uint64_t workgroup_invocations = static_cast<uint64_t>(d.workgroup_size_x) *
-        d.workgroup_size_y * d.workgroup_size_z;
+    if (d.backend != BackendKind::OpenGles || d.validation != KernelValidation::Validated ||
+        d.kernel_id.empty() || d.glsl_source.empty() || !d.workgroups_x || !d.workgroups_y || !d.workgroups_z)
+        return {StatusCode::Unsupported, "GLES dispatch requires a validated GLSL kernel and non-zero dispatch dimensions"};
     if (!d.workgroup_size_x || !d.workgroup_size_y || !d.workgroup_size_z ||
         d.workgroup_size_x > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_size_x)) ||
         d.workgroup_size_y > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_size_y)) ||
         d.workgroup_size_z > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_size_z)) ||
-        workgroup_invocations > static_cast<uint64_t>(std::max(0, caps.max_compute_invocations)) ||
-        d.workgroups_x > static_cast<uint32_t>(std::max(0,caps.max_compute_workgroup_count_x)) ||
-        d.workgroups_y > static_cast<uint32_t>(std::max(0,caps.max_compute_workgroup_count_y)) ||
-        d.workgroups_z > static_cast<uint32_t>(std::max(0,caps.max_compute_workgroup_count_z)) ||
-        d.bindings.size() > static_cast<size_t>(std::max(0,caps.max_shader_storage_buffer_bindings)))
-        return {StatusCode::Unsupported, "GLES dispatch exceeds discovered workgroup-size, invocation, count or SSBO limits"};
-    const uint64_t local_invocations = static_cast<uint64_t>(d.workgroup_size_x) *
-        d.workgroup_size_y * d.workgroup_size_z;
-    if (!d.workgroup_size_x || !d.workgroup_size_y || !d.workgroup_size_z ||
-        d.workgroup_size_x > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_size_x)) ||
-        d.workgroup_size_y > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_size_y)) ||
-        d.workgroup_size_z > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_size_z)) ||
-        local_invocations > static_cast<uint64_t>(std::max(0, caps.max_compute_invocations)))
-        return {StatusCode::Unsupported,"GLES dispatch exceeds discovered local workgroup-size or invocation limits"};
-    GLuint program=0; Status st=compile_program(d.glsl_source,program); if(!st.ok()) return st;
-    clear_errors(); glUseProgram(program);
-    for (const auto& b:d.bindings) {
-        auto* buf=dynamic_cast<GlesBuffer*>(b.buffer.get());
-        if(!buf || b.offset_bytes>buf->size_bytes()) { glUseProgram(0); glDeleteProgram(program); return {StatusCode::InvalidArgument,"Foreign GLES buffer or invalid binding offset"}; }
-        const uint64_t range=b.size_bytes?b.size_bytes:buf->size_bytes()-b.offset_bytes;
-        const uint64_t align=static_cast<uint64_t>(std::max(4,caps.min_shader_storage_buffer_offset_alignment));
-        if(!range || range>buf->size_bytes()-b.offset_bytes || b.offset_bytes%align ||
-           range>static_cast<uint64_t>(std::max<int64_t>(0,caps.max_shader_storage_block_bytes))) {
-            glUseProgram(0); glDeleteProgram(program); return {StatusCode::InvalidArgument,"GLES SSBO range violates alignment or size limits"};
-        }
-        glBindBufferRange(GL_SHADER_STORAGE_BUFFER,b.binding,buf->id(),
-                          static_cast<GLintptr>(b.offset_bytes),static_cast<GLsizeiptr>(range));
+        d.workgroups_x > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_count_x)) ||
+        d.workgroups_y > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_count_y)) ||
+        d.workgroups_z > static_cast<uint32_t>(std::max(0, caps.max_compute_workgroup_count_z)) ||
+        d.bindings.empty() || d.bindings.size() > static_cast<size_t>(std::max(0, caps.max_shader_storage_buffer_bindings)))
+        return {StatusCode::Unsupported, "GLES dispatch exceeds discovered workgroup or SSBO limits"};
+    const uint64_t x = d.workgroup_size_x, y = d.workgroup_size_y, z = d.workgroup_size_z;
+    if (x > UINT64_MAX / y || x * y > UINT64_MAX / z ||
+        x * y * z > static_cast<uint64_t>(std::max(0, caps.max_compute_invocations)))
+        return {StatusCode::Unsupported, "GLES local workgroup invocation count is invalid"};
+    std::vector<uint32_t> used_bindings;
+    for (const auto& binding : d.bindings) {
+        if (binding.binding >= static_cast<uint32_t>(std::max(0, caps.max_shader_storage_buffer_bindings)) ||
+            std::find(used_bindings.begin(), used_bindings.end(), binding.binding) != used_bindings.end())
+            return {StatusCode::InvalidArgument, "GLES storage binding index is duplicated or out of range"};
+        used_bindings.push_back(binding.binding);
+        auto* buffer = dynamic_cast<GlesBuffer*>(binding.buffer.get());
+        if (!buffer || binding.offset_bytes > buffer->size_bytes())
+            return {StatusCode::InvalidArgument, "GLES dispatch references a foreign buffer or invalid offset"};
+        const uint64_t range = binding.size_bytes ? binding.size_bytes : buffer->size_bytes() - binding.offset_bytes;
+        const uint64_t alignment = static_cast<uint64_t>(std::max(4, caps.min_shader_storage_buffer_offset_alignment));
+        if (!range || range > buffer->size_bytes() - binding.offset_bytes || binding.offset_bytes % alignment ||
+            range > static_cast<uint64_t>(std::max<int64_t>(0, caps.max_shader_storage_block_bytes)))
+            return {StatusCode::InvalidArgument, "GLES SSBO range violates alignment or size limits"};
     }
-    glDispatchCompute(d.workgroups_x,d.workgroups_y,d.workgroups_z);
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT|GL_BUFFER_UPDATE_BARRIER_BIT);
-    const GLenum error=glGetError();
+    GLuint program = 0;
+    Status compile_status = compile_program(d.glsl_source, program);
+    if (!compile_status.ok()) return compile_status;
+    clear_errors();
+    glUseProgram(program);
+    for (const auto& binding : d.bindings) {
+        auto* buffer = static_cast<GlesBuffer*>(binding.buffer.get());
+        const uint64_t range = binding.size_bytes ? binding.size_bytes : buffer->size_bytes() - binding.offset_bytes;
+        glBindBufferRange(GL_SHADER_STORAGE_BUFFER, binding.binding, buffer->id(),
+                          static_cast<GLintptr>(binding.offset_bytes), static_cast<GLsizeiptr>(range));
+    }
+    glDispatchCompute(d.workgroups_x, d.workgroups_y, d.workgroups_z);
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+    const GLenum error = glGetError();
     glUseProgram(0);
     for (const auto& binding : d.bindings) glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding.binding, 0);
     glDeleteProgram(program);
-    return error==GL_NO_ERROR?Status::success():gl_error("glDispatchCompute",error);
+    return error == GL_NO_ERROR ? Status::success() : gl_error("glDispatchCompute", error);
 }
-
 Status self_test_gles_backend(const ai_chat::gpu::UniversalGpuCapabilities& caps) {
     constexpr uint32_t input[4] = {1u, 2u, 3u, 4u};
     constexpr uint32_t expected[4] = {10u, 13u, 16u, 19u};
@@ -167,7 +174,10 @@ Status self_test_gles_backend(const ai_chat::gpu::UniversalGpuCapabilities& caps
     dispatch.workgroups_x = 1;
     dispatch.workgroup_size_x = 4;
     status = dispatch_gles(dispatch, caps);
-    if (!status.ok()) return status;
+    if (!status.ok()) {
+        glDeleteBuffers(1, &id);
+        return status;
+    }
     glFinish();
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, id);
     void* mapped = glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(input), GL_MAP_READ_BIT);
