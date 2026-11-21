@@ -1212,6 +1212,19 @@ void test_llama_model_execution_plan_is_structural_only() {
     assert(plan.operations.back().operator_name == "MatMul");
     assert(std::find(plan.blockers.begin(), plan.blockers.end(),
                      "MODEL_GRAPH_EXECUTION_NOT_VALIDATED") != plan.blockers.end());
+
+    GgufFileInfo tied_model = model;
+    tied_model.tensors.erase(std::remove_if(tied_model.tensors.begin(), tied_model.tensors.end(),
+        [](const GgufTensorInfo& tensor) { return tensor.name == "output.weight"; }),
+        tied_model.tensors.end());
+    tied_model.metadata["llama.tie_word_embeddings"] = true;
+    ModelExecutionPlan tied_plan;
+    assert(adapter->build_execution_plan(tied_model, tied_plan).ok());
+    GgufFileInfo ambiguous_output = tied_model;
+    ambiguous_output.metadata.erase("llama.tie_word_embeddings");
+    ModelExecutionPlan ambiguous_plan;
+    assert(adapter->build_execution_plan(ambiguous_output, ambiguous_plan).code == StatusCode::Unsupported);
+
     OperatorRegistry operator_registry;
     ModelGraphCoverageReport coverage;
     assert(validate_model_plan_operator_coverage(plan, operator_registry,
