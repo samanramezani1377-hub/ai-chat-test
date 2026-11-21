@@ -507,7 +507,7 @@ internal fun MainScreen(container: AppContainer, initialSettingsSection: String?
                 when (val result = modelManager.deactivate()) {
                     is ModelResult.Success -> withContext(Dispatchers.Main) {
                         activeModel = null
-                        runtimeStatus = "آماده"
+                        runtimeStatus = "خارج از دسترس"
                         diagnostic = null
                         refreshModels()
                     }
@@ -531,7 +531,6 @@ internal fun MainScreen(container: AppContainer, initialSettingsSection: String?
         }
     }
 
-    fun deactivateModel() { val m = manager ?: return; if (activeModel == null) return; scope.launch(Dispatchers.Default) { val result = m.deactivate(); withContext(Dispatchers.Main) { when (result) { is ModelResult.Success -> { activeModel = null; runtimeStatus = "خارج از دسترس"; diagnostic = null; refreshModels() }; is ModelResult.Failure -> { runtimeStatus = "خطا"; diagnostic = result.error.message } } } } }
     fun createConversation() { scope.launch(Dispatchers.Default) { val record = history.create("گفت‌وگوی جدید"); withContext(Dispatchers.Main) { current = record; messages = emptyList(); composer = ""; refreshHistory(); destination = AppDestination.CHAT; sidebarOpen = false } } }
     fun openConversation(record: ConversationRecord) { loadConversation(record); destination = AppDestination.CHAT; sidebarOpen = false }
     fun deleteConversation(record: ConversationRecord) { scope.launch(Dispatchers.Default) { val removed = history.delete(record.id) ?: return@launch; val replacement = if (current?.id == removed.id) history.recent(1).firstOrNull() else null; withContext(Dispatchers.Main) { if (replacement != null) loadConversation(replacement) else if (current?.id == removed.id) { current = null; messages = emptyList() }; refreshHistory(); deleted = DeletedConversation(removed) } } }
