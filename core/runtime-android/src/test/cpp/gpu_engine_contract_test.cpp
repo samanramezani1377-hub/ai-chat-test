@@ -247,6 +247,11 @@ void test_runtime_router_fails_closed_to_cpu() {
     report = select_runtime(readiness);
     assert(report.gpu_selected);
     assert(!report.cpu_fallback_available);
+
+    readiness.gpu_device_ready = false;
+    report = select_runtime(readiness);
+    assert(report.selected == RuntimeSelection::Unavailable);
+    assert(!report.gpu_selected);
 }
 
 void test_kv_cache_memory_and_sequential_append() {

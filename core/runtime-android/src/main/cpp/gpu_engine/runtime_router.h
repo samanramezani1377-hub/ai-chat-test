@@ -10,6 +10,7 @@ namespace ai_chat::gpu_engine {
 enum class RuntimeSelection : uint8_t {
     CpuLlamaCpp = 0,
     DedicatedGpuEngine,
+    Unavailable,
 };
 
 struct RuntimeReadiness {

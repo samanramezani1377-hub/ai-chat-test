@@ -17,8 +17,11 @@ RuntimeSelectionReport select_runtime(const RuntimeReadiness& readiness) {
     if (ready) {
         report.selected = RuntimeSelection::DedicatedGpuEngine;
         report.gpu_selected = true;
-    } else {
+    } else if (readiness.cpu_fallback_available) {
         report.selected = RuntimeSelection::CpuLlamaCpp;
+        report.gpu_selected = false;
+    } else {
+        report.selected = RuntimeSelection::Unavailable;
         report.gpu_selected = false;
     }
     return report;
