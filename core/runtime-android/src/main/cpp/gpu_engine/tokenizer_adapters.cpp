@@ -237,14 +237,14 @@ private:
                     i+=n;
                     if(letter(next)){i+=next_n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(!letter(c))break;i+=k;}}
                     else if(digit(next)){size_t count=0;while(i<s.size()&&count<digit_group){size_t k=0;uint32_t c=codepoint(s,i,k);if(!digit(c))break;i+=k;++count;}}
-                    else{i+=next_n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(space(c)||letter(c)||digit(c))break;i+=k;}while(i<s.size()&&(s[i]=='\\r'||s[i]=='\\n'))++i;}
+                    else{i+=next_n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(space(c)||letter(c)||digit(c))break;i+=k;}while(i<s.size()&&(s[i]=='\r'||s[i]=='\n'))++i;}
                     out.emplace_back(s.substr(start,i-start));continue;
                 }
             }
             if(space(cp)){i+=n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(!space(c))break;i+=k;}}
             else if(letter(cp)){i+=n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(!letter(c))break;i+=k;}}
             else if(digit(cp)){size_t count=0;while(i<s.size()&&count<digit_group){size_t k=0;uint32_t c=codepoint(s,i,k);if(!digit(c))break;i+=k;++count;}}
-            else{i+=n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(space(c)||letter(c)||digit(c))break;i+=k;}while(i<s.size()&&(s[i]=='\\r'||s[i]=='\\n'))++i;}
+            else{i+=n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(space(c)||letter(c)||digit(c))break;i+=k;}while(i<s.size()&&(s[i]=='\r'||s[i]=='\n'))++i;}
             out.emplace_back(s.substr(start,i-start));
         }return out;
     }
