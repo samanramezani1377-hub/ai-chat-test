@@ -218,8 +218,8 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
     status = registry.register_lowering(backend, "KVCacheAppend",
         [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
                   ComputeDispatch& dispatch) {
-            if (!context.kv_cache || operation.inputs.size() != 2 ||
-                !operation.weight_tensors.empty())
+            if (!context.kv_cache || context.past_length > UINT32_MAX ||
+                operation.inputs.size() != 2 || !operation.weight_tensors.empty())
                 return Status{StatusCode::InvalidArgument, "KVCacheAppend requires a cache and K/V activation tensors"};
             uint32_t layer = 0;
             Status result = required_integer(operation, "layer_index", layer);

@@ -1297,6 +1297,33 @@ void test_embedding_model_lowering_uploads_token_ids_and_binds_buffer() {
 }
 
 
+
+void test_model_kv_cache_view_binding_uses_planned_sequence_length() {
+    FakeBackend backend(BackendKind::OpenGles);
+    MemoryManager memory(backend, 4096);
+    KvCacheConfig config; config.layers = 1; config.kv_heads = 2;
+    config.head_dimension = 2; config.maximum_sequence_length = 8;
+    std::unique_ptr<KvCache> cache;
+    assert(KvCache::create(backend, memory, config, cache).ok());
+    ModelExecutionPlan plan;
+    ModelPlanOperation attention;
+    attention.id = "layer.0.attention";
+    attention.operator_name = "Attention";
+    attention.inputs = {"layer.0.query", "layer.0.cache_key", "layer.0.cache_value"};
+    attention.integer_attributes["layer_index"] = 0;
+    plan.operations.push_back(attention);
+    ModelExecutionContext context;
+    assert(bind_model_kv_cache_views(plan, *cache, 3, 2, context).ok());
+    assert(context.past_length == 3 && context.sequence_length == 2);
+    assert(context.kv_cache == cache.get());
+    assert(context.tensors.at("layer.0.cache_key").descriptor().shape ==
+           std::vector<uint64_t>({5, 2, 2}));
+    assert(context.tensors.at("layer.0.cache_value").element_count() == 20);
+    ModelExecutionContext invalid_context;
+    assert(bind_model_kv_cache_views(plan, *cache, 7, 2, invalid_context).code ==
+           StatusCode::InvalidArgument);
+}
+
 void test_model_graph_executes_kv_copy_node_before_committing_cache_state() {
     FakeBackend backend(BackendKind::OpenGles);
     MemoryManager memory(backend, 4096);
@@ -1888,6 +1915,7 @@ int main() {
     test_builtin_model_lowerings_are_backend_scoped_and_fail_closed();
     test_model_execution_never_promotes_unvalidated_kernels();
     test_model_graph_executes_kv_copy_node_before_committing_cache_state();
+    test_model_kv_cache_view_binding_uses_planned_sequence_length();
     test_embedding_model_lowering_uploads_token_ids_and_binds_buffer();
     test_llama_model_execution_plan_is_structural_only();
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
