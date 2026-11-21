@@ -1122,6 +1122,89 @@ Status reference_q4_0_matmul(const float* activations, const uint8_t* quantized_
     return Status::success();
 }
 
+Status reference_q4_1_matmul(const float* activations, const uint8_t* quantized_weights,
+                             uint64_t weight_bytes, float* output,
+                             uint32_t rows, uint32_t output_channels, uint32_t inner) {
+    if ((!activations || !quantized_weights || !output) && rows && output_channels && inner)
+        return {StatusCode::InvalidArgument, "Q4_1 MatMul reference received a null pointer"};
+    if (rows == 0 || output_channels == 0 || inner == 0 || inner % 32 != 0)
+        return {StatusCode::InvalidArgument, "Q4_1 MatMul dimensions must be non-zero and inner block-aligned"};
+    const uint64_t blocks_per_row = inner / 32;
+    if (blocks_per_row > UINT64_MAX / 20 ||
+        output_channels > UINT64_MAX / (blocks_per_row * 20) ||
+        weight_bytes != static_cast<uint64_t>(output_channels) * blocks_per_row * 20)
+        return {StatusCode::InvalidArgument, "Q4_1 MatMul weight byte size is inconsistent"};
+    std::vector<float> decoded(inner);
+    for (uint32_t channel = 0; channel < output_channels; ++channel) {
+        const uint8_t* row_weights = quantized_weights + static_cast<uint64_t>(channel) * blocks_per_row * 20;
+        Status status = decode_q4_1_blocks(row_weights, blocks_per_row * 20, decoded.data(), inner);
+        if (!status.ok()) return status;
+        for (uint32_t row = 0; row < rows; ++row) {
+            float sum = 0.0f;
+            for (uint32_t k = 0; k < inner; ++k)
+                sum += activations[static_cast<uint64_t>(row) * inner + k] * decoded[k];
+            output[static_cast<uint64_t>(row) * output_channels + channel] = sum;
+        }
+    }
+    return Status::success();
+}
+
+
+Status build_q4_1_matmul_gles_candidate(const Tensor& activations,
+                                       const std::shared_ptr<Buffer>& quantized_weights,
+                                       uint64_t weight_bytes, const Tensor& output,
+                                       ComputeDispatch& dispatch) {
+    Status status = build_q4_1_matmul_candidate(activations, quantized_weights,
+                                                weight_bytes, output, dispatch);
+    if (!status.ok()) return status;
+    const uint64_t blocks_per_row = activations.descriptor().shape[1] / 32;
+    dispatch.backend = BackendKind::OpenGles;
+    dispatch.kernel_id = "gles-q4-1-matmul-f32-activation-v1";
+    dispatch.label = "gles-q4-1-matmul-f32-activation-unverified";
+    dispatch.wgsl_source.clear();
+    dispatch.glsl_source = kQ4_1MatMulGlsl;
+    const std::pair<std::string, std::string> constants[] = {
+        {"const uint ROWS = 1u;", "const uint ROWS = " + std::to_string(activations.descriptor().shape[0]) + "u;"},
+        {"const uint OUTPUT_CHANNELS = 1u;", "const uint OUTPUT_CHANNELS = " + std::to_string(output.element_count() / activations.descriptor().shape[0]) + "u;"},
+        {"const uint INNER = 32u;", "const uint INNER = " + std::to_string(activations.descriptor().shape[1]) + "u;"},
+        {"const uint WEIGHT_ROW_BYTES = 20u;", "const uint WEIGHT_ROW_BYTES = " + std::to_string(blocks_per_row * 20) + "u;"}
+    };
+    for (const auto& constant : constants) {
+        const size_t pos = dispatch.glsl_source.find(constant.first);
+        if (pos == std::string::npos) return {StatusCode::BackendFailure, "Q4_1 GLES GLSL constant placeholder is missing"};
+        dispatch.glsl_source.replace(pos, constant.first.size(), constant.second);
+    }
+    return Status::success();
+}
+
+Status reference_q8_0_matmul(const float* activations, const uint8_t* quantized_weights,
+                             uint64_t weight_bytes, float* output,
+                             uint32_t rows, uint32_t output_channels, uint32_t inner) {
+    if ((!activations || !quantized_weights || !output) && rows && output_channels && inner)
+        return {StatusCode::InvalidArgument, "Q8_0 MatMul reference received a null pointer"};
+    if (rows == 0 || output_channels == 0 || inner == 0 || inner % 32 != 0)
+        return {StatusCode::InvalidArgument, "Q8_0 MatMul dimensions must be non-zero and inner block-aligned"};
+    const uint64_t blocks_per_row = inner / 32;
+    if (blocks_per_row > UINT64_MAX / 34 ||
+        output_channels > UINT64_MAX / (blocks_per_row * 34) ||
+        weight_bytes != static_cast<uint64_t>(output_channels) * blocks_per_row * 34)
+        return {StatusCode::InvalidArgument, "Q8_0 MatMul weight byte size is inconsistent"};
+    std::vector<float> decoded(inner);
+    for (uint32_t channel = 0; channel < output_channels; ++channel) {
+        const uint8_t* row_weights = quantized_weights + static_cast<uint64_t>(channel) * blocks_per_row * 34;
+        Status status = decode_q8_0_blocks(row_weights, blocks_per_row * 34, decoded.data(), inner);
+        if (!status.ok()) return status;
+        for (uint32_t row = 0; row < rows; ++row) {
+            float sum = 0.0f;
+            for (uint32_t k = 0; k < inner; ++k)
+                sum += activations[static_cast<uint64_t>(row) * inner + k] * decoded[k];
+            output[static_cast<uint64_t>(row) * output_channels + channel] = sum;
+        }
+    }
+    return Status::success();
+}
+
+
 const char* q5_0_dequantize_wgsl_source() noexcept { return kQ5_0DequantizeWgsl; }
 
 Status build_q5_0_dequantize_candidate(const std::shared_ptr<Buffer>& encoded,
