@@ -3210,7 +3210,7 @@ Status build_q5_matmul_candidate_impl(const Tensor& activations, const std::shar
         return {StatusCode::Unsupported, type + " MatMul requires F32 [M,K] activations and F32 [M,N] or [M,H,D] output"};
     const auto& a = activations.descriptor().shape;
     const auto& o = output.descriptor().shape;
-    const uint64_t channels = o.size() == 2 ? o[1] : (o[1] <= UINT64_MAX / o[2] ? o[1] * o[2] : 0);
+    const uint64_t channels = o.size() == 2 ? o[1] : (o[2] != 0 && o[1] <= UINT64_MAX / o[2] ? o[1] * o[2] : 0);
     if (!a[0] || !a[1] || a[1] % 32 || o[0] != a[0] || !channels ||
         a[0] > UINT32_MAX || a[1] > UINT32_MAX || channels > UINT32_MAX ||
         activations.element_count() > UINT32_MAX || output.element_count() > UINT32_MAX)

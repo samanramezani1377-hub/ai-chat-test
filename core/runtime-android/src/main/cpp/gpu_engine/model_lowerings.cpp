@@ -104,8 +104,9 @@ Status register_q5_matmul_lowering(BackendKind backend, ModelLoweringRegistry& r
                 weight->second.byte_size == 0 || weight->second.file_type_id != type_id)
                 return Status{StatusCode::InvalidArgument, type + " weight binding is missing or has the wrong file type"};
             if (input->descriptor().shape.size() != 2 ||
-                (output->descriptor().shape.size() != 2 && output->descriptor().shape.size() != 3))
-                return Status{StatusCode::Unsupported, type + " MatMul requires [M,K] activations and [M,N] or [M,H,D] output"};
+                (output->descriptor().shape.size() != 2 && output->descriptor().shape.size() != 3) ||
+                input->descriptor().shape[0] == 0)
+                return Status{StatusCode::Unsupported, type + " MatMul requires non-empty [M,K] activations and [M,N] or [M,H,D] output"};
             const uint64_t output_channels = output->element_count() / input->descriptor().shape[0];
             if (weight->second.dimensions.size() != 2 ||
                 weight->second.dimensions[0] != input->descriptor().shape[1] ||
