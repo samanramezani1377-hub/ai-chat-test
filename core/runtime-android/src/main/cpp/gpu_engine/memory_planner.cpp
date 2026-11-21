@@ -32,6 +32,15 @@ Status allocate_model_activation_tensors(const ModelExecutionPlan& model, Memory
     if (!model.structurally_validated || token_count == 0)
         return {StatusCode::InvalidArgument, "Activation allocation requires a validated model plan and non-zero token count"};
 
+    // Activation shapes depend on the current prefill/decode token count. Remove
+    // only plan-produced activations from the previous invocation; model weights
+    // and KV-cache views are not plan outputs and remain bound in the context.
+    for (const auto& operation : model.operations) {
+        if (!operation.side_effect && !operation.output.empty())
+            context.tensors.erase(operation.output);
+    }
+    context.activation_leases.clear();
+
     std::unordered_map<std::string, size_t> last_use;
     for (size_t index = 0; index < model.operations.size(); ++index) {
         const auto& operation = model.operations[index];

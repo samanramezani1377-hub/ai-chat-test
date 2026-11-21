@@ -1465,6 +1465,11 @@ void test_activation_allocator_reuses_non_overlapping_tensor_slots() {
     assert(context.tensors.at("q").buffer().get() != context.tensors.at("z").buffer().get());
     assert(context.activation_leases.size() == 3);
     assert(memory.allocated_bytes() == 96);
+
+    assert(allocate_model_activation_tensors(plan, memory, 1, context).ok());
+    assert(context.tensors.at("x").descriptor().shape == std::vector<uint64_t>({1, 4}));
+    assert(context.tensors.at("z").descriptor().shape == std::vector<uint64_t>({1, 4}));
+    assert(context.activation_leases.size() == 3);
 }
 
 void test_model_kv_cache_view_binding_uses_planned_sequence_length() {
