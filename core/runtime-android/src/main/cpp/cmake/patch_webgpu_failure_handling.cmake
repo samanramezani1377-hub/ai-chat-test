@@ -78,7 +78,7 @@ static bool ggml_backend_webgpu_wait_queue(webgpu_global_context & ctx) {
             [result](wgpu::QueueWorkDoneStatus status, wgpu::StringView message) {
                 {
                     std::lock_guard<std::mutex> lock(result->message_mutex);
-                    result->message.assign(message.data ? message.data : "", message.length);
+                    result->message = std::string(message);
                 }
                 result->status.store(static_cast<int>(status), std::memory_order_release);
             }),
@@ -142,12 +142,6 @@ static bool ggml_backend_webgpu_map_buffer(webgpu_global_context & ctx,
 ]=])
     set(_webgpu "${_webgpu_before_wait}${_wait_replacement}${_webgpu_after_wait}")
 
-    # Queue submission must stop immediately after a failed wait; graph_compute
-    # observes the shared error flag and returns GGML_STATUS_FAILED to the scheduler.
-    ai_chat_replace_once(_webgpu
-        "static void ggml_backend_webgpu_submit_commands(ggml_backend_webgpu_context &"
-        "static void ggml_backend_webgpu_submit_commands(ggml_backend_webgpu_context &"
-        "verify submit helper signature")
 endif()
 
 # The pinned source uses webgpu_context in the submit helper. Keep the replacement
