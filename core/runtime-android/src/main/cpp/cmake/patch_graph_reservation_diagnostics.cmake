@@ -95,8 +95,8 @@ bool ggml_backend_sched_reserve(ggml_backend_sched_t sched, struct ggml_cgraph *
         "record entry to backend graph splitting")
 
     ai_chat_replace_once(_backend
-        "    ggml_backend_sched_split_graph(sched, graph);\\n\\n    if (!ggml_backend_sched_alloc_splits(sched)) {"
-        "    try {\\n        ggml_backend_sched_split_graph(sched, graph);\\n    } catch (const std::exception & err) {\\n        GGML_LOG_ERROR(\\\"AI_CHAT_GRAPH_SPLIT_FAILED stage=runtime reason=%s\\\\n\\\", err.what());\\n        return false;\\n    }\\n\\n    if (!ggml_backend_sched_alloc_splits(sched)) {"
+        "    ggml_backend_sched_split_graph(sched, graph);\n\n    if (!ggml_backend_sched_alloc_splits(sched)) {"
+        "    try {\n        ggml_backend_sched_split_graph(sched, graph);\n    } catch (const std::exception & err) {\n        GGML_LOG_ERROR(\"AI_CHAT_GRAPH_SPLIT_FAILED stage=runtime reason=%s\\n\", err.what());\n        return false;\n    }\n\n    if (!ggml_backend_sched_alloc_splits(sched)) {"
         "return a recoverable graph allocation failure instead of propagating exceptions during inference")
     ai_chat_replace_once(_backend
         "    sched->ctx = ggml_init(params);\n    if (sched->ctx == NULL) {\n        GGML_ABORT(\"%s: failed to initialize context\\n\", __func__);\n    }"
