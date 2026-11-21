@@ -109,6 +109,53 @@ void main() {
 }
 )glsl";
 
+constexpr char kSiluF32Glsl[] = R"glsl(#version 310 es
+precision highp float;
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Input { float input_values[]; };
+layout(std430, binding = 1) writeonly buffer Output { float output_values[]; };
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index < uint(output_values.length())) {
+        float x = input_values[index];
+        output_values[index] = x / (1.0 + exp(-x));
+    }
+}
+)glsl";
+
+constexpr char kRmsNormF32Glsl[] = R"glsl(#version 310 es
+precision highp float;
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Input { float input_values[]; };
+layout(std430, binding = 1) readonly buffer Weight { float weight_values[]; };
+layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
+const uint ROWS = 1u;
+const uint COLUMNS = 1u;
+const float EPSILON = 0.00001;
+shared float partial[64];
+void main() {
+    uint row = gl_WorkGroupID.x;
+    uint lane = gl_LocalInvocationID.x;
+    if (row >= ROWS) return;
+    float sum = 0.0;
+    for (uint column = lane; column < COLUMNS; column += 64u) {
+        float x = input_values[row * COLUMNS + column];
+        sum += x * x;
+    }
+    partial[lane] = sum;
+    barrier();
+    for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+        if (lane < stride) partial[lane] += partial[lane + stride];
+        barrier();
+    }
+    float inverse = inversesqrt(partial[0] / float(COLUMNS) + EPSILON);
+    for (uint column = lane; column < COLUMNS; column += 64u) {
+        uint index = row * COLUMNS + column;
+        output_values[index] = input_values[index] * inverse * weight_values[column];
+    }
+}
+)glsl";
+
 constexpr char kMatMulF32Glsl[] = R"glsl(#version 310 es
 precision highp float;
 layout(local_size_x = 8, local_size_y = 8) in;
@@ -704,6 +751,30 @@ Status build_rms_norm_f32_candidate(const Tensor& input, const Tensor& weight,
     return Status::success();
 }
 
+Status build_rms_norm_f32_gles_candidate(const Tensor& input, const Tensor& weight,
+                                         const Tensor& output, float epsilon,
+                                         ComputeDispatch& dispatch) {
+    Status status = build_rms_norm_f32_candidate(input, weight, output, epsilon, dispatch);
+    if (!status.ok()) return status;
+    const auto& shape = input.descriptor().shape;
+    std::ostringstream epsilon_literal;
+    epsilon_literal << std::setprecision(9) << epsilon;
+    std::string epsilon_text = epsilon_literal.str();
+    if (epsilon_text.find_first_of(".eE") == std::string::npos) epsilon_text += ".0";
+    dispatch.backend = BackendKind::OpenGles;
+    dispatch.kernel_id = "gles-rms-norm-f32-generic-v1";
+    dispatch.label = "gles-rms-norm-f32-generic-unverified";
+    dispatch.wgsl_source.clear();
+    dispatch.glsl_source = kRmsNormF32Glsl;
+    dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const uint ROWS = 1u;",
+        "const uint ROWS = " + std::to_string(shape[0]) + "u;");
+    dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const uint COLUMNS = 1u;",
+        "const uint COLUMNS = " + std::to_string(shape[1]) + "u;");
+    dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const float EPSILON = 0.00001;",
+        "const float EPSILON = " + epsilon_text + ";");
+    return Status::success();
+}
+
 Status reference_rms_norm_f32(const float* input, const float* weight, float* output,
                               uint64_t rows, uint64_t columns, float epsilon) {
     if ((!input || !weight || !output) && rows && columns)
@@ -842,6 +913,18 @@ Status build_silu_f32_candidate(const Tensor& input, const Tensor& output,
         {0, input.buffer(), input.byte_offset(), input.byte_size()},
         {1, output.buffer(), output.byte_offset(), output.byte_size()},
     };
+    return Status::success();
+}
+
+Status build_silu_f32_gles_candidate(const Tensor& input, const Tensor& output,
+                                     ComputeDispatch& dispatch) {
+    Status status = build_silu_f32_candidate(input, output, dispatch);
+    if (!status.ok()) return status;
+    dispatch.backend = BackendKind::OpenGles;
+    dispatch.kernel_id = "gles-silu-f32-generic-v1";
+    dispatch.label = "gles-silu-f32-generic-unverified";
+    dispatch.wgsl_source.clear();
+    dispatch.glsl_source = kSiluF32Glsl;
     return Status::success();
 }
 
@@ -1192,7 +1275,37 @@ Status register_builtin_gles_operator_candidates(OperatorRegistry& registry) {
     matmul.validation = KernelValidation::Unverified;
     matmul.kernel_id = "gles-matmul-f32-generic-v1";
     matmul.glsl_source = kMatMulF32Glsl;
-    return registry.register_kernel(std::move(matmul));
+    status = registry.register_kernel(std::move(matmul));
+    if (!status.ok()) return status;
+
+    KernelDefinition rms;
+    rms.operator_name = "RMSNorm";
+    rms.backend = BackendKind::OpenGles;
+    rms.input_type = DataType::F32;
+    rms.output_type = DataType::F32;
+    rms.min_input_count = 2;
+    rms.max_input_count = 2;
+    rms.min_rank = 2;
+    rms.max_rank = 2;
+    rms.validation = KernelValidation::Unverified;
+    rms.kernel_id = "gles-rms-norm-f32-generic-v1";
+    rms.glsl_source = kRmsNormF32Glsl;
+    status = registry.register_kernel(std::move(rms));
+    if (!status.ok()) return status;
+
+    KernelDefinition silu;
+    silu.operator_name = "SiLU";
+    silu.backend = BackendKind::OpenGles;
+    silu.input_type = DataType::F32;
+    silu.output_type = DataType::F32;
+    silu.min_input_count = 1;
+    silu.max_input_count = 1;
+    silu.min_rank = 1;
+    silu.max_rank = 16;
+    silu.validation = KernelValidation::Unverified;
+    silu.kernel_id = "gles-silu-f32-generic-v1";
+    silu.glsl_source = kSiluF32Glsl;
+    return registry.register_kernel(std::move(silu));
 }
 
 } // namespace ai_chat::gpu_engine

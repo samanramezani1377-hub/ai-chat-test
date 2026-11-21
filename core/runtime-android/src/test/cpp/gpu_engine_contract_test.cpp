@@ -455,6 +455,18 @@ void test_q8_0_decoder_and_registry() {
     assert(reference_matmul_f32(matmul_lhs, matmul_rhs, matmul_output, 2, 2, 3).ok());
     assert(matmul_output[0] == 58 && matmul_output[1] == 64 &&
            matmul_output[2] == 139 && matmul_output[3] == 154);
+    ComputeDispatch gles_silu;
+    assert(build_silu_f32_gles_candidate(lhs, output, gles_silu).ok());
+    assert(gles_silu.backend == BackendKind::OpenGles);
+    assert(gles_silu.glsl_source.find("exp(-x)") != std::string::npos);
+    TensorDesc weight_desc = tensor_desc;
+    weight_desc.shape = {3};
+    Tensor weight_tensor;
+    assert(Tensor::create(weight_desc, b, 0, weight_tensor).ok());
+    ComputeDispatch gles_rms;
+    assert(build_rms_norm_f32_gles_candidate(lhs, weight_tensor, output, 1.0e-5f, gles_rms).ok());
+    assert(gles_rms.workgroups_x == 2);
+    assert(gles_rms.glsl_source.find("const uint COLUMNS = 3u;") != std::string::npos);
     assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") != std::string::npos);
 
     BufferDesc q4_encoded_desc{20, 4, MemoryDomain::Device, false, "q4-encoded"};
