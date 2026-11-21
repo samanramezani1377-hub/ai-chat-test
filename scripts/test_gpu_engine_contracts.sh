@@ -11,7 +11,17 @@ trap 'rm -rf "$TMP"' EXIT
   -I "$ENGINE" \
   "$ENGINE/gpu_engine.cpp" \
   "$ENGINE/execution_engine.cpp" \
+  "$ENGINE/gguf_reader.cpp" \
   "$TEST" \
   -o "$TMP/gpu_engine_contract_test"
+
+# The reusable engine core and Dawn backend must not import llama.cpp/GGML execution APIs.
+if grep -nE '#include[[:space:]]*[<"]((llama|ggml)[^>"]*)[>"]' \
+    "$ENGINE/gpu_engine.h" "$ENGINE/gpu_engine.cpp" \
+    "$ENGINE/execution_engine.h" "$ENGINE/execution_engine.cpp" \
+    "$ENGINE/gguf_reader.h" "$ENGINE/gguf_reader.cpp" "$ENGINE/dawn_backend.cpp"; then
+  echo "GPU engine backend boundary violation: llama.cpp/GGML include found" >&2
+  exit 1
+fi
 
 "$TMP/gpu_engine_contract_test"
