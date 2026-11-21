@@ -1970,6 +1970,28 @@ void test_operator_registry_fail_closed() {
     tampered.wgsl_source = selected.wgsl_source + "\\n// changed shader body";
     assert(registry.authorize_dispatch(selected.kernel_id, selected.backend, tampered).code ==
            StatusCode::InvalidArgument);
+
+    KernelDefinition specialized;
+    specialized.operator_name = "Specialized";
+    specialized.kernel_id = "specialized-f32-v1";
+    specialized.backend = BackendKind::DawnWebGpu;
+    specialized.input_type = DataType::F32;
+    specialized.output_type = DataType::F32;
+    specialized.min_input_count = specialized.max_input_count = 1;
+    specialized.min_rank = specialized.max_rank = 1;
+    specialized.validation = KernelValidation::Validated;
+    specialized.wgsl_source = "const ELEMENT_COUNT: u32 = 1u;\\n@compute @workgroup_size(64) fn main() {}";
+    assert(registry.register_kernel(specialized).ok());
+    ComputeDispatch specialized_dispatch;
+    specialized_dispatch.kernel_id = specialized.kernel_id;
+    specialized_dispatch.wgsl_source = "const ELEMENT_COUNT: u32 = 4u;\\n@compute @workgroup_size(64) fn main() {}";
+    assert(registry.authorize_dispatch(specialized.kernel_id, specialized.backend,
+                                       specialized_dispatch).ok());
+    ComputeDispatch altered_specialization = specialized_dispatch;
+    altered_specialization.wgsl_source = "const ELEMENT_COUNT: u32 = 4u;\\n@compute @workgroup_size(64) fn main() { let x = 1u; }";
+    assert(registry.authorize_dispatch(specialized.kernel_id, specialized.backend,
+                                       altered_specialization).code == StatusCode::InvalidArgument);
+
     ComputeDispatch unknown;
     unknown.kernel_id = "not-registered";
     unknown.wgsl_source = selected.wgsl_source;
