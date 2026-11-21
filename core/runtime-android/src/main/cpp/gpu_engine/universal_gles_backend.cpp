@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <deque>
 #include <limits>
 #include <memory>
 #include <string>
@@ -98,7 +99,8 @@ Status compile_program(const std::string& source, GLuint& program) {
 }
 
 Status dispatch_gles(const ComputeDispatch& d, const ai_chat::gpu::UniversalGpuCapabilities& caps,
-                     std::unordered_map<std::string, GLuint>* program_cache = nullptr) {
+                     std::unordered_map<std::string, GLuint>* program_cache = nullptr,
+                     std::deque<std::string>* program_cache_order = nullptr) {
     if (d.backend != BackendKind::OpenGles || d.validation != KernelValidation::Validated ||
         d.kernel_id.empty() || d.glsl_source.empty() || !d.workgroups_x || !d.workgroups_y || !d.workgroups_z)
         return {StatusCode::Unsupported, "GLES dispatch requires a validated GLSL kernel and non-zero dispatch dimensions"};
@@ -140,9 +142,35 @@ Status dispatch_gles(const ComputeDispatch& d, const ai_chat::gpu::UniversalGpuC
     if (!cache_hit) {
         Status compile_status = compile_program(d.glsl_source, program);
         if (!compile_status.ok()) return compile_status;
-        if (program_cache) {
-            try { program_cache->emplace(cache_key, program); cache_hit = true; }
-            catch (...) { /* Cache failure must not prevent inference. */ }
+        if (program_cache && program_cache_order) {
+            try {
+                const auto inserted = program_cache->emplace(cache_key, program);
+                if (inserted.second) {
+                    try {
+                        program_cache_order->push_back(cache_key);
+                        cache_hit = true;
+                    } catch (...) {
+                        program_cache->erase(inserted.first);
+                    }
+                } else {
+                    glDeleteProgram(program);
+                    program = inserted.first->second;
+                    cache_hit = true;
+                }
+                constexpr size_t kMaximumCachedPrograms = 64;
+                while (program_cache->size() > kMaximumCachedPrograms &&
+                       !program_cache_order->empty()) {
+                    const std::string oldest = std::move(program_cache_order->front());
+                    program_cache_order->pop_front();
+                    const auto evicted = program_cache->find(oldest);
+                    if (evicted != program_cache->end()) {
+                        if (evicted->second) glDeleteProgram(evicted->second);
+                        program_cache->erase(evicted);
+                    }
+                }
+            } catch (...) {
+                // Cache bookkeeping is optional; keep the compiled program uncached.
+            }
         }
     }
     clear_errors();
@@ -266,7 +294,7 @@ public:
                     glCopyBufferSubData(GL_COPY_READ_BUFFER,GL_COPY_WRITE_BUFFER,static_cast<GLintptr>(c.source_offset),static_cast<GLintptr>(c.destination_offset),static_cast<GLsizeiptr>(c.size));
                     glBindBuffer(GL_COPY_READ_BUFFER,0); glBindBuffer(GL_COPY_WRITE_BUFFER,0);
                     const GLenum e=glGetError(); if(e!=GL_NO_ERROR) result=gl_error("glCopyBufferSubData",e);
-                } else result=dispatch_gles(c.dispatch,caps_,&program_cache_);
+                } else result=dispatch_gles(c.dispatch,caps_,&program_cache_,&program_cache_order_);
             }
             glFlush();
         },detail);
@@ -310,6 +338,7 @@ public:
         const bool ran = ai_chat::gpu::run_universal_gpu_task([&]() {
             for (const auto& entry : program_cache_) if (entry.second) glDeleteProgram(entry.second);
             program_cache_.clear();
+            program_cache_order_.clear();
         }, detail);
         if (!ran) return {StatusCode::DeviceLost, detail};
         return Status::success();
@@ -318,6 +347,7 @@ public:
 private:
     ai_chat::gpu::UniversalGpuCapabilities caps_;
     std::unordered_map<std::string, GLuint> program_cache_;
+    std::deque<std::string> program_cache_order_;
     std::atomic<bool> healthy_{false};
 };
 } // namespace
