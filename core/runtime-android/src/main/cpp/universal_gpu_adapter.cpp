@@ -10,101 +10,14 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #include <sstream>
 #include <string>
 
 namespace ai_chat::gpu {
 namespace {
-
-class EglCurrentContext {
-public:
-    EglCurrentContext()
-        : previous_api_(eglQueryAPI()),
-          previous_display_(eglGetCurrentDisplay()),
-          previous_draw_(eglGetCurrentSurface(EGL_DRAW)),
-          previous_read_(eglGetCurrentSurface(EGL_READ)),
-          previous_context_(eglGetCurrentContext()) {}
-    EglCurrentContext(const EglCurrentContext &) = delete;
-    EglCurrentContext & operator=(const EglCurrentContext &) = delete;
-
-    ~EglCurrentContext() { restore(); }
-
-    bool bind(EGLDisplay display, EGLSurface surface, EGLContext context) {
-        if (eglMakeCurrent(display, surface, surface, context) != EGL_TRUE) return false;
-        active_display_ = display;
-        changed_ = true;
-        return true;
-    }
-
-    bool restore() {
-        if (!changed_) return true;
-        EGLBoolean result = EGL_FALSE;
-        if (previous_context_ != EGL_NO_CONTEXT && previous_display_ != EGL_NO_DISPLAY) {
-            // eglMakeCurrent validates the context against the thread's bound
-            // client API. Restore that API before rebinding an application
-            // context that may have been created for desktop OpenGL.
-            if (eglBindAPI(previous_api_) != EGL_TRUE) {
-                last_restore_error_ = eglGetError();
-                eglMakeCurrent(active_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-                changed_ = false;
-                return false;
-            }
-            result = eglMakeCurrent(previous_display_, previous_draw_, previous_read_, previous_context_);
-        } else {
-            // Unbind the temporary GLES context while GLES is still the bound API.
-            result = eglMakeCurrent(active_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-            if (result == EGL_TRUE && eglBindAPI(previous_api_) != EGL_TRUE) {
-                last_restore_error_ = eglGetError();
-                changed_ = false;
-                return false;
-            }
-        }
-        const EGLint restore_error = result == EGL_TRUE ? EGL_SUCCESS : eglGetError();
-        if (result != EGL_TRUE) {
-            // Best effort: the failed restore may have switched the thread API
-            // to the caller's API while the temporary GLES context is still
-            // current. Rebind GLES to safely release that temporary context,
-            // then restore the caller's API selection.
-            eglBindAPI(EGL_OPENGL_ES_API);
-            eglMakeCurrent(active_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-            eglBindAPI(previous_api_);
-        }
-        changed_ = false;
-        last_restore_error_ = restore_error;
-        return result == EGL_TRUE;
-    }
-
-    EGLint last_restore_error() const { return last_restore_error_; }
-
-private:
-    EGLenum previous_api_ = EGL_OPENGL_ES_API;
-    EGLDisplay previous_display_ = EGL_NO_DISPLAY;
-    EGLSurface previous_draw_ = EGL_NO_SURFACE;
-    EGLSurface previous_read_ = EGL_NO_SURFACE;
-    EGLContext previous_context_ = EGL_NO_CONTEXT;
-    EGLDisplay active_display_ = EGL_NO_DISPLAY;
-    EGLint last_restore_error_ = EGL_SUCCESS;
-    bool changed_ = false;
-};
-
-class EglApiBinding {
-public:
-    EglApiBinding() : previous_api_(eglQueryAPI()) {}
-    EglApiBinding(const EglApiBinding &) = delete;
-    EglApiBinding & operator=(const EglApiBinding &) = delete;
-    ~EglApiBinding() {
-        if (bound_) eglBindAPI(previous_api_);
-    }
-    bool bind_opengles() {
-        if (eglBindAPI(EGL_OPENGL_ES_API) != EGL_TRUE) return false;
-        bound_ = true;
-        return true;
-    }
-
-private:
-    EGLenum previous_api_;
-    bool bound_ = false;
-};
 
 std::string egl_error_name(EGLint error) {
     switch (error) {
@@ -327,6 +240,180 @@ void read_compute_limits(UniversalGpuCapabilities &caps) {
     caps.max_compute_workgroup_size_z = values[2];
 }
 
+
+class PersistentGlesProbe {
+public:
+    PersistentGlesProbe() = default;
+    PersistentGlesProbe(const PersistentGlesProbe &) = delete;
+    PersistentGlesProbe & operator=(const PersistentGlesProbe &) = delete;
+    ~PersistentGlesProbe() { shutdown(); }
+
+    UniversalGpuCapabilities initialize() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (!worker_.joinable()) {
+            stopping_ = false;
+            startup_complete_ = false;
+            worker_ = std::thread(&PersistentGlesProbe::run, this);
+        }
+        startup_cv_.wait(lock, [this] { return startup_complete_; });
+        return capabilities_;
+    }
+
+    void shutdown() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!worker_.joinable()) return;
+            stopping_ = true;
+        }
+        shutdown_cv_.notify_one();
+        worker_.join();
+        std::lock_guard<std::mutex> lock(mutex_);
+        stopping_ = false;
+        startup_complete_ = false;
+        capabilities_ = {};
+    }
+
+private:
+    void publish_startup(const UniversalGpuCapabilities &caps) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            capabilities_ = caps;
+            startup_complete_ = true;
+        }
+        startup_cv_.notify_all();
+    }
+
+    void wait_for_shutdown() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        shutdown_cv_.wait(lock, [this] { return stopping_; });
+    }
+
+    void run() {
+        UniversalGpuCapabilities caps;
+        EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+        EGLSurface surface = EGL_NO_SURFACE;
+        EGLContext context = EGL_NO_CONTEXT;
+        bool context_current = false;
+
+        if (display == EGL_NO_DISPLAY) {
+            caps.failure_reason = "egl_get_display_failed_" + egl_error_name(eglGetError());
+        } else {
+            EGLint egl_major = 0;
+            EGLint egl_minor = 0;
+            if (eglInitialize(display, &egl_major, &egl_minor) != EGL_TRUE) {
+                caps.failure_reason = "egl_initialize_failed_" + egl_error_name(eglGetError());
+            } else {
+                caps.egl_display_available = true;
+                caps.egl_major = egl_major;
+                caps.egl_minor = egl_minor;
+                caps.egl_version = egl_string(display, EGL_VERSION);
+                caps.egl_vendor = egl_string(display, EGL_VENDOR);
+
+                if (eglBindAPI(EGL_OPENGL_ES_API) != EGL_TRUE) {
+                    caps.failure_reason = "egl_bind_opengles_api_failed_" + egl_error_name(eglGetError());
+                } else {
+                    EGLint config_attributes[] = {
+                        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+                        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT_KHR,
+                        EGL_RED_SIZE, 8,
+                        EGL_GREEN_SIZE, 8,
+                        EGL_BLUE_SIZE, 8,
+                        EGL_NONE
+                    };
+                    EGLConfig config = nullptr;
+                    EGLint config_count = 0;
+                    if (eglChooseConfig(display, config_attributes, &config, 1, &config_count) != EGL_TRUE ||
+                        config_count < 1) {
+                        caps.failure_reason = "egl_choose_es3_pbuffer_config_failed_" + egl_error_name(eglGetError());
+                    } else {
+                        EGLint pbuffer_attributes[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
+                        surface = eglCreatePbufferSurface(display, config, pbuffer_attributes);
+                        if (surface == EGL_NO_SURFACE) {
+                            caps.failure_reason = "egl_create_pbuffer_failed_" + egl_error_name(eglGetError());
+                        } else {
+                            EGLint context_attributes[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
+                            context = eglCreateContext(display, config, EGL_NO_CONTEXT, context_attributes);
+                            if (context == EGL_NO_CONTEXT) {
+                                caps.failure_reason = "egl_create_gles3_context_failed_" + egl_error_name(eglGetError());
+                            } else if (eglMakeCurrent(display, surface, surface, context) != EGL_TRUE) {
+                                caps.failure_reason = "egl_make_current_failed_" + egl_error_name(eglGetError());
+                            } else {
+                                context_current = true;
+                                caps.egl_context_created = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (context_current) {
+            caps.vendor = gl_string(GL_VENDOR);
+            caps.renderer = gl_string(GL_RENDERER);
+            caps.version = gl_string(GL_VERSION);
+            caps.shading_language_version = gl_string(GL_SHADING_LANGUAGE_VERSION);
+
+            GLint major = 0;
+            GLint minor = 0;
+            glGetIntegerv(GL_MAJOR_VERSION, &major);
+            glGetIntegerv(GL_MINOR_VERSION, &minor);
+            caps.gles_major = major;
+            caps.gles_minor = minor;
+
+            const std::string extensions = gl_extensions(caps.extension_count);
+            caps.gles_compute_supported = major > 3 || (major == 3 && minor >= 1);
+            caps.gles_fp16_shader_hint =
+                has_extension(extensions, "GL_EXT_shader_explicit_arithmetic_types_float16") ||
+                has_extension(extensions, "GL_AMD_gpu_shader_half_float") ||
+                has_extension(extensions, "GL_NV_gpu_shader5");
+
+            if (caps.gles_compute_supported) {
+                read_compute_limits(caps);
+                const GLenum error = glGetError();
+                if (error != GL_NO_ERROR) {
+                    caps.failure_reason = "gles_compute_limit_query_failed";
+                    caps.gles_compute_supported = false;
+                } else {
+                    std::string self_test_failure;
+                    caps.gles_compute_self_test_passed = run_gles_compute_self_test(self_test_failure);
+                    if (!caps.gles_compute_self_test_passed && caps.failure_reason.empty()) {
+                        caps.failure_reason = self_test_failure.empty()
+                            ? "gles_compute_self_test_failed" : self_test_failure;
+                    }
+                }
+            } else if (caps.failure_reason.empty()) {
+                caps.failure_reason = "opengles_3_1_compute_not_supported";
+            }
+        }
+
+        // Publish even on failure so the caller never waits indefinitely.
+        publish_startup(caps);
+        wait_for_shutdown();
+
+        // All EGL/GLES teardown occurs on the same thread that owns the context.
+        if (context_current) {
+            eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        }
+        if (context != EGL_NO_CONTEXT) eglDestroyContext(display, context);
+        if (surface != EGL_NO_SURFACE) eglDestroySurface(display, surface);
+        // Do not eglTerminate the process-wide display: Android UI and other
+        // native libraries may share it independently.
+    }
+
+    std::mutex mutex_;
+    std::condition_variable startup_cv_;
+    std::condition_variable shutdown_cv_;
+    std::thread worker_;
+    UniversalGpuCapabilities capabilities_;
+    bool startup_complete_ = false;
+    bool stopping_ = false;
+};
+
+PersistentGlesProbe & persistent_gles_probe() {
+    static PersistentGlesProbe instance;
+    return instance;
+}
+
 } // namespace
 
 std::string UniversalGpuCapabilities::diagnostic_line() const {
@@ -357,120 +444,11 @@ std::string UniversalGpuCapabilities::diagnostic_line() const {
 }
 
 UniversalGpuCapabilities probe_universal_gpu_adapter() {
-    UniversalGpuCapabilities caps;
-    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    if (display == EGL_NO_DISPLAY) {
-        caps.failure_reason = "egl_get_display_failed_" + egl_error_name(eglGetError());
-        return caps;
-    }
+    return persistent_gles_probe().initialize();
+}
 
-    EGLint egl_major = 0;
-    EGLint egl_minor = 0;
-    if (eglInitialize(display, &egl_major, &egl_minor) != EGL_TRUE) {
-        caps.failure_reason = "egl_initialize_failed_" + egl_error_name(eglGetError());
-        return caps;
-    }
-    caps.egl_display_available = true;
-    caps.egl_major = egl_major;
-    caps.egl_minor = egl_minor;
-    caps.egl_version = egl_string(display, EGL_VERSION);
-    caps.egl_vendor = egl_string(display, EGL_VENDOR);
-
-    // Capture the caller's EGL context and client API before switching to GLES.
-    EglCurrentContext current_context;
-    EglApiBinding api_binding;
-    if (!api_binding.bind_opengles()) {
-        caps.failure_reason = "egl_bind_opengles_api_failed_" + egl_error_name(eglGetError());
-        return caps;
-    }
-
-    EGLint config_attributes[] = {
-        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT_KHR,
-        EGL_RED_SIZE, 8,
-        EGL_GREEN_SIZE, 8,
-        EGL_BLUE_SIZE, 8,
-        EGL_NONE
-    };
-    EGLConfig config = nullptr;
-    EGLint config_count = 0;
-    if (eglChooseConfig(display, config_attributes, &config, 1, &config_count) != EGL_TRUE ||
-        config_count < 1) {
-        caps.failure_reason = "egl_choose_es3_pbuffer_config_failed_" + egl_error_name(eglGetError());
-        return caps;
-    }
-
-    EGLint pbuffer_attributes[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
-    EGLSurface surface = eglCreatePbufferSurface(display, config, pbuffer_attributes);
-    if (surface == EGL_NO_SURFACE) {
-        caps.failure_reason = "egl_create_pbuffer_failed_" + egl_error_name(eglGetError());
-        return caps;
-    }
-
-    EGLint context_attributes[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
-    EGLContext context = eglCreateContext(display, config, EGL_NO_CONTEXT, context_attributes);
-    if (context == EGL_NO_CONTEXT) {
-        caps.failure_reason = "egl_create_gles3_context_failed_" + egl_error_name(eglGetError());
-        eglDestroySurface(display, surface);
-        return caps;
-    }
-
-    if (!current_context.bind(display, surface, context)) {
-        caps.failure_reason = "egl_make_current_failed_" + egl_error_name(eglGetError());
-        eglDestroyContext(display, context);
-        eglDestroySurface(display, surface);
-        return caps;
-    }
-    caps.egl_context_created = true;
-
-    caps.vendor = gl_string(GL_VENDOR);
-    caps.renderer = gl_string(GL_RENDERER);
-    caps.version = gl_string(GL_VERSION);
-    caps.shading_language_version = gl_string(GL_SHADING_LANGUAGE_VERSION);
-
-    GLint major = 0;
-    GLint minor = 0;
-    glGetIntegerv(GL_MAJOR_VERSION, &major);
-    glGetIntegerv(GL_MINOR_VERSION, &minor);
-    caps.gles_major = major;
-    caps.gles_minor = minor;
-
-    const std::string extensions = gl_extensions(caps.extension_count);
-
-    caps.gles_compute_supported = major > 3 || (major == 3 && minor >= 1);
-    caps.gles_fp16_shader_hint =
-        has_extension(extensions, "GL_EXT_shader_explicit_arithmetic_types_float16") ||
-        has_extension(extensions, "GL_AMD_gpu_shader_half_float") ||
-        has_extension(extensions, "GL_NV_gpu_shader5");
-
-    if (caps.gles_compute_supported) {
-        read_compute_limits(caps);
-        const GLenum error = glGetError();
-        if (error != GL_NO_ERROR) {
-            caps.failure_reason = "gles_compute_limit_query_failed";
-            caps.gles_compute_supported = false;
-        } else {
-            std::string self_test_failure;
-            caps.gles_compute_self_test_passed = run_gles_compute_self_test(self_test_failure);
-            if (!caps.gles_compute_self_test_passed && caps.failure_reason.empty()) {
-                caps.failure_reason = self_test_failure.empty()
-                    ? "gles_compute_self_test_failed" : self_test_failure;
-            }
-        }
-    } else if (caps.failure_reason.empty()) {
-        caps.failure_reason = "opengles_3_1_compute_not_supported";
-    }
-
-    // Restore the thread's previous EGL context/surfaces before destroying
-    // the temporary probe context. The probe may run on a thread that already
-    // owns an application graphics context; unbinding it would break rendering.
-    if (!current_context.restore() && caps.failure_reason.empty()) {
-        caps.failure_reason = "egl_restore_previous_context_failed_" +
-            egl_error_name(current_context.last_restore_error());
-    }
-    eglDestroyContext(display, context);
-    eglDestroySurface(display, surface);
-    return caps;
+void shutdown_universal_gpu_adapter() {
+    persistent_gles_probe().shutdown();
 }
 
 } // namespace ai_chat::gpu
