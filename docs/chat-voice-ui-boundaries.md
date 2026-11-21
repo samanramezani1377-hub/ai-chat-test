@@ -22,6 +22,10 @@ These are shared services, not shared UI state. They must not be duplicated just
 
 The voice Activity owns the voice conversation host and its controller lifecycle. Voice turns explicitly create an AgentSession with `includeAgentTools = false`; the text-chat Agent tool catalog and action protocol are not injected into voice prompts. Voice also supplies its own bounded inference settings (384 new tokens, 12 recent messages, Thinking disabled), rather than inheriting the text-chat settings reader. STT/TTS model selection, microphone capture, speech segmentation, playback, wake-trigger handoff, and voice transcript UI remain in the voice feature. Disposing the voice Activity disposes the voice host/controller without recreating the text-chat screen.
 
+## Voice shutdown and thread ownership
+
+VoiceConversationController.stop() must not block the Activity/UI caller while AudioRecord.stop() or the microphone capture-thread join is running. Microphone shutdown is dispatched to Dispatchers.IO; LocalMicrophone.start() and stop() are synchronized so a concurrent start/stop cannot release the same recorder twice. Voice engine implementations are separated by responsibility (LocalPiperTts, LocalAsrEngines, LocalMicrophone) while remaining in the same package and preserving their existing contracts.
+
 ## Text-chat ownership
 
 The text chat retains its own composer, message stream, Agent execution state, approval flow, and ChatPage presentation in MainScreen. Changes to the voice transcript layout or voice controls should be confined to the voice feature unless a deliberately shared service contract changes.

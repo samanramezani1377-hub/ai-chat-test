@@ -35,7 +35,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.ConcurrentLinkedQueue
 
 internal class VoiceConversationController(
     private val context: Context,
@@ -58,8 +57,8 @@ internal class VoiceConversationController(
     // Playback guard is also applied to ASR input, not only to barge-in detection.
     // Loudspeaker echo can remain in the microphone after AudioTrack stops.
     private val lastTtsPlaybackAtMs = AtomicLong(0L)
-    // Bounded queue preserves short consecutive user turns without unbounded memory growth.
-    private val pendingUtterances = ConcurrentLinkedQueue<String>()
+    // Keep only the newest pending utterance; stale requests never accumulate.
+    private val pendingUtterances = AtomicReference<String?>(null)
     private val lastFinalizedUtterance = AtomicReference("")
     private val lastFinalizedUtteranceAtMs = AtomicLong(0L)
     private val startInProgress = AtomicBoolean(false)
@@ -277,8 +276,7 @@ internal class VoiceConversationController(
                                     // The newest finalized user turn supersedes stale generation immediately.
                                     // Keep only the latest utterance to prevent a long decode from building
                                     // a backlog and answering obsolete requests out of order.
-                                    pendingUtterances.clear()
-                                    pendingUtterances.offer(utterance)
+                                    pendingUtterances.set(utterance)
                                     onLine("شما", utterance)
                                     onDiagnostic("VOICE-TURN-INTERRUPT: turnRunning=true; pending=1; previousGeneration=stop_requested")
                                     interrupt("گفتار تازه دریافت شد؛ پاسخ قبلی متوقف و درخواست جدید پردازش می‌شود.")
@@ -564,7 +562,7 @@ internal class VoiceConversationController(
             turnRunning.set(false)
             bargeInTriggered.set(false)
             val canContinueSession = !closed && lifecycleEpoch.get() == turnEpoch
-            val pending = if (canContinueSession) pendingUtterances.poll() else null
+            val pending = if (canContinueSession) pendingUtterances.getAndSet(null) else null
             if (canContinueSession && pending != null && turnRunning.compareAndSet(false, true)) {
                 onStatus("در حال پردازش گفتار جدید…")
                 turnJob = scope.launch { processTurn(pending) }
@@ -664,7 +662,7 @@ internal class VoiceConversationController(
 
     fun stop(): Job {
         lifecycleEpoch.incrementAndGet()
-        pendingUtterances.clear()
+        pendingUtterances.set(null)
         val oldFrameJob = frameJob
         frameJob = null
         oldFrameJob?.cancel()
