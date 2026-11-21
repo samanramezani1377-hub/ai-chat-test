@@ -123,6 +123,25 @@ void main() {
 }
 )glsl";
 
+constexpr char kMatMulF32Glsl[] = R"glsl(#version 310 es
+precision highp float;
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(std430, binding = 0) readonly buffer Lhs { float lhs[]; };
+layout(std430, binding = 1) readonly buffer Rhs { float rhs[]; };
+layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
+const uint ROWS = 1u;
+const uint COLUMNS = 1u;
+const uint INNER = 1u;
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint column = gl_GlobalInvocationID.x;
+    if (row >= ROWS || column >= COLUMNS) return;
+    float sum = 0.0;
+    for (uint k = 0u; k < INNER; ++k) sum += lhs[row * INNER + k] * rhs[k * COLUMNS + column];
+    output_values[row * COLUMNS + column] = sum;
+}
+)glsl";
+
 constexpr char kMultiplyF32Glsl[] = R"glsl(#version 310 es
 precision highp float;
 layout(local_size_x = 64) in;
@@ -639,6 +658,26 @@ Status build_matmul_f32_candidate(const Tensor& lhs, const Tensor& rhs,
         {1, rhs.buffer(), rhs.byte_offset(), rhs.byte_size()},
         {2, output.buffer(), output.byte_offset(), output.byte_size()},
     };
+    return Status::success();
+}
+
+Status build_matmul_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
+                                       const Tensor& output, ComputeDispatch& dispatch) {
+    Status status = build_matmul_f32_candidate(lhs, rhs, output, dispatch);
+    if (!status.ok()) return status;
+    const auto& a = lhs.descriptor().shape;
+    const auto& b = rhs.descriptor().shape;
+    dispatch.backend = BackendKind::OpenGles;
+    dispatch.kernel_id = "gles-matmul-f32-generic-v1";
+    dispatch.label = "gles-matmul-f32-generic-unverified";
+    dispatch.wgsl_source.clear();
+    dispatch.glsl_source = kMatMulF32Glsl;
+    dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const uint ROWS = 1u;",
+        "const uint ROWS = " + std::to_string(a[0]) + "u;");
+    dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const uint COLUMNS = 1u;",
+        "const uint COLUMNS = " + std::to_string(b[1]) + "u;");
+    dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const uint INNER = 1u;",
+        "const uint INNER = " + std::to_string(a[1]) + "u;");
     return Status::success();
 }
 
@@ -1187,7 +1226,22 @@ Status register_builtin_gles_operator_candidates(OperatorRegistry& registry) {
     multiply.validation = KernelValidation::Unverified;
     multiply.kernel_id = "gles-multiply-f32-generic-v1";
     multiply.glsl_source = kMultiplyF32Glsl;
-    return registry.register_kernel(std::move(multiply));
+    Status status = registry.register_kernel(std::move(multiply));
+    if (!status.ok()) return status;
+
+    KernelDefinition matmul;
+    matmul.operator_name = "MatMul";
+    matmul.backend = BackendKind::OpenGles;
+    matmul.input_type = DataType::F32;
+    matmul.output_type = DataType::F32;
+    matmul.min_input_count = 2;
+    matmul.max_input_count = 2;
+    matmul.min_rank = 2;
+    matmul.max_rank = 2;
+    matmul.validation = KernelValidation::Unverified;
+    matmul.kernel_id = "gles-matmul-f32-generic-v1";
+    matmul.glsl_source = kMatMulF32Glsl;
+    return registry.register_kernel(std::move(matmul));
 }
 
 } // namespace ai_chat::gpu_engine

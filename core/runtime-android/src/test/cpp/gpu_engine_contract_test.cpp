@@ -436,6 +436,8 @@ void test_q8_0_decoder_and_registry() {
     assert(register_builtin_gles_operator_candidates(gles_registry).ok());
     assert(gles_registry.select_kernel("Add", BackendKind::OpenGles, DataType::F32,
                                        DataType::F32, 2, 2, selected).code == StatusCode::Unsupported);
+    ComputeDispatch gles_matmul;
+    assert(build_matmul_f32_gles_candidate(lhs, rhs, output, gles_matmul).code == StatusCode::InvalidArgument);
     assert(dispatch.wgsl_source.find("const ELEMENT_COUNT: u32 = 32u;") != std::string::npos);
 
     BufferDesc q4_encoded_desc{20, 4, MemoryDomain::Device, false, "q4-encoded"};
