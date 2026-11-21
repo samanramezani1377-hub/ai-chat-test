@@ -314,7 +314,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         }
     }
 
-    const auto quantization_report = evaluate_model_quantization_backend(model, *quantizations_, backend_kind);
+    auto quantization_report = evaluate_model_quantization_backend(model, *quantizations_, backend_kind);
     if (!quantization_report.compatible) {
         last_error_ = "Model quantization is not compatible with the selected GPU backend";
         for (const auto& blocker : quantization_report.blockers) last_error_ += " | " + blocker;
@@ -325,10 +325,59 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     ModelGraphCoverageReport coverage;
     status = validate_model_plan_operator_coverage(plan_, *operators_, backend_kind, coverage);
     if (!status.ok() || !coverage.complete) {
-        last_error_ = "Model operator coverage is incomplete for the selected GPU backend";
-        for (const auto& blocker : coverage.unsupported_operators) last_error_ += " | " + blocker;
-        unload_locked();
-        return {status.ok() ? StatusCode::Unsupported : status.code, last_error_};
+        std::string first_backend_reason = status.ok()
+            ? "Model operator coverage is incomplete" : status.message;
+        for (const auto& blocker : coverage.unsupported_operators)
+            first_backend_reason += " | " + blocker;
+
+        const BackendKind alternate_backend = backend_kind == BackendKind::DawnWebGpu
+            ? BackendKind::OpenGles : BackendKind::DawnWebGpu;
+        engine_->shutdown();
+        status = engine_->initialize(alternate_backend);
+        if (status.ok()) {
+            KernelValidationReport alternate_operator_report;
+            status = validate_builtin_operator_kernels(
+                *engine_->active_backend(), *operators_, alternate_operator_report);
+            if (status.ok() && !alternate_operator_report.complete) {
+                std::string detail = "Alternate backend failed baseline operator validation";
+                for (const auto& item : alternate_operator_report.unavailable)
+                    detail += " | unavailable=" + item;
+                for (const auto& item : alternate_operator_report.rejected)
+                    detail += " | rejected=" + item;
+                status = {StatusCode::Unsupported, std::move(detail)};
+            }
+        }
+        if (status.ok()) status = validate_quantization_kernels_for_active_backend();
+        if (status.ok()) {
+            quantization_report = evaluate_model_quantization_backend(
+                model, *quantizations_, alternate_backend);
+            if (!quantization_report.compatible) {
+                std::string detail = "Alternate backend quantization support is incomplete";
+                for (const auto& blocker : quantization_report.blockers)
+                    detail += " | " + blocker;
+                status = {StatusCode::Unsupported, std::move(detail)};
+            }
+        }
+        ModelGraphCoverageReport alternate_coverage;
+        if (status.ok()) {
+            status = validate_model_plan_operator_coverage(
+                plan_, *operators_, alternate_backend, alternate_coverage);
+            if (status.ok() && !alternate_coverage.complete) {
+                std::string detail = "Alternate backend model operator coverage is incomplete";
+                for (const auto& blocker : alternate_coverage.unsupported_operators)
+                    detail += " | " + blocker;
+                status = {StatusCode::Unsupported, std::move(detail)};
+            }
+        }
+        if (!status.ok()) {
+            last_error_ = "Model is not supported by either GPU backend; primary backend: " +
+                          first_backend_reason + "; alternate backend: " + status.message;
+            unload_locked();
+            return {status.code, last_error_};
+        }
+        backend_kind = alternate_backend;
+        backend_fallback_reason_ = first_backend_reason;
+        coverage = std::move(alternate_coverage);
     }
 
     const DeviceInfo* device = engine_->active_device();
