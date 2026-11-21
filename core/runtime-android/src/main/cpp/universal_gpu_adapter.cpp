@@ -13,6 +13,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <exception>
 #include <sstream>
 #include <string>
 
@@ -177,6 +178,12 @@ void main() {
     glBufferData(GL_SHADER_STORAGE_BUFFER, static_cast<GLsizeiptr>(sizeof(input)),
         input.data(), GL_DYNAMIC_COPY);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, buffer);
+    const GLenum setup_error = glGetError();
+    if (setup_error != GL_NO_ERROR) {
+        failure_reason = "compute_self_test_ssbo_setup_failed";
+        cleanup();
+        return false;
+    }
     glUseProgram(program);
     glDispatchCompute(1, 1, 1);
     glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
@@ -253,7 +260,15 @@ public:
         if (!worker_.joinable()) {
             stopping_ = false;
             startup_complete_ = false;
-            worker_ = std::thread(&PersistentGlesProbe::run, this);
+            try {
+                worker_ = std::thread(&PersistentGlesProbe::run, this);
+            } catch (const std::exception &) {
+                capabilities_.failure_reason = "gles_owner_thread_start_failed";
+                startup_complete_ = true;
+            } catch (...) {
+                capabilities_.failure_reason = "gles_owner_thread_start_failed_unknown";
+                startup_complete_ = true;
+            }
         }
         startup_cv_.wait(lock, [this] { return startup_complete_; });
         return capabilities_;
