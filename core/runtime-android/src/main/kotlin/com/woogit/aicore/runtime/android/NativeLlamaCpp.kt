@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Debug
 import android.util.Log
 import kotlinx.coroutines.channels.Channel
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -20,6 +21,8 @@ internal object NativeLlamaCpp {
     @Volatile private var gpuEngineActive = false
     private var loadedContextLength = 0
     @Volatile private var lastGpuEngineFallbackDiagnostics: String = ""
+    @Volatile private var loadedModelPath: String = ""
+    private val generationStopRequested = AtomicBoolean(false)
 
     const val GPU_LAYERS_MAX = 99
     const val GPU_LAYERS_ALL = -1
@@ -85,6 +88,7 @@ internal object NativeLlamaCpp {
                     gpuEngineActive = true
                     lastGpuEngineFallbackDiagnostics = ""
                     loadedContextLength = contextLength
+                    loadedModelPath = path
                     Log.i(TAG, "ACTIVATION_LOAD_END result=0 runtime=AIChatGpuEngine gpu_backend=selected memory_budget_bytes=$budgetBytes")
                     return 0
                 }
@@ -107,6 +111,7 @@ internal object NativeLlamaCpp {
         return try {
             val result = nativeLoad(path, contextLength, 0)
             loadedContextLength = if (result == 0) contextLength else 0
+            loadedModelPath = if (result == 0) path else ""
             Log.i(TAG, "ACTIVATION_LOAD_END result=$result runtime=llama.cpp-CPU")
             result
         } catch (t: Throwable) {
@@ -125,6 +130,8 @@ internal object NativeLlamaCpp {
             nativeUnload()
         }
         loadedContextLength = 0
+        loadedModelPath = ""
+        generationStopRequested.set(false)
         Log.i(TAG, "ACTIVATION_UNLOAD_END")
     }
 
@@ -202,29 +209,79 @@ internal object NativeLlamaCpp {
             }
         }
         val useGpuEngine = gpuEngineActive
-        // The GPU session resets its own cancellation state at generation start.
-        // llama.cpp retains its existing reset/stop protocol on the CPU path.
+        generationStopRequested.set(false)
+        // The GPU session and llama.cpp each keep their own stop flag.
         if (useGpuEngine) nativeGpuEngineResetStop() else nativeResetStop()
+        val activeGpuRuntime = AtomicBoolean(useGpuEngine)
         val worker = launch {
             val result = if (useGpuEngine) {
-                nativeGpuEngineGenerate(prompt, maxTokens, temperature, topK, topP, minP, listener)
+                val bufferedGpuText = StringBuilder()
+                val bufferedListener = object : TokenListener {
+                    override fun onToken(token: String) { bufferedGpuText.append(token) }
+                }
+                val gpuResult = nativeGpuEngineGenerate(
+                    prompt, maxTokens, temperature, topK, topP, minP, bufferedListener
+                )
+                if (gpuResult == 0 && !generationStopRequested.get()) {
+                    if (bufferedGpuText.isNotEmpty()) listener.onToken(bufferedGpuText.toString())
+                    0
+                } else if (gpuResult == 9 || generationStopRequested.get()) {
+                    9
+                } else {
+                    val gpuDiagnostics = nativeGpuEngineDiagnostics()
+                    lastGpuEngineFallbackDiagnostics = "generation_error=$gpuResult; $gpuDiagnostics"
+                    Log.w(TAG, "GPU_ENGINE_GENERATION_FALLBACK code=$gpuResult diagnostics=$gpuDiagnostics")
+                    nativeGpuEngineUnload()
+                    gpuEngineActive = false
+                    activeGpuRuntime.set(false)
+
+                    if (generationStopRequested.get() || loadedModelPath.isBlank() || loadedContextLength <= 0) {
+                        9
+                    } else {
+                        ensureNativeInitialized()
+                        configurePersistentPrefixCache()
+                        val cpuLoadResult = nativeLoad(loadedModelPath, loadedContextLength, 0)
+                        if (cpuLoadResult != 0) {
+                            cpuLoadResult
+                        } else if (generationStopRequested.get()) {
+                            9
+                        } else {
+                            nativeResetStop()
+                            if (generationStopRequested.get()) {
+                                nativeStop()
+                                9
+                            } else {
+                                Log.w(TAG, "GPU_ENGINE_GENERATION_FALLBACK_COMPLETED runtime=llama.cpp-CPU")
+                                nativeGenerate(
+                                    prompt, maxTokens, temperature, topK, topP, minP,
+                                    cachePrefixTokens, continuationPrefixTokens, listener
+                                )
+                            }
+                        }
+                    }
+                }
             } else {
-                nativeGenerate(prompt, maxTokens, temperature, topK, topP, minP, cachePrefixTokens, continuationPrefixTokens, listener)
+                nativeGenerate(prompt, maxTokens, temperature, topK, topP, minP,
+                    cachePrefixTokens, continuationPrefixTokens, listener)
             }
             if (result == 0 || result == 9) close()
             else close(IllegalStateException("AI inference generation failed: code=$result"))
         }
         awaitClose {
             if (!worker.isCompleted) {
-                // Stop the active runtime and wait for the blocking JNI call to return.
-                if (useGpuEngine) nativeGpuEngineStop() else nativeStop()
+                generationStopRequested.set(true)
+                // Stop whichever runtime is currently executing, then join the blocking JNI worker.
+                if (activeGpuRuntime.get()) nativeGpuEngineStop() else nativeStop()
                 runBlocking { worker.join() }
             }
         }
     }.buffer(Channel.UNLIMITED)
 
     @Synchronized
-    fun stop() { if (gpuEngineActive) nativeGpuEngineStop() else nativeStop() }
+    fun stop() {
+        generationStopRequested.set(true)
+        if (gpuEngineActive) nativeGpuEngineStop() else nativeStop()
+    }
 
     /** Probes the independent Dawn/Universal GLES engine without loading a model or changing llama.cpp state. */
     @Synchronized
