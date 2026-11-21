@@ -4,6 +4,23 @@
 
 namespace ai_chat::gpu_engine {
 
+Status probe_universal_adapter(DeviceInfo& out) {
+    const ai_chat::gpu::UniversalGpuCapabilities capabilities =
+        ai_chat::gpu::probe_universal_gpu_adapter();
+    out = device_info_from_universal_adapter(capabilities);
+    if (!capabilities.egl_context_created) {
+        return {StatusCode::BackendFailure,
+                capabilities.failure_reason.empty() ? "Universal GPU Adapter could not create an EGL context"
+                                                     : capabilities.failure_reason};
+    }
+    if (!capabilities.gles_compute_supported || !capabilities.gles_compute_self_test_passed) {
+        return {StatusCode::Unsupported,
+                capabilities.failure_reason.empty() ? "Universal GPU Adapter compute self-test did not pass"
+                                                     : capabilities.failure_reason};
+    }
+    return Status::success();
+}
+
 DeviceInfo device_info_from_universal_adapter(
         const ai_chat::gpu::UniversalGpuCapabilities& capabilities) {
     DeviceInfo result;

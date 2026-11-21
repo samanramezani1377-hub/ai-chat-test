@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <utility>
 #include "execution_engine.h"
+#include "universal_adapter_bridge.h"
 
 namespace ai_chat::gpu_engine {
 
@@ -90,6 +91,10 @@ Status GpuEngine::initialize(BackendKind preferred_backend) {
     diagnostics_.device_name = active_device_.name.empty() ? "unknown" : active_device_.name;
     diagnostics_.last_error.clear();
     return Status::success();
+}
+
+Status GpuEngine::probe_universal_adapter(DeviceInfo& out) const {
+    return ai_chat::gpu_engine::probe_universal_adapter(out);
 }
 
 Status GpuEngine::execute(const ComputeGraph& graph, const std::atomic<bool>* cancellation) {

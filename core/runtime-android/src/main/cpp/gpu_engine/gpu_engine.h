@@ -208,6 +208,9 @@ public:
     Status register_backend(std::shared_ptr<Backend> backend);
     Status initialize(BackendKind preferred_backend = BackendKind::DawnWebGpu);
     Status execute(const ComputeGraph& graph, const std::atomic<bool>* cancellation = nullptr);
+    // Uses UniversalGpuAdapter for GLES capability discovery only; it does not
+    // register an executable GLES backend or claim model inference readiness.
+    Status probe_universal_adapter(DeviceInfo& out) const;
     Status shutdown();
 
     bool ready() const noexcept;
