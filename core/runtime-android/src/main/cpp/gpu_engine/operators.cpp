@@ -150,6 +150,8 @@ Status build_matmul_f32_candidate(const Tensor& lhs, const Tensor& rhs,
         output.buffer().get() == lhs.buffer().get() || output.buffer().get() == rhs.buffer().get())
         return {StatusCode::Unsupported, "MatMul output must use a distinct buffer"};
     if (a[0] > UINT32_MAX || a[1] > UINT32_MAX || b[1] > UINT32_MAX ||
+        lhs.element_count() > UINT32_MAX || rhs.element_count() > UINT32_MAX ||
+        output.element_count() > UINT32_MAX ||
         a[0] == 0 || a[1] == 0 || b[1] == 0)
         return {StatusCode::Unsupported, "MatMul dimensions exceed the generic WGSL kernel range"};
     const uint64_t groups_x = (b[1] + 7) / 8;
@@ -202,7 +204,8 @@ Status build_rms_norm_f32_candidate(const Tensor& input, const Tensor& weight,
     const auto& x = input.descriptor().shape;
     const auto& w = weight.descriptor().shape;
     if (x.size() != 2 || w.size() != 1 || output.descriptor().shape != x ||
-        w[0] != x[1] || x[0] == 0 || x[1] == 0 || x[0] > UINT32_MAX || x[1] > UINT32_MAX)
+        w[0] != x[1] || x[0] == 0 || x[1] == 0 || x[0] > UINT32_MAX || x[1] > UINT32_MAX ||
+        input.element_count() > UINT32_MAX || output.element_count() > UINT32_MAX)
         return {StatusCode::InvalidArgument, "RMSNorm expects input/output [rows,columns] and weight [columns]"};
     if (!std::isfinite(epsilon) || epsilon <= 0.0f)
         return {StatusCode::InvalidArgument, "RMSNorm epsilon must be finite and positive"};
