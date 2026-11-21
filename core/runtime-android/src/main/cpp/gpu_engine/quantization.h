@@ -9,7 +9,7 @@
 
 namespace ai_chat::gpu_engine {
 
-// Decodes complete GGUF Q4_0, Q4_1 and Q8_0 blocks.
+// Decodes complete GGUF Q4_0, Q4_1, Q5_0, Q5_1 and Q8_0 blocks.
 Status decode_q4_0_blocks(const uint8_t* source, size_t source_bytes,
                           float* destination, size_t destination_elements);
 Status decode_q5_0_blocks(const uint8_t* source, size_t source_bytes,
