@@ -158,7 +158,7 @@ if (NOT _alloc MATCHES "AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V2")
     chunk->free_blocks[0].size = alloc->max_chunk_size;]=]
             "upgrade cached allocator chunk bounds")
     endif()
-    string(APPEND _alloc "\\n// AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V2\\n")
+    string(APPEND _alloc "\n// AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V2\n")
     file(WRITE "${_alloc_file}" "${_alloc}")
 endif()
 
