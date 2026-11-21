@@ -299,10 +299,6 @@ jobs:
           grep -q 'eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT)' core/runtime-android/src/main/cpp/universal_gpu_adapter.cpp
           grep -q 'eglDestroyContext(display, context)' core/runtime-android/src/main/cpp/universal_gpu_adapter.cpp
 
-
-
-
-
           grep -q 'gles_compute_supported' core/runtime-android/src/main/cpp/universal_gpu_adapter.h
           grep -q 'AI_CHAT_GPU_ADAPTER_OPENGL_ES=1' core/runtime-android/src/main/cpp/CMakeLists.txt
           grep -q 'AI_CHAT_GENERIC_FP32_FALLBACK_V1' core/runtime-android/src/main/cpp/CMakeLists.txt
