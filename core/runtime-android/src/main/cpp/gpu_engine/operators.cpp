@@ -542,9 +542,12 @@ Status build_binary_f32_candidate(const Tensor& lhs, const Tensor& rhs,
     const auto& rhs_shape = rhs.descriptor().shape;
     const auto& output_shape = output.descriptor().shape;
     const bool same_shape = lhs_shape == rhs_shape && lhs_shape == output_shape;
+    uint64_t trailing_width = lhs_shape.empty() ? 0 : lhs_shape.back();
+    if (lhs_shape.size() == 3 && lhs_shape[1] <= UINT64_MAX / lhs_shape[2])
+        trailing_width = lhs_shape[1] * lhs_shape[2];
     const bool trailing_vector_broadcast = allow_trailing_vector_broadcast &&
         lhs_shape == output_shape && rhs_shape.size() == 1 && !lhs_shape.empty() &&
-        rhs.element_count() > 0 && lhs.element_count() % rhs.element_count() == 0;
+        rhs.element_count() > 0 && rhs.element_count() == trailing_width;
     if ((!same_shape && !trailing_vector_broadcast) ||
         lhs.element_count() == 0 || lhs.element_count() > UINT32_MAX ||
         rhs.element_count() == 0 || rhs.element_count() > UINT32_MAX ||
