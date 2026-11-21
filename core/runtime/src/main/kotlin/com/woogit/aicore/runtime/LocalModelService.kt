@@ -25,6 +25,7 @@ import kotlinx.coroutines.sync.withLock
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Coordinates model persistence and runtime access.
@@ -51,8 +52,9 @@ class LocalModelService(
     @Volatile
     private var runtimeStateUnknown = false
 
+    private val runtimeReloadVersion = AtomicLong(0)
     @Volatile
-    private var runtimeReloadRequested = false
+    private var appliedRuntimeReloadVersion = 0L
 
     @Volatile
     private var generationJob: Job? = null
@@ -92,12 +94,13 @@ class LocalModelService(
 
     /** Ask the next activation of the same model to re-check runtime configuration. */
     fun requestRuntimeReload() {
-        runtimeReloadRequested = true
+        runtimeReloadVersion.incrementAndGet()
     }
 
     override suspend fun activate(id: String): ModelResult<ModelDescriptor> =
         withLifecycleExclusive {
             runtimeMutex.withLock runtimeLock@{
+                val requestedReloadVersion = runtimeReloadVersion.get()
                 val model = when (val result = repository.get(id)) {
                     is ModelResult.Success -> result.value
                     is ModelResult.Failure -> return@runtimeLock result
@@ -112,7 +115,7 @@ class LocalModelService(
                 }
 
                 try {
-                    if (activeId == id && !runtimeReloadRequested) {
+                    if (activeId == id && appliedRuntimeReloadVersion == requestedReloadVersion) {
                         return@runtimeLock ModelResult.Success(
                             model.copy(
                                 state = ModelState.ACTIVE,
@@ -139,7 +142,7 @@ class LocalModelService(
                     when (val persisted = repository.setActive(id)) {
                         is ModelResult.Success -> {
                             activeId = id
-                            runtimeReloadRequested = false
+                            appliedRuntimeReloadVersion = requestedReloadVersion
                             ModelResult.Success(
                                 model.copy(
                                     state = ModelState.ACTIVE,
@@ -322,7 +325,6 @@ class LocalModelService(
      */
     private suspend fun resetRuntimeState() {
         activeId = null
-        runtimeReloadRequested = false
         runtimeStateUnknown = true
         withContext(NonCancellable) {
             try {
