@@ -13,7 +13,6 @@ Status build_add_f32_candidate(const Tensor& lhs, const Tensor& rhs,
 
 Status reference_add_f32(const float* lhs, const float* rhs, float* output,
                          uint64_t element_count);
-const char* add_f32_glsl_es_source() noexcept;
 Status build_add_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
                                     const Tensor& output, ComputeDispatch& dispatch);
 const char* multiply_f32_wgsl_source() noexcept;

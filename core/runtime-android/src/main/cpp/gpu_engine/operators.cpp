@@ -84,20 +84,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 )wgsl";
 
-constexpr char kAddF32GlslEs[] = R"glsl(#version 310 es
-precision highp float;
-layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
-layout(std430, binding = 0) readonly buffer LhsBuffer { float lhs_values[]; };
-layout(std430, binding = 1) readonly buffer RhsBuffer { float rhs_values[]; };
-layout(std430, binding = 2) writeonly buffer OutputBuffer { float output_values[]; };
-const uint ELEMENT_COUNT = 1u;
-void main() {
-    uint index = gl_GlobalInvocationID.x;
-    if (index >= ELEMENT_COUNT) return;
-    output_values[index] = lhs_values[index] + rhs_values[index];
-}
-)glsl";
-
 constexpr char kAddF32Wgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> lhs: array<f32>;
 @group(0) @binding(1) var<storage, read> rhs: array<f32>;
@@ -550,26 +536,6 @@ Status reference_embedding_f32(const float* embedding_weights, uint32_t vocabula
 const char* add_f32_wgsl_source() noexcept { return kAddF32Wgsl; }
 
 
-const char* add_f32_glsl_es_source() noexcept { return kAddF32GlslEs; }
-
-Status build_add_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
-                                    const Tensor& output, ComputeDispatch& dispatch) {
-    Status status = build_binary_f32_candidate(lhs, rhs, output, dispatch,
-        "add-f32-gles-generic-unverified", "gles-add-f32-generic-v1", kAddF32Wgsl);
-    if (!status.ok()) return status;
-    const std::string placeholder = "const uint ELEMENT_COUNT = 1u;";
-    const std::string replacement = "const uint ELEMENT_COUNT = " +
-        std::to_string(lhs.element_count()) + "u;";
-    dispatch.backend = BackendKind::OpenGles;
-    dispatch.wgsl_source.clear();
-    dispatch.glsl_es_source = kAddF32GlslEs;
-    const size_t position = dispatch.glsl_es_source.find(placeholder);
-    if (position == std::string::npos)
-        return {StatusCode::BackendFailure, "GLES Add shader element-count placeholder is missing"};
-    dispatch.glsl_es_source.replace(position, placeholder.size(), replacement);
-    return Status::success();
-}
-
 Status build_add_f32_candidate(const Tensor& lhs, const Tensor& rhs,
                                const Tensor& output, ComputeDispatch& dispatch) {
     return build_binary_f32_candidate(lhs, rhs, output, dispatch,
@@ -968,21 +934,6 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     add.wgsl_source = kAddF32Wgsl;
     add.entry_point = "main";
     Status status = registry.register_kernel(std::move(add));
-    if (!status.ok()) return status;
-
-    KernelDefinition gles_add;
-    gles_add.operator_name = "Add";
-    gles_add.backend = BackendKind::OpenGles;
-    gles_add.input_type = DataType::F32;
-    gles_add.output_type = DataType::F32;
-    gles_add.min_input_count = 2;
-    gles_add.max_input_count = 2;
-    gles_add.min_rank = 1;
-    gles_add.max_rank = 16;
-    gles_add.validation = KernelValidation::Unverified;
-    gles_add.kernel_id = "gles-add-f32-generic-v1";
-    gles_add.glsl_es_source = kAddF32GlslEs;
-    status = registry.register_kernel(std::move(gles_add));
     if (!status.ok()) return status;
 
     KernelDefinition multiply;

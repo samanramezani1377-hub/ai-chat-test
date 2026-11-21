@@ -666,7 +666,7 @@ void test_gpu_engine_lifecycle() {
 
 void test_add_operator_candidate_and_reference() {
     OperatorRegistry registry;
-    assert(register_builtin_operator_candidates(registry).ok());
+    assert(register_builtin_gles_operator_candidates(registry).ok());
     KernelDefinition selected;
     assert(registry.select_kernel("Add", BackendKind::DawnWebGpu, DataType::F32,
                                   DataType::F32, 2, 2, selected).code == StatusCode::Unsupported);
@@ -1014,7 +1014,7 @@ void test_universal_gles_operator_candidate_is_fail_closed() {
     assert(build_add_f32_gles_candidate(lhs, rhs, output, dispatch).ok());
     assert(dispatch.backend == BackendKind::OpenGles);
     assert(dispatch.wgsl_source.empty());
-    assert(dispatch.glsl_es_source.find("#version 310 es") != std::string::npos);
+    assert(dispatch.glsl_source.find("#version 310 es") != std::string::npos);
     assert(dispatch.glsl_es_source.find("ELEMENT_COUNT = 4u") != std::string::npos);
 
     OperatorRegistry registry;
@@ -1033,7 +1033,7 @@ void test_universal_gles_operator_candidate_is_fail_closed() {
     validated.min_rank = 1;
     validated.max_rank = 1;
     validated.validation = KernelValidation::Validated;
-    validated.glsl_es_source = add_f32_glsl_es_source();
+    validated.glsl_source = dispatch.glsl_source;
     assert(registry.register_kernel(validated).ok());
     dispatch.kernel_id = validated.kernel_id;
     assert(registry.authorize_dispatch(validated.kernel_id, BackendKind::OpenGles, dispatch).ok());
