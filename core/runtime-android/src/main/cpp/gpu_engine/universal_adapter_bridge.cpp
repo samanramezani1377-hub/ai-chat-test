@@ -1,6 +1,7 @@
 #include "universal_adapter_bridge.h"
 
 #include <sstream>
+#include <algorithm>
 
 #include "execution_engine.h"
 
@@ -43,6 +44,17 @@ DeviceInfo device_info_from_universal_adapter(
     result.limits.max_storage_buffer_binding_size =
         capabilities.max_shader_storage_block_bytes > 0
             ? static_cast<uint64_t>(capabilities.max_shader_storage_block_bytes) : 0;
+    result.limits.max_buffer_size = result.limits.max_storage_buffer_binding_size;
+    result.limits.max_storage_buffers_per_shader_stage =
+        capabilities.max_shader_storage_buffer_bindings > 0
+            ? static_cast<uint32_t>(capabilities.max_shader_storage_buffer_bindings) : 0;
+    result.limits.min_storage_buffer_offset_alignment =
+        capabilities.min_shader_storage_buffer_offset_alignment > 0
+            ? static_cast<uint32_t>(capabilities.min_shader_storage_buffer_offset_alignment) : 4;
+    result.limits.max_compute_workgroups_per_dimension = static_cast<uint32_t>(std::max(0,
+        std::min({capabilities.max_compute_workgroup_count_x,
+                  capabilities.max_compute_workgroup_count_y,
+                  capabilities.max_compute_workgroup_count_z})));
     result.limits.max_compute_workgroup_size_x =
         capabilities.max_compute_workgroup_size_x > 0
             ? static_cast<uint32_t>(capabilities.max_compute_workgroup_size_x) : 0;
