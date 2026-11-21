@@ -202,21 +202,21 @@ endif()
 if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_READBACK_GUARDS_V1")
 ai_chat_replace_once(_webgpu
     "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->set_rows_host_error_buf, wgpu::MapMode::Read, 0,\n                                   ctx->set_rows_host_error_buf.GetSize());\n    const uint32_t * error_data"
-    "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->set_rows_host_error_buf, wgpu::MapMode::Read, 0,\n                                   ctx->set_rows_host_error_buf.GetSize());\n    if (g_webgpu_graph_error.load(std::memory_order_acquire)) return;\n    const uint32_t * error_data"
+    "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->set_rows_host_error_buf, wgpu::MapMode::Read, 0,\n                                   ctx->set_rows_host_error_buf.GetSize());\n    if (ctx->global_ctx->device_error.load(std::memory_order_acquire) || g_webgpu_graph_error.load(std::memory_order_acquire)) return;\n    const uint32_t * error_data"
     "guard SET_ROWS mapped-range access")
 ai_chat_replace_once(_webgpu
     "    ggml_backend_webgpu_map_buffer(buf_ctx->global_ctx, buf_ctx->global_ctx->get_tensor_staging_buf,\n                                   wgpu::MapMode::Read, 0, final_size);\n    // Must specify size here"
-    "    ggml_backend_webgpu_map_buffer(buf_ctx->global_ctx, buf_ctx->global_ctx->get_tensor_staging_buf,\n                                   wgpu::MapMode::Read, 0, final_size);\n    if (g_webgpu_graph_error.load(std::memory_order_acquire)) return;\n    // Must specify size here"
+    "    ggml_backend_webgpu_map_buffer(buf_ctx->global_ctx, buf_ctx->global_ctx->get_tensor_staging_buf,\n                                   wgpu::MapMode::Read, 0, final_size);\n    if (buf_ctx->global_ctx->device_error.load(std::memory_order_acquire) || g_webgpu_graph_error.load(std::memory_order_acquire)) return;\n    // Must specify size here"
     "guard tensor readback after a failed map")
 
 ai_chat_replace_once(_webgpu
     "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->profile_timestamp_host_buf, wgpu::MapMode::Read, 0,\n                                   mapped_size);\n    const uint64_t * ts_data"
-    "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->profile_timestamp_host_buf, wgpu::MapMode::Read, 0,\n                                   mapped_size);\n    if (g_webgpu_graph_error.load(std::memory_order_acquire)) return;\n    const uint64_t * ts_data"
+    "    ggml_backend_webgpu_map_buffer(ctx->global_ctx, ctx->profile_timestamp_host_buf, wgpu::MapMode::Read, 0,\n                                   mapped_size);\n    if (ctx->global_ctx->device_error.load(std::memory_order_acquire) || g_webgpu_graph_error.load(std::memory_order_acquire)) return;\n    const uint64_t * ts_data"
     "guard timestamp readback after a failed map")
 
 ai_chat_replace_once(_webgpu
     "    ggml_backend_webgpu_map_buffer(ctx, ctx->debug_host_buf, wgpu::MapMode::Read, 0, ctx->debug_host_buf.GetSize());\n    const float * debug_data"
-    "    ggml_backend_webgpu_map_buffer(ctx, ctx->debug_host_buf, wgpu::MapMode::Read, 0, ctx->debug_host_buf.GetSize());\n    if (g_webgpu_graph_error.load(std::memory_order_acquire)) return;\n    const float * debug_data"
+    "    ggml_backend_webgpu_map_buffer(ctx, ctx->debug_host_buf, wgpu::MapMode::Read, 0, ctx->debug_host_buf.GetSize());\n    if (ctx->device_error.load(std::memory_order_acquire) || g_webgpu_graph_error.load(std::memory_order_acquire)) return;\n    const float * debug_data"
     "guard debug readback after a failed map")
 
 ai_chat_replace_once(_webgpu
