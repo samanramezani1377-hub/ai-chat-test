@@ -509,6 +509,13 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
            StatusCode::NumericalFailure);
     assert(validate_q4_1_matmul_kernel(backend, operators, quantizations).code ==
            StatusCode::NumericalFailure);
+    FakeBackend dawn_backend(BackendKind::DawnWebGpu);
+    OperatorRegistry dawn_operators;
+    QuantizationRegistry dawn_quantizations;
+    assert(register_builtin_quantized_operator_candidates(dawn_operators).ok());
+    assert(register_builtin_quantization_formats(dawn_quantizations).ok());
+    assert(validate_q4_1_matmul_kernel(dawn_backend, dawn_operators, dawn_quantizations).code ==
+           StatusCode::NumericalFailure);
     assert(validate_q4_0_embedding_kernel(backend, operators).code ==
            StatusCode::NumericalFailure);
     assert(validate_q4_1_embedding_kernel(backend, operators).code ==
