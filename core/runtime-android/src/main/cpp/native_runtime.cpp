@@ -29,7 +29,6 @@
 #include <set>
 #include "android_opencl_dispatch.h"
 #include "universal_gpu_adapter.h"
-#include "gpu_engine/universal_adapter_bridge.h"
 
 // CL_PLATFORM_ICD_SUFFIX_KHR belongs to cl_khr_icd and is not declared by every
 // vendor-neutral OpenCL header package. Keep the standard extension value available
@@ -1050,12 +1049,6 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
         // discovery/self-test only; Dawn/GGML still executes model operations.
         const auto universal_gpu_caps = ai_chat::gpu::probe_universal_gpu_adapter();
         append_native_trace(universal_gpu_caps.diagnostic_line().c_str());
-        // Reuse the Universal GPU Adapter through the backend-neutral engine
-        // capability bridge. This is probe-only and never marks GLES inference ready.
-        const auto universal_engine_device =
-            ai_chat::gpu_engine::device_info_from_universal_adapter(universal_gpu_caps);
-        append_native_trace((std::string("GPU_ENGINE_UNIVERSAL_ADAPTER ") +
-            universal_engine_device.diagnostic).c_str());
         g_universal_gles_version_known =
             universal_gpu_caps.egl_context_created && universal_gpu_caps.gles_major > 0;
         g_universal_gles_compute_supported = universal_gpu_caps.gles_compute_supported &&
