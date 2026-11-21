@@ -481,6 +481,9 @@ void test_dawn_q8_0_operator_registration_is_unverified() {
     assert(registry.select_kernel("MatMul_Q8_0", BackendKind::DawnWebGpu,
         std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
         selected).code == StatusCode::Unsupported);
+    assert(registry.select_kernel("MatMul_Q4_0", BackendKind::DawnWebGpu,
+        std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
+        selected).code == StatusCode::Unsupported);
 }
 
 
@@ -493,7 +496,13 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     assert(register_builtin_quantization_formats(quantizations).ok());
     assert(validate_q8_0_matmul_kernel(backend, operators, quantizations).code ==
            StatusCode::NumericalFailure);
+    assert(validate_q4_0_matmul_kernel(backend, operators, quantizations).code ==
+           StatusCode::NumericalFailure);
     const QuantizationFormat* format = quantizations.find(8);
+    const QuantizationFormat* q4_format = quantizations.find(2);
+    assert(q4_format != nullptr && q4_format->gpu_kernel_state == SupportState::Unverified);
+    assert(!quantizations.can_execute_on_gpu(2, BackendKind::DawnWebGpu));
+    assert(!quantizations.can_execute_on_gpu(2, BackendKind::OpenGles));
     assert(format != nullptr && format->gpu_kernel_state == SupportState::Unverified);
     assert(!quantizations.can_execute_on_gpu(8, BackendKind::DawnWebGpu));
     assert(!quantizations.can_execute_on_gpu(8, BackendKind::OpenGles));
