@@ -674,9 +674,13 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";ttft_ms=" << last_ttft_ms_
            << ";decode_tokens_per_second=" << last_decode_tokens_per_second_
            << ";cpu_fallback_available=true"
-           << ";gpu_feature_count=" << (device ? device->features.size() : 0);
+           << ";gpu_feature_count=" << (device ? device->features.size() : 0)
+           << ";gpu_features=";
     if (device) {
-        for (const auto& feature : device->features) report << ";gpu_feature=" << feature;
+        for (size_t i = 0; i < device->features.size(); ++i) {
+            if (i != 0) report << ",";
+            report << device->features[i];
+        }
     }
     report << ";last_error=" << (last_error_.empty() ? "none" : last_error_);
     return report.str();
