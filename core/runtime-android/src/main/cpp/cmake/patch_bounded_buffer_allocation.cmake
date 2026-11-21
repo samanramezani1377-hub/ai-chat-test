@@ -163,8 +163,7 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
     GGML_LOG_INFO("AI_CHAT_WEBGPU_BUFFER_RETURNED id=%d name=%s requestedBytes=%zu alignedBytes=%zu\n",
         buffer_id, buf_name.c_str(), size, ai_chat_aligned_size);
 ]=]
-        [=[    ggml_backend_webgpu_device_context * ctx = static_cast<ggml_backend_webgpu_device_context *>(buft->device->context);
-    if (ctx->webgpu_global_ctx->device_error.load()) {
+        [=[    if (ctx->webgpu_global_ctx->device_error.load()) {
         GGML_LOG_ERROR("ggml_webgpu: refusing allocation because the device is in an error state\n");
         return nullptr;
     }
@@ -191,16 +190,20 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
             buf_name.c_str(), size, ai_chat_aligned_size);
         return nullptr;
     }
-    ggml_backend_webgpu_buffer_context * buf_ctx =
+]=]
+        "validate and safely construct WebGPU tensor buffers")
+    ai_chat_replace_once(_webgpu
+        [=[    ggml_backend_webgpu_buffer_context * buf_ctx =
+        new ggml_backend_webgpu_buffer_context(buf, buf_name, ctx->webgpu_global_ctx);]=]
+        [=[    ggml_backend_webgpu_buffer_context * buf_ctx =
         new (std::nothrow) ggml_backend_webgpu_buffer_context(buf, buf_name, ctx->webgpu_global_ctx);
     if (buf_ctx == nullptr) {
         ctx->webgpu_global_ctx->device_error.store(true);
-        GGML_LOG_ERROR("ggml_webgpu: host allocation failed for tensor buffer context name=%s bytes=%zu\n",
+        GGML_LOG_ERROR("ggml_webgpu: host allocation failed for tensor buffer context name=%s bytes=%zu\\n",
             buf_name.c_str(), size);
         return nullptr;
-    }
-    return ggml_backend_buffer_init(buft, ggml_backend_webgpu_buffer_interface, buf_ctx, size);]=]
-        "validate and safely construct WebGPU tensor buffers")
+    }]=]
+        "avoid aborting when the host-side WebGPU buffer context cannot be allocated")
     ai_chat_replace_once(_webgpu
         [=[    return dev_ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize;]=]
         [=[    return std::min(
@@ -239,16 +242,17 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
     ai_chat_replace_once(_webgpu
         [=[        [](const wgpu::Device & device, wgpu::ErrorType reason, wgpu::StringView message) {
             GGML_UNUSED(device);
-            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error (non-fatal diagnostic): reason=%d message=%s\n",
+            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error (non-fatal diagnostic): reason=%d message=%s\\n",
                            static_cast<int>(reason), std::string(message).c_str());
         });]=]
-        [=[        [ctx](const wgpu::Device & device, wgpu::ErrorType reason, wgpu::StringView message) {
+        [=[        [](const wgpu::Device & device, wgpu::ErrorType reason, wgpu::StringView message, void * userdata) {
             GGML_UNUSED(device);
-            ctx->webgpu_global_ctx->device_error.store(true);
-            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error; disabling WebGPU backend for subsequent graph placement: reason=%d message=%s\n",
+            auto * callback_ctx = static_cast<ggml_backend_webgpu_device_context *>(userdata);
+            callback_ctx->webgpu_global_ctx->device_error.store(true);
+            GGML_LOG_ERROR("ggml_webgpu: uncaptured device error; disabling WebGPU backend for subsequent graph placement: reason=%d message=%s\\n",
                            static_cast<int>(reason), std::string(message).c_str());
-        });]=]
-        "disable WebGPU after uncaptured device errors instead of aborting")
+        }, ctx);]=]
+        "use Dawn's userdata callback overload for repeatable uncaptured errors")
     # Device-error guard is applied atomically with the diagnostic buffer-allocation replacement.
     ai_chat_replace_once(_webgpu
         [=[    ggml_backend_webgpu_device_context * ctx = static_cast<ggml_backend_webgpu_device_context *>(dev->context);
