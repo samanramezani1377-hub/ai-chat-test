@@ -133,6 +133,36 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
 }
 
 
+Status execute_model_execution_plan(ModelExecutionPlan& plan, Backend& backend,
+                                    const ModelLoweringRegistry& lowerings,
+                                    const OperatorRegistry& operators,
+                                    const std::vector<std::string>& external_inputs,
+                                    const ModelExecutionContext& context,
+                                    const std::atomic<bool>* cancellation,
+                                    ModelGraphCompileReport& report) {
+    report = ModelGraphCompileReport{};
+    plan.execution_validated = false;
+    plan.gpu_ready = false;
+    ComputeGraph graph;
+    Status status = compile_model_execution_plan(plan, backend.kind(), lowerings,
+                                                 operators, external_inputs, context,
+                                                 graph, report);
+    if (!status.ok()) return status;
+    ExecutionScheduler scheduler;
+    status = scheduler.execute(backend, graph, cancellation);
+    if (!status.ok()) {
+        report.errors.push_back("GRAPH_EXECUTION_FAILED:" + status.message);
+        return status;
+    }
+    report.executed = true;
+    plan.execution_validated = true;
+    // One successful graph run is not a model-family or quantization certification.
+    // The caller must still perform model-level parity and lifecycle qualification.
+    plan.gpu_ready = false;
+    return Status::success();
+}
+
+
 Status validate_model_plan_operator_coverage(ModelExecutionPlan& plan,
                                              const OperatorRegistry& registry,
                                              BackendKind backend,

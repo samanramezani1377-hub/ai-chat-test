@@ -69,6 +69,7 @@ struct ModelGraphCoverageReport {
 
 struct ModelGraphCompileReport {
     bool compiled = false;
+    bool executed = false;
     size_t compiled_nodes = 0;
     std::vector<std::string> missing_lowerings;
     std::vector<std::string> unresolved_inputs;
@@ -93,6 +94,13 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
                                     const std::vector<std::string>& external_inputs,
                                     const ModelExecutionContext& context,
                                     ComputeGraph& graph, ModelGraphCompileReport& report);
+Status execute_model_execution_plan(ModelExecutionPlan& plan, Backend& backend,
+                                    const ModelLoweringRegistry& lowerings,
+                                    const OperatorRegistry& operators,
+                                    const std::vector<std::string>& external_inputs,
+                                    const ModelExecutionContext& context,
+                                    const std::atomic<bool>* cancellation,
+                                    ModelGraphCompileReport& report);
 
 Status validate_model_plan_operator_coverage(ModelExecutionPlan& plan,
                                              const OperatorRegistry& registry,
