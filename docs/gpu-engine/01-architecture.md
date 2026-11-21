@@ -64,12 +64,13 @@ GGUF reader first: validate header/version/metadata, parse tensor directory and 
 
 ## 3. Universal GPU Adapter reuse
 
-The current Universal GPU Adapter remains the source of GLES/EGL facts and its compute self-test. A bridge maps its snapshot into the generic capability model:
-- GLES context and compute self-test are reported as GLES-specific facts.
+The Universal GPU Adapter remains the owner of the persistent EGL/GLES context and exposes serialized synchronous/asynchronous tasks on its dedicated context thread. A separate Universal GLES Backend consumes that API through a bridge:
+- GLES context, limits and compute self-test are reported as GLES-specific facts.
+- The GLES backend owns buffer allocation/lifetime, copies, upload/readback, GLSL ES dispatch and synchronization.
+- Backend initialization runs an additional integer compute/readback self-test.
 - No Dawn/WebGPU feature is inferred from GLES extensions.
-- A passed generic GLES self-test does not mean the adapter can run model kernels.
-- The current adapter is **probe-only** until it exposes a serialized, owner-thread command submission API, buffer lifecycle and synchronization contract.
-- Dawn is the first model-execution backend; GLES adapter execution is a separate future backend unless the project deliberately chooses otherwise.
+- A backend self-test does not mean model kernels or any model architecture are validated.
+- Dawn/WebGPU and Universal GLES are separate backends under the same generic contract.
 
 ## 4. Runtime API (target)
 
