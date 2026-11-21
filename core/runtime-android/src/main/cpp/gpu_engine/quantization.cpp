@@ -3003,6 +3003,24 @@ Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry
         gles.min_input_count=2; gles.max_input_count=2; gles.min_rank=2; gles.max_rank=3;
         gles.validation=KernelValidation::Unverified; gles.kernel_id="gles-"+suffix+"-matmul-f32-activation-v1"; gles.glsl_source=glsl;
         status=registry.register_kernel(std::move(gles)); if(!status.ok())return status;
+
+        const std::string embedding_op=q5_1?"Embedding_Q5_1":"Embedding_Q5_0";
+        const char* embedding_wgsl=q5_1?q5_1_embedding_wgsl_source():q5_0_embedding_wgsl_source();
+        const char* embedding_glsl=q5_1?q5_1_embedding_glsl_source():q5_0_embedding_glsl_source();
+        KernelDefinition embedding_dawn;
+        embedding_dawn.operator_name=embedding_op; embedding_dawn.backend=BackendKind::DawnWebGpu;
+        embedding_dawn.input_type=DataType::U32; embedding_dawn.input_types={DataType::U32,DataType::U32};
+        embedding_dawn.output_type=DataType::F32; embedding_dawn.min_input_count=2; embedding_dawn.max_input_count=2;
+        embedding_dawn.min_rank=2; embedding_dawn.max_rank=2; embedding_dawn.validation=KernelValidation::Unverified;
+        embedding_dawn.kernel_id="dawn-"+suffix+"-embedding-f32-v1"; embedding_dawn.wgsl_source=embedding_wgsl;
+        status=registry.register_kernel(std::move(embedding_dawn)); if(!status.ok())return status;
+        KernelDefinition embedding_gles;
+        embedding_gles.operator_name=embedding_op; embedding_gles.backend=BackendKind::OpenGles;
+        embedding_gles.input_type=DataType::U32; embedding_gles.input_types={DataType::U32,DataType::U32};
+        embedding_gles.output_type=DataType::F32; embedding_gles.min_input_count=2; embedding_gles.max_input_count=2;
+        embedding_gles.min_rank=2; embedding_gles.max_rank=2; embedding_gles.validation=KernelValidation::Unverified;
+        embedding_gles.kernel_id="gles-"+suffix+"-embedding-f32-v1"; embedding_gles.glsl_source=embedding_glsl;
+        status=registry.register_kernel(std::move(embedding_gles)); if(!status.ok())return status;
     }
     return Status::success();
 }
@@ -3114,6 +3132,12 @@ Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
     return registry.register_format(std::move(q8));
 }
 
+
+
+const char* q5_0_embedding_wgsl_source() noexcept { return kQ5_0EmbeddingWgsl; }
+const char* q5_0_embedding_glsl_source() noexcept { return kQ5_0EmbeddingGlsl; }
+const char* q5_1_embedding_wgsl_source() noexcept { return kQ5_1EmbeddingWgsl; }
+const char* q5_1_embedding_glsl_source() noexcept { return kQ5_1EmbeddingGlsl; }
 
 const char* q5_0_matmul_wgsl_source() noexcept { return kQ5_0MatMulWgsl; }
 const char* q5_0_matmul_glsl_source() noexcept { return kQ5_0MatMulGlsl; }
