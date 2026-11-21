@@ -27,8 +27,10 @@ bool metadata_u64(const GgufFileInfo& model, const std::string& key, uint64_t& v
 
 class DenseTransformerArchitectureAdapter final : public ArchitectureAdapter {
 public:
-    DenseTransformerArchitectureAdapter(std::string architecture_name, bool uses_qk_norm)
-        : architecture_name_(std::move(architecture_name)), uses_qk_norm_(uses_qk_norm) {
+    DenseTransformerArchitectureAdapter(std::string architecture_name, bool uses_qk_norm,
+                                        bool uses_qkv_bias = false)
+        : architecture_name_(std::move(architecture_name)), uses_qk_norm_(uses_qk_norm),
+          uses_qkv_bias_(uses_qkv_bias) {
         descriptor_.name = architecture_name_;
         descriptor_.family = ArchitectureFamily::DenseTransformer;
         descriptor_.required_operators = {"Embedding", "MatMul", "RMSNorm", "RoPE",
@@ -103,6 +105,17 @@ public:
                 expect_shape(prefix + "attn_k_norm.weight", {head_dimension});
             }
             expect_shape(prefix + "attn_v.weight", {embedding, kv_dimension});
+            if (uses_qkv_bias_) {
+                expect_shape(prefix + "attn_q.bias", {embedding});
+                expect_shape(prefix + "attn_k.bias", {kv_dimension});
+                expect_shape(prefix + "attn_v.bias", {kv_dimension});
+                expect_shape(prefix + "attn_output.bias", {embedding});
+                for (const char* bias : {"attn_q.bias", "attn_k.bias", "attn_v.bias", "attn_output.bias"}) {
+                    const auto found = tensors.find(prefix + bias);
+                    if (found != tensors.end() && found->second->type.name != "F32")
+                        plan.blockers.emplace_back("UNSUPPORTED_QWEN2_BIAS_DTYPE:" + prefix + bias);
+                }
+            }
             expect_shape(prefix + "attn_output.weight", {embedding, embedding});
             expect_shape(prefix + "ffn_norm.weight", {embedding});
             expect_shape(prefix + "ffn_gate.weight", {embedding, feed_forward});
@@ -117,6 +130,8 @@ public:
         plan.attention_heads = heads;
         plan.kv_heads = kv_heads;
         plan.feed_forward_length = feed_forward;
+        plan.vocabulary_size = model.tokenizer.tokens.size();
+        plan.head_dimension = head_dimension;
         plan.external_inputs = {"token_ids", "kv_cache"};
         auto add = [&plan](std::string id, std::string op,
                            std::vector<std::string> inputs,
@@ -126,44 +141,60 @@ public:
                                        std::move(weights), std::move(output), std::move(shape)});
         };
         add("embedding", "Embedding", {"token_ids"}, {embedding_weight},
-            "hidden", {embedding});
+            "hidden", {0, embedding});
         for (uint64_t layer = 0; layer < layers; ++layer) {
             const std::string p = "blk." + std::to_string(layer) + ".";
             const std::string x = "layer." + std::to_string(layer) + ".";
-            add(x + "attn_norm", "RMSNorm", {"hidden"}, {p + "attn_norm.weight"}, x + "normalized");
-            add(x + "q_proj", "MatMul", {x + "normalized"}, {p + "attn_q.weight"}, x + "q");
-            add(x + "k_proj", "MatMul", {x + "normalized"}, {p + "attn_k.weight"}, x + "k");
-            add(x + "v_proj", "MatMul", {x + "normalized"}, {p + "attn_v.weight"}, x + "v");
-            if (uses_qk_norm_) {
-                add(x + "q_norm", "RMSNorm", {x + "q"}, {p + "attn_q_norm.weight"}, x + "q_normalized");
-                add(x + "k_norm", "RMSNorm", {x + "k"}, {p + "attn_k_norm.weight"}, x + "k_normalized");
+            add(x + "attn_norm", "RMSNorm", {"hidden"}, {p + "attn_norm.weight"}, x + "normalized", {0, embedding});
+            if (uses_qkv_bias_) {
+                add(x + "q_proj", "MatMul", {x + "normalized"}, {p + "attn_q.weight"}, x + "q_linear", {0, heads, head_dimension});
+                add(x + "q_bias.apply", "Add", {x + "q_linear"}, {p + "attn_q.bias"}, x + "q", {0, heads, head_dimension});
+                add(x + "k_proj", "MatMul", {x + "normalized"}, {p + "attn_k.weight"}, x + "k_linear", {0, kv_heads, head_dimension});
+                add(x + "k_bias.apply", "Add", {x + "k_linear"}, {p + "attn_k.bias"}, x + "k", {0, kv_heads, head_dimension});
+                add(x + "v_proj", "MatMul", {x + "normalized"}, {p + "attn_v.weight"}, x + "v_linear", {0, kv_heads, head_dimension});
+                add(x + "v_bias.apply", "Add", {x + "v_linear"}, {p + "attn_v.bias"}, x + "v", {0, kv_heads, head_dimension});
+            } else {
+                add(x + "q_proj", "MatMul", {x + "normalized"}, {p + "attn_q.weight"}, x + "q", {0, heads, head_dimension});
+                add(x + "k_proj", "MatMul", {x + "normalized"}, {p + "attn_k.weight"}, x + "k", {0, kv_heads, head_dimension});
+                add(x + "v_proj", "MatMul", {x + "normalized"}, {p + "attn_v.weight"}, x + "v", {0, kv_heads, head_dimension});
             }
-            add(x + "q_rope", "RoPE", {uses_qk_norm_ ? x + "q_normalized" : x + "q"}, {}, x + "q_rotated");
-            add(x + "k_rope", "RoPE", {uses_qk_norm_ ? x + "k_normalized" : x + "k"}, {}, x + "k_rotated");
+            if (uses_qk_norm_) {
+                add(x + "q_norm", "RMSNorm", {x + "q"}, {p + "attn_q_norm.weight"}, x + "q_normalized", {0, heads, head_dimension});
+                add(x + "k_norm", "RMSNorm", {x + "k"}, {p + "attn_k_norm.weight"}, x + "k_normalized", {0, kv_heads, head_dimension});
+            }
+            add(x + "q_rope", "RoPE", {uses_qk_norm_ ? x + "q_normalized" : x + "q"}, {}, x + "q_rotated", {0, heads, head_dimension});
+            add(x + "k_rope", "RoPE", {uses_qk_norm_ ? x + "k_normalized" : x + "k"}, {}, x + "k_rotated", {0, kv_heads, head_dimension});
             add(x + "attention", "Attention", {x + "q_rotated", x + "k_rotated", x + "v", "kv_cache"},
-                {}, x + "attention_output");
-            add(x + "attention_output", "MatMul", {x + "attention_output"},
-                {p + "attn_output.weight"}, x + "attention_projected");
+                {}, x + "attention_output", {0, heads, head_dimension});
+            if (uses_qkv_bias_) {
+                add(x + "attention_output", "MatMul", {x + "attention_output"},
+                    {p + "attn_output.weight"}, x + "attention_projected_linear", {0, embedding});
+                add(x + "attention_output_bias.apply", "Add", {x + "attention_projected_linear"},
+                    {p + "attn_output.bias"}, x + "attention_projected", {0, embedding});
+            } else {
+                add(x + "attention_output", "MatMul", {x + "attention_output"},
+                    {p + "attn_output.weight"}, x + "attention_projected", {0, embedding});
+            }
             add(x + "attention_residual", "Add", {"hidden", x + "attention_projected"}, {},
-                x + "attention_residual");
+                x + "attention_residual", {0, embedding});
             add(x + "ffn_norm", "RMSNorm", {x + "attention_residual"},
-                {p + "ffn_norm.weight"}, x + "ffn_normalized");
+                {p + "ffn_norm.weight"}, x + "ffn_normalized", {0, embedding});
             add(x + "ffn_gate", "MatMul", {x + "ffn_normalized"},
-                {p + "ffn_gate.weight"}, x + "ffn_gate_values");
+                {p + "ffn_gate.weight"}, x + "ffn_gate_values", {0, feed_forward});
             add(x + "ffn_up", "MatMul", {x + "ffn_normalized"},
-                {p + "ffn_up.weight"}, x + "ffn_up_values");
+                {p + "ffn_up.weight"}, x + "ffn_up_values", {0, feed_forward});
             add(x + "ffn_activation", "SiLU", {x + "ffn_gate_values"}, {},
-                x + "ffn_gate_activated");
+                x + "ffn_gate_activated", {0, feed_forward});
             add(x + "ffn_multiply", "Multiply", {x + "ffn_gate_activated", x + "ffn_up_values"},
-                {}, x + "ffn_product");
+                {}, x + "ffn_product", {0, feed_forward});
             add(x + "ffn_down", "MatMul", {x + "ffn_product"},
-                {p + "ffn_down.weight"}, x + "ffn_down_projected");
+                {p + "ffn_down.weight"}, x + "ffn_down_projected", {0, embedding});
             add(x + "ffn_residual", "Add", {x + "attention_residual", x + "ffn_down_projected"},
-                {}, "hidden");
+                {}, "hidden", {0, embedding});
         }
-        add("final_norm", "RMSNorm", {"hidden"}, {output_norm}, "final_hidden");
+        add("final_norm", "RMSNorm", {"hidden"}, {output_norm}, "final_hidden", {0, embedding});
         add("logits", "MatMul", {"final_hidden"},
-            {tied_output ? embedding_weight : "output.weight"}, "logits");
+            {tied_output ? embedding_weight : "output.weight"}, "logits", {0, model.tokenizer.tokens.size()});
         plan.structurally_validated = true;
         plan.blockers.emplace_back("TOKENIZER_EXECUTION_NOT_VALIDATED");
         plan.blockers.emplace_back("OPERATOR_KERNEL_COVERAGE_NOT_VALIDATED");
@@ -194,6 +225,7 @@ public:
 private:
     std::string architecture_name_;
     bool uses_qk_norm_ = false;
+    bool uses_qkv_bias_ = false;
     ArchitectureDescriptor descriptor_;
 };
 
@@ -301,7 +333,7 @@ Status register_builtin_architecture_adapters(ArchitectureRegistry& registry) {
         std::make_shared<DenseTransformerArchitectureAdapter>("llama", false));
     if (!status.ok()) return status;
     status = registry.register_adapter(
-        std::make_shared<DenseTransformerArchitectureAdapter>("qwen2", false));
+        std::make_shared<DenseTransformerArchitectureAdapter>("qwen2", false, true));
     if (!status.ok()) return status;
     return registry.register_adapter(
         std::make_shared<DenseTransformerArchitectureAdapter>("qwen3", true));
