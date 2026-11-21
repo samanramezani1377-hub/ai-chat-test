@@ -14,9 +14,5 @@ Status initialize_android_gpu_engine(GpuEngine& engine) {
     return engine.initialize_with_fallback({BackendKind::DawnWebGpu, BackendKind::OpenGles});
 }
 
-Status initialize_android_gpu_engine(GpuEngine& engine) {
-    Status status = register_android_gpu_backends(engine);
-    if (!status.ok()) return status;
-    return engine.initialize_with_fallback({BackendKind::DawnWebGpu, BackendKind::OpenGles});
-}
+
 } // namespace ai_chat::gpu_engine
