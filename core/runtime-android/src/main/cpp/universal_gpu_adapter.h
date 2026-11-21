@@ -42,10 +42,13 @@ struct UniversalGpuCapabilities {
     std::string diagnostic_line() const;
 };
 
-// Creates a temporary 1x1 EGL pbuffer + OpenGL ES context, reads real driver
-// capabilities, then releases the temporary surface/context. The shared EGL
-// display is intentionally not terminated because Android UI/other libraries
-// may use the process-wide display independently.
+// Starts a process-lifetime GLES compute context on a dedicated owner thread.
+// The context remains current on that thread after the capability/self-test pass;
+// no GL call is made from the caller or Android UI/rendering thread.
 UniversalGpuCapabilities probe_universal_gpu_adapter();
+
+// Explicitly stops the dedicated context thread. Normally process lifetime owns
+// this engine; call only when the native backend itself is being permanently torn down.
+void shutdown_universal_gpu_adapter();
 
 } // namespace ai_chat::gpu
