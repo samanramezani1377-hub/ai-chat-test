@@ -33,7 +33,7 @@ class MemoryLease {
 public:
     MemoryLease() = default;
     explicit operator bool() const noexcept;
-    const std::shared_ptr<Buffer>& buffer() const noexcept;
+    std::shared_ptr<Buffer> buffer() const noexcept;
 
 private:
     struct Control;
@@ -52,6 +52,7 @@ public:
 
 private:
     struct State;
+    friend class MemoryLease;
     Backend& backend_;
     std::shared_ptr<State> state_;
 };

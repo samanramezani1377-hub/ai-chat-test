@@ -178,7 +178,7 @@ public:
         device.name = std::string(info.device);
         device.vendor = std::string(info.vendor);
         device.architecture = std::string(info.architecture);
-        device.driver = std::string(info.driver);
+        device.driver = "unknown";
         device.api_version = "WebGPU/Dawn Compatibility";
         device.compute_available = true;
         device.compute_self_test_passed = false;
@@ -474,6 +474,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         const bool matches = std::equal(std::begin(expected), std::end(expected), output);
         staging.Unmap();
         if (!matches) return {StatusCode::NumericalFailure, "Dawn compute self-test output mismatch"};
+        if (!healthy()) return {StatusCode::DeviceLost, "Dawn device reported an error during compute self-test"};
         return Status::success();
     }
 

@@ -118,9 +118,8 @@ struct MemoryLease::Control {
 
 MemoryLease::MemoryLease(std::shared_ptr<Control> control) : control_(std::move(control)) {}
 MemoryLease::operator bool() const noexcept { return control_ && control_->buffer; }
-const std::shared_ptr<Buffer>& MemoryLease::buffer() const noexcept {
-    static const std::shared_ptr<Buffer> empty;
-    return control_ ? control_->buffer : empty;
+std::shared_ptr<Buffer> MemoryLease::buffer() const noexcept {
+    return control_ ? std::shared_ptr<Buffer>(control_, control_->buffer.get()) : std::shared_ptr<Buffer>{};
 }
 
 MemoryManager::MemoryManager(Backend& backend, uint64_t budget_bytes)
