@@ -1,6 +1,7 @@
 #include "gguf_reader.h"
 
 #include <algorithm>
+#include <cstring>
 #include <array>
 #include <fstream>
 #include <limits>
@@ -239,7 +240,7 @@ Status GgufReader::open(const std::string& path, GgufReader& out) {
 
     GgufFileInfo info;
     info.file_size_bytes = file_size;
-    if (!reader.read_u32(info.version) || info.version < 2 || info.version > 3 ||
+    if (!reader.read_u32(info.version) || info.version < 1 || info.version > 3 ||
         !reader.read_u64(info.tensor_count) || !reader.read_u64(info.metadata_count)) {
         return {StatusCode::Unsupported, "Unsupported or truncated GGUF header"};
     }
@@ -350,14 +351,18 @@ const GgufTensorInfo* GgufReader::find_tensor(const std::string& name) const noe
 
 Status GgufReader::read_tensor_chunk(const GgufTensorInfo& tensor, uint64_t tensor_offset,
                                      void* destination, uint64_t size_bytes) const {
-    if (path_.empty() || !destination || size_bytes == 0 || !tensor.byte_size_known ||
-        tensor_offset > tensor.byte_size || size_bytes > tensor.byte_size - tensor_offset) {
-        return {StatusCode::InvalidArgument, "Requested GGUF tensor chunk is invalid or has unknown storage size"};
+    const GgufTensorInfo* canonical = find_tensor(tensor.name);
+    if (path_.empty() || !canonical || canonical->absolute_offset != tensor.absolute_offset ||
+        canonical->relative_offset != tensor.relative_offset ||
+        canonical->byte_size != tensor.byte_size || !canonical->byte_size_known ||
+        !destination || size_bytes == 0 || tensor_offset > canonical->byte_size ||
+        size_bytes > canonical->byte_size - tensor_offset) {
+        return {StatusCode::InvalidArgument, "Requested GGUF tensor chunk is invalid, foreign, or has unknown storage size"};
     }
     if (tensor.absolute_offset > std::numeric_limits<uint64_t>::max() - tensor_offset) {
         return {StatusCode::InvalidArgument, "GGUF tensor read offset overflows"};
     }
-    const uint64_t absolute = tensor.absolute_offset + tensor_offset;
+    const uint64_t absolute = canonical->absolute_offset + tensor_offset;
     if (absolute > info_.file_size_bytes || size_bytes > info_.file_size_bytes - absolute ||
         absolute > static_cast<uint64_t>(std::numeric_limits<std::streamoff>::max()) ||
         size_bytes > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
