@@ -197,6 +197,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 )wgsl";
 
 
+
+bool is_device_contiguous_f32(const Tensor& tensor) {
+    const TensorDesc& desc = tensor.descriptor();
+    return desc.data_type == DataType::F32 &&
+           desc.layout == TensorLayout::Contiguous &&
+           desc.strides_bytes.empty() &&
+           desc.memory != MemoryDomain::Host;
+}
+
 float half_to_float(uint16_t half) {
     const uint32_t sign = static_cast<uint32_t>(half & 0x8000u) << 16;
     uint32_t exponent = (half >> 10) & 0x1fu;
@@ -397,8 +406,8 @@ Status build_q8_0_matmul_candidate(const Tensor& activations,
                                   const Tensor& output,
                                   ComputeDispatch& dispatch) {
     dispatch = ComputeDispatch{};
-    if (!quantized_weights || !is_contiguous_f32(activations) ||
-        !is_contiguous_f32(output) || activations.descriptor().shape.size() != 2 ||
+    if (!quantized_weights || !is_device_contiguous_f32(activations) ||
+        !is_device_contiguous_f32(output) || !activations.buffer() || !output.buffer() || activations.descriptor().shape.size() != 2 ||
         output.descriptor().shape.size() != 2)
         return {StatusCode::Unsupported, "Q8_0 MatMul requires F32 [M,K] activations and F32 [M,N] output"};
     const auto& a = activations.descriptor().shape;
