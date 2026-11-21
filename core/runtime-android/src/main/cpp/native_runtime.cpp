@@ -1452,6 +1452,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeLoad(JNIEnv *env, jc
         checkpoint(spec_ready ? "SPECULATIVE_INIT_RETURNED_SUCCESS" : "SPECULATIVE_INIT_RETURNED_FAILED");
     }
     set_android_cache_model_key(stable_model_path, g_context_length);
+    env->ReleaseStringUTFChars(jpath, path);
     checkpoint("NATIVE_LOAD_COMPLETED"); return 0;
 }
 

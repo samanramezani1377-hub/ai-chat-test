@@ -14,6 +14,7 @@ import com.woogit.aicore.runtime.FileModelRepository
 import com.woogit.aicore.runtime.LocalModelService
 import com.woogit.aicore.runtime.RuntimeDiagnosticsStore
 import com.woogit.aicore.runtime.android.LlamaCppAndroidRuntimeAdapter
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.nio.file.Files
@@ -40,13 +41,21 @@ class AndroidModelManager(
             val staged = Files.createTempFile(root, "import-", ".gguf")
             try {
                 val input = contentResolver.openInputStream(uri)
-                    ?: return@withContext ModelResult.Failure(ModelError.FileAccess("Unable to open the selected model file"))
+                if (input == null) {
+                    Files.deleteIfExists(staged)
+                    return@withContext ModelResult.Failure(ModelError.FileAccess("Unable to open the selected model file"))
+                }
                 input.use { source -> Files.newOutputStream(staged).use { target -> source.copyTo(target) } }
                 service.importModel(staged)
+            } catch (cancelled: CancellationException) {
+                Files.deleteIfExists(staged)
+                throw cancelled
             } catch (t: Throwable) {
                 Files.deleteIfExists(staged)
                 ModelResult.Failure(ModelError.Storage("Unable to stage the selected model", t))
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
             ModelResult.Failure(ModelError.Storage("Unable to prepare model storage", t))
         }
@@ -64,7 +73,10 @@ class AndroidModelManager(
             val staged = Files.createTempFile(draftRoot, "draft-import-", ".gguf")
             try {
                 val input = contentResolver.openInputStream(uri)
-                    ?: return@withContext ModelResult.Failure(ModelError.FileAccess("Unable to open the selected draft model file"))
+                if (input == null) {
+                    Files.deleteIfExists(staged)
+                    return@withContext ModelResult.Failure(ModelError.FileAccess("Unable to open the selected draft model file"))
+                }
                 input.use { source -> Files.newOutputStream(staged).use { target -> source.copyTo(target) } }
                 when (val imported = draftImporter.import(staged)) {
                     is ModelResult.Failure -> { Files.deleteIfExists(staged); imported }
@@ -73,10 +85,15 @@ class AndroidModelManager(
                         is ModelResult.Failure -> { Files.deleteIfExists(imported.value.path); registered }
                     }
                 }
+            } catch (cancelled: CancellationException) {
+                Files.deleteIfExists(staged)
+                throw cancelled
             } catch (t: Throwable) {
                 Files.deleteIfExists(staged)
                 ModelResult.Failure(ModelError.Storage("Unable to import draft model", t))
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
             ModelResult.Failure(ModelError.Storage("Unable to prepare draft model storage", t))
         }
@@ -90,6 +107,8 @@ class AndroidModelManager(
             Files.newInputStream(registry).use(props::load)
             val draftId = props.getProperty("target.$modelId.draftId").orEmpty()
             if (draftId.isBlank()) ModelResult.Success(null) else draftRepository.get(draftId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
             ModelResult.Failure(ModelError.Storage("Unable to read draft assignment", t))
         }
@@ -132,9 +151,23 @@ class AndroidModelManager(
                     )
                 }
             } else if (draft == null) {
-                RuntimeDiagnosticsStore.recordNativeEvent("SPECULATIVE_DRAFT_DISCONNECTED target=$modelId")
+                val active = (repository.getActive() as? ModelResult.Success)?.value
+                if (active?.id == modelId) {
+                    when (val reloaded = runtime.loadResult(active)) {
+                        is ModelResult.Failure -> return@withContext reloaded
+                        is ModelResult.Success -> RuntimeDiagnosticsStore.recordNativeEvent(
+                            "SPECULATIVE_DRAFT_DISCONNECTED target=$modelId",
+                        )
+                    }
+                } else {
+                    RuntimeDiagnosticsStore.recordNativeEvent("SPECULATIVE_DRAFT_DISCONNECTED target=$modelId")
+                }
             }
             ModelResult.Success(Unit)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
             ModelResult.Failure(ModelError.Storage("Unable to save draft assignment", t))
         }
@@ -148,10 +181,17 @@ class AndroidModelManager(
             } ?: return@withContext ModelResult.Failure(ModelError.InvalidModel("Draft model is not registered"))
             val active = (repository.getActive() as? ModelResult.Success)?.value
             if (active != null && (draftForModel(active.id) as? ModelResult.Success)?.value?.id == id) {
-                assignDraft(active.id, null)
+                when (val detached = assignDraft(active.id, null)) {
+                    is ModelResult.Failure -> return@withContext detached
+                    is ModelResult.Success -> Unit
+                }
             }
             Files.deleteIfExists(draft.path)
             draftRepository.unregister(id)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
             ModelResult.Failure(ModelError.Storage("Unable to delete draft model", t))
         }

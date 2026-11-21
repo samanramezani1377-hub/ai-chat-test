@@ -12,6 +12,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 
 /** Imports a user-selected model into managed storage after real GGUF inspection and validation. */
 class FileModelImporter(
@@ -87,6 +88,8 @@ class FileModelImporter(
                 Files.deleteIfExists(target)
                 throw t
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
             ModelResult.Failure(ModelError.Storage("Unable to import model", t))
         }
