@@ -348,7 +348,7 @@ Status GgufReader::open(const std::string& path, GgufReader& out) {
         if (!std::isfinite(score)) return {StatusCode::InvalidArgument, "GGUF tokenizer contains a non-finite token score"};
     }
     const auto valid_token_id = [&info](int64_t id) {
-        return id < 0 || static_cast<uint64_t>(id) < info.tokenizer.tokens.size();
+        return id == -1 || (id >= 0 && static_cast<uint64_t>(id) < info.tokenizer.tokens.size());
     };
     if (!valid_token_id(info.tokenizer.bos_token_id) ||
         !valid_token_id(info.tokenizer.eos_token_id) ||

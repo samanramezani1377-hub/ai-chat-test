@@ -124,7 +124,8 @@ ModelPreflightReport evaluate_model_preflight(const GgufFileInfo& model,
 
     // Preflight is necessary but not sufficient: model-specific graph construction,
     // operator/kernel coverage and numerical validation have not been completed here.
-    report.blockers.emplace_back("TOKENIZER_AND_SAMPLER_IMPLEMENTATION_PENDING");\n    report.blockers.emplace_back("MODEL_GRAPH_AND_KERNEL_VALIDATION_PENDING");
+    report.blockers.emplace_back("TOKENIZER_IMPLEMENTATION_PENDING");
+    report.blockers.emplace_back("SAMPLER_MODEL_INTEGRATION_PENDING");\n    report.blockers.emplace_back("MODEL_GRAPH_AND_KERNEL_VALIDATION_PENDING");
     report.gpu_execution_ready = false;
     return report;
 }

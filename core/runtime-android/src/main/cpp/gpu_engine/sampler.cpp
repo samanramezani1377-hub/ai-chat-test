@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <limits>
 #include <utility>
 
 namespace ai_chat::gpu_engine {
@@ -63,10 +64,9 @@ Status Sampler::sample(const std::vector<float>& logits,
         order.resize(config_.top_k);
     }
 
-    const float maximum = *std::max_element(order.begin(), order.end(),
-        [&adjusted](size_t a, size_t b) { return adjusted[a] < adjusted[b]; }) < adjusted.size()
-        ? adjusted[*std::max_element(order.begin(), order.end(),
-            [&adjusted](size_t a, size_t b) { return adjusted[a] < adjusted[b]; })] : 0.0f;
+    const auto maximum_index = std::max_element(order.begin(), order.end(),
+        [&adjusted](size_t a, size_t b) { return adjusted[a] < adjusted[b]; });
+    const float maximum = adjusted[*maximum_index];
 
     std::vector<double> probabilities(logits.size(), 0.0);
     double total = 0.0;
