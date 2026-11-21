@@ -1089,6 +1089,89 @@ Status reference_q4_0_embedding(const uint8_t* quantized_weights, uint64_t weigh
     return Status::success();
 }
 
+Status validate_q4_0_embedding_kernel(Backend& backend, OperatorRegistry& operators) {
+    const BackendKind backend_kind = backend.kind();
+    if ((backend_kind != BackendKind::DawnWebGpu && backend_kind != BackendKind::OpenGles) ||
+        !backend.healthy())
+        return {StatusCode::NotReady, "Q4_0 Embedding validation requires a healthy Dawn or GLES backend"};
+    const bool use_gles = backend_kind == BackendKind::OpenGles;
+    const std::string kernel_id = use_gles ? "gles-q4-0-embedding-f32-v1"
+                                           : "dawn-q4-0-embedding-f32-v1";
+    auto kernel = std::find_if(operators.kernels_.begin(), operators.kernels_.end(),
+        [&](const KernelDefinition& definition) {
+            return definition.kernel_id == kernel_id && definition.backend == backend_kind;
+        });
+    if (kernel == operators.kernels_.end())
+        return {StatusCode::NotReady, "Q4_0 Embedding candidate is not registered for the selected backend"};
+    if (kernel->validation == KernelValidation::Validated) return Status::success();
+    if (kernel->validation != KernelValidation::Unverified)
+        return {StatusCode::Unsupported, "Q4_0 Embedding candidate is rejected"};
+    const std::string& registered_source = use_gles ? kernel->glsl_source : kernel->wgsl_source;
+    const std::string& canonical_source = use_gles ? q4_0_embedding_glsl_source()
+                                                    : q4_0_embedding_wgsl_source();
+    if (registered_source.empty() || registered_source != canonical_source)
+        return {StatusCode::InvalidArgument, "Q4_0 Embedding registered source differs from canonical source"};
+
+    constexpr uint32_t vocabulary = 2, dimension = 32;
+    const std::vector<uint32_t> token_ids = {1, 0};
+    const uint64_t weight_bytes = static_cast<uint64_t>(vocabulary) * 18;
+    std::vector<uint8_t> encoded(weight_bytes, 0);
+    for (uint32_t row = 0; row < vocabulary; ++row) {
+        const size_t offset = row * 18;
+        encoded[offset] = 0x00;
+        encoded[offset + 1] = 0x38; // FP16 scale 0.5
+        for (uint32_t i = 0; i < 16; ++i) {
+            const uint8_t low = static_cast<uint8_t>((static_cast<int>((i + row) % 11) - 5) + 8);
+            const uint8_t high = static_cast<uint8_t>((static_cast<int>((i + row + 3) % 11) - 5) + 8);
+            encoded[offset + 2 + i] = static_cast<uint8_t>(low | (high << 4));
+        }
+    }
+    std::vector<float> expected(token_ids.size() * dimension, 0.0f);
+    std::vector<float> actual(token_ids.size() * dimension, 0.0f);
+    Status status = reference_q4_0_embedding(encoded.data(), weight_bytes, vocabulary,
+        dimension, token_ids, expected.data());
+    if (!status.ok()) return status;
+
+    BufferDesc weight_desc{(weight_bytes + 3) & ~uint64_t{3}, 4, MemoryDomain::Device, true, "q4-0-embedding-weights"};
+    BufferDesc token_desc{token_ids.size() * sizeof(uint32_t), alignof(uint32_t), MemoryDomain::Device, false, "q4-0-embedding-token-ids"};
+    BufferDesc output_desc{actual.size() * sizeof(float), alignof(float), MemoryDomain::Device, false, "q4-0-embedding-output"};
+    std::shared_ptr<Buffer> weight_buffer, token_buffer, output_buffer;
+    status = backend.allocate(weight_desc, weight_buffer); if (!status.ok()) return status;
+    status = backend.allocate(token_desc, token_buffer); if (!status.ok()) return status;
+    status = backend.allocate(output_desc, output_buffer); if (!status.ok()) return status;
+    status = backend.upload(weight_buffer, 0, encoded.data(), weight_bytes); if (!status.ok()) return status;
+    status = backend.upload(token_buffer, 0, token_ids.data(), token_desc.size_bytes); if (!status.ok()) return status;
+
+    TensorDesc output_td; output_td.shape = {token_ids.size(), dimension}; output_td.data_type = DataType::F32;
+    Tensor output_tensor;
+    status = Tensor::create(output_td, output_buffer, 0, output_tensor); if (!status.ok()) return status;
+    ComputeDispatch dispatch;
+    status = use_gles
+        ? build_q4_0_embedding_gles_candidate(weight_buffer, weight_bytes, vocabulary, dimension,
+            token_buffer, token_ids, output_tensor, dispatch)
+        : build_q4_0_embedding_candidate(weight_buffer, weight_bytes, vocabulary, dimension,
+            token_buffer, token_ids, output_tensor, dispatch);
+    if (!status.ok()) return status;
+    const std::string& candidate_source = use_gles ? dispatch.glsl_source : dispatch.wgsl_source;
+    if (dispatch.kernel_id != kernel_id || candidate_source.empty())
+        return {StatusCode::InvalidArgument, "Q4_0 Embedding candidate identity/source is invalid"};
+    dispatch.validation = KernelValidation::Validated;
+    std::unique_ptr<CommandBatch> commands;
+    status = backend.begin_commands(commands); if (!status.ok()) return status;
+    status = commands->dispatch_compute(dispatch); if (!status.ok()) return status;
+    status = backend.submit(std::move(commands)); if (!status.ok()) return status;
+    status = backend.synchronize(); if (!status.ok()) return status;
+    status = backend.readback(output_buffer, 0, actual.data(), actual.size() * sizeof(float));
+    if (!status.ok()) return status;
+    for (size_t i = 0; i < actual.size(); ++i) {
+        const float tolerance = 1.0e-5f * std::max(1.0f, std::fabs(expected[i]));
+        if (!std::isfinite(actual[i]) || std::fabs(actual[i] - expected[i]) > tolerance)
+            return {StatusCode::NumericalFailure, "Q4_0 Embedding GPU output differs from the independent decoder reference"};
+    }
+    kernel->validation = KernelValidation::Validated;
+    return Status::success();
+}
+
 Status validate_q4_0_matmul_kernel(Backend& backend, OperatorRegistry& operators,
                                    QuantizationRegistry& quantizations) {
     const BackendKind backend_kind = backend.kind();
@@ -1788,6 +1871,38 @@ Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry
     q4_gles.kernel_id = "gles-q4-0-matmul-f32-activation-v1";
     q4_gles.glsl_source = q4_0_matmul_glsl_source();
     status = registry.register_kernel(std::move(q4_gles));
+    if (!status.ok()) return status;
+
+    KernelDefinition q4_embedding;
+    q4_embedding.operator_name = "Embedding_Q4_0";
+    q4_embedding.backend = BackendKind::DawnWebGpu;
+    q4_embedding.input_type = DataType::U32;
+    q4_embedding.input_types = {DataType::U32, DataType::U32};
+    q4_embedding.output_type = DataType::F32;
+    q4_embedding.min_input_count = 2;
+    q4_embedding.max_input_count = 2;
+    q4_embedding.min_rank = 2;
+    q4_embedding.max_rank = 2;
+    q4_embedding.validation = KernelValidation::Unverified;
+    q4_embedding.kernel_id = "dawn-q4-0-embedding-f32-v1";
+    q4_embedding.wgsl_source = q4_0_embedding_wgsl_source();
+    status = registry.register_kernel(std::move(q4_embedding));
+    if (!status.ok()) return status;
+
+    KernelDefinition q4_embedding_gles;
+    q4_embedding_gles.operator_name = "Embedding_Q4_0";
+    q4_embedding_gles.backend = BackendKind::OpenGles;
+    q4_embedding_gles.input_type = DataType::U32;
+    q4_embedding_gles.input_types = {DataType::U32, DataType::U32};
+    q4_embedding_gles.output_type = DataType::F32;
+    q4_embedding_gles.min_input_count = 2;
+    q4_embedding_gles.max_input_count = 2;
+    q4_embedding_gles.min_rank = 2;
+    q4_embedding_gles.max_rank = 2;
+    q4_embedding_gles.validation = KernelValidation::Unverified;
+    q4_embedding_gles.kernel_id = "gles-q4-0-embedding-f32-v1";
+    q4_embedding_gles.glsl_source = q4_0_embedding_glsl_source();
+    status = registry.register_kernel(std::move(q4_embedding_gles));
     if (!status.ok()) return status;
 
     KernelDefinition q4_1;
