@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <unordered_set>
+#include <utility>
 
 namespace ai_chat::gpu_engine {
 
