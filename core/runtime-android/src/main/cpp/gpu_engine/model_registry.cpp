@@ -230,18 +230,14 @@ public:
         const auto require_bias = [&tensors](const std::string& name, uint64_t length) {
             const auto found = tensors.find(name);
             return found != tensors.end() && found->second->dimensions == std::vector<uint64_t>{length} &&
-                   found->second->byte_size_known && found->second->byte_size >= length * sizeof(float);
+                   found->second->type.name == "F32" && found->second->byte_size_known &&
+                   found->second->byte_size == length * sizeof(float);
         };
         const uint64_t head_dimension = plan.embedding_length / plan.attention_heads;
         const uint64_t kv_dimension = head_dimension * plan.kv_heads;
         std::vector<ModelPlanOperation> biased;
         biased.reserve(plan.operations.size() + static_cast<size_t>(plan.layer_count) * 4);
         for (auto operation : plan.operations) {
-            const std::string prefix = "blk." + std::to_string(
-                operation.id.rfind("layer.", 0) == 0
-                    ? std::stoull(operation.id.substr(6)) : 0) + ".";
-            const std::string layer_id = operation.id.rfind("layer.", 0) == 0
-                ? operation.id.substr(0, operation.id.find('.', 6)) : std::string{};
             std::string bias_name;
             uint64_t bias_length = 0;
             std::string biased_output;
