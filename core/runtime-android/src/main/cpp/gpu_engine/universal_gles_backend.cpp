@@ -270,7 +270,7 @@ public:
             glBindBuffer(GL_SHADER_STORAGE_BUFFER,0); error=glGetError();
             if(error!=GL_NO_ERROR&&id){glDeleteBuffers(1,&id);id=0;}
         },detail);
-        if(!ran) return {StatusCode::DeviceLost,detail};
+        if(!ran) { healthy_=false; return {StatusCode::DeviceLost,detail}; }
         if(error!=GL_NO_ERROR) { Status failure = gl_error("GLES buffer allocation",error); if (failure.code == StatusCode::DeviceLost) healthy_=false; return failure; }
         if(!id) return {StatusCode::BackendFailure,"GLES buffer allocation returned no buffer without a GL error"};
         out=std::make_shared<GlesBuffer>(id,d.size_bytes,d.memory); return Status::success();
@@ -313,6 +313,7 @@ public:
         return failure;
     }
     Status upload(const std::shared_ptr<Buffer>& dst,uint64_t offset,const void* src,uint64_t size) override {
+        if (!healthy()) return {StatusCode::DeviceLost,"GLES backend is not initialized"};
         auto* b=dynamic_cast<GlesBuffer*>(dst.get());
         if(!b||!src||!size||offset>b->size_bytes()||size>b->size_bytes()-offset||
            offset>static_cast<uint64_t>(std::numeric_limits<GLintptr>::max())||size>static_cast<uint64_t>(std::numeric_limits<GLsizeiptr>::max()))
@@ -326,6 +327,7 @@ public:
         return failure;
     }
     Status readback(const std::shared_ptr<Buffer>& src,uint64_t offset,void* dst,uint64_t size) override {
+        if (!healthy()) return {StatusCode::DeviceLost,"GLES backend is not initialized"};
         auto* b=dynamic_cast<GlesBuffer*>(src.get());
         if(!b||!dst||!size||offset>b->size_bytes()||size>b->size_bytes()-offset||
            offset>static_cast<uint64_t>(std::numeric_limits<GLintptr>::max())||size>static_cast<uint64_t>(std::numeric_limits<GLsizeiptr>::max()))
