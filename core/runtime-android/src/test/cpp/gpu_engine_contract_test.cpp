@@ -606,6 +606,15 @@ void test_add_operator_candidate_and_reference() {
     float result[] = {0, 0, 0};
     assert(reference_add_f32(left, right, result, 3).ok());
     assert(result[0] == 5 && result[1] == 7 && result[2] == 9);
+    const float embedding_weights[] = {1, 2, 3, 4, 5, 6};
+    const std::vector<uint32_t> token_ids = {2, 0};
+    float embedding_output[4] = {};
+    assert(reference_embedding_f32(embedding_weights, 3, 2, token_ids, embedding_output).ok());
+    assert(embedding_output[0] == 5 && embedding_output[1] == 6 &&
+           embedding_output[2] == 1 && embedding_output[3] == 2);
+    const std::vector<uint32_t> invalid_token_ids = {3};
+    assert(reference_embedding_f32(embedding_weights, 3, 2, invalid_token_ids, embedding_output).code ==
+           StatusCode::InvalidArgument);
     float multiplied[3] = {};
     assert(reference_multiply_f32(left, right, multiplied, 3).ok());
     assert(multiplied[0] == 4.0f && multiplied[1] == 10.0f && multiplied[2] == 18.0f);

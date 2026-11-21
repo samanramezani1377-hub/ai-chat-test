@@ -19,6 +19,16 @@ Status build_multiply_f32_candidate(const Tensor& lhs, const Tensor& rhs,
 Status reference_multiply_f32(const float* lhs, const float* rhs, float* output,
                               uint64_t element_count);
 
+const char* embedding_f32_wgsl_source() noexcept;
+Status build_embedding_f32_candidate(const Tensor& embedding_weights,
+                                     const std::shared_ptr<Buffer>& token_ids_buffer,
+                                     const std::vector<uint32_t>& validated_token_ids,
+                                     const Tensor& output,
+                                     ComputeDispatch& dispatch);
+Status reference_embedding_f32(const float* embedding_weights, uint32_t vocabulary_size,
+                               uint32_t embedding_dimension,
+                               const std::vector<uint32_t>& token_ids, float* output);
+
 const char* matmul_f32_wgsl_source() noexcept;
 Status build_matmul_f32_candidate(const Tensor& lhs, const Tensor& rhs,
                                   const Tensor& output, ComputeDispatch& dispatch);

@@ -11,6 +11,29 @@
 namespace ai_chat::gpu_engine {
 namespace {
 
+constexpr char kEmbeddingF32Wgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> embedding_weights: array<f32>;
+@group(0) @binding(1) var<storage, read> token_ids: array<u32>;
+@group(0) @binding(2) var<storage, read_write> output: array<f32>;
+const VOCABULARY_SIZE: u32 = 1u;
+const EMBEDDING_DIMENSION: u32 = 1u;
+const TOKEN_COUNT: u32 = 1u;
+const TOTAL_ELEMENTS: u32 = 1u;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= TOTAL_ELEMENTS) { return; }
+    let token_row = gid.x / EMBEDDING_DIMENSION;
+    let column = gid.x % EMBEDDING_DIMENSION;
+    if (token_row >= TOKEN_COUNT) { return; }
+    let token = token_ids[token_row];
+    if (token >= VOCABULARY_SIZE) {
+        output[gid.x] = bitcast<f32>(0x7fc00000u);
+        return;
+    }
+    output[gid.x] = embedding_weights[token * EMBEDDING_DIMENSION + column];
+}
+)wgsl";
+
 constexpr char kAddF32Wgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> lhs: array<f32>;
 @group(0) @binding(1) var<storage, read> rhs: array<f32>;
@@ -235,6 +258,79 @@ Status build_binary_f32_candidate(const Tensor& lhs, const Tensor& rhs,
 }
 
 } // namespace
+
+
+const char* embedding_f32_wgsl_source() noexcept { return kEmbeddingF32Wgsl; }
+
+Status build_embedding_f32_candidate(const Tensor& embedding_weights,
+                                     const std::shared_ptr<Buffer>& token_ids_buffer,
+                                     const std::vector<uint32_t>& validated_token_ids,
+                                     const Tensor& output,
+                                     ComputeDispatch& dispatch) {
+    dispatch = ComputeDispatch{};
+    if (!is_contiguous_f32(embedding_weights) || !is_contiguous_f32(output) ||
+        !token_ids_buffer)
+        return {StatusCode::Unsupported, "Embedding requires F32 weights/output and a valid device token-id buffer"};
+    const auto& weights_shape = embedding_weights.descriptor().shape;
+    const auto& output_shape = output.descriptor().shape;
+    if (weights_shape.size() != 2 || output_shape.size() != 2 ||
+        weights_shape[0] == 0 || weights_shape[1] == 0 ||
+        output_shape[0] == 0 || output_shape[1] != weights_shape[1] ||
+        validated_token_ids.size() != output_shape[0] ||
+        weights_shape[0] > UINT32_MAX || weights_shape[1] > UINT32_MAX ||
+        output_shape[0] > UINT32_MAX || output.element_count() > UINT32_MAX)
+        return {StatusCode::InvalidArgument, "Embedding expects weights [vocabulary,dimension] and output [tokens,dimension]"};
+    for (uint32_t token : validated_token_ids) {
+        if (token >= weights_shape[0])
+            return {StatusCode::InvalidArgument, "Embedding token id is outside the vocabulary"};
+    }
+    const uint64_t token_bytes = output_shape[0] * sizeof(uint32_t);
+    if (token_ids_buffer->size_bytes() < token_bytes ||
+        !embedding_weights.buffer() || !output.buffer() ||
+        output.buffer().get() == embedding_weights.buffer().get() ||
+        output.buffer().get() == token_ids_buffer.get())
+        return {StatusCode::InvalidArgument, "Embedding input/output buffer ranges are inconsistent"};
+    dispatch.label = "embedding-f32-generic-unverified";
+    dispatch.wgsl_source = kEmbeddingF32Wgsl;
+    const std::pair<std::string, std::string> constants[] = {
+        {"const VOCABULARY_SIZE: u32 = 1u;", "const VOCABULARY_SIZE: u32 = " + std::to_string(weights_shape[0]) + "u;"},
+        {"const EMBEDDING_DIMENSION: u32 = 1u;", "const EMBEDDING_DIMENSION: u32 = " + std::to_string(weights_shape[1]) + "u;"},
+        {"const TOKEN_COUNT: u32 = 1u;", "const TOKEN_COUNT: u32 = " + std::to_string(output_shape[0]) + "u;"},
+        {"const TOTAL_ELEMENTS: u32 = 1u;", "const TOTAL_ELEMENTS: u32 = " + std::to_string(output.element_count()) + "u;"},
+    };
+    for (const auto& constant : constants) {
+        const size_t position = dispatch.wgsl_source.find(constant.first);
+        if (position == std::string::npos)
+            return {StatusCode::BackendFailure, "Embedding WGSL constant placeholder is missing"};
+        dispatch.wgsl_source.replace(position, constant.first.size(), constant.second);
+    }
+    dispatch.workgroups_x = static_cast<uint32_t>((output.element_count() + 63) / 64);
+    dispatch.bindings = {
+        {0, embedding_weights.buffer(), embedding_weights.byte_offset(), embedding_weights.byte_size()},
+        {1, token_ids_buffer, 0, token_bytes},
+        {2, output.buffer(), output.byte_offset(), output.byte_size()},
+    };
+    return Status::success();
+}
+
+Status reference_embedding_f32(const float* embedding_weights, uint32_t vocabulary_size,
+                               uint32_t embedding_dimension,
+                               const std::vector<uint32_t>& token_ids, float* output) {
+    if ((!embedding_weights || !output) && !token_ids.empty())
+        return {StatusCode::InvalidArgument, "Embedding reference received a null pointer"};
+    if (vocabulary_size == 0 || embedding_dimension == 0 || token_ids.empty())
+        return {StatusCode::InvalidArgument, "Embedding dimensions and token list must be non-empty"};
+    for (size_t row = 0; row < token_ids.size(); ++row) {
+        const uint32_t token = token_ids[row];
+        if (token >= vocabulary_size)
+            return {StatusCode::InvalidArgument, "Embedding token id is outside the vocabulary"};
+        for (uint32_t column = 0; column < embedding_dimension; ++column) {
+            output[row * embedding_dimension + column] =
+                embedding_weights[static_cast<uint64_t>(token) * embedding_dimension + column];
+        }
+    }
+    return Status::success();
+}
 
 const char* add_f32_wgsl_source() noexcept { return kAddF32Wgsl; }
 
