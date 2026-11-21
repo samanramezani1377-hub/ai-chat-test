@@ -198,7 +198,7 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_QUEUE_COMPLETION_GUARD_V1")
             "    if (!ggml_backend_webgpu_wait_queue(ctx->global_ctx)) {\n        GGML_LOG_ERROR(\"AI_CHAT_WEBGPU_GRAPH_ABORTED stage=queue_completion nodes=%d\\n\", cgraph->n_nodes);\n        WEBGPU_CPU_PROFILE_TOTAL_END(graph_compute, ctx->global_ctx);\n        return GGML_STATUS_FAILED;\n    }\n    GGML_LOG_INFO(\"AI_CHAT_WEBGPU_GRAPH_SYNC_COMPLETED nodes=%d\\n\", cgraph->n_nodes);\n    const bool ai_chat_graph_ok = !ctx->global_ctx->device_error.load(std::memory_order_acquire) && !g_webgpu_graph_error.load(std::memory_order_acquire);\n    WEBGPU_CPU_PROFILE_TOTAL_END(graph_compute, ctx->global_ctx);\n    if (!ai_chat_graph_ok) {\n        GGML_LOG_ERROR(\"AI_CHAT_WEBGPU_GRAPH_ABORTED stage=completion nodes=%d\\n\", cgraph->n_nodes);\n        return GGML_STATUS_FAILED;\n    }\n    return GGML_STATUS_SUCCESS;"
             "propagate queue completion failures from cached graph patch")
     endif()
-    string(APPEND _webgpu "\\n// AI_CHAT_WEBGPU_QUEUE_COMPLETION_GUARD_V1\\n")
+    string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_QUEUE_COMPLETION_GUARD_V1\n")
     file(WRITE "${_webgpu_file}" "${_webgpu}")
 endif()
 
