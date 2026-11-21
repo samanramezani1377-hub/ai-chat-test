@@ -71,6 +71,7 @@ private:
     uint64_t last_ttft_ms_ = 0;
     double last_decode_tokens_per_second_ = 0.0;
     std::string model_path_;
+    std::string backend_fallback_reason_;
     std::string last_error_;
     bool loaded_ = false;
 };

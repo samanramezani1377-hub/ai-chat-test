@@ -53,6 +53,7 @@ void GpuInferenceSession::unload_locked() noexcept {
     last_ttft_ms_ = 0;
     last_decode_tokens_per_second_ = 0.0;
     model_path_.clear();
+    backend_fallback_reason_.clear();
     loaded_ = false;
 }
 
@@ -301,6 +302,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             }
             if (status.ok()) {
                 backend_kind = alternate_backend;
+                backend_fallback_reason_ = first_backend_failure.message;
                 status = validate_quantization_kernels_for_active_backend();
             }
         }
@@ -590,6 +592,7 @@ std::string GpuInferenceSession::diagnostics() const {
     report << "runtime=AIChatGpuEngine"
            << ";status=" << (loaded_ ? "READY" : "UNLOADED")
            << ";backend=" << backend_name()
+           << ";backend_fallback_reason=" << (backend_fallback_reason_.empty() ? "none" : backend_fallback_reason_)
            << ";architecture=" << (plan_.architecture.empty() ? "unknown" : plan_.architecture)
            << ";device=" << (engine_ && engine_->active_device() ? engine_->active_device()->name : "unknown")
            << ";model=" << (model_path_.empty() ? "unknown" : model_path_)
