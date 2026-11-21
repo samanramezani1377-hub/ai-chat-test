@@ -310,4 +310,16 @@ if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
     file(WRITE "${_webgpu_file}" "${_webgpu}")
 endif()
 
+# Upgrade cached V1 WebGPU allocations: a failed model-sized buffer is transient,
+# not proof that the physical WebGPU device is permanently lost.
+file(READ "${_webgpu_file}" _webgpu)
+if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_TRANSIENT_ALLOC_ERRORS_V1")
+    string(REPLACE
+        "ctx->webgpu_global_ctx->device_error.store(true);"
+        "g_webgpu_graph_error.store(true, std::memory_order_release);"
+        _webgpu "${_webgpu}")
+    string(APPEND _webgpu "\n// AI_CHAT_WEBGPU_TRANSIENT_ALLOC_ERRORS_V1\n")
+    file(WRITE "${_webgpu_file}" "${_webgpu}")
+endif()
+
 message(STATUS "AI Chat: bounded GGML allocator and WebGPU buffer validation enabled")
