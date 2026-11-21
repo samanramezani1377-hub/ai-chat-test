@@ -513,6 +513,8 @@ Status decode_q8_0_blocks(const uint8_t* source, size_t source_bytes,
 
 
 const char* q8_0_matmul_wgsl_source() noexcept { return kQ8_0MatMulWgsl; }
+const char* q4_0_matmul_wgsl_source() noexcept { return kQ4_0MatMulWgsl; }
+const char* q4_0_matmul_glsl_source() noexcept { return kQ4_0MatMulGlsl; }
 
 Status build_q8_0_matmul_candidate(const Tensor& activations,
                                   const std::shared_ptr<Buffer>& quantized_weights,
@@ -1107,7 +1109,39 @@ Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry
     q8_gles.validation = KernelValidation::Unverified;
     q8_gles.kernel_id = "gles-q8-0-matmul-f32-activation-v1";
     q8_gles.glsl_source = q8_0_matmul_glsl_source();
-    return registry.register_kernel(std::move(q8_gles));
+    status = registry.register_kernel(std::move(q8_gles));
+    if (!status.ok()) return status;
+
+    KernelDefinition q4;
+    q4.operator_name = "MatMul_Q4_0";
+    q4.backend = BackendKind::DawnWebGpu;
+    q4.input_type = DataType::F32;
+    q4.input_types = {DataType::F32, DataType::U32};
+    q4.output_type = DataType::F32;
+    q4.min_input_count = 2;
+    q4.max_input_count = 2;
+    q4.min_rank = 2;
+    q4.max_rank = 3;
+    q4.validation = KernelValidation::Unverified;
+    q4.kernel_id = "dawn-q4-0-matmul-f32-activation-v1";
+    q4.wgsl_source = q4_0_matmul_wgsl_source();
+    status = registry.register_kernel(std::move(q4));
+    if (!status.ok()) return status;
+
+    KernelDefinition q4_gles;
+    q4_gles.operator_name = "MatMul_Q4_0";
+    q4_gles.backend = BackendKind::OpenGles;
+    q4_gles.input_type = DataType::F32;
+    q4_gles.input_types = {DataType::F32, DataType::U32};
+    q4_gles.output_type = DataType::F32;
+    q4_gles.min_input_count = 2;
+    q4_gles.max_input_count = 2;
+    q4_gles.min_rank = 2;
+    q4_gles.max_rank = 3;
+    q4_gles.validation = KernelValidation::Unverified;
+    q4_gles.kernel_id = "gles-q4-0-matmul-f32-activation-v1";
+    q4_gles.glsl_source = q4_0_matmul_glsl_source();
+    return registry.register_kernel(std::move(q4_gles));
 }
 
 ModelQuantizationBackendReport evaluate_model_quantization_backend(
