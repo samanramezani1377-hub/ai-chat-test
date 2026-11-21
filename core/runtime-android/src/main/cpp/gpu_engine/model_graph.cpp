@@ -237,6 +237,11 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
     std::unordered_map<std::string, size_t> producer_indices;
     for (size_t index = 0; index < plan.operations.size(); ++index) {
         const auto& operation = plan.operations[index];
+        if (operation.output.empty() || !producer_indices.emplace(operation.output, index).second)
+            return {StatusCode::InvalidArgument, "Streamed model plan has an empty or duplicate output name"};
+    }
+    for (size_t index = 0; index < plan.operations.size(); ++index) {
+        const auto& operation = plan.operations[index];
         for (const auto& input : operation.inputs) {
             const auto producer = producer_indices.find(input);
             if (producer != producer_indices.end() && producer->second >= index)
@@ -247,7 +252,6 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
             if (producer == producer_indices.end() || producer->second >= index)
                 return {StatusCode::InvalidArgument, "Streamed model plan has an unresolved or forward control dependency: " + operation.id};
         }
-        producer_indices[operation.output] = index;
     }
 
     Status status = allocate_model_activation_tensors(plan, memory, token_count, context);
