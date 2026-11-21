@@ -1150,6 +1150,14 @@ void test_model_plan_graph_compilation_is_fail_closed() {
     assert(compile_model_execution_plan(blocked, BackendKind::OpenGles, lowerings, operators,
         {"input_a", "input_b", "input_c"}, {}, blocked_graph, report).code == StatusCode::NotReady);
     assert(blocked_graph.node_count() == 0);
+
+    ModelExecutionPlan missing_input = plan;
+    missing_input.graph_compiled = false;
+    ComputeGraph incomplete_graph;
+    assert(compile_model_execution_plan(missing_input, BackendKind::OpenGles, lowerings, operators,
+        {"input_a", "input_b"}, {}, incomplete_graph, report).code == StatusCode::Unsupported);
+    assert(!report.unresolved_inputs.empty());
+    assert(incomplete_graph.node_count() == 0); // partial graphs are never published
 }
 
 void test_llama_model_execution_plan_is_structural_only() {
