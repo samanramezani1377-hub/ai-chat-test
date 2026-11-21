@@ -61,8 +61,8 @@ class LlamaCppAndroidRuntimeAdapter(
     fun setGpuLayers(value: Int) {
         require(value == GPU_LAYERS_ALL || value in 0..GPU_LAYERS_MAX) { "GPU layer preference must be ALL (-1) or between 0 and $GPU_LAYERS_MAX" }
         gpuLayersMode = value
-        RuntimeDiagnosticsStore.recordNativeEvent("WEBGPU_GPU_PREFERRED_CPU_FALLBACK_ALLOWED")
-        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "WebGPU OpenGL ES Compatibility preferred; CPU fallback allowed (applies on next activation)")
+        RuntimeDiagnosticsStore.recordNativeEvent("GPU_ENGINE_PREFERRED_LLAMA_CPU_FALLBACK_ALLOWED")
+        RuntimeDiagnosticsStore.recordTrace(RuntimeTraceEvent.Type.GENERATION_STARTED, "Independent GPU engine preferred; llama.cpp CPU fallback allowed (applies on next activation)")
     }
 
     fun gpuLayers(): Int = gpuLayersMode
@@ -116,12 +116,19 @@ class LlamaCppAndroidRuntimeAdapter(
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_LOAD_RETURNED code=$result gpuPercent=$requestedGpuPercent gpuLayers=$requestedGpuLayers")
             if (result != 0) return ModelResult.Failure(RuntimeErrorMapper.nativeLoadFailure(result))
             val info = NativeLlamaCpp.runtimeInfo()
-            selectedBackend = info.substringBefore(';').ifBlank { "WebGPU" }
-            selectedGpuLayers = if (selectedBackend.contains("WebGPU", ignoreCase = true)) requestedGpuLayers else 0
-            selectedCpuThreads = info.substringAfter("generationThreads=", "").substringBefore(';').toIntOrNull()
-                ?: Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-            val batchThreads = info.substringAfter("batchThreads=", "").substringBefore(';').toIntOrNull()
-                ?: selectedCpuThreads
+            val usingIndependentGpuEngine = info.startsWith("runtime=AIChatGpuEngine;status=READY")
+            selectedBackend = if (usingIndependentGpuEngine) {
+                info.substringAfter("backend=", "").substringBefore(';').ifBlank { "UnknownGPU" }
+            } else {
+                info.substringBefore(';').ifBlank { "llama.cpp-CPU" }
+            }
+            selectedGpuLayers = if (usingIndependentGpuEngine) requestedGpuLayers else 0
+            selectedCpuThreads = if (usingIndependentGpuEngine) 0 else
+                info.substringAfter("generationThreads=", "").substringBefore(';').toIntOrNull()
+                    ?: Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+            val batchThreads = if (usingIndependentGpuEngine) 0 else
+                info.substringAfter("batchThreads=", "").substringBefore(';').toIntOrNull()
+                    ?: selectedCpuThreads
             RuntimeDiagnosticsStore.recordNativeEvent("NATIVE_CPU_THREAD_POLICY generation=$selectedCpuThreads batch=$batchThreads")
             loadedContextLength = NativeLlamaCpp.contextLength().takeIf { it > 0 } ?: requested
             loadedArchitecture = model.metadata.architecture?.lowercase() ?: "unknown"
@@ -456,9 +463,11 @@ class LlamaCppAndroidRuntimeAdapter(
 
     override fun runtimeInfo(): RuntimeInfo {
         val nativeInfo = NativeLlamaCpp.runtimeInfo()
-        val nativeVersion = nativeInfo.substringAfter("llama.cpp=", "").substringBefore(';').ifBlank { "unknown" }
+        val usingIndependentGpuEngine = nativeInfo.startsWith("runtime=AIChatGpuEngine;status=READY")
+        val nativeVersion = if (usingIndependentGpuEngine) "experimental" else
+            nativeInfo.substringAfter("llama.cpp=", "").substringBefore(';').ifBlank { "unknown" }
         return RuntimeInfo(
-            name = "llama.cpp-android-direct",
+            name = if (usingIndependentGpuEngine) "ai-chat-gpu-engine" else "llama.cpp-android-direct",
             version = nativeVersion,
             backend = selectedBackend,
             threads = selectedCpuThreads,
