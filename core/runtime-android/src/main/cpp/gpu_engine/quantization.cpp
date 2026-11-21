@@ -2457,6 +2457,38 @@ Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry
     status = registry.register_kernel(std::move(q4_1_embedding_gles));
     if (!status.ok()) return status;
 
+    KernelDefinition q8_embedding;
+    q8_embedding.operator_name = "Embedding_Q8_0";
+    q8_embedding.backend = BackendKind::DawnWebGpu;
+    q8_embedding.input_type = DataType::U32;
+    q8_embedding.input_types = {DataType::U32, DataType::U32};
+    q8_embedding.output_type = DataType::F32;
+    q8_embedding.min_input_count = 2;
+    q8_embedding.max_input_count = 2;
+    q8_embedding.min_rank = 2;
+    q8_embedding.max_rank = 2;
+    q8_embedding.validation = KernelValidation::Unverified;
+    q8_embedding.kernel_id = "dawn-q8-0-embedding-f32-v1";
+    q8_embedding.wgsl_source = q8_0_embedding_wgsl_source();
+    status = registry.register_kernel(std::move(q8_embedding));
+    if (!status.ok()) return status;
+
+    KernelDefinition q8_embedding_gles;
+    q8_embedding_gles.operator_name = "Embedding_Q8_0";
+    q8_embedding_gles.backend = BackendKind::OpenGles;
+    q8_embedding_gles.input_type = DataType::U32;
+    q8_embedding_gles.input_types = {DataType::U32, DataType::U32};
+    q8_embedding_gles.output_type = DataType::F32;
+    q8_embedding_gles.min_input_count = 2;
+    q8_embedding_gles.max_input_count = 2;
+    q8_embedding_gles.min_rank = 2;
+    q8_embedding_gles.max_rank = 2;
+    q8_embedding_gles.validation = KernelValidation::Unverified;
+    q8_embedding_gles.kernel_id = "gles-q8-0-embedding-f32-v1";
+    q8_embedding_gles.glsl_source = q8_0_embedding_glsl_source();
+    status = registry.register_kernel(std::move(q8_embedding_gles));
+    if (!status.ok()) return status;
+
     KernelDefinition q4_1;
     q4_1.operator_name = "MatMul_Q4_1";
     q4_1.backend = BackendKind::DawnWebGpu;
