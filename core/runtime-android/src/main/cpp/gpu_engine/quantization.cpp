@@ -761,7 +761,7 @@ Status validate_q4_0_matmul_kernel(Backend& backend, OperatorRegistry& operators
     if ((backend_kind != BackendKind::DawnWebGpu && backend_kind != BackendKind::OpenGles) ||
         !backend.healthy())
         return {StatusCode::NotReady, "Q4_0 MatMul validation requires a healthy Dawn or GLES backend"};
-    constexpr uint32_t kQ4_0TypeId = 8;
+    constexpr uint32_t kQ4_0TypeId = 2;
     auto format = quantizations.formats_.find(kQ4_0TypeId);
     if (format == quantizations.formats_.end() || format->second.decoder_state != SupportState::Validated)
         return {StatusCode::NotReady, "Q4_0 host decoder must be validated before GPU kernel promotion"};
@@ -813,11 +813,11 @@ Status validate_q4_0_matmul_kernel(Backend& backend, OperatorRegistry& operators
     if (!status.ok()) return status;
 
     BufferDesc activation_desc{activations.size() * sizeof(float), alignof(float), MemoryDomain::Device,
-        false, "q8-validation-activations"};
+        false, "q4-validation-activations"};
     BufferDesc weights_desc{(weight_bytes + 3) & ~uint64_t{3}, 4, MemoryDomain::Device,
-        true, "q8-validation-weights"};
+        true, "q4-validation-weights"};
     BufferDesc output_desc{sizeof(actual), alignof(float), MemoryDomain::Device,
-        false, "q8-validation-output"};
+        false, "q4-validation-output"};
     std::shared_ptr<Buffer> activation_buffer, weights_buffer, output_buffer;
     status = backend.allocate(activation_desc, activation_buffer); if (!status.ok()) return status;
     status = backend.allocate(weights_desc, weights_buffer); if (!status.ok()) return status;
