@@ -937,6 +937,22 @@ void test_tokenizer_engine_contracts() {
     std::vector<uint32_t> unigram_ids;
     assert(unigram_adapter->encode(unigram_choice, "ab", unigram_ids).ok());
     assert((unigram_ids == std::vector<uint32_t>{4, 3}));
+    GgufTokenizerInfo byte_fallback;
+    byte_fallback.model = "llama";
+    byte_fallback.pre_tokenizer = "default";
+    byte_fallback.tokens = {"<0xC3>", "<0xA9>"};
+    byte_fallback.scores = {-1.0f, -1.0f};
+    byte_fallback.token_types = {6, 6};
+    auto byte_adapter = builtins.find(byte_fallback);
+    assert(byte_adapter && byte_adapter->validate_metadata(byte_fallback).ok());
+    std::vector<uint32_t> byte_ids;
+    assert(byte_adapter->encode(byte_fallback, "\xc3\xa9", byte_ids).ok());
+    assert((byte_ids == std::vector<uint32_t>{0, 1}));
+
+    GgufTokenizerInfo invalid_scores = sentencepiece;
+    invalid_scores.scores[2] = std::numeric_limits<float>::quiet_NaN();
+    assert(spm->validate_metadata(invalid_scores).code == StatusCode::InvalidArgument);
+
 
     std::string spm_text;
     assert(spm->decode(sentencepiece, spm_ids, spm_text).ok() && spm_text == "ab");

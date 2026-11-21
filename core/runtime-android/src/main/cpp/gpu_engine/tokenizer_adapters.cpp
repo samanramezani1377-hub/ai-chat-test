@@ -154,8 +154,9 @@ private:
         if (norm.empty()) return Status::success();
 
         size_t max_piece_bytes = 1;
-        for (const auto& token : m.tokens) {
-            if (!token.empty() && !special_type(m, static_cast<uint32_t>(&token - m.tokens.data())))
+        for (size_t token_id = 0; token_id < m.tokens.size(); ++token_id) {
+            const auto& token = m.tokens[token_id];
+            if (!token.empty() && !special_type(m, static_cast<uint32_t>(token_id)))
                 max_piece_bytes = std::max(max_piece_bytes, token.size());
         }
         const size_t n = norm.size();
