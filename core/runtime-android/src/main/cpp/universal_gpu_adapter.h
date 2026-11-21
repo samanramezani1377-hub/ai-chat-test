@@ -13,6 +13,8 @@ struct UniversalGpuCapabilities {
     bool egl_display_available = false;
     bool egl_context_created = false;
     bool gles_compute_supported = false;
+    // True only after a real GLES compute shader dispatch and SSBO readback pass.
+    bool gles_compute_self_test_passed = false;
     bool gles_fp16_shader_hint = false;
     int gles_major = 0;
     int gles_minor = 0;
