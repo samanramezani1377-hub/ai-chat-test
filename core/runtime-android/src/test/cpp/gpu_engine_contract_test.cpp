@@ -528,6 +528,8 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     assert(register_builtin_quantization_formats(quantizations).ok());
     assert(validate_q8_0_matmul_kernel(backend, operators, quantizations).code ==
            StatusCode::NumericalFailure);
+    assert(validate_q8_0_embedding_kernel(backend, operators).code ==
+           StatusCode::NumericalFailure);
     assert(validate_q4_0_matmul_kernel(backend, operators, quantizations).code ==
            StatusCode::NumericalFailure);
     assert(validate_q4_1_matmul_kernel(backend, operators, quantizations).code ==
@@ -538,6 +540,8 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     assert(register_builtin_quantized_operator_candidates(dawn_operators).ok());
     assert(register_builtin_quantization_formats(dawn_quantizations).ok());
     assert(validate_q4_1_matmul_kernel(dawn_backend, dawn_operators, dawn_quantizations).code ==
+           StatusCode::NumericalFailure);
+    assert(validate_q8_0_embedding_kernel(dawn_backend, dawn_operators).code ==
            StatusCode::NumericalFailure);
     assert(validate_q4_0_embedding_kernel(backend, operators).code ==
            StatusCode::NumericalFailure);
