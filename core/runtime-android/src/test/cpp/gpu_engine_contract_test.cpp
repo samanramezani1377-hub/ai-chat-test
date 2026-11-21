@@ -769,6 +769,17 @@ void test_q8_0_decoder_and_registry() {
     assert(build_q5_0_dequantize_candidate(q5_encoded, 22, q4_output_tensor, q5_0_dispatch).ok());
     assert(build_q5_1_dequantize_candidate(q5_encoded, 24, q4_output_tensor, q5_1_dispatch).ok());
     assert(q5_0_dispatch.bindings.size() == 2 && q5_1_dispatch.bindings.size() == 2);
+    ComputeDispatch q5_0_gles_dispatch, q5_1_gles_dispatch;
+    assert(build_q5_0_dequantize_gles_candidate(q5_encoded, 22, q4_output_tensor, q5_0_gles_dispatch).ok());
+    assert(build_q5_1_dequantize_gles_candidate(q5_encoded, 24, q4_output_tensor, q5_1_gles_dispatch).ok());
+    assert(q5_0_gles_dispatch.backend == BackendKind::OpenGles);
+    assert(q5_1_gles_dispatch.backend == BackendKind::OpenGles);
+    assert(q5_0_gles_dispatch.wgsl_source.empty() && q5_1_gles_dispatch.wgsl_source.empty());
+    assert(q5_0_gles_dispatch.glsl_source.find("#version 310 es") == 0);
+    assert(q5_1_gles_dispatch.glsl_source.find("#version 310 es") == 0);
+    assert(q5_0_gles_dispatch.glsl_source.find("ELEMENT_COUNT = 32u") != std::string::npos);
+    assert(q5_1_gles_dispatch.glsl_source.find("ELEMENT_COUNT = 32u") != std::string::npos);
+
 
     std::vector<uint8_t> q8_weights(68, 0);
     q8_weights[0] = 0x00; q8_weights[1] = 0x38;

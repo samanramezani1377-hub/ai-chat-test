@@ -75,6 +75,70 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 )wgsl";
 
+
+constexpr char kQ5_0DequantizeGlsl[] = R"glsl(#version 310 es
+precision highp float;
+precision highp int;
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Encoded { uint encoded[]; };
+layout(std430, binding = 1) writeonly buffer Output { float output_values[]; };
+const uint ELEMENT_COUNT = 32u;
+uint read_u8(uint byte_offset) {
+    uint word = encoded[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 255u;
+}
+uint read_u16(uint byte_offset) {
+    uint word = encoded[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= ELEMENT_COUNT) return;
+    uint block_index = index / 32u;
+    uint within = index % 32u;
+    uint offset = block_index * 22u;
+    float scale = unpackHalf2x16(read_u16(offset)).x;
+    uint high_bits = read_u8(offset + 2u) | (read_u8(offset + 3u) << 8u) |
+                     (read_u8(offset + 4u) << 16u) | (read_u8(offset + 5u) << 24u);
+    uint packed = read_u8(offset + 6u + (within % 16u));
+    uint nibble = (within >= 16u) ? (packed >> 4u) : (packed & 15u);
+    uint high = (high_bits >> within) & 1u;
+    output_values[index] = scale * float(int(nibble | (high << 4u)) - 16);
+}
+)glsl";
+
+constexpr char kQ5_1DequantizeGlsl[] = R"glsl(#version 310 es
+precision highp float;
+precision highp int;
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Encoded { uint encoded[]; };
+layout(std430, binding = 1) writeonly buffer Output { float output_values[]; };
+const uint ELEMENT_COUNT = 32u;
+uint read_u8(uint byte_offset) {
+    uint word = encoded[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 255u;
+}
+uint read_u16(uint byte_offset) {
+    uint word = encoded[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= ELEMENT_COUNT) return;
+    uint block_index = index / 32u;
+    uint within = index % 32u;
+    uint offset = block_index * 24u;
+    float scale = unpackHalf2x16(read_u16(offset)).x;
+    float minimum = unpackHalf2x16(read_u16(offset + 2u)).x;
+    uint high_bits = read_u8(offset + 4u) | (read_u8(offset + 5u) << 8u) |
+                     (read_u8(offset + 6u) << 16u) | (read_u8(offset + 7u) << 24u);
+    uint packed = read_u8(offset + 8u + (within % 16u));
+    uint nibble = (within >= 16u) ? (packed >> 4u) : (packed & 15u);
+    uint high = (high_bits >> within) & 1u;
+    output_values[index] = scale * float(nibble | (high << 4u)) + minimum;
+}
+)glsl";
+
 constexpr char kQ4_1DequantizeWgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> encoded: array<u32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
@@ -2626,6 +2690,52 @@ Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
     q8.gpu_kernel_state = SupportState::Unverified;
     initialize_backend_states(q8);
     return registry.register_format(std::move(q8));
+}
+
+
+const char* q5_0_dequantize_glsl_source() noexcept { return kQ5_0DequantizeGlsl; }
+const char* q5_1_dequantize_glsl_source() noexcept { return kQ5_1DequantizeGlsl; }
+
+Status build_q5_0_dequantize_gles_candidate(const std::shared_ptr<Buffer>& encoded,
+                                            uint64_t encoded_bytes,
+                                            const Tensor& output,
+                                            ComputeDispatch& dispatch) {
+    Status status = build_q5_0_dequantize_candidate(encoded, encoded_bytes, output, dispatch);
+    if (!status.ok()) return status;
+    dispatch.label = "q5-0-dequantize-gles-generic-unverified";
+    dispatch.kernel_id = "gles-q5-0-dequantize-generic-v1";
+    dispatch.backend = BackendKind::OpenGles;
+    dispatch.wgsl_source.clear();
+    dispatch.glsl_source = kQ5_0DequantizeGlsl;
+    const std::string placeholder = "const uint ELEMENT_COUNT = 32u;";
+    const std::string replacement = "const uint ELEMENT_COUNT = " +
+        std::to_string(output.element_count()) + "u;";
+    const size_t position = dispatch.glsl_source.find(placeholder);
+    if (position == std::string::npos)
+        return {StatusCode::BackendFailure, "Q5_0 GLSL element-count placeholder is missing"};
+    dispatch.glsl_source.replace(position, placeholder.size(), replacement);
+    return Status::success();
+}
+
+Status build_q5_1_dequantize_gles_candidate(const std::shared_ptr<Buffer>& encoded,
+                                            uint64_t encoded_bytes,
+                                            const Tensor& output,
+                                            ComputeDispatch& dispatch) {
+    Status status = build_q5_1_dequantize_candidate(encoded, encoded_bytes, output, dispatch);
+    if (!status.ok()) return status;
+    dispatch.label = "q5-1-dequantize-gles-generic-unverified";
+    dispatch.kernel_id = "gles-q5-1-dequantize-generic-v1";
+    dispatch.backend = BackendKind::OpenGles;
+    dispatch.wgsl_source.clear();
+    dispatch.glsl_source = kQ5_1DequantizeGlsl;
+    const std::string placeholder = "const uint ELEMENT_COUNT = 32u;";
+    const std::string replacement = "const uint ELEMENT_COUNT = " +
+        std::to_string(output.element_count()) + "u;";
+    const size_t position = dispatch.glsl_source.find(placeholder);
+    if (position == std::string::npos)
+        return {StatusCode::BackendFailure, "Q5_1 GLSL element-count placeholder is missing"};
+    dispatch.glsl_source.replace(position, placeholder.size(), replacement);
+    return Status::success();
 }
 
 } // namespace ai_chat::gpu_engine
