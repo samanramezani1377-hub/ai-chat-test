@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -196,6 +197,8 @@ struct RuntimeDiagnostics {
     bool cpu_fallback_available = true;
     std::string last_error;
 };
+
+class ComputeGraph;
 
 class GpuEngine {
 public:
