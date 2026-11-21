@@ -139,14 +139,14 @@ endif()
 if (NOT _webgpu MATCHES "AI_CHAT_WEBGPU_BOUNDED_BUFFER_ALLOCATION_V1")
     ai_chat_replace_once(_webgpu
         [=[    buffer = device.CreateBuffer(&buffer_desc);]=]
-        [=[    GGML_LOG_INFO("AI_CHAT_WEBGPU_CREATE_BUFFER_BEGIN label=%s bytes=%llu usage=%u\\n",
+        [=[    GGML_LOG_INFO("AI_CHAT_WEBGPU_CREATE_BUFFER_BEGIN label=%s bytes=%llu usage=%u\n",
         label, static_cast<unsigned long long>(size), static_cast<unsigned int>(usage));
     buffer = device.CreateBuffer(&buffer_desc);
     if (!buffer) {
-        GGML_LOG_ERROR("AI_CHAT_WEBGPU_CREATE_BUFFER_FAILED label=%s bytes=%llu\\n",
+        GGML_LOG_ERROR("AI_CHAT_WEBGPU_CREATE_BUFFER_FAILED label=%s bytes=%llu\n",
             label, static_cast<unsigned long long>(size));
     } else {
-        GGML_LOG_INFO("AI_CHAT_WEBGPU_CREATE_BUFFER_OK label=%s bytes=%llu\\n",
+        GGML_LOG_INFO("AI_CHAT_WEBGPU_CREATE_BUFFER_OK label=%s bytes=%llu\n",
             label, static_cast<unsigned long long>(size));
     }]=]
         "log every Dawn buffer allocation and its outcome")
