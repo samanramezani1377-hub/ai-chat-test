@@ -233,3 +233,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineDiagnostics
     }
     return env->NewStringUTF(result.c_str());
 }
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineResetStop(
+        JNIEnv*, jclass) {
+    ai_chat::gpu_engine::gpu_inference_session().reset_stop();
+}

@@ -67,6 +67,10 @@ void GpuInferenceSession::cancel() noexcept {
     cancelled_.store(true, std::memory_order_relaxed);
 }
 
+void GpuInferenceSession::reset_stop() noexcept {
+    cancelled_.store(false, std::memory_order_relaxed);
+}
+
 bool GpuInferenceSession::loaded() const noexcept {
     try {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -365,7 +369,8 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
         return {StatusCode::NotReady, "GPU inference session is not loaded"};
     if (prompt.empty() || max_new_tokens == 0)
         return {StatusCode::InvalidArgument, "Prompt and max_new_tokens must be non-empty"};
-    cancelled_.store(false, std::memory_order_relaxed);
+    if (cancelled_.load(std::memory_order_relaxed))
+        return {StatusCode::Cancelled, "GPU generation was cancelled before it started"};
 
     TokenizerEngine tokenizer_engine(*tokenizers_);
     std::vector<uint32_t> prompt_tokens;

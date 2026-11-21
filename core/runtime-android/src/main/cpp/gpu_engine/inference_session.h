@@ -37,6 +37,7 @@ public:
                     SamplingConfig sampling, const TextCallback& on_text);
     Status count_tokens(const std::string& text, uint32_t& out_count) const;
     void cancel() noexcept;
+    void reset_stop() noexcept;
     void unload() noexcept;
     bool loaded() const noexcept;
     std::string diagnostics() const;

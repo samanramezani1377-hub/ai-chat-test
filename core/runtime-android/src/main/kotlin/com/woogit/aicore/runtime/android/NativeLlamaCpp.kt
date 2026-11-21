@@ -17,7 +17,7 @@ internal object NativeLlamaCpp {
     private const val TAG = "AIChatRuntime"
     private const val PREFLIGHT_FILE = "ai-chat-model-preflight.txt"
     private var nativeInitialized = false
-    private var gpuEngineActive = false
+    @Volatile private var gpuEngineActive = false
     private var loadedContextLength = 0
 
     const val GPU_LAYERS_MAX = 99
@@ -198,7 +198,7 @@ internal object NativeLlamaCpp {
         val useGpuEngine = gpuEngineActive
         // The GPU session resets its own cancellation state at generation start.
         // llama.cpp retains its existing reset/stop protocol on the CPU path.
-        if (!useGpuEngine) nativeResetStop()
+        if (useGpuEngine) nativeGpuEngineResetStop() else nativeResetStop()
         val worker = launch {
             val result = if (useGpuEngine) {
                 nativeGpuEngineGenerate(prompt, maxTokens, temperature, topK, topP, minP, listener)
@@ -243,6 +243,7 @@ internal object NativeLlamaCpp {
     @JvmStatic private external fun nativeGpuEngineCountTokens(text: String): Int
     @JvmStatic private external fun nativeGpuEngineContextLength(): Int
     @JvmStatic private external fun nativeGpuEngineStop()
+    @JvmStatic private external fun nativeGpuEngineResetStop()
     @JvmStatic private external fun nativeGpuEngineUnload()
     @JvmStatic private external fun nativeGpuEngineDiagnostics(): String
     @JvmStatic private external fun nativeRuntimeInfo(): String
