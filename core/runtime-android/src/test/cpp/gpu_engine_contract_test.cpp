@@ -795,7 +795,6 @@ void test_gpu_engine_lifecycle() {
 void test_add_operator_candidate_and_reference() {
     OperatorRegistry registry;
     assert(register_builtin_gles_operator_candidates(registry).ok());
-    assert(validate_gles_add_f32_kernel(backend, registry).code == StatusCode::NumericalFailure);
     KernelDefinition selected;
     assert(registry.select_kernel("Add", BackendKind::DawnWebGpu, DataType::F32,
                                   DataType::F32, 2, 2, selected).code == StatusCode::Unsupported);
@@ -808,6 +807,9 @@ void test_add_operator_candidate_and_reference() {
                                   DataType::F32, 2, mixed_selected).code == StatusCode::Unsupported);
 
     FakeBackend backend;
+    assert(validate_gles_add_f32_kernel(backend, registry).code == StatusCode::NumericalFailure);
+    assert(registry.select_kernel("Add", BackendKind::OpenGles, DataType::F32,
+                                  DataType::F32, 2, 2, selected).code == StatusCode::Unsupported);
     BufferDesc desc{24, 4, MemoryDomain::Device, false, "add"};
     std::shared_ptr<Buffer> a, b, out;
     assert(backend.allocate(desc, a).ok());
