@@ -434,6 +434,10 @@ void test_q8_0_decoder_and_registry() {
     assert(gles_dispatch.wgsl_source.empty());
     OperatorRegistry gles_registry;
     assert(register_builtin_gles_operator_candidates(gles_registry).ok());
+    KernelDefinition gles_embedding_unverified;
+    assert(gles_registry.select_kernel("Embedding", BackendKind::OpenGles,
+        std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
+        gles_embedding_unverified).code == StatusCode::Unsupported);
     assert(gles_registry.select_kernel("Add", BackendKind::OpenGles, DataType::F32,
                                        DataType::F32, 2, 2, selected).code == StatusCode::Unsupported);
     TensorDesc rhs_matmul_desc = tensor_desc;
@@ -765,6 +769,13 @@ void test_add_operator_candidate_and_reference() {
                                          embedding_dispatch).ok());
     assert(embedding_dispatch.bindings.size() == 3);
     assert(embedding_dispatch.wgsl_source.find("const VOCABULARY_SIZE: u32 = 3u;") != std::string::npos);
+    ComputeDispatch gles_embedding_dispatch;
+    assert(build_embedding_f32_gles_candidate(embedding_weights_tensor, embedding_ids_buffer,
+        token_ids, embedding_output_tensor, gles_embedding_dispatch).ok());
+    assert(gles_embedding_dispatch.backend == BackendKind::OpenGles);
+    assert(gles_embedding_dispatch.glsl_source.find("const uint VOCABULARY_SIZE = 3u;") != std::string::npos);
+    assert(gles_embedding_dispatch.glsl_source.find("const uint EMBEDDING_DIMENSION = 2u;") != std::string::npos);
+    assert(gles_embedding_dispatch.glsl_source.find("const uint TOKEN_COUNT = 2u;") != std::string::npos);
     const std::vector<uint32_t> invalid_token_ids = {3};
     assert(reference_embedding_f32(embedding_weights, 3, 2, invalid_token_ids, embedding_output).code ==
            StatusCode::InvalidArgument);
