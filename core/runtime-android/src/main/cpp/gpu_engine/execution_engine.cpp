@@ -233,6 +233,9 @@ Status ComputeGraph::add_node(GraphNode node, size_t& out_index) {
         }
     }
     if (node.name.empty()) return {StatusCode::InvalidArgument, "Graph node name cannot be empty"};
+    if (node.dispatch.validation != KernelValidation::Validated || node.dispatch.kernel_id.empty()) {
+        return {StatusCode::Unsupported, "Compute graph rejects unverified or unidentified kernels"};
+    }
     nodes_.push_back(std::move(node));
     return Status::success();
 }

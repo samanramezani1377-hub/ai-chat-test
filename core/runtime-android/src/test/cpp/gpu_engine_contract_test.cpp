@@ -594,7 +594,12 @@ void test_gpu_engine_lifecycle() {
     GraphNode node;
     node.name = "single";
     node.dispatch.label = "single";
+    node.dispatch.kernel_id = "test-single";
+    node.dispatch.validation = KernelValidation::Validated;
     size_t index = 0;
+    GraphNode unverified_node;
+    unverified_node.name = "unverified";
+    assert(graph.add_node(unverified_node, index).code == StatusCode::Unsupported);
     assert(graph.add_node(node, index).ok());
     assert(engine.execute(graph).ok());
     assert(engine.shutdown().ok());
@@ -959,17 +964,23 @@ void test_graph_scheduler_order_and_cancel() {
     GraphNode first;
     first.name = "first";
     first.dispatch.label = "first";
+    first.dispatch.kernel_id = "test-first";
+    first.dispatch.validation = KernelValidation::Validated;
     assert(graph.add_node(first, index).ok());
 
     GraphNode second;
     second.name = "second";
     second.dependencies = {0};
     second.dispatch.label = "second";
+    second.dispatch.kernel_id = "test-second";
+    second.dispatch.validation = KernelValidation::Validated;
     assert(graph.add_node(second, index).ok());
 
     GraphNode independent;
     independent.name = "independent";
     independent.dispatch.label = "independent";
+    independent.dispatch.kernel_id = "test-independent";
+    independent.dispatch.validation = KernelValidation::Validated;
     assert(graph.add_node(independent, index).ok());
 
     std::vector<size_t> order;
