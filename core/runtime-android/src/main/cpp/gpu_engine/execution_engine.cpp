@@ -160,25 +160,25 @@ uint64_t MemoryManager::available_bytes() const noexcept {
 }
 
 Status OperatorRegistry::register_kernel(KernelDefinition definition) {
+    const bool invalid_input_types = !definition.input_types.empty() &&
+        (definition.input_types.size() < definition.min_input_count ||
+         definition.input_types.size() > definition.max_input_count ||
+         std::any_of(definition.input_types.begin(), definition.input_types.end(),
+                     [](DataType type) { return type == DataType::Unknown; }));
     if (definition.operator_name.empty() || definition.kernel_id.empty() ||
         definition.backend == BackendKind::Unknown || definition.input_type == DataType::Unknown ||
         definition.output_type == DataType::Unknown || definition.min_input_count == 0 ||
         definition.min_input_count > definition.max_input_count ||
         definition.min_rank == 0 || definition.min_rank > definition.max_rank ||
-        (!definition.input_types.empty() &&
-         (definition.input_types.size() < definition.min_input_count ||
-          definition.input_types.size() > definition.max_input_count ||
-          std::any_of(definition.input_types.begin(), definition.input_types.end(),
-                      [](DataType type) { return type == DataType::Unknown; }))) {
+        invalid_input_types) {
         return {StatusCode::InvalidArgument, "Kernel definition is missing required identity or valid constraints"};
     }
     if (definition.validation == KernelValidation::Validated && definition.wgsl_source.empty()) {
-        return {StatusCode::InvalidArgument, "A validated Dawn kernel must include WGSL source"};
+        return {StatusCode::InvalidArgument, "A validated kernel must include WGSL source"};
     }
     const auto duplicate = std::find_if(kernels_.begin(), kernels_.end(),
         [&definition](const KernelDefinition& current) {
-            return current.kernel_id == definition.kernel_id &&
-                   current.backend == definition.backend;
+            return current.kernel_id == definition.kernel_id && current.backend == definition.backend;
         });
     if (duplicate != kernels_.end()) return {StatusCode::InvalidArgument, "Duplicate kernel id for backend"};
     kernels_.push_back(std::move(definition));

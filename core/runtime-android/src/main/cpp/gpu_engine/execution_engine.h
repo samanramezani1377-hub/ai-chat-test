@@ -61,6 +61,7 @@ struct KernelDefinition {
     std::string operator_name;
     BackendKind backend = BackendKind::Unknown;
     DataType input_type = DataType::Unknown;
+    std::vector<DataType> input_types;
     DataType output_type = DataType::Unknown;
     uint32_t min_input_count = 1;
     uint32_t max_input_count = 1;
