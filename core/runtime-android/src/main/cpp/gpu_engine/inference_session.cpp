@@ -120,7 +120,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     }
     const GgufReader& reader = *loader_->reader();
     const GgufFileInfo& model = reader.info();
-    const BackendKind backend_kind = engine_->active_backend()->kind();
+    BackendKind backend_kind = engine_->active_backend()->kind();
 
     const auto tokenizer_preflight = evaluate_tokenizer_preflight(model.tokenizer, *tokenizers_);
     if (!tokenizer_preflight.ready) {
@@ -254,19 +254,59 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         }
     }
 
-    for (uint32_t type_id : quantization_types) {
-        if (type_id == 2) {
-            status = validate_q4_0_matmul_kernel(*engine_->active_backend(), *operators_, *quantizations_);
-            if (status.ok()) status = validate_q4_0_embedding_kernel(*engine_->active_backend(), *operators_);
-        } else if (type_id == 3) {
-            status = validate_q4_1_matmul_kernel(*engine_->active_backend(), *operators_, *quantizations_);
-            if (status.ok()) status = validate_q4_1_embedding_kernel(*engine_->active_backend(), *operators_);
-        } else {
-            status = validate_q8_0_matmul_kernel(*engine_->active_backend(), *operators_, *quantizations_);
+    auto validate_quantization_kernels_for_active_backend = [&]() -> Status {
+        for (uint32_t type_id : quantization_types) {
+            Status validation_status;
+            if (type_id == 2) {
+                validation_status = validate_q4_0_matmul_kernel(
+                    *engine_->active_backend(), *operators_, *quantizations_);
+                if (validation_status.ok()) validation_status = validate_q4_0_embedding_kernel(
+                    *engine_->active_backend(), *operators_);
+            } else if (type_id == 3) {
+                validation_status = validate_q4_1_matmul_kernel(
+                    *engine_->active_backend(), *operators_, *quantizations_);
+                if (validation_status.ok()) validation_status = validate_q4_1_embedding_kernel(
+                    *engine_->active_backend(), *operators_);
+            } else {
+                validation_status = validate_q8_0_matmul_kernel(
+                    *engine_->active_backend(), *operators_, *quantizations_);
+            }
+            if (!validation_status.ok()) {
+                last_error_ = "Quantized GPU kernel validation failed for GGUF type " +
+                              std::to_string(type_id) + ": " + validation_status.message;
+                return validation_status;
+            }
+        }
+        return Status::success();
+    };
+
+    status = validate_quantization_kernels_for_active_backend();
+    if (!status.ok()) {
+        const BackendKind alternate_backend = backend_kind == BackendKind::DawnWebGpu
+            ? BackendKind::OpenGles : BackendKind::DawnWebGpu;
+        const Status first_backend_failure = status;
+        engine_->shutdown();
+        status = engine_->initialize(alternate_backend);
+        if (status.ok()) {
+            KernelValidationReport alternate_operator_report;
+            status = validate_builtin_operator_kernels(
+                *engine_->active_backend(), *operators_, alternate_operator_report);
+            if (status.ok() && !alternate_operator_report.complete) {
+                std::string detail = "Alternate backend failed baseline operator validation";
+                for (const auto& item : alternate_operator_report.unavailable)
+                    detail += " | unavailable=" + item;
+                for (const auto& item : alternate_operator_report.rejected)
+                    detail += " | rejected=" + item;
+                status = {StatusCode::Unsupported, std::move(detail)};
+            }
+            if (status.ok()) {
+                backend_kind = alternate_backend;
+                status = validate_quantization_kernels_for_active_backend();
+            }
         }
         if (!status.ok()) {
-            last_error_ = "Quantized GPU kernel validation failed for GGUF type " +
-                          std::to_string(type_id) + ": " + status.message;
+            last_error_ = "Quantized kernels are unavailable on both GPU backends; first backend: " +
+                          first_backend_failure.message + "; alternate backend: " + status.message;
             unload_locked();
             return {status.code, last_error_};
         }
