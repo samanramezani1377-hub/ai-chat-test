@@ -137,3 +137,8 @@ The model execution context carries token IDs and the selected backend. The Embe
 ### Graph-ordered KV cache and attention
 
 KVCacheAppend is represented as an internal copy-only graph node. It records two bounded device-buffer copies (K and V) in the same backend command batch as compute operations, after their producer nodes and before Attention through explicit control dependencies. The graph compiler allows side-effect outputs without fabricating tensor storage. Attention binds K/V tensor views sized to `past_length + sequence_length`. The cache valid-token counters are advanced only after the entire graph has submitted and synchronized; failed execution leaves the logical cache length unchanged so the same append range can be safely overwritten on retry. Internal copy nodes do not masquerade as validated math operators.
+
+
+### Activation allocation and liveness
+
+The activation allocator derives each output shape from the model plan and runtime token count, computes last-use indices from data dependencies, and reuses a device buffer only when its prior tensor's final consumer precedes the new producer. Retained outputs (currently logits) are pinned until the caller releases the execution context. Each unique slot is backed by a MemoryLease retained by the context. This is a simple graph-order liveness allocator for the current sequential scheduler; it does not yet model parallel branches or asynchronous multi-queue overlap.
