@@ -1,7 +1,9 @@
 package com.woogit.aicore.runtime
 
+import com.woogit.aicore.domain.ChatMessage
 import com.woogit.aicore.domain.GenerationRequest
 import com.woogit.aicore.domain.GenerationResult
+import com.woogit.aicore.domain.InferenceSettings
 import com.woogit.aicore.domain.ModelDescriptor
 import com.woogit.aicore.domain.ModelError
 import com.woogit.aicore.domain.ModelFormat
@@ -14,8 +16,10 @@ import com.woogit.aicore.domain.Quantization
 import com.woogit.aicore.domain.RuntimeCompatibility
 import com.woogit.aicore.domain.RuntimeInfo
 import com.woogit.aicore.domain.ValidationStatus
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
@@ -32,12 +36,13 @@ class LocalModelServiceConcurrencyTest {
         val service = LocalModelService(NoOpImporter(), repository, runtime)
 
         assertTrue(service.activate("model-a") is ModelResult.Success<*>)
-        assertTrue(service.generate(listOf(com.woogit.aicore.domain.ChatMessage(com.woogit.aicore.domain.ChatMessage.Role.USER, "one")), com.woogit.aicore.domain.InferenceSettings(maxNewTokens = 1)) is ModelResult.Success<*>)
-        assertTrue(service.generate(listOf(com.woogit.aicore.domain.ChatMessage(com.woogit.aicore.domain.ChatMessage.Role.USER, "two")), com.woogit.aicore.domain.InferenceSettings(maxNewTokens = 1)) is ModelResult.Success<*>)
+        assertTrue(service.generate(listOf(userMessage("one")), InferenceSettings(maxNewTokens = 1)) is ModelResult.Success<*>)
+        assertTrue(service.generate(listOf(userMessage("two")), InferenceSettings(maxNewTokens = 1)) is ModelResult.Success<*>)
 
         assertEquals(1, runtime.loadCount.get())
         assertEquals(0, runtime.unloadCount.get())
     }
+
     @Test
     fun concurrentLifecycleOperationsAreSerialized() = runBlocking {
         val runtime = RecordingRuntime()
@@ -48,7 +53,7 @@ class LocalModelServiceConcurrencyTest {
             async { service.activate("model-a") },
             async { service.deactivate() },
             async { service.activate("model-a") },
-            async { service.deactivate() }
+            async { service.deactivate() },
         ).awaitAll()
 
         assertEquals(4, results.size)
@@ -58,6 +63,29 @@ class LocalModelServiceConcurrencyTest {
         assertEquals(null, service.activeModelId())
         assertEquals(null, repository.activeId)
     }
+
+    @Test
+    fun stopGenerationCancelsActiveGenerationWithoutWaitingForItsMutex() = runBlocking {
+        val runtime = RecordingRuntime().apply { blockGeneration = true }
+        val repository = RecordingRepository(model())
+        val service = LocalModelService(NoOpImporter(), repository, runtime)
+
+        assertTrue(service.activate("model-a") is ModelResult.Success<*>)
+        runtime.stopCount.set(0)
+
+        val generation = async {
+            service.generate(listOf(userMessage("wait")), InferenceSettings(maxNewTokens = 8))
+        }
+        runtime.generationStarted.await()
+
+        service.stopGeneration()
+
+        assertTrue(generation.isCancelled, "stopGeneration must cancel the active generation job")
+        assertEquals(1, runtime.stopCount.get(), "native stop must be requested before waiting for generation to finish")
+    }
+
+    private fun userMessage(text: String) =
+        ChatMessage(ChatMessage.Role.USER, text)
 
     private fun model() = ModelDescriptor(
         id = "model-a",
@@ -69,7 +97,7 @@ class LocalModelServiceConcurrencyTest {
         metadata = ModelMetadata(architecture = "qwen2"),
         validation = ValidationStatus.VALID,
         runtimeCompatibility = RuntimeCompatibility(true),
-        state = ModelState.READY
+        state = ModelState.READY,
     )
 
     private class NoOpImporter : ModelImporter {
@@ -81,33 +109,66 @@ class LocalModelServiceConcurrencyTest {
         var activeId: String? = null
 
         override suspend fun register(model: ModelDescriptor): ModelResult<Unit> = ModelResult.Success(Unit)
-        override suspend fun get(id: String): ModelResult<ModelDescriptor?> = ModelResult.Success(if (id == model.id) model else null)
+        override suspend fun get(id: String): ModelResult<ModelDescriptor?> =
+            ModelResult.Success(if (id == model.id) model else null)
         override suspend fun list(): ModelResult<List<ModelDescriptor>> = ModelResult.Success(listOf(model))
-        override suspend fun getActive(): ModelResult<ModelDescriptor?> = ModelResult.Success(activeId?.let { model.takeIf { it.id == activeId } })
-        override suspend fun setActive(id: String?): ModelResult<Unit> { activeId = id; return ModelResult.Success(Unit) }
+        override suspend fun getActive(): ModelResult<ModelDescriptor?> =
+            ModelResult.Success(activeId?.let { model.takeIf { it.id == activeId } })
+        override suspend fun setActive(id: String?): ModelResult<Unit> {
+            activeId = id
+            return ModelResult.Success(Unit)
+        }
         override suspend fun unregister(id: String): ModelResult<Unit> = ModelResult.Success(Unit)
     }
 
     private class RecordingRuntime : RuntimeAdapter {
         val concurrentOperations = AtomicInteger(0)
         val maxConcurrentOperations = AtomicInteger(0)
-
         val loadCount = AtomicInteger(0)
         val unloadCount = AtomicInteger(0)
+        val stopCount = AtomicInteger(0)
+        val generationStarted = CompletableDeferred<Unit>()
 
-        override suspend fun load(model: ModelDescriptor) { loadCount.incrementAndGet(); operation() }
-        override suspend fun unload() { unloadCount.incrementAndGet(); operation() }
-        override suspend fun generate(request: GenerationRequest, onToken: suspend (String) -> Unit): GenerationResult {
+        @Volatile
+        var blockGeneration = false
+
+        override suspend fun load(model: ModelDescriptor) {
+            loadCount.incrementAndGet()
+            operation()
+        }
+
+        override suspend fun unload() {
+            unloadCount.incrementAndGet()
+            operation()
+        }
+
+        override suspend fun generate(
+            request: GenerationRequest,
+            onToken: suspend (String) -> Unit,
+        ): GenerationResult {
+            if (blockGeneration) {
+                generationStarted.complete(Unit)
+                awaitCancellation()
+            }
             onToken("ok")
             return GenerationResult(text = "ok")
         }
-        override suspend fun stopGeneration() = operation()
+
+        override suspend fun stopGeneration() {
+            stopCount.incrementAndGet()
+            operation()
+        }
+
         override fun runtimeInfo(): RuntimeInfo = RuntimeInfo("test", "1", "test")
 
         private suspend fun operation() {
             val current = concurrentOperations.incrementAndGet()
             maxConcurrentOperations.updateAndGet { maxOf(it, current) }
-            try { delay(20) } finally { concurrentOperations.decrementAndGet() }
+            try {
+                delay(20)
+            } finally {
+                concurrentOperations.decrementAndGet()
+            }
         }
     }
 }
