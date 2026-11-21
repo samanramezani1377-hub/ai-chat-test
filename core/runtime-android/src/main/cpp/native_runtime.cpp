@@ -1044,9 +1044,9 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeInit(JNIEnv *env, jc
 
     std::lock_guard<std::mutex> lock(g_backend_init_mutex);
     if (!g_backend_initialized) {
-        // Probe the platform's real OpenGL ES implementation before backend
-        // registration. This is vendor-neutral capability discovery only; Dawn/
-        // GGML remains responsible for actual GPU execution and kernel support.
+        // Start the adapter's process-lifetime GLES context on its dedicated
+        // owner thread before backend registration. This remains capability
+        // discovery/self-test only; Dawn/GGML still executes model operations.
         const auto universal_gpu_caps = ai_chat::gpu::probe_universal_gpu_adapter();
         append_native_trace(universal_gpu_caps.diagnostic_line().c_str());
         g_universal_gles_version_known =
