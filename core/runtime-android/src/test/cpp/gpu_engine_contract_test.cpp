@@ -6,6 +6,7 @@
 #include "sampler.h"
 #include "quantization.h"
 #include "kv_cache.h"
+#include "runtime_router.h"
 
 #include <algorithm>
 #include <cmath>
@@ -220,6 +221,33 @@ private:
 
 
 
+
+
+void test_runtime_router_fails_closed_to_cpu() {
+    RuntimeReadiness readiness;
+    auto report = select_runtime(readiness);
+    assert(report.selected == RuntimeSelection::CpuLlamaCpp);
+    assert(!report.gpu_selected);
+    assert(report.cpu_fallback_available);
+    assert(report.blockers.size() == 7);
+
+    readiness.gpu_device_ready = true;
+    readiness.tokenizer_validated = true;
+    readiness.architecture_validated = true;
+    readiness.quantization_validated = true;
+    readiness.operator_coverage_validated = true;
+    readiness.model_graph_validated = true;
+    readiness.memory_preflight_passed = true;
+    report = select_runtime(readiness);
+    assert(report.selected == RuntimeSelection::DedicatedGpuEngine);
+    assert(report.gpu_selected);
+    assert(report.blockers.empty());
+
+    readiness.cpu_fallback_available = false;
+    report = select_runtime(readiness);
+    assert(report.gpu_selected);
+    assert(!report.cpu_fallback_available);
+}
 
 void test_kv_cache_memory_and_sequential_append() {
     FakeBackend backend;
@@ -660,6 +688,7 @@ int main() {
     test_independent_sampler_and_stop_controller();
     test_q8_0_decoder_and_registry();
     test_kv_cache_memory_and_sequential_append();
+    test_runtime_router_fails_closed_to_cpu();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";
     return 0;

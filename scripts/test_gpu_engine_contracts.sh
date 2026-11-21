@@ -18,6 +18,7 @@ trap 'rm -rf "$TMP"' EXIT
   "$ENGINE/sampler.cpp" \
   "$ENGINE/quantization.cpp" \
   "$ENGINE/kv_cache.cpp" \
+  "$ENGINE/runtime_router.cpp" \
   "$TEST" \
   -o "$TMP/gpu_engine_contract_test"
 
@@ -31,7 +32,8 @@ if grep -nE '#include[[:space:]]*[<"]((llama|ggml)[^>"]*)[>"]' \
     "$ENGINE/weight_streamer.h" "$ENGINE/weight_streamer.cpp" \
     "$ENGINE/sampler.h" "$ENGINE/sampler.cpp" \
     "$ENGINE/quantization.h" "$ENGINE/quantization.cpp" \
-    "$ENGINE/kv_cache.h" "$ENGINE/kv_cache.cpp" "$ENGINE/dawn_backend.cpp"; then
+    "$ENGINE/kv_cache.h" "$ENGINE/kv_cache.cpp" \
+    "$ENGINE/runtime_router.h" "$ENGINE/runtime_router.cpp" "$ENGINE/dawn_backend.cpp"; then
   echo "GPU engine backend boundary violation: llama.cpp/GGML include found" >&2
   exit 1
 fi
