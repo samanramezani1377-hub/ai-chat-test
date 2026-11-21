@@ -1,6 +1,7 @@
 #include "execution_engine.h"
 #include "gguf_reader.h"
 #include "model_registry.h"
+#include "operators.h"
 
 #include <algorithm>
 #include <cassert>
@@ -197,6 +198,43 @@ private:
     ArchitectureDescriptor descriptor_;
 };
 
+
+void test_add_operator_candidate_and_reference() {
+    OperatorRegistry registry;
+    assert(register_builtin_operator_candidates(registry).ok());
+    KernelDefinition selected;
+    assert(registry.select_kernel("Add", BackendKind::DawnWebGpu, DataType::F32,
+                                  DataType::F32, 2, 2, selected).code == StatusCode::Unsupported);
+
+    FakeBackend backend;
+    BufferDesc desc{24, 4, MemoryDomain::Device, false, "add"};
+    std::shared_ptr<Buffer> a, b, out;
+    assert(backend.allocate(desc, a).ok());
+    assert(backend.allocate(desc, b).ok());
+    assert(backend.allocate(desc, out).ok());
+    TensorDesc tensor_desc;
+    tensor_desc.shape = {2, 3};
+    tensor_desc.data_type = DataType::F32;
+    tensor_desc.memory = MemoryDomain::Device;
+    tensor_desc.alignment = 4;
+    Tensor lhs, rhs, output;
+    assert(Tensor::create(tensor_desc, a, 0, lhs).ok());
+    assert(Tensor::create(tensor_desc, b, 0, rhs).ok());
+    assert(Tensor::create(tensor_desc, out, 0, output).ok());
+
+    ComputeDispatch dispatch;
+    assert(build_add_f32_candidate(lhs, rhs, output, dispatch).ok());
+    assert(dispatch.bindings.size() == 3);
+    assert(dispatch.workgroups_x == 1);
+    assert(dispatch.label.find("unverified") != std::string::npos);
+
+    const float left[] = {1, 2, 3};
+    const float right[] = {4, 5, 6};
+    float result[] = {0, 0, 0};
+    assert(reference_add_f32(left, right, result, 3).ok());
+    assert(result[0] == 5 && result[1] == 7 && result[2] == 9);
+}
+
 void test_model_and_quantization_registry_fail_closed() {
     QuantizationRegistry quantizations;
     QuantizationFormat q4;
@@ -294,6 +332,7 @@ int main() {
     test_tensor_and_memory_lease();
     test_operator_registry_fail_closed();
     test_model_and_quantization_registry_fail_closed();
+    test_add_operator_candidate_and_reference();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";
     return 0;
