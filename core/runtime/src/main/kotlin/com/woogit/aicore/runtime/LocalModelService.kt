@@ -22,8 +22,11 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -313,10 +316,77 @@ class LocalModelService(
                     ModelError.InvalidModel("Model is not registered"),
                 )
 
-                Files.deleteIfExists(model.path)
-                repository.unregister(id)
+                if (!Files.exists(model.path)) {
+                    return@runtimeLock repository.unregister(id)
+                }
+
+                val tombstone = model.path.resolveSibling(
+                    ".${model.path.fileName}.deleting-${UUID.randomUUID()}",
+                )
+                try {
+                    try {
+                        Files.move(model.path, tombstone, StandardCopyOption.ATOMIC_MOVE)
+                    } catch (_: AtomicMoveNotSupportedException) {
+                        Files.move(model.path, tombstone)
+                    }
+                } catch (error: Throwable) {
+                    return@runtimeLock ModelResult.Failure(
+                        ModelError.Storage("Unable to stage model file for deletion", error),
+                    )
+                }
+
+                val unregistered = try {
+                    repository.unregister(id)
+                } catch (cancelled: CancellationException) {
+                    restoreModelFile(tombstone, model.path)?.let(cancelled::addSuppressed)
+                    throw cancelled
+                } catch (error: Throwable) {
+                    restoreModelFile(tombstone, model.path)?.let(error::addSuppressed)
+                    return@runtimeLock ModelResult.Failure(
+                        ModelError.Storage("Unable to remove model record", error),
+                    )
+                }
+
+                when (unregistered) {
+                    is ModelResult.Success -> {
+                        try {
+                            Files.deleteIfExists(tombstone)
+                            unregistered
+                        } catch (error: Throwable) {
+                            ModelResult.Failure(
+                                ModelError.Storage(
+                                    "Model record was removed, but its staged file could not be deleted: ${tombstone.fileName}",
+                                    error,
+                                ),
+                            )
+                        }
+                    }
+                    is ModelResult.Failure -> {
+                        val restoreError = restoreModelFile(tombstone, model.path)
+                        if (restoreError != null) {
+                            ModelResult.Failure(
+                                ModelError.Storage(
+                                    "Model record was not removed and the original file could not be restored; backup remains at ${tombstone.fileName}",
+                                    restoreError,
+                                ),
+                            )
+                        } else {
+                            unregistered
+                        }
+                    }
+                }
             }
         }
+
+    private fun restoreModelFile(tombstone: Path, original: Path): Throwable? {
+        if (!Files.exists(tombstone)) return null
+        return try {
+            Files.move(tombstone, original)
+            null
+        } catch (error: Throwable) {
+            error
+        }
+    }
 
     /**
      * Roll back an interrupted or failed lifecycle transition. Cleanup must finish even

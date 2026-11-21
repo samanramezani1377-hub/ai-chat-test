@@ -97,6 +97,45 @@ class LocalModelServiceConcurrencyTest {
     }
 
     @Test
+    fun failedModelRecordDeletionRestoresOriginalModelFile() = runBlocking {
+        val directory = Files.createTempDirectory("model-delete-rollback")
+        try {
+            val modelPath = directory.resolve("model-a.gguf")
+            Files.writeString(modelPath, "known-good-model")
+            val repository = RecordingRepository(model(modelPath)).apply { failUnregister = true }
+            val service = LocalModelService(NoOpImporter(), repository, RecordingRuntime())
+
+            val result = service.deleteModel("model-a")
+
+            assertTrue(result is ModelResult.Failure)
+            assertTrue(Files.exists(modelPath))
+            assertEquals("known-good-model", Files.readString(modelPath))
+            assertTrue(repository.registered)
+            assertEquals(0, Files.list(directory).use { stream -> stream.count() }.toInt())
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun successfulModelDeletionRemovesFileAndRepositoryRecord() = runBlocking {
+        val directory = Files.createTempDirectory("model-delete-success")
+        try {
+            val modelPath = directory.resolve("model-a.gguf")
+            Files.writeString(modelPath, "model")
+            val repository = RecordingRepository(model(modelPath))
+            val service = LocalModelService(NoOpImporter(), repository, RecordingRuntime())
+
+            assertTrue(service.deleteModel("model-a") is ModelResult.Success)
+            assertTrue(!Files.exists(modelPath))
+            assertTrue(!repository.registered)
+            assertEquals(0, Files.list(directory).use { stream -> stream.count() }.toInt())
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun concurrentLifecycleOperationsAreSerialized() = runBlocking {
         val runtime = RecordingRuntime()
         val repository = RecordingRepository(model())
@@ -140,10 +179,10 @@ class LocalModelServiceConcurrencyTest {
     private fun userMessage(text: String) =
         ChatMessage(ChatMessage.Role.USER, text)
 
-    private fun model() = ModelDescriptor(
+    private fun model(path: Path = Path.of("/tmp/model-a.gguf")) = ModelDescriptor(
         id = "model-a",
         displayName = "Test model",
-        path = Path.of("/tmp/model-a.gguf"),
+        path = path,
         format = ModelFormat.GGUF,
         quantization = Quantization.Q6_K,
         sizeBytes = 1024,
@@ -160,10 +199,12 @@ class LocalModelServiceConcurrencyTest {
 
     private class RecordingRepository(private val model: ModelDescriptor) : ModelRepository {
         var activeId: String? = null
+        var registered = true
+        var failUnregister = false
 
         override suspend fun register(model: ModelDescriptor): ModelResult<Unit> = ModelResult.Success(Unit)
         override suspend fun get(id: String): ModelResult<ModelDescriptor?> =
-            ModelResult.Success(if (id == model.id) model else null)
+            ModelResult.Success(model.takeIf { id == model.id && registered })
         override suspend fun list(): ModelResult<List<ModelDescriptor>> = ModelResult.Success(listOf(model))
         override suspend fun getActive(): ModelResult<ModelDescriptor?> =
             ModelResult.Success(activeId?.let { model.takeIf { it.id == activeId } })
@@ -171,7 +212,11 @@ class LocalModelServiceConcurrencyTest {
             activeId = id
             return ModelResult.Success(Unit)
         }
-        override suspend fun unregister(id: String): ModelResult<Unit> = ModelResult.Success(Unit)
+        override suspend fun unregister(id: String): ModelResult<Unit> {
+            if (failUnregister) return ModelResult.Failure(ModelError.Storage("simulated unregister failure"))
+            registered = false
+            return ModelResult.Success(Unit)
+        }
     }
 
     private class RecordingRuntime : RuntimeAdapter {
