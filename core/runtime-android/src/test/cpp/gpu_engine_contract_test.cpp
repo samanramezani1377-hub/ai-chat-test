@@ -167,6 +167,13 @@ void test_independent_gguf_reader() {
     assert(reader.info().alignment == 32);
     assert(reader.info().tokenizer.model == "gpt2");
     assert(reader.info().tokenizer.tokens.size() == 2);
+    const GgufTensorInfo* streamed_tensor = reader.find_tensor("weight");
+    assert(streamed_tensor && streamed_tensor->byte_size_known);
+    std::vector<uint8_t> first_read(static_cast<size_t>(streamed_tensor->byte_size));
+    std::vector<uint8_t> second_read(first_read.size());
+    assert(reader.read_tensor_chunk(*streamed_tensor, 0, first_read.data(), first_read.size()).ok());
+    assert(reader.read_tensor_chunk(*streamed_tensor, 0, second_read.data(), second_read.size()).ok());
+    assert(first_read == second_read);
     assert(reader.info().tensors.size() == 1);
     const auto* tensor = reader.find_tensor("test.weight");
     assert(tensor && tensor->byte_size_known && tensor->byte_size == 24);

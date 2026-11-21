@@ -8,8 +8,15 @@
 #include <limits>
 #include <set>
 #include <utility>
+#include <mutex>
 
 namespace ai_chat::gpu_engine {
+
+struct GgufFileStream {
+    std::ifstream input;
+    std::mutex mutex;
+};
+
 namespace {
 
 class Reader {
@@ -273,8 +280,10 @@ GgufTensorTypeInfo GgufReader::tensor_type_info(uint32_t type_id) {
 Status GgufReader::open(const std::string& path, GgufReader& out) {
     out = GgufReader{};
     if (path.empty()) return {StatusCode::InvalidArgument, "GGUF path is empty"};
-    std::ifstream input(path, std::ios::binary);
-    if (!input) return {StatusCode::InvalidArgument, "GGUF file cannot be opened"};
+    auto stream = std::make_shared<GgufFileStream>();
+    stream->input.open(path, std::ios::binary);
+    if (!stream->input) return {StatusCode::InvalidArgument, "GGUF file cannot be opened"};
+    std::ifstream& input = stream->input;
     input.seekg(0, std::ios::end);
     const auto end = input.tellg();
     if (end < 0) return {StatusCode::InvalidArgument, "GGUF file size cannot be determined"};
@@ -431,6 +440,7 @@ Status GgufReader::open(const std::string& path, GgufReader& out) {
 
     out.path_ = path;
     out.info_ = std::move(info);
+    out.file_stream_ = std::move(stream);
     return Status::success();
 }
 
@@ -459,8 +469,11 @@ Status GgufReader::read_tensor_chunk(const GgufTensorInfo& tensor, uint64_t tens
         size_bytes > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
         return {StatusCode::InvalidArgument, "GGUF tensor read range exceeds file bounds"};
     }
-    std::ifstream input(path_, std::ios::binary);
-    if (!input) return {StatusCode::BackendFailure, "GGUF file could not be reopened for tensor streaming"};
+    if (!file_stream_)
+        return {StatusCode::NotReady, "GGUF reader has no retained file stream"};
+    std::lock_guard<std::mutex> lock(file_stream_->mutex);
+    std::ifstream& input = file_stream_->input;
+    input.clear();
     input.seekg(static_cast<std::streamoff>(absolute), std::ios::beg);
     if (!input || !input.read(static_cast<char*>(destination), static_cast<std::streamsize>(size_bytes))) {
         return {StatusCode::BackendFailure, "GGUF tensor chunk read failed"};

@@ -3,12 +3,15 @@
 #include "gpu_engine.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <variant>
 #include <vector>
 
 namespace ai_chat::gpu_engine {
+
+struct GgufFileStream;
 
 struct GgufArrayInfo {
     uint32_t element_type = 0;
@@ -88,6 +91,7 @@ public:
 private:
     std::string path_;
     GgufFileInfo info_;
+    std::shared_ptr<GgufFileStream> file_stream_;
 };
 
 } // namespace ai_chat::gpu_engine
