@@ -15,6 +15,7 @@ import com.samanramezani.aichattest.providers.CloudflareProvider
 import com.samanramezani.aichattest.providers.CloudflareProviderStore
 import com.samanramezani.aichattest.providers.InferenceProviderMode
 import com.samanramezani.aichattest.providers.ProviderModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -206,6 +207,8 @@ private fun CloudflareProviderSettings(onProviderChanged: () -> Unit, sharedStor
                         message = if (fetched.isEmpty()) "مدل متنی فعالی از حساب دریافت نشد؛ مجوز Workers AI و توکن را بررسی کن. مدل‌های منسوخ در فهرست نمایش داده نمی‌شوند." else "${fetched.size} مدل متنی فعال از حساب Cloudflare دریافت شد؛ مدل‌های منسوخ حذف شده‌اند."
                         failed = false
                         modelMenu = true
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
                     } catch (t: Throwable) {
                         message = t.message ?: "دریافت فهرست مدل‌ها ناموفق بود."
                         failed = true
