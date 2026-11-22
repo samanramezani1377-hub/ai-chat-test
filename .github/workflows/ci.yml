@@ -91,23 +91,26 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # Debug symbols are optional: absence or discovery issues must not fail
+      # the already successful APK build.
       - name: Locate native debug symbols
         id: native-symbols
         shell: bash
+        continue-on-error: true
         run: |
           mapfile -t symbols < <(find engine -type f -name 'libgpu_engine_android.so.debug' -print)
           if (("${#symbols[@]}" == 0)); then
             echo "No separate native debug-symbol file was generated."
-            find engine -type f \\( -name '*.so' -o -name '*.debug' \\) -print | head -100
+            find engine -type f \( -name '*.so' -o -name '*.debug' \) -print | head -100
             echo "found=false" >> "$GITHUB_OUTPUT"
           else
-            printf 'Found native debug symbols: %s\\n' "${symbols[@]}"
-            printf '%s\\n' "${symbols[@]}" > "$RUNNER_TEMP/native-debug-symbol-paths.txt"
+            printf 'Found native debug symbols: %s\n' "${symbols[@]}"
+            printf '%s\n' "${symbols[@]}" > "$RUNNER_TEMP/native-debug-symbol-paths.txt"
             echo "found=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Upload native debug symbols
-        if: steps.native-symbols.outputs.found == 'true'
+        if: steps.native-symbols.outcome == 'success' && steps.native-symbols.outputs.found == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: android-gpu-engine-native-debug-symbols
