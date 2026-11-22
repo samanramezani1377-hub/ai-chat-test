@@ -6,6 +6,7 @@
 #include <limits>
 #include <string>
 #include <utility>
+#include <unordered_set>
 #include <vector>
 
 namespace ai_chat::gpu_engine {
@@ -76,6 +77,12 @@ protected:
     }
     static Status validate_ids(const GgufTokenizerInfo& m) {
         if(m.tokens.empty()) return {StatusCode::InvalidArgument,"Tokenizer vocabulary is empty"};
+        std::unordered_set<std::string> unique_tokens;
+        unique_tokens.reserve(m.tokens.size());
+        for (const auto& token : m.tokens) {
+            if (token.empty() || !unique_tokens.insert(token).second)
+                return {StatusCode::InvalidArgument,"Tokenizer vocabulary contains an empty or duplicate token"};
+        }
         if(!m.scores.empty()&&m.scores.size()!=m.tokens.size()) return {StatusCode::InvalidArgument,"Tokenizer scores do not match vocabulary"};
         if(!m.token_types.empty()&&m.token_types.size()!=m.tokens.size()) return {StatusCode::InvalidArgument,"Tokenizer token types do not match vocabulary"};
         const int64_t ids[]={m.bos_token_id,m.eos_token_id,m.unknown_token_id,m.padding_token_id};
@@ -227,8 +234,22 @@ public:
     explicit BpeAdapter(std::string pre):desc_{"gpt2",std::move(pre),"byte-level-bpe",SupportState::Unverified}{build_bytes();}
     const TokenizerDescriptor& descriptor()const noexcept override{return desc_;}
     Status validate_metadata(const GgufTokenizerInfo&m)const override{
-        Status s=validate_ids(m);if(!s.ok())return s;if(m.merges.empty())return {StatusCode::Unsupported,"BPE merge table is empty"};
-        for(const auto&x:m.merges)if(x.find(' ')==std::string::npos)return {StatusCode::InvalidArgument,"Malformed BPE merge entry"};
+        Status s=validate_ids(m);if(!s.ok())return s;
+        if(m.merges.empty())return {StatusCode::Unsupported,"BPE merge table is empty"};
+        const auto vocabulary=token_map(m);
+        std::unordered_set<std::string> unique_merges;
+        unique_merges.reserve(m.merges.size());
+        for(const auto& merge:m.merges){
+            const size_t separator=merge.find(' ');
+            if(separator==std::string::npos||separator==0||separator+1>=merge.size()||
+               merge.find(' ',separator+1)!=std::string::npos)
+                return {StatusCode::InvalidArgument,"Malformed BPE merge entry"};
+            const std::string key=merge.substr(0,separator)+"\x1f"+merge.substr(separator+1);
+            if(!unique_merges.insert(key).second)
+                return {StatusCode::InvalidArgument,"BPE merge table contains a duplicate pair"};
+            if(vocabulary.find(merge.substr(0,separator)+merge.substr(separator+1))==vocabulary.end())
+                return {StatusCode::InvalidArgument,"BPE merge result is missing from the token vocabulary"};
+        }
         return Status::success();
     }
     Status encode(const GgufTokenizerInfo&m,const std::string&text,std::vector<uint32_t>&out)const override{
