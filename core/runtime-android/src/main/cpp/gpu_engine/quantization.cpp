@@ -3483,8 +3483,6 @@ Status validate_q5_matmul_kernel_impl(Backend& backend, OperatorRegistry& operat
     auto format=quantizations.formats_.find(type_id);
     if(format==quantizations.formats_.end()||format->second.decoder_state!=SupportState::Validated)
         return {StatusCode::NotReady,"Q5 host decoder must be validated before GPU kernel promotion"};
-    const auto state=format->second.backend_gpu_kernel_states.find(kind);
-    if(state!=format->second.backend_gpu_kernel_states.end()&&state->second==SupportState::Validated)return Status::success();
     const std::string suffix=q5_1?"q5-1":"q5-0";
     const std::string kernel_id=(kind==BackendKind::OpenGles?"gles-":"dawn-")+suffix+"-matmul-f32-activation-v1";
     auto kernel=std::find_if(operators.kernels_.begin(),operators.kernels_.end(),[&](const KernelDefinition& k){
@@ -3648,10 +3646,14 @@ Status reference_q5_1_embedding(const uint8_t*w,uint64_t bytes,uint32_t vocabula
 }
 
 
-Status validate_q5_embedding_kernel_impl(Backend& backend,OperatorRegistry& operators,bool q5_1){
+Status validate_q5_embedding_kernel_impl(Backend& backend,OperatorRegistry& operators,QuantizationRegistry& quantizations,bool q5_1){
     const BackendKind kind=backend.kind();
     if((kind!=BackendKind::DawnWebGpu&&kind!=BackendKind::OpenGles)||!backend.healthy())
         return {StatusCode::NotReady,"Q5 Embedding validation requires a healthy Dawn or GLES backend"};
+    const uint32_t type_id=q5_1?7u:6u;
+    auto format=quantizations.formats_.find(type_id);
+    if(format==quantizations.formats_.end()||format->second.decoder_state!=SupportState::Validated)
+        return {StatusCode::NotReady,"Q5 host decoder must be validated before embedding kernel promotion"};
     const std::string suffix=q5_1?"q5-1":"q5-0";
     const std::string kernel_id=(kind==BackendKind::OpenGles?"gles-":"dawn-")+suffix+"-embedding-f32-v1";
     auto kernel=std::find_if(operators.kernels_.begin(),operators.kernels_.end(),[&](const KernelDefinition& k){
@@ -3718,10 +3720,12 @@ Status validate_q5_embedding_kernel_impl(Backend& backend,OperatorRegistry& oper
             return {StatusCode::NumericalFailure,"Q5 Embedding GPU output differs from independent decoder reference"};
     }
     kernel->validation=KernelValidation::Validated;
+    format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;
+    format->second.gpu_kernel_state=SupportState::Validated;
     return Status::success();
 }
-Status validate_q5_0_embedding_kernel(Backend& b,OperatorRegistry& o){return validate_q5_embedding_kernel_impl(b,o,false);}
-Status validate_q5_1_embedding_kernel(Backend& b,OperatorRegistry& o){return validate_q5_embedding_kernel_impl(b,o,true);}
+Status validate_q5_0_embedding_kernel(Backend& b,OperatorRegistry& o,QuantizationRegistry& q){return validate_q5_embedding_kernel_impl(b,o,q,false);}
+Status validate_q5_1_embedding_kernel(Backend& b,OperatorRegistry& o,QuantizationRegistry& q){return validate_q5_embedding_kernel_impl(b,o,q,true);}
 
 
 } // namespace ai_chat::gpu_engine

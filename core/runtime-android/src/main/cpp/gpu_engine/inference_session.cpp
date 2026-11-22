@@ -291,8 +291,8 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             if (validation_status.ok() && has_operator(embedding_name)) {
                 if (type_id == 2) validation_status=validate_q4_0_embedding_kernel(*engine_->active_backend(),*operators_);
                 else if (type_id == 3) validation_status=validate_q4_1_embedding_kernel(*engine_->active_backend(),*operators_);
-                else if (type_id == 6) validation_status=validate_q5_0_embedding_kernel(*engine_->active_backend(),*operators_);
-                else if (type_id == 7) validation_status=validate_q5_1_embedding_kernel(*engine_->active_backend(),*operators_);
+                else if (type_id == 6) validation_status=validate_q5_0_embedding_kernel(*engine_->active_backend(),*operators_,*quantizations_);
+                else if (type_id == 7) validation_status=validate_q5_1_embedding_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else validation_status=validate_q8_0_embedding_kernel(*engine_->active_backend(),*operators_);
             }
             if (!validation_status.ok()) {

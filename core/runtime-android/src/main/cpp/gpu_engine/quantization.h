@@ -64,8 +64,8 @@ const char* q5_1_embedding_wgsl_source() noexcept;
 const char* q5_1_embedding_glsl_source() noexcept;
 
 
-Status validate_q5_0_embedding_kernel(Backend& backend, OperatorRegistry& operators);
-Status validate_q5_1_embedding_kernel(Backend& backend, OperatorRegistry& operators);
+Status validate_q5_0_embedding_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
+Status validate_q5_1_embedding_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
 
 Status build_q5_0_embedding_candidate(const std::shared_ptr<Buffer>&,uint64_t,uint32_t,uint32_t,const std::shared_ptr<Buffer>&,const std::vector<uint32_t>&,const Tensor&,ComputeDispatch&);
 Status build_q5_0_embedding_gles_candidate(const std::shared_ptr<Buffer>&,uint64_t,uint32_t,uint32_t,const std::shared_ptr<Buffer>&,const std::vector<uint32_t>&,const Tensor&,ComputeDispatch&);
