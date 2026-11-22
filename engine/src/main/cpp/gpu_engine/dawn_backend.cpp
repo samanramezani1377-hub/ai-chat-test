@@ -39,6 +39,24 @@ struct MapState {
     std::string message;
 };
 
+struct DawnHealthState {
+    std::atomic<bool> healthy{false};
+    mutable std::mutex mutex;
+    std::string error;
+    void mark_healthy() {
+        { std::lock_guard<std::mutex> lock(mutex); error.clear(); }
+        healthy.store(true, std::memory_order_relaxed);
+    }
+    void mark_unhealthy(std::string reason) {
+        { std::lock_guard<std::mutex> lock(mutex); error = std::move(reason); }
+        healthy.store(false, std::memory_order_relaxed);
+    }
+    std::string diagnostic() const {
+        std::lock_guard<std::mutex> lock(mutex);
+        return error;
+    }
+};
+
 Status backend_error(const char* operation, const std::string& detail) {
     return {StatusCode::BackendFailure, std::string(operation) + ": " + detail};
 }
@@ -293,14 +311,18 @@ public:
         wgpu::DeviceDescriptor descriptor{};
         descriptor.SetDeviceLostCallback(
             wgpu::CallbackMode::AllowSpontaneous,
-            [](const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView,
-               std::atomic<bool>* health) {
-                if (reason != wgpu::DeviceLostReason::Destroyed) health->store(false, std::memory_order_relaxed);
+            [](const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message,
+               DawnHealthState* health) {
+                if (reason != wgpu::DeviceLostReason::Destroyed)
+                    health->mark_unhealthy("Dawn device lost (reason=" +
+                        std::to_string(static_cast<unsigned>(reason)) + "): " + std::string(message));
             },
             health_.get());
         descriptor.SetUncapturedErrorCallback(
-            [](const wgpu::Device&, wgpu::ErrorType, wgpu::StringView, std::atomic<bool>* health) {
-                health->store(false, std::memory_order_relaxed);
+            [](const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message,
+               DawnHealthState* health) {
+                health->mark_unhealthy("Dawn uncaptured error (type=" +
+                    std::to_string(static_cast<unsigned>(type)) + "): " + std::string(message));
             },
             health_.get());
 
@@ -321,10 +343,10 @@ public:
         }
         device_ = std::move(request.device);
         queue_ = device_.GetQueue();
-        health_->store(true, std::memory_order_relaxed);
+        health_->mark_healthy();
         const Status self_test = run_compute_self_test();
         if (!self_test.ok()) {
-            health_->store(false, std::memory_order_relaxed);
+            health_->mark_unhealthy("Dawn backend shut down or initialization failed");
             device_.Destroy();
             queue_ = nullptr;
             device_ = nullptr;
@@ -336,7 +358,10 @@ public:
     Status allocate(const BufferDesc& desc, std::shared_ptr<Buffer>& out) override {
         std::lock_guard<std::mutex> lock(mutex_);
         out.reset();
-        if (!device_ || !healthy()) return {StatusCode::DeviceLost, "Dawn device is not ready"};
+        if (!device_ || !healthy()) {
+            const std::string detail = health_->diagnostic();
+            return {StatusCode::DeviceLost, detail.empty() ? "Dawn device is not ready" : "Dawn device is not ready: " + detail};
+        }
         if (desc.size_bytes == 0 || desc.size_bytes > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
             desc.size_bytes > max_buffer_size_) {
             return {StatusCode::InvalidArgument, "Dawn buffer size is zero or exceeds the validated device limit"};
@@ -358,7 +383,10 @@ public:
     Status begin_commands(std::unique_ptr<CommandBatch>& out) override {
         std::lock_guard<std::mutex> lock(mutex_);
         out.reset();
-        if (!device_ || !healthy()) return {StatusCode::DeviceLost, "Dawn device is not ready"};
+        if (!device_ || !healthy()) {
+            const std::string detail = health_->diagnostic();
+            return {StatusCode::DeviceLost, detail.empty() ? "Dawn device is not ready" : "Dawn device is not ready: " + detail};
+        }
         auto batch = std::make_unique<DawnCommandBatch>(device_, device_limits_);
         if (!batch->valid()) return backend_error("CreateCommandEncoder", "Dawn returned an empty encoder");
         out = std::move(batch);
@@ -367,7 +395,10 @@ public:
 
     Status submit(std::unique_ptr<CommandBatch> commands) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!device_ || !healthy()) return {StatusCode::DeviceLost, "Dawn device is not ready"};
+        if (!device_ || !healthy()) {
+            const std::string detail = health_->diagnostic();
+            return {StatusCode::DeviceLost, detail.empty() ? "Dawn device is not ready" : "Dawn device is not ready: " + detail};
+        }
         auto* batch = dynamic_cast<DawnCommandBatch*>(commands.get());
         if (!batch) return {StatusCode::InvalidArgument, "Command batch belongs to another backend"};
         wgpu::CommandEncoder encoder = batch->finish();
@@ -380,7 +411,10 @@ public:
 
     Status synchronize() override {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!device_ || !healthy()) return {StatusCode::DeviceLost, "Dawn device is not ready"};
+        if (!device_ || !healthy()) {
+            const std::string detail = health_->diagnostic();
+            return {StatusCode::DeviceLost, detail.empty() ? "Dawn device is not ready" : "Dawn device is not ready: " + detail};
+        }
         QueueWorkState request;
         const wgpu::Future future = queue_.OnSubmittedWorkDone(
             wgpu::CallbackMode::AllowSpontaneous,
@@ -400,7 +434,10 @@ public:
                   const void* source, uint64_t size_bytes) override {
         std::lock_guard<std::mutex> lock(mutex_);
         auto* buffer = dynamic_cast<DawnBuffer*>(destination.get());
-        if (!device_ || !healthy()) return {StatusCode::DeviceLost, "Dawn device is not ready"};
+        if (!device_ || !healthy()) {
+            const std::string detail = health_->diagnostic();
+            return {StatusCode::DeviceLost, detail.empty() ? "Dawn device is not ready" : "Dawn device is not ready: " + detail};
+        }
         if (!buffer || !source || size_bytes == 0 || (destination_offset % 4) != 0 || (size_bytes % 4) != 0 ||
             destination_offset > buffer->size_bytes() || size_bytes > buffer->size_bytes() - destination_offset) {
             return {StatusCode::InvalidArgument, "Invalid Dawn upload buffer or range"};
@@ -413,7 +450,10 @@ public:
                     void* destination, uint64_t size_bytes) override {
         std::lock_guard<std::mutex> lock(mutex_);
         auto* buffer = dynamic_cast<DawnBuffer*>(source.get());
-        if (!device_ || !healthy()) return {StatusCode::DeviceLost, "Dawn device is not ready"};
+        if (!device_ || !healthy()) {
+            const std::string detail = health_->diagnostic();
+            return {StatusCode::DeviceLost, detail.empty() ? "Dawn device is not ready" : "Dawn device is not ready: " + detail};
+        }
         if (!buffer || !destination || size_bytes == 0 || (source_offset % 4) != 0 || (size_bytes % 4) != 0 ||
             source_offset > buffer->size_bytes() || size_bytes > buffer->size_bytes() - source_offset) {
             return {StatusCode::InvalidArgument, "Invalid Dawn readback buffer or range"};
@@ -460,12 +500,12 @@ public:
         device_ = nullptr;
         adapter_ = nullptr;
         instance_ = nullptr;
-        health_->store(false, std::memory_order_relaxed);
+        health_->mark_unhealthy("Dawn backend shut down or initialization failed");
         return Status::success();
     }
 
     bool healthy() const noexcept override {
-        return health_->load(std::memory_order_relaxed);
+        return health_->healthy.load(std::memory_order_relaxed);
     }
 
 private:
@@ -563,7 +603,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     wgpu::Adapter adapter_;
     wgpu::Device device_;
     wgpu::Queue queue_;
-    std::shared_ptr<std::atomic<bool>> health_ = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<DawnHealthState> health_ = std::make_shared<DawnHealthState>();
     uint64_t max_buffer_size_ = std::numeric_limits<uint64_t>::max();
     DeviceLimits device_limits_;
 };
