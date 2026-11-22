@@ -573,6 +573,14 @@ void test_q5_matmul_lowerings_are_registered_for_both_backends() {
     assert(gles.find(BackendKind::OpenGles,"MatMul_BF16") != nullptr);
     assert(gles.find(BackendKind::OpenGles,"Embedding_F16") != nullptr);
     assert(gles.find(BackendKind::OpenGles,"Embedding_BF16") != nullptr);
+    assert(dawn.find(BackendKind::DawnWebGpu,"MatMul_F16") != nullptr);
+    assert(dawn.find(BackendKind::DawnWebGpu,"MatMul_BF16") != nullptr);
+    assert(dawn.find(BackendKind::DawnWebGpu,"Embedding_F16") != nullptr);
+    assert(dawn.find(BackendKind::DawnWebGpu,"Embedding_BF16") != nullptr);
+    assert(gles.find(BackendKind::OpenGles,"MatMul_F16") != nullptr);
+    assert(gles.find(BackendKind::OpenGles,"MatMul_BF16") != nullptr);
+    assert(gles.find(BackendKind::OpenGles,"Embedding_F16") != nullptr);
+    assert(gles.find(BackendKind::OpenGles,"Embedding_BF16") != nullptr);
 }
 
 void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
@@ -596,6 +604,10 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
            StatusCode::NumericalFailure);
     assert(validate_q5_0_embedding_kernel(backend, operators, quantizations).code == StatusCode::NumericalFailure);
     assert(validate_q5_1_embedding_kernel(backend, operators, quantizations).code == StatusCode::NumericalFailure);
+    assert(validate_f16_matmul_kernel(backend,operators,quantizations).code==StatusCode::NumericalFailure);
+    assert(validate_bf16_matmul_kernel(backend,operators,quantizations).code==StatusCode::NumericalFailure);
+    assert(validate_f16_embedding_kernel(backend,operators,quantizations).code==StatusCode::NumericalFailure);
+    assert(validate_bf16_embedding_kernel(backend,operators,quantizations).code==StatusCode::NumericalFailure);
     FakeBackend dawn_backend(BackendKind::DawnWebGpu);
     OperatorRegistry dawn_operators;
     QuantizationRegistry dawn_quantizations;
@@ -628,6 +640,12 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     assert(!quantizations.can_execute_on_gpu(6, BackendKind::OpenGles));
     assert(!quantizations.can_execute_on_gpu(7, BackendKind::DawnWebGpu));
     assert(!quantizations.can_execute_on_gpu(7, BackendKind::OpenGles));
+    const QuantizationFormat* f16_format=quantizations.find(1);
+    const QuantizationFormat* bf16_format=quantizations.find(30);
+    assert(f16_format&&f16_format->gpu_kernel_state==SupportState::Unverified);
+    assert(bf16_format&&bf16_format->gpu_kernel_state==SupportState::Unverified);
+    assert(!quantizations.can_execute_on_gpu(1,BackendKind::DawnWebGpu));
+    assert(!quantizations.can_execute_on_gpu(30,BackendKind::OpenGles);
     KernelDefinition q5_embedding_selected;
     assert(operators.select_kernel("Embedding_Q5_0", BackendKind::OpenGles,
         std::vector<DataType>{DataType::U32,DataType::U32}, DataType::F32, 2,
@@ -635,6 +653,14 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     assert(operators.select_kernel("Embedding_Q5_1", BackendKind::OpenGles,
         std::vector<DataType>{DataType::U32,DataType::U32}, DataType::F32, 2,
         q5_embedding_selected).code == StatusCode::Unsupported);
+    assert(operators.select_kernel("MatMul_F16",BackendKind::DawnWebGpu,
+        std::vector<DataType>{DataType::F32,DataType::U32},DataType::F32,2,selected).code==StatusCode::Unsupported);
+    assert(operators.select_kernel("MatMul_BF16",BackendKind::DawnWebGpu,
+        std::vector<DataType>{DataType::F32,DataType::U32},DataType::F32,2,selected).code==StatusCode::Unsupported);
+    assert(operators.select_kernel("Embedding_F16",BackendKind::DawnWebGpu,
+        std::vector<DataType>{DataType::U32,DataType::U32},DataType::F32,2,q5_embedding_selected).code==StatusCode::Unsupported);
+    assert(operators.select_kernel("Embedding_BF16",BackendKind::DawnWebGpu,
+        std::vector<DataType>{DataType::U32,DataType::U32},DataType::F32,2,q5_embedding_selected).code==StatusCode::Unsupported);
     assert(format != nullptr && format->gpu_kernel_state == SupportState::Unverified);
     assert(!quantizations.can_execute_on_gpu(8, BackendKind::DawnWebGpu));
     assert(!quantizations.can_execute_on_gpu(8, BackendKind::OpenGles));
