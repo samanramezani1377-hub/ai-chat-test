@@ -3286,7 +3286,8 @@ ModelQuantizationBackendReport evaluate_model_quantization_backend(
             report.unsupported_file_type_ids.push_back(tensor.type_id);
             continue;
         }
-        if (!type.quantized) continue;
+        const bool requires_packed_gpu_kernel = type.quantized || type.name == "F16" || type.name == "BF16";
+        if (!requires_packed_gpu_kernel) continue;
         const QuantizationFormat* format = registry.find(tensor.type_id);
         if (!format || format->decoder_state != SupportState::Validated) {
             report.blockers.push_back("QUANTIZATION_DECODER_NOT_VALIDATED:" + tensor.name);
