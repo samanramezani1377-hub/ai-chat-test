@@ -31,6 +31,8 @@ jobs:
 
       - name: Verify Qwen3.5 tokenizer against Hugging Face reference
         run: bash scripts/test_qwen35_tokenizer_parity.sh
+      - name: Verify Qwen3 tokenizer against Hugging Face reference
+        run: bash scripts/test_qwen3_tokenizer_parity.sh
 
   android-apk:
     name: Build Android GPU engine test APK
