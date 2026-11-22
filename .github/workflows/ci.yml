@@ -81,15 +81,8 @@ jobs:
           gradle --parallel :test-app:assembleDebug --stacktrace --console=plain
           ccache --show-stats
 
-      - name: Upload native debug symbols
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-gpu-engine-native-debug-symbols
-          path: engine/.cxx/**/libgpu_engine_android.so.debug
-          if-no-files-found: error
-          retention-days: 14
-          include-hidden-files: true
-
+      # Publish the APK before optional symbol packaging so a symbol-path
+      # problem can never suppress the installable test build.
       - name: Upload test APK
         uses: actions/upload-artifact@v4
         with:
@@ -97,3 +90,28 @@ jobs:
           path: test-app/build/outputs/apk/debug/test-app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Locate native debug symbols
+        id: native-symbols
+        shell: bash
+        run: |
+          mapfile -t symbols < <(find engine -type f -name 'libgpu_engine_android.so.debug' -print)
+          if (("${#symbols[@]}" == 0)); then
+            echo "No separate native debug-symbol file was generated."
+            find engine -type f \\( -name '*.so' -o -name '*.debug' \\) -print | head -100
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            printf 'Found native debug symbols: %s\\n' "${symbols[@]}"
+            printf '%s\\n' "${symbols[@]}" > "$RUNNER_TEMP/native-debug-symbol-paths.txt"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload native debug symbols
+        if: steps.native-symbols.outputs.found == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-gpu-engine-native-debug-symbols
+          path: engine/**/libgpu_engine_android.so.debug
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: true
