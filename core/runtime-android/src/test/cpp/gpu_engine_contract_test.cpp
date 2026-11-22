@@ -1059,6 +1059,15 @@ void test_tokenizer_engine_contracts() {
     std::vector<uint32_t> bpe_ids;
     assert(bpe_adapter->encode(bpe, "hi<|special|>", bpe_ids).ok());
     assert((bpe_ids == std::vector<uint32_t>{2, 4}));
+    GgufTokenizerInfo malformed_bpe = bpe;
+    malformed_bpe.merges = {"h x"};
+    assert(bpe_adapter->validate_metadata(malformed_bpe).code == StatusCode::InvalidArgument);
+    malformed_bpe = bpe;
+    malformed_bpe.merges = {"h i", "h i"};
+    assert(bpe_adapter->validate_metadata(malformed_bpe).code == StatusCode::InvalidArgument);
+    malformed_bpe = bpe;
+    malformed_bpe.tokens[2] = "h";
+    assert(bpe_adapter->validate_metadata(malformed_bpe).code == StatusCode::InvalidArgument);
     std::string bpe_text;
     assert(bpe_adapter->decode(bpe, bpe_ids, bpe_text).ok() && bpe_text == "hi");
 
