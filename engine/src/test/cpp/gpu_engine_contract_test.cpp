@@ -463,6 +463,20 @@ void test_qwen35_hybrid_recipe_builds_generic_semantic_graph() {
         GgufMetadataArray{7, std::vector<bool>{true}};
     ModelExecutionPlan rejected;
     assert(!adapter->build_execution_plan(invalid, rejected).ok());
+
+    // The GGUF block_count may include a trailing NextN/MTP prediction block.
+    // The ordinary decode graph must contain only the transformer stack; the
+    // final prediction block must not be misclassified by full_attention_interval.
+    GgufFileInfo with_mtp = model;
+    with_mtp.metadata["qwen35.block_count"] = uint64_t{3};
+    with_mtp.metadata["qwen35.nextn_predict_layers"] = uint64_t{1};
+    with_mtp.metadata["qwen35.full_attention_interval"] = uint64_t{2};
+    with_mtp.metadata.erase("qwen35.attention.recurrent_layers");
+    ModelExecutionPlan mtp_plan;
+    assert(adapter->build_execution_plan(with_mtp, mtp_plan).ok());
+    assert(mtp_plan.layer_count == 2);
+    assert(std::none_of(mtp_plan.operations.begin(), mtp_plan.operations.end(),
+        [](const ModelPlanOperation& op) { return op.id.rfind("layer.2.", 0) == 0; }));
 }
 
 void test_split_sigmoid_and_softplus_references() {
