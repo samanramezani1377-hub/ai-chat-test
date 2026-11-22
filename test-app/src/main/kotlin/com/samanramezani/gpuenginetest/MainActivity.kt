@@ -9,16 +9,14 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.provider.OpenableColumns
 import android.view.Gravity
-import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.woogit.aicore.runtime.android.GpuEngineTestApi
+import com.samanramezani.gpuengine.GpuEngineTestApi
 import java.io.File
 import java.io.FileInputStream
 import java.util.Locale
@@ -96,7 +94,7 @@ class MainActivity : Activity() {
         }
         val scroll = ScrollView(this).apply {
             isFillViewport = true
-            addView(logView, ScrollView.LayoutParams(-1, -2))
+            addView(logView, LinearLayout.LayoutParams(-1, -2))
         }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
