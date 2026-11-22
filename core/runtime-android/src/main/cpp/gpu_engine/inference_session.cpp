@@ -200,6 +200,14 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             quantization_types.insert(7);
             continue;
         }
+        if (tensor->type.name == "F16") {
+            quantization_types.insert(1);
+            continue;
+        }
+        if (tensor->type.name == "BF16") {
+            quantization_types.insert(30);
+            continue;
+        }
         last_error_ = "Weight type is not implemented by the current GPU loader: " +
                       tensor->type.name + " (" + name + ")";
         unload_locked();
@@ -253,9 +261,13 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
                 (operation.operator_name == "MatMul_Q5_0" || operation.operator_name == "Embedding_Q5_0");
             const bool compatible_q5_1 = tensor->type.name == "Q5_1" &&
                 (operation.operator_name == "MatMul_Q5_1" || operation.operator_name == "Embedding_Q5_1");
+            const bool compatible_f16 = tensor->type.name == "F16" &&
+                (operation.operator_name == "MatMul_F16" || operation.operator_name == "Embedding_F16");
+            const bool compatible_bf16 = tensor->type.name == "BF16" &&
+                (operation.operator_name == "MatMul_BF16" || operation.operator_name == "Embedding_BF16");
             if (tensor->type.name != "F32" &&
                 !compatible_q4_0 && !compatible_q4_1 && !compatible_q8_0 &&
-                !compatible_q5_0 && !compatible_q5_1) {
+                !compatible_q5_0 && !compatible_q5_1 && !compatible_f16 && !compatible_bf16) {
                 last_error_ = "Quantized weight is attached to an operator without a matching packed kernel: " +
                               operation.operator_name + ":" + name;
                 unload_locked();
@@ -278,6 +290,8 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             else if (type_id == 3) { type_name="Q4_1"; matmul_name="MatMul_Q4_1"; embedding_name="Embedding_Q4_1"; }
             else if (type_id == 6) { type_name="Q5_0"; matmul_name="MatMul_Q5_0"; embedding_name="Embedding_Q5_0"; }
             else if (type_id == 7) { type_name="Q5_1"; matmul_name="MatMul_Q5_1"; embedding_name="Embedding_Q5_1"; }
+            else if (type_id == 1) { type_name="F16"; matmul_name="MatMul_F16"; embedding_name="Embedding_F16"; }
+            else if (type_id == 30) { type_name="BF16"; matmul_name="MatMul_BF16"; embedding_name="Embedding_BF16"; }
             else if (type_id == 8) { type_name="Q8_0"; matmul_name="MatMul_Q8_0"; embedding_name="Embedding_Q8_0"; }
             else return {StatusCode::Unsupported,"No GPU validation route exists for GGUF quantization type "+std::to_string(type_id)};
 
@@ -286,6 +300,8 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
                 else if (type_id == 3) validation_status=validate_q4_1_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else if (type_id == 6) validation_status=validate_q5_0_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else if (type_id == 7) validation_status=validate_q5_1_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
+                else if (type_id == 1) validation_status=validate_f16_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
+                else if (type_id == 30) validation_status=validate_bf16_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else validation_status=validate_q8_0_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
             }
             if (validation_status.ok() && has_operator(embedding_name)) {
@@ -293,6 +309,8 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
                 else if (type_id == 3) validation_status=validate_q4_1_embedding_kernel(*engine_->active_backend(),*operators_);
                 else if (type_id == 6) validation_status=validate_q5_0_embedding_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else if (type_id == 7) validation_status=validate_q5_1_embedding_kernel(*engine_->active_backend(),*operators_,*quantizations_);
+                else if (type_id == 1) validation_status=validate_f16_embedding_kernel(*engine_->active_backend(),*operators_,*quantizations_);
+                else if (type_id == 30) validation_status=validate_bf16_embedding_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else validation_status=validate_q8_0_embedding_kernel(*engine_->active_backend(),*operators_);
             }
             if (!validation_status.ok()) {

@@ -191,6 +191,10 @@ public:
                     operation.operator_name = "Embedding_Q5_0";
                 else if (found != model.tensors.end() && found->type.name == "Q5_1")
                     operation.operator_name = "Embedding_Q5_1";
+                else if (found != model.tensors.end() && found->type.name == "F16")
+                    operation.operator_name = "Embedding_F16";
+                else if (found != model.tensors.end() && found->type.name == "BF16")
+                    operation.operator_name = "Embedding_BF16";
             }
             if (operation.operator_name == "MatMul" && operation.weight_tensors.size() == 1) {
                 const auto found = std::find_if(model.tensors.begin(), model.tensors.end(),
@@ -203,6 +207,8 @@ public:
                     else if (found->type.name == "Q4_1") operation.operator_name = "MatMul_Q4_1";
                     else if (found->type.name == "Q5_0") operation.operator_name = "MatMul_Q5_0";
                     else if (found->type.name == "Q5_1") operation.operator_name = "MatMul_Q5_1";
+                    else if (found->type.name == "F16") operation.operator_name = "MatMul_F16";
+                    else if (found->type.name == "BF16") operation.operator_name = "MatMul_BF16";
                 }
             }
             if (operation.operator_name == "RMSNorm")

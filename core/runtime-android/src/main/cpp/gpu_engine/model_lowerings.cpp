@@ -159,6 +159,67 @@ Status register_q5_embedding_lowering(BackendKind backend,ModelLoweringRegistry&
                   :build_q5_0_embedding_candidate(weight->second.buffer,weight->second.byte_size,vocabulary,dimension,token_buffer,context.token_ids,*output,dispatch));
     });
 }
+
+Status register_fp16_matmul_lowering(BackendKind backend,ModelLoweringRegistry&registry,bool bf16){
+    const std::string type=bf16?"BF16":"F16",op=bf16?"MatMul_BF16":"MatMul_F16";
+    const uint32_t type_id=bf16?30u:1u;
+    return registry.register_lowering(backend,op,[backend,type,type_id,bf16](
+        const ModelPlanOperation&operation,const ModelExecutionContext&context,ComputeDispatch&dispatch){
+        if(operation.inputs.size()!=1||operation.weight_tensors.size()!=1)
+            return Status{StatusCode::InvalidArgument,type+" MatMul requires one activation and one packed weight"};
+        const Tensor*input=nullptr,*output=nullptr;Status result=lookup_operand(operation,context,0,input);if(!result.ok())return result;
+        result=lookup_output(operation,context,output);if(!result.ok())return result;
+        const auto weight=context.quantized_weights.find(operation.weight_tensors.front());
+        if(weight==context.quantized_weights.end()||!weight->second.buffer||weight->second.byte_size==0||
+           weight->second.file_type_id!=type_id||weight->second.dimensions.size()!=2)
+            return Status{StatusCode::InvalidArgument,type+" MatMul weight binding is missing or invalid"};
+        if(input->descriptor().shape.size()!=2||input->descriptor().shape[0]==0||
+           (output->descriptor().shape.size()!=2&&output->descriptor().shape.size()!=3))
+            return Status{StatusCode::Unsupported,type+" MatMul activation/output shapes are unsupported"};
+        const uint64_t channels=output->element_count()/input->descriptor().shape[0];
+        if(weight->second.dimensions[0]!=input->descriptor().shape[1]||weight->second.dimensions[1]!=channels)
+            return Status{StatusCode::InvalidArgument,type+" MatMul weight dimensions do not match activation/output"};
+        if(backend==BackendKind::OpenGles)
+            return bf16?build_bf16_matmul_gles_candidate(*input,weight->second.buffer,weight->second.byte_size,*output,dispatch)
+                       :build_f16_matmul_gles_candidate(*input,weight->second.buffer,weight->second.byte_size,*output,dispatch);
+        return bf16?build_bf16_matmul_candidate(*input,weight->second.buffer,weight->second.byte_size,*output,dispatch)
+                   :build_f16_matmul_candidate(*input,weight->second.buffer,weight->second.byte_size,*output,dispatch);
+    });
+}
+Status register_fp16_embedding_lowering(BackendKind backend,ModelLoweringRegistry&registry,bool bf16){
+    const std::string type=bf16?"BF16":"F16",op=bf16?"Embedding_BF16":"Embedding_F16";
+    const uint32_t type_id=bf16?30u:1u;
+    return registry.register_lowering(backend,op,[backend,type,type_id,bf16](
+        const ModelPlanOperation&operation,const ModelExecutionContext&context,ComputeDispatch&dispatch){
+        if(operation.inputs.size()!=1||operation.inputs[0]!="token_ids"||operation.weight_tensors.size()!=1||
+           !context.backend||context.token_ids.empty()||context.token_ids.size()>UINT32_MAX)
+            return Status{StatusCode::InvalidArgument,type+" Embedding requires token IDs, one packed weight and an active backend"};
+        const Tensor*output=nullptr;Status result=lookup_output(operation,context,output);if(!result.ok())return result;
+        const auto weight=context.quantized_weights.find(operation.weight_tensors.front());
+        if(weight==context.quantized_weights.end()||!weight->second.buffer||weight->second.byte_size==0||
+           weight->second.file_type_id!=type_id||weight->second.dimensions.size()!=2||
+           weight->second.dimensions[0]>UINT32_MAX||weight->second.dimensions[1]>UINT32_MAX)
+            return Status{StatusCode::InvalidArgument,type+" Embedding weight binding is missing or invalid"};
+        const uint32_t dimension=static_cast<uint32_t>(weight->second.dimensions[0]);
+        const uint32_t vocabulary=static_cast<uint32_t>(weight->second.dimensions[1]);
+        if(output->descriptor().shape.size()!=2||output->descriptor().shape[0]!=context.token_ids.size()||
+           output->descriptor().shape[1]!=dimension)
+            return Status{StatusCode::InvalidArgument,type+" Embedding output shape is inconsistent"};
+        BufferDesc token_desc;token_desc.size_bytes=context.token_ids.size()*sizeof(uint32_t);
+        token_desc.alignment=alignof(uint32_t);token_desc.memory=MemoryDomain::Device;
+        token_desc.persistent=false;token_desc.label="fp16-model-token-ids";
+        std::shared_ptr<Buffer> token_buffer;result=context.backend->allocate(token_desc,token_buffer);if(!result.ok())return result;
+        if(!token_buffer||token_buffer->size_bytes()<token_desc.size_bytes)
+            return Status{StatusCode::BackendFailure,"Backend returned undersized 16-bit token-ID buffer"};
+        result=context.backend->upload(token_buffer,0,context.token_ids.data(),token_desc.size_bytes);if(!result.ok())return result;
+        if(backend==BackendKind::OpenGles)
+            return bf16?build_bf16_embedding_gles_candidate(weight->second.buffer,weight->second.byte_size,vocabulary,dimension,token_buffer,context.token_ids,*output,dispatch)
+                       :build_f16_embedding_gles_candidate(weight->second.buffer,weight->second.byte_size,vocabulary,dimension,token_buffer,context.token_ids,*output,dispatch);
+        return bf16?build_bf16_embedding_candidate(weight->second.buffer,weight->second.byte_size,vocabulary,dimension,token_buffer,context.token_ids,*output,dispatch)
+                   :build_f16_embedding_candidate(weight->second.buffer,weight->second.byte_size,vocabulary,dimension,token_buffer,context.token_ids,*output,dispatch);
+    });
+}
+
 } // namespace
 
 Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegistry& registry) {
@@ -285,6 +346,14 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
     status = register_q5_embedding_lowering(backend, registry, false);
     if (!status.ok()) return status;
     status = register_q5_embedding_lowering(backend, registry, true);
+    if (!status.ok()) return status;
+    status = register_fp16_matmul_lowering(backend, registry, false);
+    if (!status.ok()) return status;
+    status = register_fp16_matmul_lowering(backend, registry, true);
+    if (!status.ok()) return status;
+    status = register_fp16_embedding_lowering(backend, registry, false);
+    if (!status.ok()) return status;
+    status = register_fp16_embedding_lowering(backend, registry, true);
     if (!status.ok()) return status;
 
     status = registry.register_lowering(backend, "RMSNorm",

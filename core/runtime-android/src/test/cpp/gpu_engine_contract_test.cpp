@@ -565,6 +565,14 @@ void test_q5_matmul_lowerings_are_registered_for_both_backends() {
     assert(dawn.find(BackendKind::DawnWebGpu,"Embedding_Q5_1") != nullptr);
     assert(gles.find(BackendKind::OpenGles,"Embedding_Q5_0") != nullptr);
     assert(gles.find(BackendKind::OpenGles,"Embedding_Q5_1") != nullptr);
+    assert(dawn.find(BackendKind::DawnWebGpu,"MatMul_F16") != nullptr);
+    assert(dawn.find(BackendKind::DawnWebGpu,"MatMul_BF16") != nullptr);
+    assert(dawn.find(BackendKind::DawnWebGpu,"Embedding_F16") != nullptr);
+    assert(dawn.find(BackendKind::DawnWebGpu,"Embedding_BF16") != nullptr);
+    assert(gles.find(BackendKind::OpenGles,"MatMul_F16") != nullptr);
+    assert(gles.find(BackendKind::OpenGles,"MatMul_BF16") != nullptr);
+    assert(gles.find(BackendKind::OpenGles,"Embedding_F16") != nullptr);
+    assert(gles.find(BackendKind::OpenGles,"Embedding_BF16") != nullptr);
 }
 
 void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
