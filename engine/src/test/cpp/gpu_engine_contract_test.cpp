@@ -1645,10 +1645,10 @@ void test_tokenizer_engine_contracts() {
     };
     qwen35.token_types.assign(qwen35.tokens.size(), 1);
     auto qwen35_adapter = builtins.find(qwen35);
-    assert(qwen35_adapter && qwen35_adapter->descriptor().validation == SupportState::Validated);
+    assert(qwen35_adapter && qwen35_adapter->descriptor().validation == SupportState::Unverified);
     assert(qwen35_adapter->validate_metadata(qwen35).ok());
     auto qwen35_preflight = evaluate_tokenizer_preflight(qwen35, builtins);
-    assert(qwen35_preflight.ready && qwen35_preflight.adapter_validated);
+    assert(!qwen35_preflight.ready && !qwen35_preflight.adapter_validated);
     std::vector<uint32_t> qwen35_ids;
     assert(qwen35_adapter->encode(qwen35, "  hi", qwen35_ids).ok());
     assert((qwen35_ids == std::vector<uint32_t>{qwen_space, qwen_space_hi}));
