@@ -333,7 +333,7 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
                 return {StatusCode::InvalidArgument, "Final hidden-state byte offset overflowed"};
             TensorDesc last_row_desc = full_hidden.descriptor();
             last_row_desc.shape[0] = 1;
-            last_row_desc.strides.clear();
+            last_row_desc.strides_bytes.clear();
             Tensor last_hidden_row;
             status = Tensor::create(last_row_desc, full_hidden.buffer(),
                 full_hidden.byte_offset() + row_offset, last_hidden_row);

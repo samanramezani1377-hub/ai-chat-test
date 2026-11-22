@@ -286,7 +286,7 @@ private:
         while(i<s.size()){size_t n=0;uint32_t cp=codepoint(s,i,n);size_t start=i;
             // GPT-2/Qwen-style pre-tokenizers keep common English contractions
             // as independent pieces before byte-level BPE merge ranking.
-            if (s[i] == '\\'') {
+            if (s[i] == '\'') {
                 static const char* contractions[] = {"'s", "'t", "'re", "'ve", "'m", "'ll", "'d"};
                 size_t contraction_length = 0;
                 for (const char* suffix : contractions) {

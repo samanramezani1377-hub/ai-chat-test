@@ -112,6 +112,8 @@ class OperatorRegistry {
     friend Status validate_q5_1_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
     friend Status validate_q4_0_embedding_kernel(Backend& backend, OperatorRegistry& operators);
     friend Status validate_q4_1_embedding_kernel(Backend& backend, OperatorRegistry& operators);
+    friend Status validate_q8_0_embedding_kernel(Backend& backend, OperatorRegistry& operators);
+    friend Status validate_q5_embedding_kernel_impl(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations, bool q5_1);
 public:
     Status register_kernel(KernelDefinition definition);
     bool has_validated_kernel(const std::string& operator_name, BackendKind backend) const noexcept;

@@ -131,7 +131,19 @@ endif()
 # Upgrade previously patched .cxx trees that still contain the old unbounded final chunk.
 file(READ "${_alloc_file}" _alloc)
 if (NOT _alloc MATCHES "AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V2")
-    if (_alloc MATCHES "SIZE_MAX/2")
+    set(_legacy_chunk_anchor [=[    struct tallocr_chunk * chunk = calloc(1, sizeof(struct tallocr_chunk));
+    chunk->n_free_blocks = 1;
+    chunk->free_blocks[0].offset = 0;
+    // available space in a chunk is limited to max_chunk_size, but can be higher if:
+    // 1. a single tensor exceeds the maximum, and cannot fit any other way
+    // 2. we are running out of chunks
+    // backends will either manage to allocate the larger size, or report an error.
+    chunk->free_blocks[0].size = MAX(min_size, alloc->max_chunk_size);
+    if (alloc->n_chunks == GGML_VBUFFER_MAX_CHUNKS - 1) {
+        chunk->free_blocks[0].size = SIZE_MAX/2;
+    }]=])
+    string(FIND "${_alloc}" "${_legacy_chunk_anchor}" _legacy_chunk_pos)
+    if (NOT _legacy_chunk_pos EQUAL -1)
         ai_chat_replace_once(_alloc
             [=[    struct tallocr_chunk * chunk = calloc(1, sizeof(struct tallocr_chunk));
     chunk->n_free_blocks = 1;
@@ -157,6 +169,8 @@ if (NOT _alloc MATCHES "AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V2")
     // Every chunk is strictly bounded by the backend's maximum buffer/binding size.
     chunk->free_blocks[0].size = alloc->max_chunk_size;]=]
             "upgrade cached allocator chunk bounds")
+    elseif (NOT _alloc MATCHES "AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V1")
+        message(FATAL_ERROR "AI Chat allocator patch: upstream allocator is neither the known legacy layout nor an already bounded V1 layout")
     endif()
     string(APPEND _alloc "\n// AI_CHAT_BOUNDED_VBUFFER_ALLOCATOR_V2\n")
     file(WRITE "${_alloc_file}" "${_alloc}")

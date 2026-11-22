@@ -647,6 +647,7 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     assert(register_builtin_gles_operator_candidates(operators).ok());
     assert(register_builtin_quantized_operator_candidates(operators).ok());
     assert(register_builtin_quantization_formats(quantizations).ok());
+    KernelDefinition selected;
     assert(validate_q8_0_matmul_kernel(backend, operators, quantizations).code ==
            StatusCode::NumericalFailure);
     assert(validate_q8_0_embedding_kernel(backend, operators).code ==
@@ -752,7 +753,6 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     assert(format != nullptr && format->gpu_kernel_state == SupportState::Unverified);
     assert(!quantizations.can_execute_on_gpu(8, BackendKind::DawnWebGpu));
     assert(!quantizations.can_execute_on_gpu(8, BackendKind::OpenGles));
-    KernelDefinition selected;
     assert(operators.select_kernel("MatMul_Q8_0", BackendKind::OpenGles,
         std::vector<DataType>{DataType::F32, DataType::U32}, DataType::F32, 2,
         selected).code == StatusCode::Unsupported);
