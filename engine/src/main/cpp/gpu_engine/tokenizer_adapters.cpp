@@ -53,13 +53,62 @@ void append_utf8(uint32_t c, std::string& out) {
     }
 }
 
+bool unicode_number(uint32_t c) {
+    // Unicode Number categories used by Qwen's \\p{N} pre-tokenizer.
+    // Decimal ranges cover the scripts commonly present in model prompts;
+    // letter-number and other-number blocks are included explicitly.
+    static constexpr uint32_t decimal_starts[] = {
+        0x0030,0x0660,0x06f0,0x07c0,0x0966,0x09e6,0x0a66,0x0ae6,0x0b66,
+        0x0be6,0x0c66,0x0ce6,0x0d66,0x0de6,0x0e50,0x0ed0,0x0f20,0x1040,
+        0x1090,0x17e0,0x1810,0x1946,0x19d0,0x1a80,0x1a90,0x1b50,0x1bb0,
+        0x1c40,0x1c50,0xa620,0xa8d0,0xa900,0xa9d0,0xa9f0,0xaa50,0xabf0,
+        0xff10,0x104a0,0x10d30,0x11066,0x1d7ce
+    };
+    for (uint32_t start : decimal_starts) if (c >= start && c < start + 10) return true;
+    return (c >= 0x00b2 && c <= 0x00b3) || c == 0x00b9 ||
+           (c >= 0x2070 && c <= 0x2079) || (c >= 0x2080 && c <= 0x2089) ||
+           (c >= 0x2160 && c <= 0x2188) || (c >= 0x2460 && c <= 0x249b) ||
+           (c >= 0x24ea && c <= 0x24ff) || (c >= 0x2776 && c <= 0x2793) ||
+           (c >= 0x3007 && c <= 0x3007) || (c >= 0x3021 && c <= 0x3029) ||
+           (c >= 0x3038 && c <= 0x303a) || (c >= 0x3192 && c <= 0x3195) ||
+           (c >= 0x3220 && c <= 0x3229) || (c >= 0x3251 && c <= 0x325f) ||
+           (c >= 0x3280 && c <= 0x3289) || (c >= 0x32b1 && c <= 0x32bf);
+}
+bool digit(uint32_t c) { return (c >= '0' && c <= '9') || unicode_number(c); }
 bool letter(uint32_t c) {
     if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) return true;
-    if (c < 0x80 || std::isspace(static_cast<unsigned char>(c)) || (c >= '0' && c <= '9')) return false;
-    if ((c >= 0x2000 && c <= 0x206f) || (c >= 0x3000 && c <= 0x303f)) return false;
-    return c >= 0x00c0 && c <= 0x1efff;
+    if (c < 0x80 || space(c) || unicode_number(c)) return false;
+    // Exclude punctuation, symbols, arrows, box drawing and emoji blocks before
+    // applying script ranges. Combining marks are intentionally included in
+    // L|M runs, as required by Qwen's regular expression.
+    if ((c >= 0x2000 && c <= 0x2bff) || (c >= 0x3000 && c <= 0x303f) ||
+        (c >= 0x1f000 && c <= 0x1ffff) || (c >= 0xfe10 && c <= 0xfe1f) ||
+        (c >= 0xfe30 && c <= 0xfe6f) || (c >= 0xff01 && c <= 0xff0f) ||
+        (c >= 0xff1a && c <= 0xff20) || (c >= 0xff3b && c <= 0xff40) ||
+        (c >= 0xff5b && c <= 0xff65)) return false;
+    if (c >= 0x0600 && c <= 0x06ff &&
+        (c <= 0x0605 || c == 0x0609 || c == 0x060a || c == 0x060c ||
+         c == 0x060d || c == 0x061b || c == 0x061e || c == 0x061f ||
+         (c >= 0x066a && c <= 0x066d) || c == 0x06d4)) return false;
+    return (c >= 0x00c0 && c <= 0x02ff) ||
+           (c >= 0x0300 && c <= 0x036f) ||
+           (c >= 0x0370 && c <= 0x052f) ||
+           (c >= 0x0531 && c <= 0x0588) ||
+           (c >= 0x0590 && c <= 0x05ff) ||
+           (c >= 0x0600 && c <= 0x08ff) ||
+           (c >= 0x0900 && c <= 0x1fff) ||
+           (c >= 0x2c00 && c <= 0x2dff) ||
+           (c >= 0x3040 && c <= 0x30ff) ||
+           (c >= 0x3100 && c <= 0x312f) ||
+           (c >= 0x3130 && c <= 0x318f) ||
+           (c >= 0x31a0 && c <= 0x31bf) ||
+           (c >= 0x3400 && c <= 0x4dbf) ||
+           (c >= 0x4e00 && c <= 0x9fff) ||
+           (c >= 0xac00 && c <= 0xd7af) ||
+           (c >= 0xf900 && c <= 0xfaff) ||
+           (c >= 0x10000 && c <= 0x1efff) ||
+           (c >= 0x20000 && c <= 0x3134a);
 }
-bool digit(uint32_t c) { return (c >= '0' && c <= '9') || (c >= 0x0660 && c <= 0x0669); }
 bool space(uint32_t c) {
     return c == 0x20 || (c >= 0x09 && c <= 0x0d) || c == 0x85 || c == 0xa0 ||
            c == 0x1680 || (c >= 0x2000 && c <= 0x200a) || c == 0x2028 ||
@@ -280,12 +329,95 @@ public:
         return Status::success();
     }
 private:
+    enum class QwenKind : uint8_t { LetterMark, Number, Space, Newline, Other };
+    static QwenKind qwen_kind(uint32_t cp) {
+        if (cp == '\\r' || cp == '\\n') return QwenKind::Newline;
+        if (unicode_number(cp)) return QwenKind::Number;
+        if (letter(cp)) return QwenKind::LetterMark;
+        if (space(cp)) return QwenKind::Space;
+        return QwenKind::Other;
+    }
+    static size_t contraction_length(const std::string& s, size_t at) {
+        static constexpr const char* suffixes[] = {"'s","'t","'re","'ve","'m","'ll","'d"};
+        if (at >= s.size() || s[at] != '\\'') return 0;
+        for (const char* suffix : suffixes) {
+            const size_t length = std::char_traits<char>::length(suffix);
+            if (at + length > s.size()) continue;
+            bool match = true;
+            for (size_t i = 0; i < length; ++i) {
+                const auto actual = static_cast<unsigned char>(s[at + i]);
+                const auto expected = static_cast<unsigned char>(suffix[i]);
+                if (std::tolower(actual) != std::tolower(expected)) { match = false; break; }
+            }
+            if (match) return length;
+        }
+        return 0;
+    }
+    static std::vector<std::string> split_qwen35(const std::string& s) {
+        struct Character { size_t offset; uint32_t cp; QwenKind kind; };
+        std::vector<Character> chars;
+        for (size_t i = 0; i < s.size();) {
+            size_t width = 0;
+            const uint32_t cp = codepoint(s, i, width);
+            if (width == 0) break;
+            chars.push_back({i, cp, qwen_kind(cp)});
+            i += width;
+        }
+        const size_t count = chars.size();
+        auto kind_at = [&](size_t i) { return i < count ? chars[i].kind : QwenKind::Other; };
+        auto is_lm = [](QwenKind k) { return k == QwenKind::LetterMark; };
+        auto is_space = [](QwenKind k) { return k == QwenKind::Space || k == QwenKind::Newline; };
+        auto run = [&](size_t i, const auto& predicate) {
+            while (i < count && predicate(chars[i].kind)) ++i;
+            return i;
+        };
+        auto byte_at = [&](size_t i) { return i < count ? chars[i].offset : s.size(); };
+        std::vector<std::string> out;
+        size_t i = 0;
+        while (i < count) {
+            const uint32_t cp = chars[i].cp;
+            const QwenKind current = chars[i].kind;
+            const QwenKind next = kind_at(i + 1);
+            size_t end = i;
+            const size_t contraction = contraction_length(s, chars[i].offset);
+            if (contraction != 0) {
+                size_t target = chars[i].offset + contraction;
+                end = i;
+                while (end < count && chars[end].offset < target) ++end;
+            } else if (current != QwenKind::Newline && current != QwenKind::LetterMark &&
+                       current != QwenKind::Number && i + 1 < count && is_lm(next)) {
+                end = run(i + 1, is_lm);
+            } else if (is_lm(current)) {
+                end = run(i, is_lm);
+            } else if (current == QwenKind::Number) {
+                end = i + 1;
+            } else if ((cp == ' ' && next == QwenKind::Other) || current == QwenKind::Other) {
+                const size_t start = current == QwenKind::Other ? i : i + 1;
+                end = run(start, [](QwenKind k) { return k == QwenKind::Other; });
+                end = run(end, [](QwenKind k) { return k == QwenKind::Newline; });
+            } else {
+                const size_t whitespace_end = run(i, is_space);
+                size_t last_newline = count;
+                for (size_t j = whitespace_end; j > i; --j) {
+                    if (chars[j - 1].kind == QwenKind::Newline) { last_newline = j - 1; break; }
+                }
+                if (last_newline != count) end = last_newline + 1;
+                else if (whitespace_end < count && whitespace_end - i >= 2) end = whitespace_end - 1;
+                else end = whitespace_end;
+            }
+            if (end <= i) end = i + 1;
+            out.emplace_back(s.substr(chars[i].offset, byte_at(end) - chars[i].offset));
+            i = end;
+        }
+        return out;
+    }
     void build_bytes(){
         std::vector<uint32_t> bytes, cps;for(uint32_t b=33;b<=126;++b)bytes.push_back(b);for(uint32_t b=161;b<=172;++b)bytes.push_back(b);for(uint32_t b=174;b<=255;++b)bytes.push_back(b);cps=bytes;
         uint32_t extra=0;for(uint32_t b=0;b<256;++b)if(std::find(bytes.begin(),bytes.end(),b)==bytes.end()){bytes.push_back(b);cps.push_back(256+extra++);}
         for(size_t i=0;i<bytes.size();++i){std::string enc;append_utf8(cps[i],enc);encoder_[static_cast<uint8_t>(bytes[i])]=enc;decoder_[cps[i]]=static_cast<uint8_t>(bytes[i]);}
     }
     std::vector<std::string> split(const std::string&s)const{
+        if (desc_.pre_tokenizer == "qwen35") return split_qwen35(s);
         std::vector<std::string> out;size_t i=0;const size_t digit_group=(desc_.pre_tokenizer=="qwen2"||desc_.pre_tokenizer=="qwen3")?1:3;
         while(i<s.size()){size_t n=0;uint32_t cp=codepoint(s,i,n);size_t start=i;
             // GPT-2/Qwen-style pre-tokenizers keep common English contractions
