@@ -40,7 +40,6 @@ add_library(ai_chat_gpu_engine STATIC
     ${ENGINE_DIR}/sampler.cpp
     ${ENGINE_DIR}/quantization.cpp
     ${ENGINE_DIR}/kv_cache.cpp
-    ${ENGINE_DIR}/runtime_router.cpp
     ${ENGINE_DIR}/memory_planner.cpp
     ${ENGINE_DIR}/tokenizer.cpp
     ${ENGINE_DIR}/tokenizer_adapters.cpp

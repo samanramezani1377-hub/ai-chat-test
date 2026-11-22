@@ -6,7 +6,6 @@
 #include "sampler.h"
 #include "quantization.h"
 #include "kv_cache.h"
-#include "runtime_router.h"
 #include "memory_planner.h"
 #include "tokenizer.h"
 #include "model_graph.h"
@@ -344,36 +343,7 @@ void test_gpu_backend_fallback_order() {
     assert(!engine.diagnostics().fallback_reason.empty());
     assert(engine.shutdown().ok());
 }
-void test_runtime_router_fails_closed_to_cpu() {
-    RuntimeReadiness readiness;
-    auto report = select_runtime(readiness);
-    assert(report.selected == RuntimeSelection::CpuLlamaCpp);
-    assert(!report.gpu_selected);
-    assert(report.cpu_fallback_available);
-    assert(report.blockers.size() == 7);
 
-    readiness.gpu_device_ready = true;
-    readiness.tokenizer_validated = true;
-    readiness.architecture_validated = true;
-    readiness.quantization_validated = true;
-    readiness.operator_coverage_validated = true;
-    readiness.model_graph_validated = true;
-    readiness.memory_preflight_passed = true;
-    report = select_runtime(readiness);
-    assert(report.selected == RuntimeSelection::DedicatedGpuEngine);
-    assert(report.gpu_selected);
-    assert(report.blockers.empty());
-
-    readiness.cpu_fallback_available = false;
-    report = select_runtime(readiness);
-    assert(report.gpu_selected);
-    assert(!report.cpu_fallback_available);
-
-    readiness.gpu_device_ready = false;
-    report = select_runtime(readiness);
-    assert(report.selected == RuntimeSelection::Unavailable);
-    assert(!report.gpu_selected);
-}
 
 
 void test_kv_cache_device_append_avoids_host_roundtrip() {
@@ -3475,7 +3445,6 @@ int main() {
     test_kv_cache_device_append_avoids_host_roundtrip();
     test_model_gpu_memory_estimate_includes_kv_and_scratch();
     test_gpu_backend_fallback_order();
-    test_runtime_router_fails_closed_to_cpu();
     test_gpu_memory_planner_respects_streaming_and_reserve();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";

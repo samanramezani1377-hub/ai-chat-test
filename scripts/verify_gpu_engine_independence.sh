@@ -23,3 +23,9 @@ grep -q 'DAWN_ENABLE_VULKAN OFF' "$ENGINE/cmake/FindDawn.cmake"
 grep -q 'AI_CHAT_GPU_BACKEND_VULKAN=0' "$ENGINE/CMakeLists.txt"
 grep -q 'abiFilters += "arm64-v8a"' "$ROOT/engine/build.gradle.kts"
 echo "Standalone Android GPU engine boundary verified."
+
+
+if grep -RInE 'NativeLlamaCpp|CpuLlamaCpp|cpu_fallback_available=true|llama\.cpp runtime' "$ENGINE"; then
+    echo "::error::Legacy CPU runtime routing remains in the standalone GPU engine."
+    exit 1
+fi

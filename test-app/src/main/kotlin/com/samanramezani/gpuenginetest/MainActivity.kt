@@ -84,6 +84,7 @@ class MainActivity : Activity() {
 
         logView = EditText(this).apply {
             textSize = 11f
+            minLines = 12
             typeface = android.graphics.Typeface.MONOSPACE
             setTextIsSelectable(true)
             isSingleLine = false

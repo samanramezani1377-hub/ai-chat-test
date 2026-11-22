@@ -720,7 +720,7 @@ std::string GpuInferenceSession::diagnostics() const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::ostringstream report;
     const DeviceInfo* device = engine_ ? engine_->active_device() : nullptr;
-    report << "runtime=AIChatGpuEngine"
+    report << "runtime=AndroidGpuInferenceEngine"
            << ";status=" << (loaded_ ? "READY" : "UNLOADED")
            << ";runtime_version=0.1.0"
            << ";backend=" << backend_name()
@@ -756,7 +756,7 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";context_length=" << context_length_
            << ";ttft_ms=" << last_ttft_ms_
            << ";decode_tokens_per_second=" << last_decode_tokens_per_second_
-           << ";cpu_fallback_available=true"
+           << ";cpu_fallback_available=false"
            << ";gpu_feature_count=" << (device ? device->features.size() : 0)
            << ";gpu_features=";
     if (device) {

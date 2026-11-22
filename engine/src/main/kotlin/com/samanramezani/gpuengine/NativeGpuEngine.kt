@@ -1,9 +1,6 @@
 package com.samanramezani.gpuengine
 
-/**
- * JNI compatibility name retained for the native entry points. This module contains
- * only the independent GPU engine; there is no llama.cpp runtime in this project.
- */
+/** JNI boundary for the standalone Android GPU inference engine. */
 internal object NativeGpuEngine {
     init {
         System.loadLibrary("gpu_engine_android")

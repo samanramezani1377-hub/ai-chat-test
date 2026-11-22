@@ -18,9 +18,8 @@
 
 namespace ai_chat::gpu_engine {
 
-// A deliberately fail-closed Dense Transformer inference session. It uses the
-// independent GPU engine for GPU execution; llama.cpp remains outside this class
-// and is available to the Android caller as the CPU fallback.
+// A deliberately fail-closed GPU-only inference session. This standalone
+// Android engine does not provide or silently select a CPU inference fallback.
 class GpuInferenceSession {
 public:
     using TextCallback = std::function<void(const std::string&)>;

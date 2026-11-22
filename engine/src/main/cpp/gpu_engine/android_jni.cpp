@@ -50,7 +50,7 @@ std::string probe_gpu_engine() {
     const Status status = initialize_android_gpu_runtime(
         engine, operators, quantizations, architectures, tokenizers, lowerings);
     std::ostringstream report;
-    report << "runtime=AIChatGpuEngine"
+    report << "runtime=AndroidGpuInferenceEngine"
            << ";status=" << (status.ok() ? "READY" : "UNAVAILABLE");
     if (!status.ok()) {
         report << ";error=" << status.message;
@@ -115,9 +115,9 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineProbe(
     try {
         result = ai_chat::gpu_engine::probe_gpu_engine();
     } catch (const std::exception& exception) {
-        result = std::string("runtime=AIChatGpuEngine;status=ERROR;error=") + exception.what();
+        result = std::string("runtime=AndroidGpuInferenceEngine;status=ERROR;error=") + exception.what();
     } catch (...) {
-        result = "runtime=AIChatGpuEngine;status=ERROR;error=unknown";
+        result = "runtime=AndroidGpuInferenceEngine;status=ERROR;error=unknown";
     }
     return env->NewStringUTF(result.c_str());
 }
@@ -227,9 +227,9 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineDiagnostics(
     try {
         result = ai_chat::gpu_engine::gpu_inference_session().diagnostics();
     } catch (const std::exception& exception) {
-        result = std::string("runtime=AIChatGpuEngine;status=ERROR;error=") + exception.what();
+        result = std::string("runtime=AndroidGpuInferenceEngine;status=ERROR;error=") + exception.what();
     } catch (...) {
-        result = "runtime=AIChatGpuEngine;status=ERROR;error=unknown";
+        result = "runtime=AndroidGpuInferenceEngine;status=ERROR;error=unknown";
     }
     return env->NewStringUTF(result.c_str());
 }

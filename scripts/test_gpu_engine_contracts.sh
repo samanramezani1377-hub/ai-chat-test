@@ -21,7 +21,6 @@ trap 'rm -rf "$TMP"' EXIT
   "$ENGINE/sampler.cpp" \
   "$ENGINE/quantization.cpp" \
   "$ENGINE/kv_cache.cpp" \
-  "$ENGINE/runtime_router.cpp" \
   "$ENGINE/memory_planner.cpp" \
   "$ENGINE/tokenizer.cpp" \
   "$ENGINE/tokenizer_adapters.cpp" \
