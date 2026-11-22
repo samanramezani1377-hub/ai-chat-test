@@ -498,6 +498,24 @@ void test_f16_bf16_reference_matmul_decoding() {
 
 
 
+
+void test_q2_k_q3_k_decoder_layouts(){
+    std::vector<uint8_t> q2(84,0);q2[0]=0x00;q2[1]=0x3c;
+    std::fill(q2.begin()+4,q2.begin()+20,0x01);std::fill(q2.begin()+20,q2.end(),0x55);
+    std::vector<float> q2_out(256);assert(decode_q2_k_blocks(q2.data(),q2.size(),q2_out.data(),q2_out.size()).ok());
+    for(float value:q2_out)assert(value==1.0f);
+    std::vector<uint8_t> q3(110,0);std::fill(q3.begin(),q3.begin()+32,0xff);
+    std::fill(q3.begin()+32,q3.begin()+96,0x55);
+    std::fill(q3.begin()+96,q3.begin()+104,0x11);
+    std::fill(q3.begin()+104,q3.begin()+108,0xaa);
+    q3[108]=0x00;q3[109]=0x3c;
+    std::vector<float> q3_out(256);assert(decode_q3_k_blocks(q3.data(),q3.size(),q3_out.data(),q3_out.size()).ok());
+    for(float value:q3_out)assert(value==1.0f);
+    std::fill(q3.begin(),q3.begin()+32,0x00);
+    assert(decode_q3_k_blocks(q3.data(),q3.size(),q3_out.data(),q3_out.size()).ok());
+    for(float value:q3_out)assert(value==-3.0f);
+}
+
 void test_q4_k_q5_k_decoder_layouts(){
     std::vector<uint8_t> q4(144,0);q4[0]=0x00;q4[1]=0x3c;
     std::fill(q4.begin()+4,q4.begin()+8,1);std::fill(q4.begin()+8,q4.begin()+12,1);std::fill(q4.begin()+16,q4.end(),0x11);
@@ -3359,6 +3377,7 @@ int main() {
     test_q5_decoders();
     test_q6_k_decoder_layout();
     test_q4_k_q5_k_decoder_layouts();
+    test_q2_k_q3_k_decoder_layouts();
     test_f16_bf16_reference_matmul_decoding();
     test_dawn_q8_0_operator_registration_is_unverified();
     test_q5_matmul_lowerings_are_registered_for_both_backends();

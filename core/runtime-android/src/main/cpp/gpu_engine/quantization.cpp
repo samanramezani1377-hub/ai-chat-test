@@ -3626,6 +3626,19 @@ Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
 
 
 
+
+    QuantizationFormat q2_k;
+    q2_k.file_type_id=10;q2_k.name="Q2_K";q2_k.block_elements=256;q2_k.bytes_per_block=84;
+    q2_k.quantized=true;q2_k.decoder_state=SupportState::Validated;q2_k.gpu_kernel_state=SupportState::Unverified;
+    initialize_backend_states(q2_k);
+    status=registry.register_format(std::move(q2_k));if(!status.ok())return status;
+
+    QuantizationFormat q3_k;
+    q3_k.file_type_id=11;q3_k.name="Q3_K";q3_k.block_elements=256;q3_k.bytes_per_block=110;
+    q3_k.quantized=true;q3_k.decoder_state=SupportState::Validated;q3_k.gpu_kernel_state=SupportState::Unverified;
+    initialize_backend_states(q3_k);
+    status=registry.register_format(std::move(q3_k));if(!status.ok())return status;
+
     QuantizationFormat q4_k;
     q4_k.file_type_id=12;q4_k.name="Q4_K";q4_k.block_elements=256;q4_k.bytes_per_block=144;
     q4_k.quantized=true;q4_k.decoder_state=SupportState::Validated;q4_k.gpu_kernel_state=SupportState::Unverified;
@@ -4952,5 +4965,85 @@ Status validate_k4_matmul_kernel_impl(Backend&backend,OperatorRegistry&operators
 }
 Status validate_q4_k_matmul_kernel(Backend&b,OperatorRegistry&o,QuantizationRegistry&q){return validate_k4_matmul_kernel_impl(b,o,q,false);}
 Status validate_q5_k_matmul_kernel(Backend&b,OperatorRegistry&o,QuantizationRegistry&q){return validate_k4_matmul_kernel_impl(b,o,q,true);}
+
+
+Status decode_q2_k_blocks(const uint8_t*source,size_t source_bytes,float*destination,size_t destination_elements){
+    constexpr size_t block_bytes=84,block_elements=256;
+    if((!source||!destination)&&source_bytes)return {StatusCode::InvalidArgument,"Q2_K decoder received a null pointer"};
+    if(source_bytes%block_bytes)return {StatusCode::InvalidArgument,"Q2_K source does not contain complete blocks"};
+    const size_t blocks=source_bytes/block_bytes;
+    if(blocks>std::numeric_limits<size_t>::max()/block_elements)return {StatusCode::Unsupported,"Q2_K output size overflows"};
+    if(destination_elements!=blocks*block_elements)return {StatusCode::InvalidArgument,"Q2_K destination element count mismatch"};
+    for(size_t block=0;block<blocks;++block){
+        const uint8_t*encoded=source+block*block_bytes;
+        const uint16_t d_bits=static_cast<uint16_t>(encoded[0])|static_cast<uint16_t>(encoded[1]<<8u);
+        const uint16_t min_bits=static_cast<uint16_t>(encoded[2])|static_cast<uint16_t>(encoded[3]<<8u);
+        const float d=decode_f16_value(d_bits),minimum=decode_f16_value(min_bits);
+        if(!std::isfinite(d)||!std::isfinite(minimum))return {StatusCode::NumericalFailure,"Q2_K block scales are non-finite"};
+        const uint8_t*scales=encoded+4;const uint8_t*qs=encoded+20;float*out=destination+block*block_elements;
+        size_t scale_index=0,output_index=0;
+        for(size_t n=0;n<256;n+=128){
+            uint32_t shift=0;
+            for(size_t group=0;group<4;++group){
+                for(size_t side=0;side<2;++side){
+                    const uint8_t packed_scale=scales[scale_index++];
+                    const float dl=d*static_cast<float>(packed_scale&15u);
+                    const float ml=minimum*static_cast<float>(packed_scale>>4u);
+                    const uint8_t*q=qs+side*16;
+                    for(size_t lane=0;lane<16;++lane)out[output_index++]=dl*static_cast<float>((q[lane]>>shift)&3u)-ml;
+                }
+                shift+=2;
+            }
+            qs+=32;
+        }
+    }
+    return Status::success();
+}
+Status decode_q3_k_blocks(const uint8_t*source,size_t source_bytes,float*destination,size_t destination_elements){
+    constexpr size_t block_bytes=110,block_elements=256;
+    if((!source||!destination)&&source_bytes)return {StatusCode::InvalidArgument,"Q3_K decoder received a null pointer"};
+    if(source_bytes%block_bytes)return {StatusCode::InvalidArgument,"Q3_K source does not contain complete blocks"};
+    const size_t blocks=source_bytes/block_bytes;
+    if(blocks>std::numeric_limits<size_t>::max()/block_elements)return {StatusCode::Unsupported,"Q3_K output size overflows"};
+    if(destination_elements!=blocks*block_elements)return {StatusCode::InvalidArgument,"Q3_K destination element count mismatch"};
+    for(size_t block=0;block<blocks;++block){
+        const uint8_t*encoded=source+block*block_bytes;
+        const uint8_t*hm=encoded;const uint8_t*q=encoded+32;const uint8_t*packed_scales=encoded+96;
+        uint32_t aux0=0,aux1=0,aux2=0;
+        std::memcpy(&aux0,packed_scales,4);std::memcpy(&aux1,packed_scales+4,4);std::memcpy(&aux2,packed_scales+8,4);
+        constexpr uint32_t kmask1=0x03030303u,kmask2=0x0f0f0f0fu;
+        const uint32_t tmp=aux2;
+        const uint32_t unpacked[4]={
+            (aux0&kmask2)|(((tmp>>0u)&kmask1)<<4u),
+            (aux1&kmask2)|(((tmp>>2u)&kmask1)<<4u),
+            ((aux0>>4u)&kmask2)|(((tmp>>4u)&kmask1)<<4u),
+            ((aux1>>4u)&kmask2)|(((tmp>>6u)&kmask1)<<4u)
+        };
+        int8_t scales[16];
+        std::memcpy(scales,unpacked,sizeof(scales));
+        const uint16_t d_bits=static_cast<uint16_t>(encoded[108])|static_cast<uint16_t>(encoded[109]<<8u);
+        const float d=decode_f16_value(d_bits);
+        if(!std::isfinite(d))return {StatusCode::NumericalFailure,"Q3_K block scale is non-finite"};
+        float*out=destination+block*block_elements;size_t output_index=0,scale_index=0;
+        uint8_t mask=1;
+        for(size_t n=0;n<256;n+=128){
+            uint32_t shift=0;
+            for(size_t group=0;group<4;++group){
+                for(size_t side=0;side<2;++side){
+                    const float dl=d*static_cast<float>(static_cast<int>(scales[scale_index++])-32);
+                    const uint8_t*qq=q+side*16;const uint8_t*hh=hm+side*16;
+                    for(size_t lane=0;lane<16;++lane){
+                        const int low=static_cast<int>((qq[lane]>>shift)&3u);
+                        const int quant=low-((hh[lane]&mask)?0:4);
+                        out[output_index++]=dl*static_cast<float>(quant);
+                    }
+                }
+                shift+=2;mask=static_cast<uint8_t>(mask<<1u);
+            }
+            q+=32;
+        }
+    }
+    return Status::success();
+}
 
 } // namespace ai_chat::gpu_engine
