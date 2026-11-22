@@ -417,6 +417,36 @@ void test_qwen35_hybrid_recipe_builds_generic_semantic_graph() {
     assert(text_mrope->string_attributes.at("position_encoding") ==
            "qwen35_text_only_mrope_equivalent");
     assert(!plan.gpu_ready && !plan.operator_coverage_validated);
+
+    // Qwen3.5 uses attention head widths independent of hidden_size / heads,
+    // and a rotary width independent of the attention head width.
+    GgufFileInfo independent_dimensions = model;
+    independent_dimensions.metadata["qwen35.attention.key_length"] = uint64_t{6};
+    independent_dimensions.metadata["qwen35.attention.value_length"] = uint64_t{5};
+    independent_dimensions.metadata["qwen35.rope.dimension_count"] = uint64_t{2};
+    for (auto& tensor : independent_dimensions.tensors) {
+        if (tensor.name == "blk.1.attn_q.weight") tensor.dimensions = {8, 22};
+        else if (tensor.name == "blk.1.attn_k.weight") tensor.dimensions = {8, 6};
+        else if (tensor.name == "blk.1.attn_v.weight") tensor.dimensions = {8, 5};
+        else if (tensor.name == "blk.1.attn_output.weight") tensor.dimensions = {10, 8};
+        else if (tensor.name == "blk.1.attn_q_norm.weight" ||
+                 tensor.name == "blk.1.attn_k_norm.weight") tensor.dimensions = {6};
+    }
+    ModelExecutionPlan independent_plan;
+    assert(adapter->build_execution_plan(independent_dimensions, independent_plan).ok());
+    assert(independent_plan.head_dimension == 6);
+    assert(independent_plan.rotary_dimensions == 2);
+
+    GgufFileInfo wrong_shape = independent_dimensions;
+    for (auto& tensor : wrong_shape.tensors)
+        if (tensor.name == "blk.1.attn_q.weight") tensor.dimensions = {8, 21};
+    ModelExecutionPlan wrong_shape_plan;
+    assert(!adapter->build_execution_plan(wrong_shape, wrong_shape_plan).ok());
+    assert(std::any_of(wrong_shape_plan.blockers.begin(), wrong_shape_plan.blockers.end(),
+        [](const std::string& blocker) {
+            return blocker.find("TENSOR_SHAPE_MISMATCH:blk.1.attn_q.weight:expected=[8,22]:actual=[8,21]") == 0;
+        }));
+
     const auto has_operator = [&](const std::string& name) {
         return std::any_of(plan.operations.begin(), plan.operations.end(),
             [&](const ModelPlanOperation& op) { return op.operator_name == name; });

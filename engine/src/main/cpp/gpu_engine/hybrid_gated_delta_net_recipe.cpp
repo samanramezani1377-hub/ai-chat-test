@@ -93,6 +93,8 @@ struct Qwen35HybridConfig {
     uint64_t ssm_dt_rank = 0;
     uint64_t ssm_groups = 0;
     uint64_t head_dimension = 0;
+    uint64_t value_head_dimension = 0;
+    uint64_t rotary_dimension = 0;
     uint64_t key_dimension = 0;
     uint64_t conv_dimension = 0;
     uint64_t recurrent_state_elements = 0;
@@ -130,13 +132,29 @@ bool load_qwen35_hyperparameters(const GgufFileInfo& model, Qwen35HybridConfig& 
         error = "Qwen3.5 GGUF contains invalid or inconsistent hybrid dimensions";
         return false;
     }
-    out.head_dimension = out.embedding / out.heads;
+    // Attention head widths are independent metadata dimensions in GGUF;
+    // do not assume key/value width == hidden_size / query_head_count.
+    if (!metadata_u64_value(model, prefix + "attention.key_length", out.head_dimension))
+        out.head_dimension = out.embedding / out.heads;
+    if (!metadata_u64_value(model, prefix + "attention.value_length", out.value_head_dimension))
+        out.value_head_dimension = out.head_dimension;
+    if (!metadata_u64_value(model, prefix + "rope.dimension_count", out.rotary_dimension))
+        out.rotary_dimension = out.head_dimension;
+    if (out.heads > UINT64_MAX / 2 || out.head_dimension == 0 ||
+        out.value_head_dimension == 0 || out.rotary_dimension == 0 ||
+        out.rotary_dimension > out.head_dimension || (out.rotary_dimension & 1u) != 0 ||
+        out.head_dimension > UINT64_MAX / (2 * out.heads) ||
+        out.head_dimension > UINT64_MAX / out.kv_heads ||
+        out.value_head_dimension > UINT64_MAX / out.kv_heads ||
+        out.value_head_dimension > UINT64_MAX / out.heads) {
+        error = "Qwen3.5 attention key/value or rotary dimensions are invalid";
+        return false;
+    }
     out.key_dimension = out.ssm_state * out.ssm_groups;
     if (out.key_dimension > UINT64_MAX / 2 ||
         out.ssm_inner > (UINT64_MAX - 2 * out.key_dimension) / 2 ||
-        out.ssm_dt_rank > UINT64_MAX / 2 ||
-        out.head_dimension > UINT64_MAX / out.kv_heads) {
-        error = "Qwen3.5 gated-delta-net or attention dimensions overflow";
+        out.ssm_dt_rank > UINT64_MAX / 2) {
+        error = "Qwen3.5 gated-delta-net dimensions overflow";
         return false;
     }
     out.conv_dimension = out.ssm_inner + 2 * out.key_dimension;
@@ -182,6 +200,16 @@ bool load_qwen35_hyperparameters(const GgufFileInfo& model, Qwen35HybridConfig& 
         return false;
     }
     return true;
+}
+
+std::string format_dimensions(const std::vector<uint64_t>& dimensions) {
+    std::string result = "[";
+    for (size_t i = 0; i < dimensions.size(); ++i) {
+        if (i != 0) result += ",";
+        result += std::to_string(dimensions[i]);
+    }
+    result += "]";
+    return result;
 }
 
 std::string matmul_operator_for(const GgufTensorInfo& tensor) {
@@ -262,7 +290,9 @@ public:
                 return false;
             }
             if (found->second->dimensions != shape) {
-                plan.blockers.emplace_back("TENSOR_SHAPE_MISMATCH:" + name);
+                plan.blockers.emplace_back("TENSOR_SHAPE_MISMATCH:" + name +
+                    ":expected=" + format_dimensions(shape) +
+                    ":actual=" + format_dimensions(found->second->dimensions));
                 return false;
             }
             if (!found->second->byte_size_known || found->second->byte_size == 0) {
@@ -311,10 +341,14 @@ public:
                 expect(prefix + "ssm_norm.weight", {config.ssm_inner / config.ssm_dt_rank});
                 expect(prefix + "ssm_out.weight", {config.ssm_inner, config.embedding});
             } else {
-                expect(prefix + "attn_q.weight", {config.embedding, config.embedding * 2});
-                expect(prefix + "attn_k.weight", {config.embedding, config.head_dimension * config.kv_heads});
-                expect(prefix + "attn_v.weight", {config.embedding, config.head_dimension * config.kv_heads});
-                expect(prefix + "attn_output.weight", {config.embedding, config.embedding});
+                expect(prefix + "attn_q.weight",
+                       {config.embedding, config.heads * (config.head_dimension + config.value_head_dimension)});
+                expect(prefix + "attn_k.weight",
+                       {config.embedding, config.kv_heads * config.head_dimension});
+                expect(prefix + "attn_v.weight",
+                       {config.embedding, config.kv_heads * config.value_head_dimension});
+                expect(prefix + "attn_output.weight",
+                       {config.heads * config.value_head_dimension, config.embedding});
                 expect(prefix + "attn_q_norm.weight", {config.head_dimension});
                 expect(prefix + "attn_k_norm.weight", {config.head_dimension});
             }
@@ -333,7 +367,7 @@ public:
         plan.vocabulary_size = model.tokenizer.tokens.size();
         config.vocabulary_size = plan.vocabulary_size;
         plan.head_dimension = config.head_dimension;
-        plan.rotary_dimensions = config.head_dimension;
+        plan.rotary_dimensions = config.rotary_dimension;
         plan.rms_norm_epsilon = config.rms_epsilon;
         plan.rope_theta = config.rope_theta;
         plan.rope_neox_style = true;
@@ -498,23 +532,23 @@ public:
             } else {
                 add(x + "q_projection", "MatMul", {x + "normalized"},
                     {p + "attn_q.weight"}, x + "q_full",
-                    {0, config.heads, config.head_dimension * 2});
+                    {0, config.heads, config.head_dimension + config.value_head_dimension});
                 add(x + "q_split", "Split", {x + "q_full"}, {}, x + "q",
                     {0, config.heads, config.head_dimension});
                 plan.operations.back().integer_attributes["axis"] = 2;
                 plan.operations.back().integer_attributes["offset"] = 0;
                 plan.operations.back().integer_attributes["length"] = config.head_dimension;
                 add(x + "query_gate_split", "Split", {x + "q_full"}, {}, x + "query_gate",
-                    {0, config.heads, config.head_dimension});
+                    {0, config.heads, config.value_head_dimension});
                 plan.operations.back().integer_attributes["axis"] = 2;
                 plan.operations.back().integer_attributes["offset"] = config.head_dimension;
-                plan.operations.back().integer_attributes["length"] = config.head_dimension;
+                plan.operations.back().integer_attributes["length"] = config.value_head_dimension;
                 add(x + "k_projection", "MatMul", {x + "normalized"},
                     {p + "attn_k.weight"}, x + "k",
                     {0, config.kv_heads, config.head_dimension});
                 add(x + "v_projection", "MatMul", {x + "normalized"},
                     {p + "attn_v.weight"}, x + "v",
-                    {0, config.kv_heads, config.head_dimension});
+                    {0, config.kv_heads, config.value_head_dimension});
                 add(x + "q_norm", "RMSNorm", {x + "q"}, {p + "attn_q_norm.weight"},
                     x + "q_normalized", {0, config.heads, config.head_dimension});
                 add(x + "k_norm", "RMSNorm", {x + "k"}, {p + "attn_k_norm.weight"},
@@ -525,7 +559,7 @@ public:
                         {}, x + suffix + "_rotated",
                         {0, suffix == "q" ? config.heads : config.kv_heads, config.head_dimension});
                     rope.float_attributes["theta"] = config.rope_theta;
-                    rope.integer_attributes["rotary_dimensions"] = config.head_dimension;
+                    rope.integer_attributes["rotary_dimensions"] = config.rotary_dimension;
                     rope.integer_array_attributes["sections"] = config.rope_sections;
                     // In text-only mode all M-RoPE axes share the same position;
                     // standard NeoX RoPE is therefore equivalent for this path.
@@ -536,14 +570,14 @@ public:
                 plan.operations.back().integer_attributes["layer_index"] = layer;
                 add(x + "attention", "Attention",
                     {x + "q_rotated", x + "cache_key", x + "cache_value"},
-                    {}, x + "attention_context", {0, config.heads, config.head_dimension});
+                    {}, x + "attention_context", {0, config.heads, config.value_head_dimension});
                 plan.operations.back().integer_attributes["layer_index"] = layer;
                 plan.operations.back().control_inputs.push_back(x + "kv_cache_updated");
                 add(x + "attention_gate_sigmoid", "Sigmoid", {x + "query_gate"}, {},
-                    x + "attention_gate", {0, config.heads, config.head_dimension});
+                    x + "attention_gate", {0, config.heads, config.value_head_dimension});
                 add(x + "attention_gated", "Multiply",
                     {x + "attention_context", x + "attention_gate"}, {},
-                    x + "attention_gated", {0, config.heads, config.head_dimension});
+                    x + "attention_gated", {0, config.heads, config.value_head_dimension});
                 add(x + "attention_output_projection", "MatMul",
                     {x + "attention_gated"}, {p + "attn_output.weight"},
                     x + "attention_output", {0, config.embedding});
