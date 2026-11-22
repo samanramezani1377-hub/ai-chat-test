@@ -82,6 +82,17 @@ bool GpuInferenceSession::loaded() const noexcept {
     }
 }
 
+bool GpuInferenceSession::uses_qwen35_tokenizer() const noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return loaded_ && loader_ && loader_->reader() &&
+               loader_->reader()->info().tokenizer.model == "gpt2" &&
+               loader_->reader()->info().tokenizer.pre_tokenizer == "qwen35";
+    } catch (...) {
+        return false;
+    }
+}
+
 std::string GpuInferenceSession::backend_name() const {
     return engine_ ? backend_label(engine_->diagnostics().selected_backend) : "Unknown";
 }

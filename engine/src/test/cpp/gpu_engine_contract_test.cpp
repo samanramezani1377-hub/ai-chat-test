@@ -1319,6 +1319,77 @@ void test_tokenizer_engine_contracts() {
     assert(qwen2_digit_adapter->encode(qwen2_digits, "1234", digit_ids).ok());
     assert((digit_ids == std::vector<uint32_t>{0, 1, 2, 3}));
 
+    // Build a compact, complete byte-level vocabulary fixture for the Qwen3.5
+    // adapter. The first 256 entries are GPT-2 byte symbols in byte order.
+    GgufTokenizerInfo qwen35;
+    qwen35.model = "gpt2";
+    qwen35.pre_tokenizer = "qwen35";
+    std::vector<std::string> byte_symbols(256);
+    std::vector<uint32_t> printable;
+    for (uint32_t b = 33; b <= 126; ++b) printable.push_back(b);
+    for (uint32_t b = 161; b <= 172; ++b) printable.push_back(b);
+    for (uint32_t b = 174; b <= 255; ++b) printable.push_back(b);
+    uint32_t extra_symbol = 0;
+    for (uint32_t b = 0; b < 256; ++b) {
+        uint32_t cp = b;
+        if (std::find(printable.begin(), printable.end(), b) == printable.end())
+            cp = 256 + extra_symbol++;
+        std::string encoded;
+        if (cp < 0x80) encoded.push_back(static_cast<char>(cp));
+        else if (cp < 0x800) {
+            encoded.push_back(static_cast<char>(0xc0 | (cp >> 6)));
+            encoded.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
+        } else {
+            encoded.push_back(static_cast<char>(0xe0 | (cp >> 12)));
+            encoded.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3f)));
+            encoded.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
+        }
+        byte_symbols[b] = encoded;
+    }
+    qwen35.tokens = byte_symbols;
+    const auto append_qwen_token = [&](const std::string& token) {
+        qwen35.tokens.push_back(token);
+        return static_cast<uint32_t>(qwen35.tokens.size() - 1);
+    };
+    const uint32_t qwen_space = static_cast<uint32_t>(
+        std::find(qwen35.tokens.begin(), qwen35.tokens.end(), byte_symbols[32]) - qwen35.tokens.begin());
+    const uint32_t qwen_space_space = append_qwen_token(byte_symbols[32] + byte_symbols[32]);
+    const uint32_t qwen_space_h = append_qwen_token(byte_symbols[32] + byte_symbols['h']);
+    const uint32_t qwen_space_hi = append_qwen_token(byte_symbols[32] + byte_symbols['h'] + byte_symbols['i']);
+    append_qwen_token(byte_symbols['1'] + byte_symbols['2']);
+    append_qwen_token(byte_symbols['1'] + byte_symbols['2'] + byte_symbols['3']);
+    append_qwen_token(byte_symbols['1'] + byte_symbols['2'] + byte_symbols['3'] + byte_symbols['4']);
+    qwen35.merges = {
+        byte_symbols[32] + " " + byte_symbols[32],
+        byte_symbols[32] + " " + byte_symbols['h'],
+        byte_symbols[32] + byte_symbols['h'] + " " + byte_symbols['i'],
+        byte_symbols['1'] + " " + byte_symbols['2'],
+        byte_symbols['1'] + byte_symbols['2'] + " " + byte_symbols['3'],
+        byte_symbols['1'] + byte_symbols['2'] + byte_symbols['3'] + " " + byte_symbols['4']
+    };
+    qwen35.token_types.assign(qwen35.tokens.size(), 1);
+    auto qwen35_adapter = builtins.find(qwen35);
+    assert(qwen35_adapter && qwen35_adapter->descriptor().validation == SupportState::Validated);
+    assert(qwen35_adapter->validate_metadata(qwen35).ok());
+    auto qwen35_preflight = evaluate_tokenizer_preflight(qwen35, builtins);
+    assert(qwen35_preflight.ready && qwen35_preflight.adapter_validated);
+    std::vector<uint32_t> qwen35_ids;
+    assert(qwen35_adapter->encode(qwen35, "  hi", qwen35_ids).ok());
+    assert((qwen35_ids == std::vector<uint32_t>{qwen_space, qwen_space_hi}));
+    assert(qwen35_adapter->encode(qwen35, "1234", qwen35_ids).ok());
+    assert((qwen35_ids == std::vector<uint32_t>{49, 50, 51, 52}));
+    std::string qwen35_text;
+    assert(qwen35_adapter->decode(qwen35, qwen35_ids, qwen35_text).ok());
+    assert(qwen35_text == "1234");
+    GgufTokenizerInfo invalid_qwen35 = qwen35;
+    invalid_qwen35.token_types.clear();
+    assert(qwen35_adapter->validate_metadata(invalid_qwen35).code == StatusCode::Unsupported);
+    invalid_qwen35 = qwen35;
+    invalid_qwen35.add_space_prefix = true;
+    assert(qwen35_adapter->validate_metadata(invalid_qwen35).code == StatusCode::Unsupported);
+    (void)qwen_space_space;
+    (void)qwen_space_h;
+
     GgufTokenizerInfo bpe_prefix;
     bpe_prefix.model = "gpt2";
     bpe_prefix.pre_tokenizer = "gpt2";

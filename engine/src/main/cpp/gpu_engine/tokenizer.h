@@ -52,6 +52,12 @@ TokenizerPreflightReport evaluate_tokenizer_preflight(
 // not imply that an adapter is supported or validated.
 std::string describe_tokenizer_metadata(
     const GgufTokenizerInfo& metadata, const TokenizerRegistry& registry);
+// Optional exact Unicode property classifications supplied by the Android ICU-backed
+// Java Character API for Qwen3.5's Unicode regex pre-tokenizer. Values map to
+// LetterMark=0, Number=1, Space=2, Newline=3, Other=4.
+using Qwen35UnicodeCategories = std::unordered_map<uint32_t, uint8_t>;
+void set_qwen35_unicode_categories(const Qwen35UnicodeCategories* categories) noexcept;
+
 Status register_builtin_tokenizer_adapters(TokenizerRegistry& registry);
 
 class TokenizerEngine {
@@ -62,7 +68,13 @@ public:
     Status decode(const GgufTokenizerInfo& metadata,
                   const std::vector<uint32_t>& token_ids, std::string& text) const;
 private:
+    Status ensure_ready(const GgufTokenizerInfo& metadata) const;
     const TokenizerRegistry& registry_;
+    // A model's GGUF tokenizer metadata is immutable for the lifetime of a
+    // TokenizerEngine. Cache its expensive structural preflight across decode
+    // steps instead of rescanning a 248k-token vocabulary for every output token.
+    mutable const GgufTokenizerInfo* validated_metadata_ = nullptr;
+    mutable bool metadata_ready_ = false;
 };
 
 } // namespace ai_chat::gpu_engine
