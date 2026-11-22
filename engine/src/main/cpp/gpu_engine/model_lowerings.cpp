@@ -221,6 +221,39 @@ Status register_fp16_embedding_lowering(BackendKind backend,ModelLoweringRegistr
 }
 
 
+Status register_q6_k_embedding_lowering(BackendKind backend,ModelLoweringRegistry&registry){
+    return registry.register_lowering(backend,"Embedding_Q6_K",[backend](
+        const ModelPlanOperation&operation,const ModelExecutionContext&context,ComputeDispatch&dispatch){
+        if(operation.inputs.size()!=1||operation.inputs[0]!="token_ids"||
+           operation.weight_tensors.size()!=1||!context.backend||context.token_ids.empty()||
+           context.token_ids.size()>UINT32_MAX)
+            return Status{StatusCode::InvalidArgument,"Q6_K Embedding requires token IDs, one packed weight and an active backend"};
+        const Tensor*output=nullptr;Status result=lookup_output(operation,context,output);if(!result.ok())return result;
+        const auto weight=context.quantized_weights.find(operation.weight_tensors.front());
+        if(weight==context.quantized_weights.end()||!weight->second.buffer||weight->second.byte_size==0||
+           weight->second.file_type_id!=14||weight->second.dimensions.size()!=2||
+           weight->second.dimensions[0]>UINT32_MAX||weight->second.dimensions[1]>UINT32_MAX)
+            return Status{StatusCode::InvalidArgument,"Q6_K Embedding weight binding is missing or invalid"};
+        const uint32_t dimension=static_cast<uint32_t>(weight->second.dimensions[0]);
+        const uint32_t vocabulary=static_cast<uint32_t>(weight->second.dimensions[1]);
+        if(dimension%256||output->descriptor().shape.size()!=2||
+           output->descriptor().shape[0]!=context.token_ids.size()||output->descriptor().shape[1]!=dimension)
+            return Status{StatusCode::Unsupported,"Q6_K Embedding requires [vocabulary,dimension] packed weights and block-aligned output dimensions"};
+        for(uint32_t id:context.token_ids)if(id>=vocabulary)
+            return Status{StatusCode::InvalidArgument,"Q6_K Embedding token ID is outside the vocabulary"};
+        BufferDesc token_desc;token_desc.size_bytes=context.token_ids.size()*sizeof(uint32_t);
+        token_desc.alignment=alignof(uint32_t);token_desc.memory=MemoryDomain::Device;
+        token_desc.persistent=false;token_desc.label="q6-k-model-token-ids";
+        std::shared_ptr<Buffer>token_buffer;result=context.backend->allocate(token_desc,token_buffer);if(!result.ok())return result;
+        if(!token_buffer||token_buffer->size_bytes()<token_desc.size_bytes)
+            return Status{StatusCode::BackendFailure,"Backend returned an undersized Q6_K token-ID buffer"};
+        result=context.backend->upload(token_buffer,0,context.token_ids.data(),token_desc.size_bytes);if(!result.ok())return result;
+        return backend==BackendKind::OpenGles
+            ?build_q6_k_embedding_gles_candidate(weight->second.buffer,weight->second.byte_size,vocabulary,dimension,token_buffer,context.token_ids,*output,dispatch)
+            :build_q6_k_embedding_candidate(weight->second.buffer,weight->second.byte_size,vocabulary,dimension,token_buffer,context.token_ids,*output,dispatch);
+    });
+}
+
 Status register_q6_k_matmul_lowering(BackendKind backend,ModelLoweringRegistry&registry){
     return registry.register_lowering(backend,"MatMul_Q6_K",[backend](
         const ModelPlanOperation&operation,const ModelExecutionContext&context,ComputeDispatch&dispatch){
@@ -434,6 +467,8 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
     status = register_fp16_embedding_lowering(backend, registry, false);
     if (!status.ok()) return status;
     status = register_fp16_embedding_lowering(backend, registry, true);
+    if (!status.ok()) return status;
+    status = register_q6_k_embedding_lowering(backend, registry);
     if (!status.ok()) return status;
     status = register_q6_k_matmul_lowering(backend, registry);
     if (!status.ok()) return status;
