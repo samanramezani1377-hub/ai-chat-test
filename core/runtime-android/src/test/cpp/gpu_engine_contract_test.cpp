@@ -813,6 +813,14 @@ void test_q8_0_decoder_and_registry() {
     assert(decode_q8_0_blocks(encoded.data(), encoded.size() - 1, decoded, 32).code ==
            StatusCode::InvalidArgument);
 
+    std::vector<uint8_t> subnormal_scale(34, 0);
+    subnormal_scale[0] = 0x01; // smallest positive IEEE-754 binary16 subnormal
+    subnormal_scale[2] = 1;
+    float subnormal_decoded[32] = {};
+    assert(decode_q8_0_blocks(subnormal_scale.data(), subnormal_scale.size(),
+                              subnormal_decoded, 32).ok());
+    assert(std::fabs(subnormal_decoded[0] - 5.960464477539063e-8f) < 1.0e-12f);
+
     encoded[0] = 0x00; encoded[1] = 0x7e; // NaN scale
     assert(decode_q8_0_blocks(encoded.data(), encoded.size(), decoded, 32).code ==
            StatusCode::NumericalFailure);

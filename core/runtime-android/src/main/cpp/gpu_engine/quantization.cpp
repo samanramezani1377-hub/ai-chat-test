@@ -1645,7 +1645,7 @@ float half_to_float(uint16_t half) {
             int shift = 0;
             while ((mantissa & 0x0400u) == 0) { mantissa <<= 1; ++shift; }
             mantissa &= 0x03ffu;
-            const uint32_t float_exponent = static_cast<uint32_t>(127 - 14 - shift + 1);
+            const uint32_t float_exponent = static_cast<uint32_t>(127 - 14 - shift);
             bits = sign | (float_exponent << 23) | (mantissa << 13);
         }
     } else if (exponent == 0x1fu) {
@@ -4416,7 +4416,7 @@ float decode_f16_value(uint16_t value) {
             int shift = 0;
             while ((mantissa & 0x0400u) == 0) { mantissa <<= 1u; ++shift; }
             mantissa &= 0x03ffu;
-            const uint32_t exp32 = static_cast<uint32_t>(127 - 15 - shift);
+            const uint32_t exp32 = static_cast<uint32_t>(127 - 14 - shift);
             bits = sign | (exp32 << 23u) | (mantissa << 13u);
         }
     } else if (exponent == 0x1fu) {
