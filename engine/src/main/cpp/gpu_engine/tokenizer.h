@@ -68,7 +68,13 @@ public:
     Status decode(const GgufTokenizerInfo& metadata,
                   const std::vector<uint32_t>& token_ids, std::string& text) const;
 private:
+    Status ensure_ready(const GgufTokenizerInfo& metadata) const;
     const TokenizerRegistry& registry_;
+    // A model's GGUF tokenizer metadata is immutable for the lifetime of a
+    // TokenizerEngine. Cache its expensive structural preflight across decode
+    // steps instead of rescanning a 248k-token vocabulary for every output token.
+    mutable const GgufTokenizerInfo* validated_metadata_ = nullptr;
+    mutable bool metadata_ready_ = false;
 };
 
 } // namespace ai_chat::gpu_engine
