@@ -335,6 +335,95 @@ void test_gguf_structure_analyzer_is_evidence_only() {
     assert(unknown_analysis.evidence_score == 10);
 }
 
+void test_qwen35_hybrid_recipe_builds_generic_semantic_graph() {
+    GgufFileInfo model;
+    model.architecture = "qwen35";
+    model.tokenizer.model = "gpt2";
+    model.tokenizer.tokens.resize(32);
+    model.metadata["qwen35.block_count"] = uint64_t{2};
+    model.metadata["qwen35.embedding_length"] = uint64_t{8};
+    model.metadata["qwen35.attention.head_count"] = uint64_t{2};
+    model.metadata["qwen35.attention.head_count_kv"] = uint64_t{1};
+    model.metadata["qwen35.feed_forward_length"] = uint64_t{16};
+    model.metadata["qwen35.ssm.conv_kernel"] = uint64_t{4};
+    model.metadata["qwen35.ssm.inner_size"] = uint64_t{8};
+    model.metadata["qwen35.ssm.state_size"] = uint64_t{2};
+    model.metadata["qwen35.ssm.time_step_rank"] = uint64_t{4};
+    model.metadata["qwen35.ssm.group_count"] = uint64_t{1};
+    model.metadata["qwen35.rope.dimension_sections"] =
+        GgufMetadataArray{4, std::vector<uint64_t>{1, 1, 1, 1}};
+    model.metadata["qwen35.attention.recurrent_layers"] =
+        GgufMetadataArray{7, std::vector<bool>{true, false}};
+    model.metadata["qwen35.attention.layer_norm_rms_epsilon"] = 1e-5;
+    model.metadata["qwen35.rope.freq_base"] = 10000.0;
+
+    auto add_tensor = [&](const std::string& name, std::vector<uint64_t> dimensions) {
+        GgufTensorInfo tensor;
+        tensor.name = name;
+        tensor.dimensions = std::move(dimensions);
+        tensor.type_id = 0;
+        tensor.byte_size = 4;
+        tensor.byte_size_known = true;
+        tensor.type = GgufReader::tensor_type_info(0);
+        model.tensors.push_back(std::move(tensor));
+    };
+    add_tensor("token_embd.weight", {8, 32});
+    add_tensor("output_norm.weight", {8});
+    add_tensor("output.weight", {8, 32});
+    for (uint64_t layer = 0; layer < 2; ++layer) {
+        const std::string p = "blk." + std::to_string(layer) + ".";
+        add_tensor(p + "attn_norm.weight", {8});
+        add_tensor(p + "post_attention_norm.weight", {8});
+        add_tensor(p + "ffn_gate.weight", {8, 16});
+        add_tensor(p + "ffn_up.weight", {8, 16});
+        add_tensor(p + "ffn_down.weight", {16, 8});
+    }
+    add_tensor("blk.0.attn_qkv_gate.weight", {8, 20});
+    add_tensor("blk.0.ssm_conv1d.weight", {4, 12});
+    add_tensor("blk.0.ssm_dt.bias", {4});
+    add_tensor("blk.0.ssm_a", {4});
+    add_tensor("blk.0.ssm_beta_alpha.weight", {8, 8});
+    add_tensor("blk.0.ssm_norm.weight", {2});
+    add_tensor("blk.0.ssm_out.weight", {8, 8});
+    add_tensor("blk.1.attn_q.weight", {8, 16});
+    add_tensor("blk.1.attn_k.weight", {8, 4});
+    add_tensor("blk.1.attn_v.weight", {8, 4});
+    add_tensor("blk.1.attn_output.weight", {8, 8});
+    add_tensor("blk.1.attn_q_norm.weight", {4});
+    add_tensor("blk.1.attn_k_norm.weight", {4});
+
+    ArchitectureRegistry registry;
+    assert(register_builtin_architecture_adapters(registry).ok());
+    const auto adapter = registry.find("qwen35");
+    assert(adapter);
+    assert(adapter->descriptor().family == ArchitectureFamily::Hybrid);
+    assert(adapter->descriptor().validation == SupportState::Unverified);
+
+    ModelExecutionPlan plan;
+    const Status status = adapter->build_execution_plan(model, plan);
+    assert(status.ok());
+    assert(plan.structurally_validated);
+    assert(plan.semantic_schema_id == "hybrid_gated_delta_net");
+    assert(plan.uses_recurrent_state && plan.uses_multi_axis_rope);
+    assert(!plan.gpu_ready && !plan.operator_coverage_validated);
+    const auto has_operator = [&](const std::string& name) {
+        return std::any_of(plan.operations.begin(), plan.operations.end(),
+            [&](const ModelPlanOperation& op) { return op.operator_name == name; });
+    };
+    assert(has_operator("GatedDeltaNet"));
+    assert(has_operator("MultiAxisRoPE"));
+    assert(has_operator("SSMConv1D"));
+    assert(has_operator("KVCacheAppend"));
+    assert(std::find(plan.blockers.begin(), plan.blockers.end(),
+                     "HYBRID_GDN_GPU_KERNEL_VALIDATION_PENDING") != plan.blockers.end());
+
+    GgufFileInfo invalid = model;
+    invalid.metadata["qwen35.attention.recurrent_layers"] =
+        GgufMetadataArray{7, std::vector<bool>{true}};
+    ModelExecutionPlan rejected;
+    assert(!adapter->build_execution_plan(invalid, rejected).ok());
+}
+
 void test_gpu_memory_planner_respects_streaming_and_reserve() {
     GpuMemoryPlanInput input;
     input.total_weight_bytes = 8ull * 1024 * 1024 * 1024;
@@ -3602,6 +3691,7 @@ int main() {
     test_model_gpu_memory_estimate_includes_kv_and_scratch();
     test_gpu_backend_fallback_order();
     test_gguf_structure_analyzer_is_evidence_only();
+    test_qwen35_hybrid_recipe_builds_generic_semantic_graph();
     test_gpu_memory_planner_respects_streaming_and_reserve();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";

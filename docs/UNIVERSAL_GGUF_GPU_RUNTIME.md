@@ -75,6 +75,14 @@ Exit: graph compilation reports complete, backend-specific coverage and all requ
 
 Exit: the exact model/quantization/backend combination passes structural, numerical, and device tests.
 
+## Implemented hybrid gated-delta-net semantic recipe
+
+The `engine` branch now contains one reusable `HybridGatedDeltaNetRecipe` for the `qwen35` GGUF architecture. It is a family-level declarative graph recipe, not a Qwen3.5-specific GPU backend. It consumes the GGUF metadata arrays for recurrent-layer flags and multi-axis RoPE sections, checks required tensor names/shapes/storage, and emits a backend-neutral plan containing full-attention and gated-delta-net layer paths.
+
+The graph IR now carries string, integer-array, and floating-array semantic attributes so architecture parameters such as RoPE sections remain data rather than backend-specific code. The GGUF reader also preserves typed scalar arrays instead of skipping non-tokenizer arrays. Current GGML storage layouts are recognized for TQ1_0, TQ2_0, MXFP4, NVFP4, Q1_0, Q2_0 and F8_E4M3; removed historical type IDs are identified as removed and remain non-loadable.
+
+**Important validation boundary:** this recipe currently builds and structurally validates the graph only. The GPU implementation still lacks validated `MultiAxisRoPE`, `SSMConv1D`, `GatedDeltaNet`, `GdnL2Norm`, split, sigmoid/softplus and recurrent-state lifecycle lowerings. It deliberately leaves `gpu_ready=false` and carries explicit pending-validation blockers. No Qwen3.5 GPU execution or numerical parity is claimed. Qwen3.5-MoE is not registered by this recipe.
+
 ## Current known blocker: Qwen3.5 GGUF
 
 The reported device log says Unsupported model architecture: qwen35. This is an architecture registry failure, not a tokenizer failure. The Qwen3.5 tokenizer profile has been merged separately; it does not prove that the Qwen3.5 forward pass is supported.

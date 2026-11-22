@@ -51,10 +51,17 @@ struct ModelPlanOperation {
     std::unordered_map<std::string, bool> bool_attributes;
     std::vector<std::string> control_inputs;
     bool side_effect = false;
+    // Typed semantic parameters keep architecture-specific details in model data,
+    // not in backend-specific graph code.
+    std::unordered_map<std::string, std::string> string_attributes;
+    std::unordered_map<std::string, std::vector<uint64_t>> integer_array_attributes;
+    std::unordered_map<std::string, std::vector<double>> float_array_attributes;
 };
 
 struct ModelExecutionPlan {
     std::string architecture;
+    std::string semantic_schema_id;
+    std::string semantic_schema_version = "1";
     uint64_t layer_count = 0;
     uint64_t embedding_length = 0;
     uint64_t attention_heads = 0;
@@ -66,6 +73,8 @@ struct ModelExecutionPlan {
     double rms_norm_epsilon = 0.00001;
     double rope_theta = 10000.0;
     bool rope_neox_style = true;
+    bool uses_recurrent_state = false;
+    bool uses_multi_axis_rope = false;
     std::vector<std::string> external_inputs;
     std::vector<ModelPlanOperation> operations;
     std::vector<std::string> blockers;

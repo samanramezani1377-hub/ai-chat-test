@@ -342,8 +342,10 @@ Status register_builtin_architecture_adapters(ArchitectureRegistry& registry) {
     status = registry.register_adapter(
         std::make_shared<DenseTransformerArchitectureAdapter>("qwen2", false, true));
     if (!status.ok()) return status;
-    return registry.register_adapter(
+    status = registry.register_adapter(
         std::make_shared<DenseTransformerArchitectureAdapter>("qwen3", true));
+    if (!status.ok()) return status;
+    return register_builtin_hybrid_architecture_recipes(registry);
 }
 
 Status QuantizationRegistry::register_format(QuantizationFormat format) {

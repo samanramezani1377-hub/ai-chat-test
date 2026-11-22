@@ -14,6 +14,7 @@ trap 'rm -rf "$TMP"' EXIT
   "$ENGINE/gguf_reader.cpp" \
   "$ENGINE/model_registry.cpp" \
   "$ENGINE/model_structure_analyzer.cpp" \
+  "$ENGINE/hybrid_gated_delta_net_recipe.cpp" \
   "$ENGINE/model_graph.cpp" \
   "$ENGINE/model_lowerings.cpp" \
   "$ENGINE/operators.cpp" \

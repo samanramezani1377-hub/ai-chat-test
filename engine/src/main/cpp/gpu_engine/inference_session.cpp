@@ -518,6 +518,8 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             ? "Model operator coverage is incomplete" : status.message;
         for (const auto& blocker : coverage.unsupported_operators)
             first_backend_reason += " | " + blocker;
+        for (const auto& blocker : plan_.blockers)
+            first_backend_reason += " | " + blocker;
 
         const BackendKind alternate_backend = backend_kind == BackendKind::DawnWebGpu
             ? BackendKind::OpenGles : BackendKind::DawnWebGpu;
