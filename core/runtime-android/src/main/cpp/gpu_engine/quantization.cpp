@@ -3207,6 +3207,33 @@ Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry
     q4_1_gles.glsl_source = q4_1_matmul_glsl_source();
     status = registry.register_kernel(std::move(q4_1_gles));
     if (!status.ok()) return status;
+
+    for (const bool bf16 : {false,true}) {
+        const std::string suffix=bf16?"bf16":"f16";
+        const std::string matmul=bf16?"MatMul_BF16":"MatMul_F16";
+        const std::string embedding=bf16?"Embedding_BF16":"Embedding_F16";
+        const char* mw=bf16?kBF16MatMulWgsl:kF16MatMulWgsl;
+        const char* mg=bf16?kBF16MatMulGlsl:kF16MatMulGlsl;
+        const char* ew=bf16?kBF16EmbeddingWgsl:kF16EmbeddingWgsl;
+        const char* eg=bf16?kBF16EmbeddingGlsl:kF16EmbeddingGlsl;
+        for(const bool gles:{false,true}){
+            KernelDefinition m;
+            m.operator_name=matmul;m.backend=gles?BackendKind::OpenGles:BackendKind::DawnWebGpu;
+            m.input_type=DataType::F32;m.input_types={DataType::F32,DataType::U32};m.output_type=DataType::F32;
+            m.min_input_count=2;m.max_input_count=2;m.min_rank=2;m.max_rank=3;
+            m.validation=KernelValidation::Unverified;m.kernel_id=(gles?"gles-":"dawn-")+suffix+"-matmul-f32-activation-v1";
+            if(gles)m.glsl_source=mg;else m.wgsl_source=mw;
+            status=registry.register_kernel(std::move(m));if(!status.ok())return status;
+            KernelDefinition e;
+            e.operator_name=embedding;e.backend=gles?BackendKind::OpenGles:BackendKind::DawnWebGpu;
+            e.input_type=DataType::U32;e.input_types={DataType::U32,DataType::U32};e.output_type=DataType::F32;
+            e.min_input_count=2;e.max_input_count=2;e.min_rank=2;e.max_rank=2;
+            e.validation=KernelValidation::Unverified;e.kernel_id=(gles?"gles-":"dawn-")+suffix+"-embedding-f32-v1";
+            if(gles)e.glsl_source=eg;else e.wgsl_source=ew;
+            status=registry.register_kernel(std::move(e));if(!status.ok())return status;
+        }
+    }
+
     for (const bool q5_1 : {false, true}) {
         const std::string suffix = q5_1 ? "q5-1" : "q5-0";
         const std::string op = q5_1 ? "MatMul_Q5_1" : "MatMul_Q5_0";
@@ -3291,6 +3318,19 @@ Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
         format.backend_gpu_kernel_states[BackendKind::DawnWebGpu] = SupportState::Unverified;
         format.backend_gpu_kernel_states[BackendKind::OpenGles] = SupportState::Unverified;
     };
+
+    QuantizationFormat f16;
+    f16.file_type_id=1;f16.name="F16";f16.block_elements=1;f16.bytes_per_block=2;
+    f16.quantized=false;f16.decoder_state=SupportState::Validated;f16.gpu_kernel_state=SupportState::Unverified;
+    initialize_backend_states(f16);
+    Status status=registry.register_format(std::move(f16));if(!status.ok())return status;
+
+    QuantizationFormat bf16;
+    bf16.file_type_id=30;bf16.name="BF16";bf16.block_elements=1;bf16.bytes_per_block=2;
+    bf16.quantized=false;bf16.decoder_state=SupportState::Validated;bf16.gpu_kernel_state=SupportState::Unverified;
+    initialize_backend_states(bf16);
+    status=registry.register_format(std::move(bf16));if(!status.ok())return status;
+
     QuantizationFormat q4_0;
     q4_0.file_type_id = 2;
     q4_0.name = "Q4_0";

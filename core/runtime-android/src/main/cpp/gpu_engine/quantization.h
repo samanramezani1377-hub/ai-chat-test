@@ -55,6 +55,12 @@ const char* q5_1_matmul_glsl_source() noexcept;
 Status validate_q5_matmul_kernel_impl(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations, bool q5_1);
 
 
+
+Status validate_f16_matmul_kernel(Backend&,OperatorRegistry&,QuantizationRegistry&);
+Status validate_bf16_matmul_kernel(Backend&,OperatorRegistry&,QuantizationRegistry&);
+Status validate_f16_embedding_kernel(Backend&,OperatorRegistry&,QuantizationRegistry&);
+Status validate_bf16_embedding_kernel(Backend&,OperatorRegistry&,QuantizationRegistry&);
+
 Status build_f16_embedding_candidate(const std::shared_ptr<Buffer>&,uint64_t,uint32_t,uint32_t,const std::shared_ptr<Buffer>&,const std::vector<uint32_t>&,const Tensor&,ComputeDispatch&);
 Status build_f16_embedding_gles_candidate(const std::shared_ptr<Buffer>&,uint64_t,uint32_t,uint32_t,const std::shared_ptr<Buffer>&,const std::vector<uint32_t>&,const Tensor&,ComputeDispatch&);
 Status build_bf16_embedding_candidate(const std::shared_ptr<Buffer>&,uint64_t,uint32_t,uint32_t,const std::shared_ptr<Buffer>&,const std::vector<uint32_t>&,const Tensor&,ComputeDispatch&);
