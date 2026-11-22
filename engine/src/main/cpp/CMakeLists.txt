@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.22)
 project(android_gpu_inference_engine LANGUAGES C CXX)
 
+# Use ccache in CI for Dawn and engine translation units. Local Android builds
+# remain independent of ccache and do not require an extra host tool.
+if (DEFINED ENV{CI} AND DEFINED ENV{CCACHE_DIR})
+    find_program(AI_CHAT_CCACHE_EXECUTABLE ccache REQUIRED)
+    set(CMAKE_C_COMPILER_LAUNCHER "${AI_CHAT_CCACHE_EXECUTABLE}" CACHE STRING "C compiler launcher" FORCE)
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${AI_CHAT_CCACHE_EXECUTABLE}" CACHE STRING "C++ compiler launcher" FORCE)
+endif()
+
 if (NOT ANDROID)
     message(FATAL_ERROR "The Android GPU engine must be built with the Android NDK toolchain")
 endif()
@@ -87,7 +95,7 @@ add_custom_command(TARGET gpu_engine_android POST_BUILD
     COMMAND "${CMAKE_OBJCOPY}" --only-keep-debug
             "$<TARGET_FILE:gpu_engine_android>" "${ENGINE_DEBUG_SYMBOLS}"
     COMMAND "${CMAKE_STRIP}" --strip-debug "$<TARGET_FILE:gpu_engine_android>"
-    COMMAND "${CMAKE_OBJCOPY}" --add-gnu-debuglink="${ENGINE_DEBUG_SYMBOLS}"
+    COMMAND "${CMAKE_OBJCOPY}" --add-gnu-debuglink "${ENGINE_DEBUG_SYMBOLS}"
             "$<TARGET_FILE:gpu_engine_android>"
     COMMENT "Extracting native debug symbols and stripping packaged GPU engine"
     VERBATIM

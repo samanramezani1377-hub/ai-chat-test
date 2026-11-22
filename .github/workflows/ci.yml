@@ -30,6 +30,8 @@ jobs:
     name: Build Android GPU engine test APK
     runs-on: ubuntu-22.04
     timeout-minutes: 120
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
     steps:
       - uses: actions/checkout@v5
 
@@ -50,13 +52,32 @@ jobs:
         with:
           go-version: "1.24.x"
 
+      - name: Install ccache
+        run: |
+          if ! command -v ccache >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ccache
+          fi
+          ccache --max-size=3G
+
+      - name: Restore native compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-android-arm64-ndk27-dawn-alpha06-${{ hashFiles('engine/src/main/cpp/CMakeLists.txt', 'engine/src/main/cpp/cmake/FindDawn.cmake') }}
+          restore-keys: |
+            ccache-android-arm64-ndk27-dawn-alpha06-
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "8.13"
+          cache-read-only: false
 
       - name: Build test application
-        run: gradle :test-app:assembleDebug --stacktrace --console=plain
+        run: |
+          gradle :test-app:assembleDebug --stacktrace --console=plain
+          ccache --show-stats
 
       - name: Upload test APK
         uses: actions/upload-artifact@v4
