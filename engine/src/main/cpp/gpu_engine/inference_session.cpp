@@ -27,19 +27,21 @@ bool add_overflow(uint64_t lhs, uint64_t rhs, uint64_t& result) {
     return false;
 }
 
-std::string safe_diagnostic_atom(const std::string& value) {
+std::string safe_diagnostic_atom(const std::string& value, size_t maximum = 256) {
     std::string out;
-    out.reserve(value.size());
+    out.reserve(std::min(value.size(), maximum));
     for (unsigned char ch : value) {
+        if (out.size() >= maximum) break;
         if (ch == ';' || ch == '=' || ch == '|' || ch == ',' ||
             ch == '\n' || ch == '\r' || ch == '\t') out.push_back('_');
         else if (ch >= 0x20 && ch != 0x7f) out.push_back(static_cast<char>(ch));
     }
+    if (value.size() > out.size() && out.size() == maximum) out += "~";
     return out;
 }
 
 std::string metadata_value_summary(const GgufMetadataValue& value) {
-    if (const auto* v = std::get_if<std::string>(&value)) return "s:" + safe_diagnostic_atom(*v);
+    if (const auto* v = std::get_if<std::string>(&value)) return "s:" + safe_diagnostic_atom(*v, 128);
     if (const auto* v = std::get_if<uint64_t>(&value)) return "u:" + std::to_string(*v);
     if (const auto* v = std::get_if<int64_t>(&value)) return "i:" + std::to_string(*v);
     if (const auto* v = std::get_if<double>(&value)) {
@@ -71,18 +73,34 @@ std::string describe_unsupported_gguf_structure(const GgufFileInfo& model,
         << ",merges=" << model.tokenizer.merges.size()
         << ",architecture_metadata=[";
     bool first = true;
+    bool truncated = false;
     const std::string prefix = model.architecture + ".";
+    std::vector<std::string> metadata_keys;
+    metadata_keys.reserve(model.metadata.size());
     for (const auto& entry : model.metadata) {
-        if (entry.first != "general.architecture" &&
-            entry.first != "general.name" &&
-            entry.first.compare(0, prefix.size(), prefix) != 0) continue;
+        if (entry.first == "general.architecture" || entry.first == "general.name" ||
+            entry.first.compare(0, prefix.size(), prefix) == 0)
+            metadata_keys.push_back(entry.first);
+    }
+    std::sort(metadata_keys.begin(), metadata_keys.end());
+    for (const auto& key : metadata_keys) {
+        if (static_cast<size_t>(out.tellp()) >= maximum_characters - 512) {
+            truncated = true;
+            break;
+        }
+        const auto found = model.metadata.find(key);
+        if (found == model.metadata.end()) continue;
         if (!first) out << ",";
         first = false;
-        out << safe_diagnostic_atom(entry.first) << ":" << metadata_value_summary(entry.second);
+        out << safe_diagnostic_atom(key) << ":" << metadata_value_summary(found->second);
     }
     out << "],tensors=[";
     first = true;
     for (const auto& tensor : model.tensors) {
+        if (static_cast<size_t>(out.tellp()) >= maximum_characters - 512) {
+            truncated = true;
+            break;
+        }
         if (!first) out << ",";
         first = false;
         out << safe_diagnostic_atom(tensor.name) << "[";
@@ -95,13 +113,10 @@ std::string describe_unsupported_gguf_structure(const GgufFileInfo& model,
         if (tensor.byte_size_known) out << tensor.byte_size;
         else out << "?";
     }
-    out << "]}";
-    std::string result = out.str();
-    if (result.size() > maximum_characters) {
-        result.resize(maximum_characters);
-        result += "...TRUNCATED";
-    }
-    return result;
+    out << "]";
+    if (truncated) out << ",truncated=1";
+    out << "}";
+    return out.str();
 }
 
 } // namespace
