@@ -4096,7 +4096,9 @@ Status build_bf16_matmul_gles_candidate(const Tensor&a,const std::shared_ptr<Buf
 
 Status reference_f16_matmul(const float*a,const uint8_t*w,uint64_t bytes,float*out,uint32_t rows,uint32_t channels,uint32_t inner,bool bf16){
     if((!a||!w||!out)&&rows&&channels&&inner)return {StatusCode::InvalidArgument,"16-bit MatMul reference received a null pointer"};
-    if(!rows||!channels||!inner||bytes!=static_cast<uint64_t>(channels)*inner*2)return {StatusCode::InvalidArgument,"16-bit MatMul dimensions or weight bytes are invalid"};
+    if(!rows||!channels||!inner||inner>UINT64_MAX/2||channels>UINT64_MAX/(static_cast<uint64_t>(inner)*2)||
+       bytes!=static_cast<uint64_t>(channels)*inner*2)
+        return {StatusCode::InvalidArgument,"16-bit MatMul dimensions or weight bytes are invalid"};
     std::vector<float> decoded(inner);
     for(uint32_t channel=0;channel<channels;++channel){
         Status status=decode_fp16_storage(w+static_cast<uint64_t>(channel)*inner*2,static_cast<uint64_t>(inner)*2,decoded.data(),inner,bf16);
@@ -4172,7 +4174,9 @@ Status build_bf16_embedding_gles_candidate(const std::shared_ptr<Buffer>&w,uint6
 
 Status reference_f16_embedding(const uint8_t*w,uint64_t bytes,uint32_t vocabulary,uint32_t dimension,const std::vector<uint32_t>&ids,float*out,bool bf16){
     if((!w||!out)&&!ids.empty())return {StatusCode::InvalidArgument,"16-bit Embedding reference received a null pointer"};
-    if(!vocabulary||!dimension||ids.empty()||bytes!=static_cast<uint64_t>(vocabulary)*dimension*2)
+    if(!vocabulary||!dimension||ids.empty()||dimension>UINT64_MAX/2||
+       vocabulary>UINT64_MAX/(static_cast<uint64_t>(dimension)*2)||
+       bytes!=static_cast<uint64_t>(vocabulary)*dimension*2)
         return {StatusCode::InvalidArgument,"16-bit Embedding dimensions or weight bytes are invalid"};
     for(size_t row=0;row<ids.size();++row){
         if(ids[row]>=vocabulary)return {StatusCode::InvalidArgument,"16-bit Embedding token ID is outside vocabulary"};
