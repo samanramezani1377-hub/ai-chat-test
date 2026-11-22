@@ -76,8 +76,6 @@ Status build_split_impl(const Tensor& input, const Tensor& output,
     for (size_t i = 0; i < in_shape.size(); ++i) {
         if (in_shape[i] == 0 || out_shape[i] == 0)
             return {StatusCode::InvalidArgument, "Split dimensions must be non-zero"};
-        if (i != axis && in_shape[i] != out_shape[i])
-            return {StatusCode::InvalidArgument, "Split may change only the selected axis dimension"};
         if (i > axis) {
             if (inner > UINT32_MAX / in_shape[i])
                 return {StatusCode::InvalidArgument, "Split inner dimension overflows"};

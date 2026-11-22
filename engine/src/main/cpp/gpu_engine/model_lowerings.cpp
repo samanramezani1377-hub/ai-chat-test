@@ -523,6 +523,32 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
         });
     if (!status.ok()) return status;
 
+    status = registry.register_lowering(backend, "GdnL2Norm",
+        [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
+                  ComputeDispatch& dispatch) {
+            if (operation.inputs.size() != 1 || !operation.weight_tensors.empty())
+                return Status{StatusCode::InvalidArgument, "GdnL2Norm requires one activation and no weights"};
+            const Tensor *input = nullptr, *output = nullptr;
+            Status result = lookup_operand(operation, context, 0, input);
+            if (!result.ok()) return result;
+            result = lookup_output(operation, context, output);
+            if (!result.ok()) return result;
+            uint32_t state_size = 0, group_count = 0;
+            float epsilon = 0.0f;
+            result = required_integer(operation, "state_size", state_size);
+            if (!result.ok()) return result;
+            result = required_integer(operation, "group_count", group_count);
+            if (!result.ok()) return result;
+            result = required_float(operation, "epsilon", epsilon);
+            if (!result.ok()) return result;
+            return backend == BackendKind::OpenGles
+                ? build_gdn_l2_norm_f32_gles_candidate(*input, *output, state_size,
+                    group_count, epsilon, dispatch)
+                : build_gdn_l2_norm_f32_candidate(*input, *output, state_size,
+                    group_count, epsilon, dispatch);
+        });
+    if (!status.ok()) return status;
+
     status = registry.register_lowering(backend, "RoPE",
         [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
                   ComputeDispatch& dispatch) {

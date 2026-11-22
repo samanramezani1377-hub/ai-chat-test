@@ -1785,7 +1785,9 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     q8.wgsl_source = q8_0_dequantize_wgsl_source();
     status = registry.register_kernel(std::move(q8));
     if (!status.ok()) return status;
-    return register_split_operator_candidate(registry, BackendKind::DawnWebGpu);
+    status = register_split_operator_candidate(registry, BackendKind::DawnWebGpu);
+    if (!status.ok()) return status;
+    return register_gdn_l2_norm_operator_candidate(registry, BackendKind::DawnWebGpu);
 }
 
 
@@ -1956,7 +1958,9 @@ Status register_builtin_gles_operator_candidates(OperatorRegistry& registry) {
     status = registry.register_kernel(std::move(attention));
     if (!status.ok()) return status;
 
-    return register_split_operator_candidate(registry, BackendKind::OpenGles);
+    status = register_split_operator_candidate(registry, BackendKind::OpenGles);
+    if (!status.ok()) return status;
+    return register_gdn_l2_norm_operator_candidate(registry, BackendKind::OpenGles);
 }
 
 } // namespace ai_chat::gpu_engine

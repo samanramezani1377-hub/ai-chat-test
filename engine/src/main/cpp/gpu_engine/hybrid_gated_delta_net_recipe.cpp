@@ -95,6 +95,7 @@ struct Qwen35HybridConfig {
     uint64_t head_dimension = 0;
     uint64_t key_dimension = 0;
     uint64_t conv_dimension = 0;
+    uint64_t recurrent_state_elements = 0;
     uint64_t vocabulary_size = 0;
     double rms_epsilon = 0.00001;
     double rope_theta = 10000.0;
@@ -123,8 +124,9 @@ bool load_qwen35_hyperparameters(const GgufFileInfo& model, Qwen35HybridConfig& 
         out.embedding == 0 || out.embedding > UINT64_MAX / 2 || out.heads == 0 ||
         out.kv_heads == 0 || out.feed_forward == 0 || out.conv_kernel == 0 ||
         out.ssm_inner == 0 || out.ssm_state == 0 || out.ssm_dt_rank == 0 ||
-        out.ssm_groups == 0 || out.kv_heads > out.heads || out.embedding % out.heads != 0 ||
-        out.ssm_inner % out.ssm_dt_rank != 0 || out.ssm_state > UINT64_MAX / out.ssm_groups) {
+        out.ssm_groups == 0 || out.conv_kernel < 2 || out.kv_heads > out.heads ||
+        out.embedding % out.heads != 0 || out.ssm_inner % out.ssm_dt_rank != 0 ||
+        out.ssm_state > UINT64_MAX / out.ssm_groups) {
         error = "Qwen3.5 GGUF contains invalid or inconsistent hybrid dimensions";
         return false;
     }
@@ -138,6 +140,13 @@ bool load_qwen35_hyperparameters(const GgufFileInfo& model, Qwen35HybridConfig& 
         return false;
     }
     out.conv_dimension = out.ssm_inner + 2 * out.key_dimension;
+    const uint64_t value_head_dimension = out.ssm_inner / out.ssm_dt_rank;
+    if (value_head_dimension > UINT64_MAX / value_head_dimension ||
+        value_head_dimension * value_head_dimension > UINT64_MAX / out.ssm_dt_rank) {
+        error = "Qwen3.5 recurrent state dimensions overflow";
+        return false;
+    }
+    out.recurrent_state_elements = value_head_dimension * value_head_dimension * out.ssm_dt_rank;
     if (!metadata_u64_array(model, prefix + "rope.dimension_sections", out.rope_sections) ||
         out.rope_sections.size() != 4) {
         error = "Qwen3.5 requires four RoPE dimension sections in GGUF metadata";
@@ -210,8 +219,8 @@ public:
         descriptor_.required_operators = {
             "Embedding", "MatMul", "RMSNorm", "MultiAxisRoPE", "Attention",
             "KVCacheAppend", "Sigmoid", "Softplus", "SSMConv1D", "GdnL2Norm",
-            "GatedDeltaNet", "RecurrentStateRead", "RecurrentStateWrite",
-            "ConvStateRead", "ConvStateWrite", "Split", "SiLU", "Multiply", "Add"
+            "GatedDeltaNet", "RecurrentStateRead", "ConvStateRead",
+            "Split", "SiLU", "Multiply", "Add"
         };
         descriptor_.uses_attention = true;
         descriptor_.uses_kv_cache = true;
@@ -327,7 +336,7 @@ public:
         plan.rope_neox_style = true;
         plan.uses_recurrent_state = true;
         plan.uses_multi_axis_rope = true;
-        plan.external_inputs = {"token_ids"};
+        plan.external_inputs = {"token_ids", "position_ids"};
         plan.retained_outputs = {"logits"};
 
         auto add = [&](std::string id, std::string op, std::vector<std::string> inputs,
@@ -376,10 +385,10 @@ public:
             std::string attention_output;
             if (config.recurrent_layers[static_cast<size_t>(layer)] != 0) {
                 add(x + "recurrent_state_read", "RecurrentStateRead", {},
-                    {}, x + "recurrent_state", {0, config.ssm_inner});
+                    {}, x + "recurrent_state", {0, config.recurrent_state_elements});
                 plan.operations.back().integer_attributes["layer_index"] = layer;
                 add(x + "conv_state_read", "ConvStateRead", {},
-                    {}, x + "conv_state", {0, config.conv_dimension, config.conv_kernel});
+                    {}, x + "conv_state", {0, config.conv_dimension, config.conv_kernel - 1});
                 plan.operations.back().integer_attributes["layer_index"] = layer;
 
                 if (has(p + "attn_qkv_gate.weight")) {
@@ -435,18 +444,22 @@ public:
 
                 add(x + "ssm_conv", "SSMConv1D", {x + "qkv", x + "conv_state"},
                     {p + "ssm_conv1d.weight"}, x + "conv_output",
-                    {0, config.conv_dimension});
-                add(x + "ssm_split_q", "Split", {x + "conv_output"}, {}, x + "q",
+                    {0, config.conv_dimension}, true);
+                plan.operations.back().integer_attributes["layer_index"] = layer;
+                plan.operations.back().string_attributes["state_writeback"] = "conv_state";
+                add(x + "ssm_conv_silu", "SiLU", {x + "conv_output"}, {},
+                    x + "conv_output_silu", {0, config.conv_dimension});
+                add(x + "ssm_split_q", "Split", {x + "conv_output_silu"}, {}, x + "q",
                     {0, config.key_dimension});
                 plan.operations.back().integer_attributes["axis"] = 1;
                 plan.operations.back().integer_attributes["offset"] = 0;
                 plan.operations.back().integer_attributes["length"] = config.key_dimension;
-                add(x + "ssm_split_k", "Split", {x + "conv_output"}, {}, x + "k",
+                add(x + "ssm_split_k", "Split", {x + "conv_output_silu"}, {}, x + "k",
                     {0, config.key_dimension});
                 plan.operations.back().integer_attributes["axis"] = 1;
                 plan.operations.back().integer_attributes["offset"] = config.key_dimension;
                 plan.operations.back().integer_attributes["length"] = config.key_dimension;
-                add(x + "ssm_split_v", "Split", {x + "conv_output"}, {}, x + "v",
+                add(x + "ssm_split_v", "Split", {x + "conv_output_silu"}, {}, x + "v",
                     {0, config.ssm_inner});
                 plan.operations.back().integer_attributes["axis"] = 1;
                 plan.operations.back().integer_attributes["offset"] = 2 * config.key_dimension;
@@ -455,14 +468,18 @@ public:
                     {0, config.key_dimension});
                 plan.operations.back().integer_attributes["state_size"] = config.ssm_state;
                 plan.operations.back().integer_attributes["group_count"] = config.ssm_groups;
+                plan.operations.back().float_attributes["epsilon"] = config.rms_epsilon;
                 add(x + "k_l2_norm", "GdnL2Norm", {x + "k"}, {}, x + "k_norm",
                     {0, config.key_dimension});
                 plan.operations.back().integer_attributes["state_size"] = config.ssm_state;
                 plan.operations.back().integer_attributes["group_count"] = config.ssm_groups;
+                plan.operations.back().float_attributes["epsilon"] = config.rms_epsilon;
                 add(x + "gated_delta_net", "GatedDeltaNet",
                     {x + "q_norm", x + "k_norm", x + "v", x + "delta_gate",
                      x + "beta_gated", x + "recurrent_state"},
-                    {}, x + "recurrent_output", {0, config.ssm_inner});
+                    {}, x + "recurrent_output", {0, config.ssm_inner}, true);
+                plan.operations.back().string_attributes["state_writeback"] = "recurrent_state";
+                plan.operations.back().integer_attributes["layer_index"] = layer;
                 plan.operations.back().integer_attributes["state_size"] = config.ssm_state;
                 plan.operations.back().integer_attributes["group_count"] = config.ssm_groups;
                 plan.operations.back().integer_attributes["value_heads"] = config.ssm_dt_rank;
@@ -478,15 +495,6 @@ public:
                 add(x + "recurrent_output_projection", "MatMul",
                     {x + "gdn_normalized"}, {p + "ssm_out.weight"},
                     x + "attention_output", {0, config.embedding});
-                add(x + "recurrent_state_write", "RecurrentStateWrite",
-                    {x + "recurrent_output", x + "recurrent_state"}, {},
-                    x + "recurrent_state_updated", {}, true);
-                plan.operations.back().integer_attributes["layer_index"] = layer;
-                add(x + "conv_state_write", "ConvStateWrite",
-                    {x + "conv_output", x + "conv_state"}, {},
-                    x + "conv_state_updated", {}, true);
-                plan.operations.back().integer_attributes["layer_index"] = layer;
-                plan.operations.back().control_inputs.push_back(x + "recurrent_state_updated");
             } else {
                 add(x + "q_projection", "MatMul", {x + "normalized"},
                     {p + "attn_q.weight"}, x + "q_full",
@@ -513,7 +521,7 @@ public:
                     x + "k_normalized", {0, config.kv_heads, config.head_dimension});
                 for (const std::string suffix : {"q", "k"}) {
                     auto& rope = add(x + suffix + "_mrope", "MultiAxisRoPE",
-                        {x + (suffix == "q" ? "q_normalized" : "k_normalized")},
+                        {x + (suffix == "q" ? "q_normalized" : "k_normalized"), "position_ids"},
                         {}, x + suffix + "_rotated",
                         {0, suffix == "q" ? config.heads : config.kv_heads, config.head_dimension});
                     rope.float_attributes["theta"] = config.rope_theta;

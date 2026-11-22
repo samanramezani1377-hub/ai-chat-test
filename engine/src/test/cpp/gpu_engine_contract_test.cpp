@@ -405,6 +405,8 @@ void test_qwen35_hybrid_recipe_builds_generic_semantic_graph() {
     assert(plan.structurally_validated);
     assert(plan.semantic_schema_id == "hybrid_gated_delta_net");
     assert(plan.uses_recurrent_state && plan.uses_multi_axis_rope);
+    assert(std::find(plan.external_inputs.begin(), plan.external_inputs.end(),
+                     "position_ids") != plan.external_inputs.end());
     assert(!plan.gpu_ready && !plan.operator_coverage_validated);
     const auto has_operator = [&](const std::string& name) {
         return std::any_of(plan.operations.begin(), plan.operations.end(),
@@ -446,6 +448,33 @@ void test_split_sigmoid_and_softplus_references() {
     assert((sliced == std::vector<float>{1, 2, 4, 5, 7, 8, 10, 11}));
     assert(reference_split_f32(source.data(), sliced.data(),
                                {2, 2, 3}, {2, 2, 2}, 2, 2).code ==
+           StatusCode::InvalidArgument);
+}
+
+void test_gdn_l2_norm_reference() {
+    constexpr uint32_t tokens = 2;
+    constexpr uint32_t state_size = 3;
+    constexpr uint32_t groups = 2;
+    constexpr float epsilon = 1.0e-5f;
+    const std::vector<float> input = {
+        1.0f, 2.0f, 2.0f, 3.0f, 4.0f, 0.0f,
+        -1.0f, 1.0f, 1.0f, 0.5f, -0.5f, 2.0f
+    };
+    std::vector<float> output(input.size());
+    assert(reference_gdn_l2_norm_f32(input.data(), output.data(), tokens,
+                                      state_size, groups, epsilon).ok());
+    for (uint32_t token = 0; token < tokens; ++token) {
+        for (uint32_t group = 0; group < groups; ++group) {
+            const size_t base = static_cast<size_t>(token) * groups * state_size +
+                                static_cast<size_t>(group) * state_size;
+            float norm_squared = 0.0f;
+            for (uint32_t i = 0; i < state_size; ++i)
+                norm_squared += output[base + i] * output[base + i];
+            assert(std::fabs(norm_squared - 1.0f) < 2.0e-4f);
+        }
+    }
+    assert(reference_gdn_l2_norm_f32(input.data(), output.data(), tokens,
+                                      state_size, groups, 0.0f).code ==
            StatusCode::InvalidArgument);
 }
 
@@ -3718,6 +3747,7 @@ int main() {
     test_gguf_structure_analyzer_is_evidence_only();
     test_qwen35_hybrid_recipe_builds_generic_semantic_graph();
     test_split_sigmoid_and_softplus_references();
+    test_gdn_l2_norm_reference();
     test_gpu_memory_planner_respects_streaming_and_reserve();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";

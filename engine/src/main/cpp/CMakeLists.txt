@@ -45,6 +45,7 @@ add_library(ai_chat_gpu_engine STATIC
     ${ENGINE_DIR}/model_structure_analyzer.cpp
     ${ENGINE_DIR}/hybrid_gated_delta_net_recipe.cpp
     ${ENGINE_DIR}/split_operator.cpp
+    ${ENGINE_DIR}/gdn_l2_norm_operator.cpp
     ${ENGINE_DIR}/model_graph.cpp
     ${ENGINE_DIR}/model_lowerings.cpp
     ${ENGINE_DIR}/operators.cpp

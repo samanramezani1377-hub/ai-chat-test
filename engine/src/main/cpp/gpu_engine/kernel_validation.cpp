@@ -358,6 +358,47 @@ Status validate_split(Backend& backend, Validate&& build) {
 }
 
 template <typename Validate>
+Status validate_gdn_l2_norm(Backend& backend, Validate&& build) {
+    constexpr uint32_t state_size = 4;
+    constexpr uint32_t groups = 2;
+    constexpr float epsilon = 1.0e-5f;
+    std::vector<float> values(2 * state_size * groups);
+    for (size_t i = 0; i < values.size(); ++i)
+        values[i] = static_cast<float>(static_cast<int>(i % 9) - 4) * 0.17f;
+    TensorFixture input, output;
+    Status status = make_f32_tensor(backend, {2, state_size * groups}, values,
+                                    "validate-gdn-l2-input", input);
+    if (!status.ok()) return status;
+    status = make_f32_tensor(backend, {2, state_size * groups}, {},
+                             "validate-gdn-l2-output", output);
+    if (!status.ok()) return status;
+    std::vector<float> expected(values.size());
+    status = reference_gdn_l2_norm_f32(values.data(), expected.data(), 2,
+                                        state_size, groups, epsilon);
+    if (!status.ok()) return status;
+    ComputeDispatch dispatch;
+    status = build(input.tensor, output.tensor, state_size, groups, epsilon, dispatch);
+    if (!status.ok()) return status;
+    status = execute_and_compare(backend, dispatch, output.tensor, expected);
+    if (!status.ok()) return status;
+
+    std::vector<float> values2(3 * 5);
+    for (size_t i = 0; i < values2.size(); ++i)
+        values2[i] = static_cast<float>(static_cast<int>(i % 7) - 3) * 0.31f;
+    TensorFixture input2, output2;
+    status = make_f32_tensor(backend, {1, 15}, values2, "validate-gdn-l2-input-odd", input2);
+    if (!status.ok()) return status;
+    status = make_f32_tensor(backend, {1, 15}, {}, "validate-gdn-l2-output-odd", output2);
+    if (!status.ok()) return status;
+    std::vector<float> expected2(values2.size());
+    status = reference_gdn_l2_norm_f32(values2.data(), expected2.data(), 1, 5, 3, epsilon);
+    if (!status.ok()) return status;
+    status = build(input2.tensor, output2.tensor, 5, 3, epsilon, dispatch);
+    if (!status.ok()) return status;
+    return execute_and_compare(backend, dispatch, output2.tensor, expected2);
+}
+
+template <typename Validate>
 Status validate_rope(Backend& backend, Validate&& build) {
     TensorFixture input, output;
     const std::vector<float> x = {
@@ -596,6 +637,16 @@ Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& reg
                                 : build_silu_f32_candidate(input, out, dispatch);
                 }, false);
             });
+    run("GdnL2Norm", gles ? "gles-gdn-l2-norm-f32-v1" : "dawn-gdn-l2-norm-f32-v1",
+        [&] {
+            return validate_gdn_l2_norm(backend,
+                [&](const Tensor& input, const Tensor& output, uint32_t state_size,
+                    uint32_t groups, float epsilon, ComputeDispatch& dispatch) {
+                    return gles
+                        ? build_gdn_l2_norm_f32_gles_candidate(input, output, state_size, groups, epsilon, dispatch)
+                        : build_gdn_l2_norm_f32_candidate(input, output, state_size, groups, epsilon, dispatch);
+                });
+        });
     run("Split", gles ? "gles-split-f32-v1" : "dawn-split-f32-v1",
         [&] {
             return validate_split(backend, [&](const Tensor& input, const Tensor& output,

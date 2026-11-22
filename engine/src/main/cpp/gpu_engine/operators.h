@@ -98,6 +98,16 @@ Status reference_split_f32(const float* input, float* output,
                            const std::vector<uint64_t>& output_shape,
                            uint32_t axis, uint32_t offset);
 Status register_split_operator_candidate(OperatorRegistry& registry, BackendKind backend);
+Status build_gdn_l2_norm_f32_candidate(const Tensor& input, const Tensor& output,
+                                       uint32_t state_size, uint32_t group_count,
+                                       float epsilon, ComputeDispatch& dispatch);
+Status build_gdn_l2_norm_f32_gles_candidate(const Tensor& input, const Tensor& output,
+                                            uint32_t state_size, uint32_t group_count,
+                                            float epsilon, ComputeDispatch& dispatch);
+Status reference_gdn_l2_norm_f32(const float* input, float* output,
+                                 uint32_t tokens, uint32_t state_size,
+                                 uint32_t group_count, float epsilon);
+Status register_gdn_l2_norm_operator_candidate(OperatorRegistry& registry, BackendKind backend);
 
 const char* softmax_f32_wgsl_source() noexcept;
 Status build_softmax_f32_candidate(const Tensor& input, const Tensor& output,
