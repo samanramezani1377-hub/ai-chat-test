@@ -37,7 +37,7 @@ The runtime continues to read these values from each GGUF:
 - BOS, EOS, unknown and padding token IDs
 - BOS/EOS insertion and byte/whitespace behavior flags
 
-Different valid PAD IDs are therefore retained per file. Diagnostics include both special-token IDs and their corresponding token strings to expose conversion inconsistencies.
+Different valid PAD IDs are therefore retained per file. GGUF `CONTROL` tokens are treated as skippable special tokens, while `USER_DEFINED` tokens are isolated during encode but preserved during decode. Diagnostics include both special-token IDs and their corresponding token strings to expose conversion inconsistencies.
 
 ## Limits
 
