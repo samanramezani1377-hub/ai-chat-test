@@ -11,7 +11,7 @@
 
 #include <exception>
 #include <cstdlib>
-#include <sstream>
+#include <sstream>\n#include <stdexcept>\n#include <cstdint>\n#include <vector>
 #include <string>
 
 namespace ai_chat::gpu_engine {
@@ -30,13 +30,112 @@ GpuInferenceSession& gpu_inference_session() {
     return session;
 }
 
+void append_utf8(uint32_t cp, std::string& out) {
+    if (cp <= 0x7f) out.push_back(static_cast<char>(cp));
+    else if (cp <= 0x7ff) {
+        out.push_back(static_cast<char>(0xc0 | (cp >> 6)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
+    } else if (cp <= 0xffff) {
+        out.push_back(static_cast<char>(0xe0 | (cp >> 12)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3f)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
+    } else {
+        out.push_back(static_cast<char>(0xf0 | (cp >> 18)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3f)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3f)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
+    }
+}
+
 std::string from_java_string(JNIEnv* env, jstring value) {
     if (!value) return {};
-    const char* chars = env->GetStringUTFChars(value, nullptr);
-    if (!chars) return {};
-    std::string result(chars);
-    env->ReleaseStringUTFChars(value, chars);
+    const jsize length = env->GetStringLength(value);
+    const jchar* chars = env->GetStringChars(value, nullptr);
+    if (!chars) throw std::runtime_error("Unable to read Java UTF-16 string");
+    std::string result;
+    result.reserve(static_cast<size_t>(length) * 3);
+    for (jsize i = 0; i < length; ++i) {
+        uint32_t cp = chars[i];
+        if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < length &&
+            chars[i + 1] >= 0xdc00 && chars[i + 1] <= 0xdfff) {
+            cp = 0x10000 + ((cp - 0xd800) << 10) + (chars[++i] - 0xdc00);
+        } else if (cp >= 0xd800 && cp <= 0xdfff) {
+            cp = 0xfffd;
+        }
+        append_utf8(cp, result);
+    }
+    env->ReleaseStringChars(value, chars);
     return result;
+}
+
+// Hugging Face's Qwen3.5 tokenizer applies Unicode NFC before pre-tokenization.
+// Use Android's ICU-backed java.text.Normalizer so the complete Unicode tables
+// are provided by the OS instead of a partial hand-maintained range table.
+std::string normalized_java_text(JNIEnv* env, jstring value) {
+    if (!value) return {};
+    jclass normalizer = env->FindClass("java/text/Normalizer");
+    if (!normalizer) throw std::runtime_error("java.text.Normalizer is unavailable");
+    jclass form_class = env->FindClass("java/text/Normalizer$Form");
+    if (!form_class) {
+        env->DeleteLocalRef(normalizer);
+        throw std::runtime_error("java.text.Normalizer.Form is unavailable");
+    }
+    jfieldID nfc_field = env->GetStaticFieldID(
+        form_class, "NFC", "Ljava/text/Normalizer$Form;");
+    jmethodID normalize = env->GetStaticMethodID(
+        normalizer, "normalize",
+        "(Ljava/lang/CharSequence;Ljava/text/Normalizer$Form;)Ljava/lang/String;");
+    if (!nfc_field || !normalize) {
+        env->DeleteLocalRef(form_class);
+        env->DeleteLocalRef(normalizer);
+        throw std::runtime_error("Unable to resolve NFC normalization API");
+    }
+    jobject nfc = env->GetStaticObjectField(form_class, nfc_field);
+    auto normalized = static_cast<jstring>(env->CallStaticObjectMethod(
+        normalizer, normalize, value, nfc));
+    if (env->ExceptionCheck() || !normalized) {
+        env->ExceptionClear();
+        if (nfc) env->DeleteLocalRef(nfc);
+        env->DeleteLocalRef(form_class);
+        env->DeleteLocalRef(normalizer);
+        throw std::runtime_error("Qwen3.5 NFC normalization failed");
+    }
+    std::string result = from_java_string(env, normalized);
+    env->DeleteLocalRef(normalized);
+    if (nfc) env->DeleteLocalRef(nfc);
+    env->DeleteLocalRef(form_class);
+    env->DeleteLocalRef(normalizer);
+    return result;
+}
+
+jstring to_java_string(JNIEnv* env, const std::string& value) {
+    std::vector<jchar> utf16;
+    utf16.reserve(value.size());
+    for (size_t i = 0; i < value.size();) {
+        const uint8_t first = static_cast<uint8_t>(value[i]);
+        uint32_t cp = 0xfffd;
+        size_t width = 1;
+        if (first < 0x80) cp = first;
+        else if ((first & 0xe0) == 0xc0 && i + 1 < value.size()) {
+            cp = ((first & 0x1f) << 6) | (static_cast<uint8_t>(value[i+1]) & 0x3f); width = 2;
+        } else if ((first & 0xf0) == 0xe0 && i + 2 < value.size()) {
+            cp = ((first & 0x0f) << 12) | ((static_cast<uint8_t>(value[i+1]) & 0x3f) << 6) |
+                 (static_cast<uint8_t>(value[i+2]) & 0x3f); width = 3;
+        } else if ((first & 0xf8) == 0xf0 && i + 3 < value.size()) {
+            cp = ((first & 0x07) << 18) | ((static_cast<uint8_t>(value[i+1]) & 0x3f) << 12) |
+                 ((static_cast<uint8_t>(value[i+2]) & 0x3f) << 6) |
+                 (static_cast<uint8_t>(value[i+3]) & 0x3f); width = 4;
+        }
+        i += width;
+        if (cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) cp = 0xfffd;
+        if (cp <= 0xffff) utf16.push_back(static_cast<jchar>(cp));
+        else {
+            cp -= 0x10000;
+            utf16.push_back(static_cast<jchar>(0xd800 + (cp >> 10)));
+            utf16.push_back(static_cast<jchar>(0xdc00 + (cp & 0x3ff)));
+        }
+    }
+    return env->NewString(utf16.data(), static_cast<jsize>(utf16.size()));
 }
 
 std::string probe_gpu_engine() {
@@ -146,7 +245,7 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineGenerate(
     try {
         if (max_tokens <= 0)
             return static_cast<jint>(ai_chat::gpu_engine::StatusCode::InvalidArgument);
-        const std::string prompt_text = ai_chat::gpu_engine::from_java_string(env, prompt);
+        const std::string prompt_text = ai_chat::gpu_engine::normalized_java_text(env, prompt);
         ai_chat::gpu_engine::SamplingConfig sampling;
         sampling.temperature = temperature;
         sampling.top_k = top_k > 0 ? static_cast<uint32_t>(top_k) : 0u;
@@ -162,7 +261,7 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineGenerate(
         bool callback_failed = false;
         const auto callback = [env, listener, on_token, &callback_failed](const std::string& text) {
             if (!listener || !on_token || callback_failed) return;
-            jstring chunk = env->NewStringUTF(text.c_str());
+            jstring chunk = ai_chat::gpu_engine::to_java_string(env, text);
             if (!chunk) { callback_failed = true; return; }
             env->CallVoidMethod(listener, on_token, chunk);
             env->DeleteLocalRef(chunk);
@@ -187,7 +286,7 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineCountTokens(
     try {
         uint32_t count = 0;
         const auto status = ai_chat::gpu_engine::gpu_inference_session().count_tokens(
-            ai_chat::gpu_engine::from_java_string(env, text), count);
+            ai_chat::gpu_engine::normalized_java_text(env, text), count);
         return status.ok() ? static_cast<jint>(count) : -1;
     } catch (...) {
         return -1;
