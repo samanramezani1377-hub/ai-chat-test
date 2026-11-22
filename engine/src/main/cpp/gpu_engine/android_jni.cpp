@@ -108,6 +108,68 @@ std::string normalized_java_text(JNIEnv* env, jstring value) {
     return result;
 }
 
+Qwen35UnicodeCategories classify_qwen35_text(JNIEnv* env, const std::string& text) {
+    Qwen35UnicodeCategories categories;
+    jclass character = env->FindClass("java/lang/Character");
+    if (!character) throw std::runtime_error("java.lang.Character is unavailable");
+    jmethodID get_type = env->GetStaticMethodID(character, "getType", "(I)I");
+    if (!get_type) {
+        env->DeleteLocalRef(character);
+        throw std::runtime_error("Character.getType(int) is unavailable");
+    }
+    auto is_unicode_space = [](uint32_t cp) {
+        return (cp >= 0x0009 && cp <= 0x000d) || cp == 0x0020 || cp == 0x0085 ||
+               cp == 0x00a0 || cp == 0x1680 || (cp >= 0x2000 && cp <= 0x200a) ||
+               cp == 0x2028 || cp == 0x2029 || cp == 0x202f || cp == 0x205f ||
+               cp == 0x3000;
+    };
+    for (size_t i = 0; i < text.size();) {
+        const uint8_t first = static_cast<uint8_t>(text[i]);
+        uint32_t cp = first;
+        size_t width = 1;
+        if ((first & 0xe0) == 0xc0 && i + 1 < text.size()) {
+            cp = ((first & 0x1f) << 6) | (static_cast<uint8_t>(text[i+1]) & 0x3f); width = 2;
+        } else if ((first & 0xf0) == 0xe0 && i + 2 < text.size()) {
+            cp = ((first & 0x0f) << 12) | ((static_cast<uint8_t>(text[i+1]) & 0x3f) << 6) |
+                 (static_cast<uint8_t>(text[i+2]) & 0x3f); width = 3;
+        } else if ((first & 0xf8) == 0xf0 && i + 3 < text.size()) {
+            cp = ((first & 0x07) << 18) | ((static_cast<uint8_t>(text[i+1]) & 0x3f) << 12) |
+                 ((static_cast<uint8_t>(text[i+2]) & 0x3f) << 6) |
+                 (static_cast<uint8_t>(text[i+3]) & 0x3f); width = 4;
+        }
+        i += width;
+        uint8_t kind = 4; // Other
+        if (cp == '\\r' || cp == '\\n') kind = 3; // Newline
+        else if (is_unicode_space(cp)) kind = 2; // Space
+        else {
+            const jint type = env->CallStaticIntMethod(character, get_type, static_cast<jint>(cp));
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                env->DeleteLocalRef(character);
+                throw std::runtime_error("Character.getType failed during Qwen3.5 tokenization");
+            }
+            if (type >= 1 && type <= 8) kind = 0; // Letter or Mark
+            else if (type >= 9 && type <= 11) kind = 1; // Number
+        }
+        categories.emplace(cp, kind);
+    }
+    env->DeleteLocalRef(character);
+    return categories;
+}
+
+class ScopedQwen35UnicodeCategories {
+public:
+    ScopedQwen35UnicodeCategories(JNIEnv* env, const std::string& normalized_text)
+        : categories_(classify_qwen35_text(env, normalized_text)) {
+        set_qwen35_unicode_categories(&categories_);
+    }
+    ~ScopedQwen35UnicodeCategories() { set_qwen35_unicode_categories(nullptr); }
+    ScopedQwen35UnicodeCategories(const ScopedQwen35UnicodeCategories&) = delete;
+    ScopedQwen35UnicodeCategories& operator=(const ScopedQwen35UnicodeCategories&) = delete;
+private:
+    Qwen35UnicodeCategories categories_;
+};
+
 jstring to_java_string(JNIEnv* env, const std::string& value) {
     std::vector<jchar> utf16;
     utf16.reserve(value.size());
@@ -246,6 +308,7 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineGenerate(
         if (max_tokens <= 0)
             return static_cast<jint>(ai_chat::gpu_engine::StatusCode::InvalidArgument);
         const std::string prompt_text = ai_chat::gpu_engine::normalized_java_text(env, prompt);
+        ai_chat::gpu_engine::ScopedQwen35UnicodeCategories unicode_categories(env, prompt_text);
         ai_chat::gpu_engine::SamplingConfig sampling;
         sampling.temperature = temperature;
         sampling.top_k = top_k > 0 ? static_cast<uint32_t>(top_k) : 0u;
@@ -285,8 +348,9 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineCountTokens(
         JNIEnv* env, jclass, jstring text) {
     try {
         uint32_t count = 0;
-        const auto status = ai_chat::gpu_engine::gpu_inference_session().count_tokens(
-            ai_chat::gpu_engine::normalized_java_text(env, text), count);
+        const std::string normalized = ai_chat::gpu_engine::normalized_java_text(env, text);
+        ai_chat::gpu_engine::ScopedQwen35UnicodeCategories unicode_categories(env, normalized);
+        const auto status = ai_chat::gpu_engine::gpu_inference_session().count_tokens(normalized, count);
         return status.ok() ? static_cast<jint>(count) : -1;
     } catch (...) {
         return -1;
