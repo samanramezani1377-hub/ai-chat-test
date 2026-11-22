@@ -83,6 +83,7 @@ bool metadata_u64_or_uniform_array(const GgufFileInfo& model, const std::string&
 
 struct Qwen35HybridConfig {
     uint64_t layers = 0;
+    uint64_t nextn_predict_layers = 0;
     uint64_t embedding = 0;
     uint64_t heads = 0;
     uint64_t kv_heads = 0;
@@ -174,6 +175,16 @@ bool load_qwen35_hyperparameters(const GgufFileInfo& model, Qwen35HybridConfig& 
         error = "Qwen3.5 requires four RoPE dimension sections in GGUF metadata";
         return false;
     }
+    // GGUF block_count includes the optional MTP/NextN prediction blocks.
+    // Those blocks are not part of the ordinary autoregressive transformer
+    // stack and must never be classified by the repeating hybrid-layer rule.
+    metadata_u64_value(model, prefix + "nextn_predict_layers", out.nextn_predict_layers);
+    if (out.nextn_predict_layers > out.layers) {
+        error = "Qwen3.5 nextn_predict_layers exceeds block_count";
+        return false;
+    }
+    out.layers -= out.nextn_predict_layers;
+
     if (!metadata_u64_array(model, prefix + "attention.recurrent_layers", out.recurrent_layers)) {
         uint64_t full_attention_interval = 4;
         metadata_u64_value(model, prefix + "full_attention_interval", full_attention_interval);
@@ -185,9 +196,11 @@ bool load_qwen35_hyperparameters(const GgufFileInfo& model, Qwen35HybridConfig& 
         for (uint64_t layer = 0; layer < out.layers; ++layer)
             out.recurrent_layers[static_cast<size_t>(layer)] =
                 ((layer + 1) % full_attention_interval) != 0 ? 1u : 0u;
+    } else if (out.recurrent_layers.size() == out.layers + out.nextn_predict_layers) {
+        out.recurrent_layers.resize(static_cast<size_t>(out.layers));
     }
     if (out.recurrent_layers.size() != out.layers) {
-        error = "Qwen3.5 recurrent_layers metadata length does not match block_count";
+        error = "Qwen3.5 recurrent_layers metadata length does not match the non-MTP transformer block count";
         return false;
     }
     if (!metadata_f64_value(model, prefix + "attention.layer_norm_rms_epsilon", out.rms_epsilon))
