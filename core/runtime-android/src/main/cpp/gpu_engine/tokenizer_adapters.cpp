@@ -60,7 +60,11 @@ bool letter(uint32_t c) {
     return c >= 0x00c0 && c <= 0x1efff;
 }
 bool digit(uint32_t c) { return (c >= '0' && c <= '9') || (c >= 0x0660 && c <= 0x0669); }
-bool space(uint32_t c) { return c == 0x20 || (c >= 0x09 && c <= 0x0d) || c == 0xa0 || c == 0x3000; }
+bool space(uint32_t c) {
+    return c == 0x20 || (c >= 0x09 && c <= 0x0d) || c == 0x85 || c == 0xa0 ||
+           c == 0x1680 || (c >= 0x2000 && c <= 0x200a) || c == 0x2028 ||
+           c == 0x2029 || c == 0x202f || c == 0x205f || c == 0x3000;
+}
 
 bool byte_token(const std::string& s, uint8_t& b) {
     if (s.size() != 6 || s.substr(0, 3) != "<0x" || s[5] != '>') return false;
