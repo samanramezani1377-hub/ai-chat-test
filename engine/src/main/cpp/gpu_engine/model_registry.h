@@ -133,6 +133,7 @@ struct ModelPreflightReport {
 };
 
 Status register_builtin_architecture_adapters(ArchitectureRegistry& registry);
+Status register_builtin_hybrid_architecture_recipes(ArchitectureRegistry& registry);
 
 class GgufModelLoader {
 public:

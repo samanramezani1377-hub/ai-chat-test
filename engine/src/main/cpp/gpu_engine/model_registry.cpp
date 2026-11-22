@@ -175,7 +175,8 @@ public:
                            std::vector<std::string> weights,
                            std::string output, std::vector<uint64_t> shape = {}) {
             ModelPlanOperation operation{std::move(id), std::move(op), std::move(inputs),
-                                         std::move(weights), std::move(output), std::move(shape), {}, {}, {}, {}, false};
+                                         std::move(weights), std::move(output), std::move(shape),
+                                         {}, {}, {}, {}, false, {}, {}, {}};
             if (operation.operator_name == "Embedding" && operation.weight_tensors.size() == 1) {
                 const auto found = std::find_if(model.tensors.begin(), model.tensors.end(),
                     [&operation](const GgufTensorInfo& tensor) {
