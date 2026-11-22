@@ -23,6 +23,21 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# GitHub-hosted runners are ephemeral. Keep Dawn's populated FetchContent
+# repositories and third-party dependency sources in a separately cacheable
+# workspace directory rather than inside Gradle's per-build .cxx directory.
+# The CI cache key is tied to the AndroidX WebGPU AAR version and FindDawn
+# configuration, so this directory always represents the pinned Dawn revision.
+if (DEFINED ENV{CI} AND DEFINED ENV{GITHUB_WORKSPACE})
+    set(FETCHCONTENT_BASE_DIR "$ENV{GITHUB_WORKSPACE}/.ci-cache/dawn" CACHE PATH
+        "Persistent CI cache for Dawn FetchContent sources" FORCE)
+    # The cache is invalidated when the pinned AAR/configuration changes. Avoid
+    # redundant git update checks on every configure when the exact source cache
+    # has already been restored.
+    set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL
+        "Use the revision-pinned Dawn sources restored by CI cache" FORCE)
+endif()
+
 # Dawn is the only fetched native GPU dependency. Its revision is pinned by the
 # AndroidX WebGPU AAR metadata supplied by the Gradle build.
 set(_ENGINE_CXX_STANDARD "${CMAKE_CXX_STANDARD}")

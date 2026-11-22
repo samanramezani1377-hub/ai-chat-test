@@ -70,9 +70,23 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-android-arm64-ndk27-dawn-alpha06-${{ hashFiles('engine/src/main/cpp/CMakeLists.txt', 'engine/src/main/cpp/cmake/FindDawn.cmake') }}-${{ github.run_id }}
+          # A per-run key prevented exact cache hits on reruns of the same commit.
+          # Commit keys let reruns reuse the exact cache; the prefix restores the
+          # newest compatible compiler objects after source changes.
+          key: ccache-android-arm64-ndk27-dawn-alpha06-${{ github.sha }}
           restore-keys: |
             ccache-android-arm64-ndk27-dawn-alpha06-
+
+      # Dawn and its pinned third-party sources are expensive to clone. Keep
+      # FetchContent's source/dependency directory outside Gradle's disposable
+      # .cxx build tree and cache it independently from compiler objects.
+      - name: Restore pinned Dawn source cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-cache/dawn
+          # The AAR version pins the Dawn source revision. Do not use restore-keys
+          # here: a different AAR revision must fetch its own exact sources.
+          key: dawn-fetchcontent-androidx-alpha06-${{ hashFiles('engine/build.gradle.kts', 'engine/src/main/cpp/cmake/FindDawn.cmake') }}
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
