@@ -4065,4 +4065,80 @@ Status reference_f16_matmul(const float*a,const uint8_t*w,uint64_t bytes,float*o
     }
     return Status::success();
 }
+
+namespace {
+Status build_fp16_embedding_candidate_impl(const std::shared_ptr<Buffer>&weights,uint64_t bytes,
+    uint32_t vocabulary,uint32_t dimension,const std::shared_ptr<Buffer>&token_buffer,
+    const std::vector<uint32_t>&token_ids,const Tensor&output,ComputeDispatch&dispatch,bool bf16){
+    dispatch=ComputeDispatch{};
+    const std::string type=bf16?"BF16":"F16",suffix=bf16?"bf16":"f16";
+    if(!weights||!token_buffer||!output.buffer()||weights->memory_domain()==MemoryDomain::Host||
+       token_buffer->memory_domain()==MemoryDomain::Host||output.descriptor().data_type!=DataType::F32||
+       output.descriptor().layout!=TensorLayout::Contiguous||output.descriptor().memory==MemoryDomain::Host||
+       output.descriptor().shape.size()!=2||token_ids.empty())
+        return {StatusCode::Unsupported,type+" Embedding requires packed weights, device token IDs and contiguous F32 output"};
+    if(!vocabulary||!dimension||token_ids.size()!=output.descriptor().shape[0]||
+       output.descriptor().shape[1]!=dimension||token_ids.size()>UINT32_MAX||output.element_count()>UINT32_MAX)
+        return {StatusCode::InvalidArgument,type+" Embedding dimensions or token count are invalid"};
+    for(uint32_t id:token_ids)if(id>=vocabulary)return {StatusCode::InvalidArgument,type+" Embedding token ID is outside vocabulary"};
+    if(static_cast<uint64_t>(dimension)>UINT64_MAX/2||static_cast<uint64_t>(vocabulary)>UINT64_MAX/(static_cast<uint64_t>(dimension)*2))
+        return {StatusCode::InvalidArgument,type+" Embedding weight byte size overflows"};
+    const uint64_t expected=static_cast<uint64_t>(vocabulary)*dimension*2;
+    if(bytes!=expected||bytes>UINT32_MAX-3ull)return {StatusCode::InvalidArgument,type+" Embedding weight bytes do not match [vocabulary,dimension]"};
+    const uint64_t padded=(bytes+3)&~uint64_t{3},token_bytes=token_ids.size()*sizeof(uint32_t);
+    if(weights->size_bytes()<padded||token_buffer->size_bytes()<token_bytes||
+       output.byte_size()!=output.element_count()*sizeof(float)||output.buffer().get()==weights.get()||
+       output.buffer().get()==token_buffer.get()||weights.get()==token_buffer.get())
+        return {StatusCode::InvalidArgument,type+" Embedding buffer ranges are inconsistent"};
+    dispatch.label=suffix+"-embedding-f32-generic-unverified";
+    dispatch.kernel_id="dawn-"+suffix+"-embedding-f32-v1";
+    dispatch.backend=BackendKind::DawnWebGpu;
+    dispatch.wgsl_source=bf16?kBF16EmbeddingWgsl:kF16EmbeddingWgsl;
+    dispatch.workgroup_size_x=64;
+    const std::pair<std::string,std::string> constants[]={
+        {"const VOCABULARY_SIZE: u32 = 1u;","const VOCABULARY_SIZE: u32 = "+std::to_string(vocabulary)+"u;"},
+        {"const EMBEDDING_DIMENSION: u32 = 1u;","const EMBEDDING_DIMENSION: u32 = "+std::to_string(dimension)+"u;"},
+        {"const TOKEN_COUNT: u32 = 1u;","const TOKEN_COUNT: u32 = "+std::to_string(token_ids.size())+"u;"},
+        {"const TOTAL_ELEMENTS: u32 = 1u;","const TOTAL_ELEMENTS: u32 = "+std::to_string(output.element_count())+"u;"},
+        {"const WEIGHT_ROW_BYTES: u32 = 2u;","const WEIGHT_ROW_BYTES: u32 = "+std::to_string(static_cast<uint64_t>(dimension)*2)+"u;"}
+    };
+    for(const auto& item:constants){const size_t pos=dispatch.wgsl_source.find(item.first);if(pos==std::string::npos)return {StatusCode::BackendFailure,type+" Embedding WGSL placeholder missing"};dispatch.wgsl_source.replace(pos,item.first.size(),item.second);}
+    dispatch.workgroups_x=static_cast<uint32_t>((output.element_count()+63)/64);
+    dispatch.bindings={{0,weights,0,padded},{1,token_buffer,0,token_bytes},{2,output.buffer(),output.byte_offset(),output.byte_size()}};
+    return Status::success();
+}
+}
+Status build_f16_embedding_candidate(const std::shared_ptr<Buffer>&w,uint64_t b,uint32_t v,uint32_t d,const std::shared_ptr<Buffer>&tb,const std::vector<uint32_t>&ids,const Tensor&o,ComputeDispatch&x){return build_fp16_embedding_candidate_impl(w,b,v,d,tb,ids,o,x,false);}
+Status build_bf16_embedding_candidate(const std::shared_ptr<Buffer>&w,uint64_t b,uint32_t v,uint32_t d,const std::shared_ptr<Buffer>&tb,const std::vector<uint32_t>&ids,const Tensor&o,ComputeDispatch&x){return build_fp16_embedding_candidate_impl(w,b,v,d,tb,ids,o,x,true);}
+static Status build_fp16_embedding_gles_candidate_impl(const std::shared_ptr<Buffer>&w,uint64_t b,uint32_t v,uint32_t d,const std::shared_ptr<Buffer>&tb,const std::vector<uint32_t>&ids,const Tensor&o,ComputeDispatch&x,bool bf16){
+    Status status=build_fp16_embedding_candidate_impl(w,b,v,d,tb,ids,o,x,bf16);if(!status.ok())return status;
+    const std::string suffix=bf16?"bf16":"f16";
+    x.label=suffix+"-embedding-gles-f32-generic-unverified";
+    x.kernel_id="gles-"+suffix+"-embedding-f32-v1";x.backend=BackendKind::OpenGles;
+    x.wgsl_source.clear();x.glsl_source=bf16?kBF16EmbeddingGlsl:kF16EmbeddingGlsl;
+    const std::pair<std::string,std::string> constants[]={
+        {"const uint VOCABULARY_SIZE = 1u;","const uint VOCABULARY_SIZE = "+std::to_string(v)+"u;"},
+        {"const uint EMBEDDING_DIMENSION = 1u;","const uint EMBEDDING_DIMENSION = "+std::to_string(d)+"u;"},
+        {"const uint TOKEN_COUNT = 1u;","const uint TOKEN_COUNT = "+std::to_string(ids.size())+"u;"},
+        {"const uint TOTAL_ELEMENTS = 1u;","const uint TOTAL_ELEMENTS = "+std::to_string(o.element_count())+"u;"},
+        {"const uint WEIGHT_ROW_BYTES = 2u;","const uint WEIGHT_ROW_BYTES = "+std::to_string(static_cast<uint64_t>(d)*2)+"u;"}
+    };
+    for(const auto& item:constants){const size_t pos=x.glsl_source.find(item.first);if(pos==std::string::npos)return {StatusCode::BackendFailure,"16-bit GLES Embedding placeholder missing"};x.glsl_source.replace(pos,item.first.size(),item.second);}
+    return Status::success();
+}
+Status build_f16_embedding_gles_candidate(const std::shared_ptr<Buffer>&w,uint64_t b,uint32_t v,uint32_t d,const std::shared_ptr<Buffer>&tb,const std::vector<uint32_t>&ids,const Tensor&o,ComputeDispatch&x){return build_fp16_embedding_gles_candidate_impl(w,b,v,d,tb,ids,o,x,false);}
+Status build_bf16_embedding_gles_candidate(const std::shared_ptr<Buffer>&w,uint64_t b,uint32_t v,uint32_t d,const std::shared_ptr<Buffer>&tb,const std::vector<uint32_t>&ids,const Tensor&o,ComputeDispatch&x){return build_fp16_embedding_gles_candidate_impl(w,b,v,d,tb,ids,o,x,true);}
+
+Status reference_f16_embedding(const uint8_t*w,uint64_t bytes,uint32_t vocabulary,uint32_t dimension,const std::vector<uint32_t>&ids,float*out,bool bf16){
+    if((!w||!out)&&!ids.empty())return {StatusCode::InvalidArgument,"16-bit Embedding reference received a null pointer"};
+    if(!vocabulary||!dimension||ids.empty()||bytes!=static_cast<uint64_t>(vocabulary)*dimension*2)
+        return {StatusCode::InvalidArgument,"16-bit Embedding dimensions or weight bytes are invalid"};
+    for(size_t row=0;row<ids.size();++row){
+        if(ids[row]>=vocabulary)return {StatusCode::InvalidArgument,"16-bit Embedding token ID is outside vocabulary"};
+        Status status=decode_fp16_storage(w+static_cast<uint64_t>(ids[row])*dimension*2,static_cast<uint64_t>(dimension)*2,
+            out+row*dimension,dimension,bf16);
+        if(!status.ok())return status;
+    }
+    return Status::success();
+}
 } // namespace ai_chat::gpu_engine
