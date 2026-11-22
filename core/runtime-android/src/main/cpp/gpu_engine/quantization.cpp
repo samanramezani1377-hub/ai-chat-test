@@ -4424,11 +4424,13 @@ Status validate_bf16_embedding_kernel(Backend&b,OperatorRegistry&o,QuantizationR
 Status decode_q6_k_blocks(const uint8_t*source,size_t source_bytes,float*destination,size_t destination_elements){
     constexpr size_t block_bytes=210,block_elements=256;
     if((!source||!destination)&&source_bytes)return {StatusCode::InvalidArgument,"Q6_K decoder received a null pointer"};
-    if(source_bytes%block_bytes!=0||destination_elements!=(source_bytes/block_bytes)*block_elements)
-        return {StatusCode::InvalidArgument,"Q6_K source bytes and destination element count do not match complete blocks"};
+    if(source_bytes%block_bytes!=0)
+        return {StatusCode::InvalidArgument,"Q6_K source byte count does not contain complete blocks"};
     const size_t blocks=source_bytes/block_bytes;
     if(blocks>std::numeric_limits<size_t>::max()/block_elements)
         return {StatusCode::Unsupported,"Q6_K destination element count overflows"};
+    if(destination_elements!=blocks*block_elements)
+        return {StatusCode::InvalidArgument,"Q6_K destination element count does not match complete blocks"};
     for(size_t block=0;block<blocks;++block){
         const uint8_t*encoded=source+block*block_bytes;
         const uint8_t*ql=encoded;
