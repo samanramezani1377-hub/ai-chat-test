@@ -187,6 +187,20 @@ bool GpuInferenceSession::uses_qwen35_tokenizer() const noexcept {
     }
 }
 
+bool GpuInferenceSession::uses_nfc_tokenizer() const noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!loaded_ || !loader_ || !loader_->reader()) return false;
+        const auto& tokenizer = loader_->reader()->info().tokenizer;
+        return tokenizer.model == "gpt2" &&
+               (tokenizer.pre_tokenizer == "qwen35" ||
+                tokenizer.pre_tokenizer == "qwen2" ||
+                tokenizer.pre_tokenizer == "qwen3");
+    } catch (...) {
+        return false;
+    }
+}
+
 std::string GpuInferenceSession::backend_name() const {
     return engine_ ? backend_label(engine_->diagnostics().selected_backend) : "Unknown";
 }

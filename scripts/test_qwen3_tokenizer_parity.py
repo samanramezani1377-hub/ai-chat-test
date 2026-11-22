@@ -131,10 +131,11 @@ def main():
         gguf=root/"qwen3-tokenizer.gguf"
         build_gguf(tokenizer_data,config,gguf)
         for index,text in enumerate(corpus):
+            normalized=unicodedata.normalize("NFC",text)
             categories=root/f"categories-{index}.txt"
-            write_categories(text,categories)
+            write_categories(normalized,categories)
             expected=reference.encode(text,add_special_tokens=False).ids
-            actual,decoded=run_native(cli,gguf,text,categories)
+            actual,decoded=run_native(cli,gguf,normalized,categories)
             if actual!=expected:
                 raise AssertionError(f"Encode parity failed case {index}: {text!r}\nexpected {expected[:80]}\nactual {actual[:80]}")
             expected_decoded=reference.decode(expected,skip_special_tokens=True)

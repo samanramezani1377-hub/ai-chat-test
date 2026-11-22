@@ -40,6 +40,7 @@ public:
     void unload() noexcept;
     bool loaded() const noexcept;
     bool uses_qwen35_tokenizer() const noexcept;
+    bool uses_nfc_tokenizer() const noexcept;
     std::string diagnostics() const;
 
 private:

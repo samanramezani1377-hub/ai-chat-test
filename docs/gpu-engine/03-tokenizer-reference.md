@@ -2,9 +2,9 @@
 
 ## Scope
 
-The built-in `gpt2/qwen35` adapter implements the Qwen3.5 byte-level BPE profile. It consumes the vocabulary, merge ranks, token-type table and special-token IDs parsed from the selected GGUF file. Model names and token IDs are not used as tokenizer-selection shortcuts.
+The built-in `gpt2/qwen35` and `gpt2/qwen2` adapters implement the tested Qwen3.5 and Qwen2/Qwen3 byte-level BPE profiles. They consume the vocabulary, merge ranks, token-type table and special-token IDs parsed from the selected GGUF file. Model names and token IDs are not used as tokenizer-selection shortcuts.
 
-The adapter is marked `Validated` only while the native reference-parity test remains part of CI. Other built-in BPE and SentencePiece profiles remain `Unverified` until they receive equivalent independent reference suites.
+Both profiles are marked `Validated` only while their independent native reference-parity tests remain part of CI. Other built-in BPE and SentencePiece profiles remain `Unverified` until they receive equivalent reference suites.
 
 ## Reference
 
@@ -16,6 +16,8 @@ CI pins the upstream `Qwen/Qwen3.5-0.8B` tokenizer assets to revision `2b48083df
 
 The upstream implementation specifies NFC normalization, the Qwen3.5 Unicode pre-tokenization expression, byte-level BPE and the ByteLevel decoder. The CI test builds a minimal GGUF fixture from the pinned tokenizer assets and compares native token IDs and decoded text against the Hugging Face `tokenizers` runtime.
 
+Qwen3.5 reference parity covers 15 multilingual/Unicode cases. The Qwen3-0.6B tokenizer uses the `Qwen2Tokenizer` class and the `qwen2` pre-tokenizer label; its separate CI suite pins tokenizer assets to revision `c1899de289a04d12100db370d81485cdf75e47ca` and checks NFC-normalized text, repeated whitespace, contractions, multilingual Unicode, special tokens, IDs and decoded text. Android JNI uses the platform's full Unicode NFC normalizer for both tested profiles before native tokenization.
+
 ## Run locally
 
 Install the pinned reference runtime and run:
@@ -23,6 +25,7 @@ Install the pinned reference runtime and run:
 ```bash
 python3 -m pip install tokenizers==0.22.1
 bash scripts/test_qwen35_tokenizer_parity.sh
+bash scripts/test_qwen3_tokenizer_parity.sh
 ```
 
 The test is CPU-only and does not require Android, a GPU, Vulkan, a model-weight download or a separate tokenizer file on the device.
@@ -41,4 +44,4 @@ Different valid PAD IDs are therefore retained per file. GGUF `CONTROL` tokens a
 
 ## Limits
 
-Passing this profile test validates the Qwen3.5 tokenizer algorithm against the pinned upstream assets. It does not validate a model architecture, graph, quantization kernel, GPU backend or end-to-end generation. It also does not validate other tokenizer profiles or arbitrary custom tokenizers that happen to use the same metadata labels.
+Passing these profile tests validates the Qwen3.5 and Qwen2/Qwen3 tokenizer algorithms against the pinned upstream assets. It does not validate a model architecture, graph, quantization kernel, GPU backend or end-to-end generation. It also does not validate other tokenizer profiles or arbitrary custom tokenizers that happen to use the same metadata labels.

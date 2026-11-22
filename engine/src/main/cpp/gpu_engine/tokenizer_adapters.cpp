@@ -296,28 +296,28 @@ private:
 class BpeAdapter final : public BaseAdapter {
 public:
     explicit BpeAdapter(std::string pre):desc_{"gpt2",pre,"byte-level-bpe",
-        // Qwen3.5 is checked against the pinned upstream tokenizer.json in CI.
-        // Other profiles remain unverified until they have equivalent parity tests.
-        pre == "qwen35" ? SupportState::Validated : SupportState::Unverified}{build_bytes();}
+        // Qwen3.5 and Qwen2/Qwen3 byte-level BPE profiles are checked against
+        // pinned upstream tokenizer.json assets in CI.
+        (pre == "qwen35" || pre == "qwen2") ? SupportState::Validated : SupportState::Unverified}{build_bytes();}
     const TokenizerDescriptor& descriptor()const noexcept override{return desc_;}
     Status validate_metadata(const GgufTokenizerInfo&m)const override{
         Status s=validate_ids(m);if(!s.ok())return s;
         if(m.merges.empty())return {StatusCode::Unsupported,"BPE merge table is empty"};
-        if (desc_.pre_tokenizer == "qwen35") {
-            // Qwen3.5's published GGUF tokenizer profile. Fail closed if the
-            // tokenizer assets or special-token contract differ from this profile.
+        if (desc_.pre_tokenizer == "qwen35" || desc_.pre_tokenizer == "qwen2") {
+            // The tested Qwen3.5 and Qwen2/Qwen3 byte-level BPE profiles require
+            // complete token types and no implicit BOS/EOS, prefix-space or byte fallback.
             if (m.token_types.size() != m.tokens.size() ||
                 m.add_bos_token || m.add_eos_token ||
                 m.add_space_prefix || m.byte_fallback) {
-                return {StatusCode::Unsupported,"Qwen3.5 requires a complete token-type table and byte-level BPE without implicit BOS/EOS, prefix-space or byte-fallback behavior"};
+                return {StatusCode::Unsupported,"Qwen byte-level BPE requires a complete token-type table without implicit BOS/EOS, prefix-space or byte-fallback behavior"};
             }
         }
         const auto vocabulary=token_map(m);
-        if (desc_.pre_tokenizer == "qwen35") {
+        if (desc_.pre_tokenizer == "qwen35" || desc_.pre_tokenizer == "qwen2") {
             for (uint32_t byte = 0; byte < 256; ++byte) {
                 const auto symbol = encoder_.find(static_cast<uint8_t>(byte));
                 if (symbol == encoder_.end() || vocabulary.find(symbol->second) == vocabulary.end())
-                    return {StatusCode::Unsupported,"Qwen3.5 byte-level vocabulary is missing one of the 256 base byte symbols"};
+                    return {StatusCode::Unsupported,"Qwen byte-level vocabulary is missing one of the 256 base byte symbols"};
             }
         }
         std::unordered_set<std::string> unique_merges;

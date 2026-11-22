@@ -345,7 +345,8 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineGenerate(
             return static_cast<jint>(ai_chat::gpu_engine::StatusCode::InvalidArgument);
         auto& session = ai_chat::gpu_engine::gpu_inference_session();
         const bool qwen35_tokenizer = session.uses_qwen35_tokenizer();
-        const std::string prompt_text = qwen35_tokenizer
+        const bool nfc_tokenizer = session.uses_nfc_tokenizer();
+        const std::string prompt_text = nfc_tokenizer
             ? ai_chat::gpu_engine::normalized_java_text(env, prompt)
             : ai_chat::gpu_engine::from_java_string(env, prompt);
         std::unique_ptr<ai_chat::gpu_engine::ScopedQwen35UnicodeCategories> unicode_categories;
@@ -407,7 +408,8 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineCountTokens(
         uint32_t count = 0;
         auto& session = ai_chat::gpu_engine::gpu_inference_session();
         const bool qwen35_tokenizer = session.uses_qwen35_tokenizer();
-        const std::string input_text = qwen35_tokenizer
+        const bool nfc_tokenizer = session.uses_nfc_tokenizer();
+        const std::string input_text = nfc_tokenizer
             ? ai_chat::gpu_engine::normalized_java_text(env, text)
             : ai_chat::gpu_engine::from_java_string(env, text);
         std::unique_ptr<ai_chat::gpu_engine::ScopedQwen35UnicodeCategories> unicode_categories;
