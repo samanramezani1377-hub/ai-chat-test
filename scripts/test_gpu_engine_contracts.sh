@@ -14,7 +14,7 @@ if grep -Eq '\bsample\b' "$ENGINE/hybrid_state_operators.cpp"; then
   exit 1
 fi
 
-"${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror \
+"${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -fsanitize=address -fno-omit-frame-pointer -g \
   -I "$ENGINE" \
   "$ENGINE/gpu_engine.cpp" \
   "$ENGINE/execution_engine.cpp" \
