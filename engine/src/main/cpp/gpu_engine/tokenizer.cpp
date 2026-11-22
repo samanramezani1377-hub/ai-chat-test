@@ -140,12 +140,25 @@ TokenizerPreflightReport evaluate_tokenizer_preflight(
     return report;
 }
 
+Status TokenizerEngine::ensure_ready(const GgufTokenizerInfo& metadata) const {
+    if (validated_metadata_ == &metadata) {
+        return metadata_ready_
+            ? Status::success()
+            : Status{StatusCode::Unsupported,"Tokenizer is not validated for this GGUF model/pre-tokenizer"};
+    }
+    const auto report = evaluate_tokenizer_preflight(metadata, registry_);
+    validated_metadata_ = &metadata;
+    metadata_ready_ = report.ready;
+    return report.ready
+        ? Status::success()
+        : Status{StatusCode::Unsupported,"Tokenizer is not validated for this GGUF model/pre-tokenizer"};
+}
+
 Status TokenizerEngine::encode(const GgufTokenizerInfo& metadata, const std::string& text,
                                std::vector<uint32_t>& token_ids) const {
     token_ids.clear();
-    const auto report = evaluate_tokenizer_preflight(metadata, registry_);
-    if (!report.ready)
-        return {StatusCode::Unsupported, "Tokenizer is not validated for this GGUF model/pre-tokenizer"};
+    const Status ready = ensure_ready(metadata);
+    if (!ready.ok()) return ready;
     const auto adapter = registry_.find(metadata);
     Status status = adapter->encode(metadata, text, token_ids);
     if (!status.ok()) token_ids.clear();
@@ -164,9 +177,8 @@ Status TokenizerEngine::decode(const GgufTokenizerInfo& metadata,
                                const std::vector<uint32_t>& token_ids,
                                std::string& text) const {
     text.clear();
-    const auto report = evaluate_tokenizer_preflight(metadata, registry_);
-    if (!report.ready)
-        return {StatusCode::Unsupported, "Tokenizer is not validated for this GGUF model/pre-tokenizer"};
+    const Status ready = ensure_ready(metadata);
+    if (!ready.ok()) return ready;
     for (uint32_t id : token_ids) {
         if (id >= metadata.tokens.size())
             return {StatusCode::InvalidArgument, "Decode token id is outside the GGUF vocabulary"};
