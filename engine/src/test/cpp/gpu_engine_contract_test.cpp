@@ -406,7 +406,16 @@ void test_qwen35_hybrid_recipe_builds_generic_semantic_graph() {
     assert(plan.semantic_schema_id == "hybrid_gated_delta_net");
     assert(plan.uses_recurrent_state && plan.uses_multi_axis_rope);
     assert(std::find(plan.external_inputs.begin(), plan.external_inputs.end(),
-                     "position_ids") != plan.external_inputs.end());
+                     "position_ids") == plan.external_inputs.end());
+    assert(std::find(plan.external_inputs.begin(), plan.external_inputs.end(),
+                     "layer.0.recurrent_state") != plan.external_inputs.end());
+    assert(std::find(plan.external_inputs.begin(), plan.external_inputs.end(),
+                     "layer.0.conv_state") != plan.external_inputs.end());
+    const auto text_mrope = std::find_if(plan.operations.begin(), plan.operations.end(),
+        [](const ModelPlanOperation& op) { return op.operator_name == "MultiAxisRoPE"; });
+    assert(text_mrope != plan.operations.end() && text_mrope->inputs.size() == 1);
+    assert(text_mrope->string_attributes.at("position_encoding") ==
+           "qwen35_text_only_mrope_equivalent");
     assert(!plan.gpu_ready && !plan.operator_coverage_validated);
     const auto has_operator = [&](const std::string& name) {
         return std::any_of(plan.operations.begin(), plan.operations.end(),
