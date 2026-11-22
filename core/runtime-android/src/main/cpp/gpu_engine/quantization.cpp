@@ -3541,6 +3541,22 @@ Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry
 
 
 
+
+    for(const bool q3:{false,true}){
+        const std::string suffix=q3?"q3-k":"q2-k",op=q3?"MatMul_Q3_K":"MatMul_Q2_K";
+        const char*wgsl=q3?kQ3_KMatMulWgsl:kQ2_KMatMulWgsl;const char*glsl=q3?kQ3_KMatMulGlsl:kQ2_KMatMulGlsl;
+        KernelDefinition dawn;dawn.operator_name=op;dawn.backend=BackendKind::DawnWebGpu;
+        dawn.input_type=DataType::F32;dawn.input_types={DataType::F32,DataType::U32};dawn.output_type=DataType::F32;
+        dawn.min_input_count=2;dawn.max_input_count=2;dawn.min_rank=2;dawn.max_rank=3;
+        dawn.validation=KernelValidation::Unverified;dawn.kernel_id="dawn-"+suffix+"-matmul-f32-activation-v1";dawn.wgsl_source=wgsl;
+        status=registry.register_kernel(std::move(dawn));if(!status.ok())return status;
+        KernelDefinition gles;gles.operator_name=op;gles.backend=BackendKind::OpenGles;
+        gles.input_type=DataType::F32;gles.input_types={DataType::F32,DataType::U32};gles.output_type=DataType::F32;
+        gles.min_input_count=2;gles.max_input_count=2;gles.min_rank=2;gles.max_rank=3;
+        gles.validation=KernelValidation::Unverified;gles.kernel_id="gles-"+suffix+"-matmul-f32-activation-v1";gles.glsl_source=glsl;
+        status=registry.register_kernel(std::move(gles));if(!status.ok())return status;
+    }
+
     for(const bool q5:{false,true}){
         const std::string suffix=q5?"q5-k":"q4-k",op=q5?"MatMul_Q5_K":"MatMul_Q4_K";
         const char*wgsl=q5?kQ5_KMatMulWgsl:kQ4_KMatMulWgsl;
@@ -5237,5 +5253,71 @@ Status reference_q3_k_matmul(const float*a,const uint8_t*w,uint64_t bytes,float*
   for(uint32_t row=0;row<rows;++row){float sum=0;for(uint32_t k=0;k<inner;++k)sum+=a[static_cast<uint64_t>(row)*inner+k]*decoded[k];out[static_cast<uint64_t>(row)*channels+ch]=sum;}}
  return Status::success();
 }
+
+
+Status validate_k23_matmul_kernel_impl(Backend&backend,OperatorRegistry&operators,QuantizationRegistry&quantizations,bool q3){
+    const BackendKind kind=backend.kind();if((kind!=BackendKind::DawnWebGpu&&kind!=BackendKind::OpenGles)||!backend.healthy())
+        return {StatusCode::NotReady,"K2/K3 MatMul validation requires a healthy Dawn or GLES backend"};
+    const uint32_t type_id=q3?11u:10u;auto format=quantizations.formats_.find(type_id);
+    if(format==quantizations.formats_.end()||format->second.decoder_state!=SupportState::Validated)
+        return {StatusCode::NotReady,"K2/K3 host decoder is not validated"};
+    const std::string suffix=q3?"q3-k":"q2-k";
+    const std::string kernel_id=(kind==BackendKind::OpenGles?"gles-":"dawn-")+suffix+"-matmul-f32-activation-v1";
+    auto kernel=std::find_if(operators.kernels_.begin(),operators.kernels_.end(),[&](const KernelDefinition&k){return k.kernel_id==kernel_id&&k.backend==kind;});
+    if(kernel==operators.kernels_.end())return {StatusCode::NotReady,"K2/K3 MatMul candidate is not registered"};
+    if(kernel->validation==KernelValidation::Validated){format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;format->second.gpu_kernel_state=SupportState::Validated;return Status::success();}
+    if(kernel->validation!=KernelValidation::Unverified)return {StatusCode::Unsupported,"K2/K3 MatMul candidate is rejected"};
+    const bool gles=kind==BackendKind::OpenGles;
+    const std::string&registered=gles?kernel->glsl_source:kernel->wgsl_source;
+    const std::string canonical=q3?(gles?std::string(kQ3_KMatMulGlsl):std::string(kQ3_KMatMulWgsl))
+                                  :(gles?std::string(kQ2_KMatMulGlsl):std::string(kQ2_KMatMulWgsl));
+    if(registered.empty()||registered!=canonical)return {StatusCode::InvalidArgument,"K2/K3 MatMul shader differs from canonical source"};
+    constexpr uint32_t rows=2,channels=2,inner=256;
+    const uint32_t block_bytes=q3?110u:84u;const uint64_t bytes=static_cast<uint64_t>(channels)*block_bytes;
+    std::vector<uint8_t>encoded(static_cast<size_t>(bytes),0);
+    for(uint32_t ch=0;ch<channels;++ch){
+        uint8_t*block=encoded.data()+ch*block_bytes;
+        if(q3){
+            std::fill(block,block+32,0xff);std::fill(block+32,block+96,0x55);
+            std::fill(block+96,block+104,0x11);std::fill(block+104,block+108,0xaa);
+            block[108]=0;block[109]=0x3c;
+        }else{
+            block[0]=0;block[1]=0x3c;std::fill(block+4,block+20,0x01);std::fill(block+20,block+84,0x55);
+        }
+    }
+    std::vector<float>activations(rows*inner);
+    for(size_t i=0;i<activations.size();++i)activations[i]=(static_cast<int>(i%9)-4)*0.125f;
+    float expected[rows*channels]={},actual[rows*channels]={};
+    Status status=q3?reference_q3_k_matmul(activations.data(),encoded.data(),bytes,expected,rows,channels,inner)
+                    :reference_q2_k_matmul(activations.data(),encoded.data(),bytes,expected,rows,channels,inner);
+    if(!status.ok())return status;
+    BufferDesc ad{activations.size()*sizeof(float),alignof(float),MemoryDomain::Device,false,"k23-validation-activations"};
+    BufferDesc wd{bytes,4,MemoryDomain::Device,true,"k23-validation-weights"};
+    BufferDesc od{sizeof(actual),alignof(float),MemoryDomain::Device,false,"k23-validation-output"};
+    std::shared_ptr<Buffer>ab,wb,ob;
+    status=backend.allocate(ad,ab);if(!status.ok())return status;status=backend.allocate(wd,wb);if(!status.ok())return status;
+    status=backend.allocate(od,ob);if(!status.ok())return status;
+    status=backend.upload(ab,0,activations.data(),ad.size_bytes);if(!status.ok())return status;
+    status=backend.upload(wb,0,encoded.data(),bytes);if(!status.ok())return status;
+    TensorDesc atd;atd.shape={rows,inner};atd.data_type=DataType::F32;
+    TensorDesc otd;otd.shape={rows,channels};otd.data_type=DataType::F32;
+    Tensor at,ot;status=Tensor::create(atd,ab,0,at);if(!status.ok())return status;status=Tensor::create(otd,ob,0,ot);if(!status.ok())return status;
+    ComputeDispatch dispatch;
+    if(q3)status=gles?build_q3_k_matmul_gles_candidate(at,wb,bytes,ot,dispatch):build_q3_k_matmul_candidate(at,wb,bytes,ot,dispatch);
+    else status=gles?build_q2_k_matmul_gles_candidate(at,wb,bytes,ot,dispatch):build_q2_k_matmul_candidate(at,wb,bytes,ot,dispatch);
+    if(!status.ok())return status;
+    if(dispatch.kernel_id!=kernel_id||dispatch.backend!=kind)return {StatusCode::InvalidArgument,"K2/K3 MatMul candidate identity mismatch"};
+    dispatch.validation=KernelValidation::Validated;
+    std::unique_ptr<CommandBatch>commands;status=backend.begin_commands(commands);if(!status.ok())return status;
+    if(!commands)return {StatusCode::BackendFailure,"K2/K3 backend returned empty command batch"};
+    status=commands->dispatch_compute(dispatch);if(!status.ok())return status;status=backend.submit(std::move(commands));if(!status.ok())return status;
+    status=backend.synchronize();if(!status.ok())return status;status=backend.readback(ob,0,actual,sizeof(actual));if(!status.ok())return status;
+    for(size_t i=0;i<rows*channels;++i){const float tolerance=1.0e-4f*std::max(1.0f,std::fabs(expected[i]));
+        if(!std::isfinite(actual[i])||std::fabs(actual[i]-expected[i])>tolerance)return {StatusCode::NumericalFailure,"K2/K3 MatMul GPU output differs from independent decoder"};}
+    kernel->validation=KernelValidation::Validated;format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;
+    format->second.gpu_kernel_state=SupportState::Validated;return Status::success();
+}
+Status validate_q2_k_matmul_kernel(Backend&b,OperatorRegistry&o,QuantizationRegistry&q){return validate_k23_matmul_kernel_impl(b,o,q,false);}
+Status validate_q3_k_matmul_kernel(Backend&b,OperatorRegistry&o,QuantizationRegistry&q){return validate_k23_matmul_kernel_impl(b,o,q,true);}
 
 } // namespace ai_chat::gpu_engine

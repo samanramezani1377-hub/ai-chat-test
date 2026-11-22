@@ -32,6 +32,9 @@ Status build_q5_k_matmul_gles_candidate(const Tensor&,const std::shared_ptr<Buff
 Status reference_q5_k_matmul(const float*,const uint8_t*,uint64_t,float*,uint32_t,uint32_t,uint32_t);
 
 
+Status validate_q2_k_matmul_kernel(Backend&,OperatorRegistry&,QuantizationRegistry&);
+Status validate_q3_k_matmul_kernel(Backend&,OperatorRegistry&,QuantizationRegistry&);
+
 Status build_q2_k_matmul_candidate(const Tensor&,const std::shared_ptr<Buffer>&,uint64_t,const Tensor&,ComputeDispatch&);
 Status build_q2_k_matmul_gles_candidate(const Tensor&,const std::shared_ptr<Buffer>&,uint64_t,const Tensor&,ComputeDispatch&);
 Status reference_q2_k_matmul(const float*,const uint8_t*,uint64_t,float*,uint32_t,uint32_t,uint32_t);
