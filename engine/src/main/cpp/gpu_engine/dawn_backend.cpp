@@ -17,6 +17,28 @@
 namespace ai_chat::gpu_engine {
 namespace {
 
+struct AdapterRequestState {
+    wgpu::RequestAdapterStatus status = wgpu::RequestAdapterStatus::Error;
+    std::string message;
+    wgpu::Adapter adapter;
+};
+
+struct DeviceRequestState {
+    wgpu::RequestDeviceStatus status = wgpu::RequestDeviceStatus::Error;
+    std::string message;
+    wgpu::Device device;
+};
+
+struct QueueWorkState {
+    wgpu::QueueWorkDoneStatus status = wgpu::QueueWorkDoneStatus::Error;
+    std::string message;
+};
+
+struct MapState {
+    wgpu::MapAsyncStatus status = wgpu::MapAsyncStatus::Error;
+    std::string message;
+};
+
 Status backend_error(const char* operation, const std::string& detail) {
     return {StatusCode::BackendFailure, std::string(operation) + ": " + detail};
 }
@@ -193,23 +215,22 @@ public:
         options.backendType = wgpu::BackendType::OpenGLES;
         options.featureLevel = wgpu::FeatureLevel::Compatibility;
 
-        wgpu::RequestAdapterStatus callback_status = wgpu::RequestAdapterStatus::Error;
-        std::string callback_message;
-        wgpu::Adapter requested_adapter;
+        AdapterRequestState request;
         const wgpu::Future future = instance_.RequestAdapter(
             &options, wgpu::CallbackMode::AllowSpontaneous,
-            [&requested_adapter, &callback_status, &callback_message](
-                wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message) {
-                callback_status = status;
-                callback_message = std::string(message);
-                if (status == wgpu::RequestAdapterStatus::Success) requested_adapter = std::move(adapter);
-            });
+            [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter,
+               wgpu::StringView message, AdapterRequestState* state) {
+                state->status = status;
+                state->message = std::string(message);
+                if (status == wgpu::RequestAdapterStatus::Success) state->adapter = std::move(adapter);
+            },
+            &request);
         const wgpu::WaitStatus wait = instance_.WaitAny(future, std::numeric_limits<uint64_t>::max());
-        if (wait != wgpu::WaitStatus::Success || callback_status != wgpu::RequestAdapterStatus::Success ||
-            !requested_adapter) {
-            return backend_error("RequestAdapter", callback_message.empty() ? "No OpenGL ES WebGPU adapter" : callback_message);
+        if (wait != wgpu::WaitStatus::Success || request.status != wgpu::RequestAdapterStatus::Success ||
+            !request.adapter) {
+            return backend_error("RequestAdapter", request.message.empty() ? "No OpenGL ES WebGPU adapter" : request.message);
         }
-        adapter_ = std::move(requested_adapter);
+        adapter_ = std::move(request.adapter);
 
         wgpu::AdapterInfo info{};
         adapter_.GetInfo(&info);
@@ -269,35 +290,36 @@ public:
         }
         if (device_) return Status::success();
 
-        auto health = health_;
         wgpu::DeviceDescriptor descriptor{};
         descriptor.SetDeviceLostCallback(
             wgpu::CallbackMode::AllowSpontaneous,
-            [health](const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView) {
+            [](const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView,
+               std::atomic<bool>* health) {
                 if (reason != wgpu::DeviceLostReason::Destroyed) health->store(false, std::memory_order_relaxed);
-            });
+            },
+            health_.get());
         descriptor.SetUncapturedErrorCallback(
-            [health](const wgpu::Device&, wgpu::ErrorType, wgpu::StringView) {
+            [](const wgpu::Device&, wgpu::ErrorType, wgpu::StringView, std::atomic<bool>* health) {
                 health->store(false, std::memory_order_relaxed);
-            });
+            },
+            health_.get());
 
-        wgpu::RequestDeviceStatus callback_status = wgpu::RequestDeviceStatus::Error;
-        std::string callback_message;
-        wgpu::Device requested_device;
+        DeviceRequestState request;
         const wgpu::Future future = adapter_.RequestDevice(
             &descriptor, wgpu::CallbackMode::AllowSpontaneous,
-            [&requested_device, &callback_status, &callback_message](
-                wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message) {
-                callback_status = status;
-                callback_message = std::string(message);
-                if (status == wgpu::RequestDeviceStatus::Success) requested_device = std::move(device);
-            });
+            [](wgpu::RequestDeviceStatus status, wgpu::Device device,
+               wgpu::StringView message, DeviceRequestState* state) {
+                state->status = status;
+                state->message = std::string(message);
+                if (status == wgpu::RequestDeviceStatus::Success) state->device = std::move(device);
+            },
+            &request);
         const wgpu::WaitStatus wait = instance_.WaitAny(future, std::numeric_limits<uint64_t>::max());
-        if (wait != wgpu::WaitStatus::Success || callback_status != wgpu::RequestDeviceStatus::Success ||
-            !requested_device) {
-            return backend_error("RequestDevice", callback_message.empty() ? "Dawn device creation failed" : callback_message);
+        if (wait != wgpu::WaitStatus::Success || request.status != wgpu::RequestDeviceStatus::Success ||
+            !request.device) {
+            return backend_error("RequestDevice", request.message.empty() ? "Dawn device creation failed" : request.message);
         }
-        device_ = std::move(requested_device);
+        device_ = std::move(request.device);
         queue_ = device_.GetQueue();
         health_->store(true, std::memory_order_relaxed);
         const Status self_test = run_compute_self_test();
@@ -359,17 +381,17 @@ public:
     Status synchronize() override {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!device_ || !healthy()) return {StatusCode::DeviceLost, "Dawn device is not ready"};
-        wgpu::QueueWorkDoneStatus callback_status = wgpu::QueueWorkDoneStatus::Error;
-        std::string callback_message;
+        QueueWorkState request;
         const wgpu::Future future = queue_.OnSubmittedWorkDone(
             wgpu::CallbackMode::AllowSpontaneous,
-            [&callback_status, &callback_message](wgpu::QueueWorkDoneStatus status, wgpu::StringView message) {
-                callback_status = status;
-                callback_message = std::string(message);
-            });
+            [](wgpu::QueueWorkDoneStatus status, wgpu::StringView message, QueueWorkState* state) {
+                state->status = status;
+                state->message = std::string(message);
+            },
+            &request);
         const wgpu::WaitStatus wait = instance_.WaitAny(future, std::numeric_limits<uint64_t>::max());
-        if (wait != wgpu::WaitStatus::Success || callback_status != wgpu::QueueWorkDoneStatus::Success) {
-            return backend_error("QueueWorkDone", callback_message.empty() ? "Dawn queue wait failed" : callback_message);
+        if (wait != wgpu::WaitStatus::Success || request.status != wgpu::QueueWorkDoneStatus::Success) {
+            return backend_error("QueueWorkDone", request.message.empty() ? "Dawn queue wait failed" : request.message);
         }
         return Status::success();
     }
@@ -409,17 +431,17 @@ public:
         if (!command_buffer) return backend_error("ReadbackCommand", "Dawn command buffer creation failed");
         queue_.Submit(1, &command_buffer);
 
-        wgpu::MapAsyncStatus map_status = wgpu::MapAsyncStatus::Error;
-        std::string map_message;
+        MapState map_request;
         const wgpu::Future future = staging.MapAsync(
             wgpu::MapMode::Read, 0, size_bytes, wgpu::CallbackMode::AllowSpontaneous,
-            [&map_status, &map_message](wgpu::MapAsyncStatus status, wgpu::StringView message) {
-                map_status = status;
-                map_message = std::string(message);
-            });
+            [](wgpu::MapAsyncStatus status, wgpu::StringView message, MapState* state) {
+                state->status = status;
+                state->message = std::string(message);
+            },
+            &map_request);
         const wgpu::WaitStatus wait = instance_.WaitAny(future, std::numeric_limits<uint64_t>::max());
-        if (wait != wgpu::WaitStatus::Success || map_status != wgpu::MapAsyncStatus::Success) {
-            return backend_error("MapReadback", map_message.empty() ? "Dawn staging map failed" : map_message);
+        if (wait != wgpu::WaitStatus::Success || map_request.status != wgpu::MapAsyncStatus::Success) {
+            return backend_error("MapReadback", map_request.message.empty() ? "Dawn staging map failed" : map_request.message);
         }
         const void* mapped = staging.GetConstMappedRange(0, size_bytes);
         if (!mapped) {
@@ -512,17 +534,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (!commands) return backend_error("DawnSelfTest", "command buffer creation failed");
         queue_.Submit(1, &commands);
 
-        wgpu::MapAsyncStatus map_status = wgpu::MapAsyncStatus::Error;
-        std::string map_message;
+        MapState map_request;
         const wgpu::Future future = staging.MapAsync(
             wgpu::MapMode::Read, 0, byte_size, wgpu::CallbackMode::AllowSpontaneous,
-            [&map_status, &map_message](wgpu::MapAsyncStatus status, wgpu::StringView message) {
-                map_status = status;
-                map_message = std::string(message);
-            });
+            [](wgpu::MapAsyncStatus status, wgpu::StringView message, MapState* state) {
+                state->status = status;
+                state->message = std::string(message);
+            },
+            &map_request);
         const wgpu::WaitStatus wait = instance_.WaitAny(future, std::numeric_limits<uint64_t>::max());
-        if (wait != wgpu::WaitStatus::Success || map_status != wgpu::MapAsyncStatus::Success) {
-            return backend_error("DawnSelfTest", map_message.empty() ? "readback map failed" : map_message);
+        if (wait != wgpu::WaitStatus::Success || map_request.status != wgpu::MapAsyncStatus::Success) {
+            return backend_error("DawnSelfTest", map_request.message.empty() ? "readback map failed" : map_request.message);
         }
         const auto* output = static_cast<const uint32_t*>(staging.GetConstMappedRange(0, byte_size));
         if (!output) {
