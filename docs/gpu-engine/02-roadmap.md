@@ -129,3 +129,5 @@ CI/source checks are useful but not hardware evidence. Do not wait for CI to pro
 - **2026-11-22 / BPE metadata validation:** added strict vocabulary uniqueness and merge-table integrity checks before encoding. This prevents silently accepting malformed merge tables but leaves tokenizer algorithm parity and real-model fixtures outstanding.
 
 - **2026-11-22 / F16 and BF16 execution:** added generic packed 16-bit MatMul and Embedding kernels for Dawn/GLES, IEEE-754 conversion references, backend validation and registry promotion, GGUF model routing and inference integration. This extends the engine beyond block quantization. Hardware validation and real-model generation remain **UNVERIFIED**.
+
+- **2026-11-22 / Q6_K support:** implemented the 256-element Q6_K block decoder and direct Dawn/GLES MatMul candidates, plus reference-based backend validation, GGUF type mapping, model lowering and inference preflight. Q6_K Embedding and hardware parity remain outstanding; do not treat Q6_K as supported until the MatMul validator passes on the target backend.
