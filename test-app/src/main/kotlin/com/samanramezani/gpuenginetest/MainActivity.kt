@@ -187,7 +187,8 @@ class MainActivity : Activity() {
         appendLog("device_available_memory_bytes=${memoryInfo.availMem}")
         appendLog("device_memory_threshold_bytes=${memoryInfo.threshold}")
         appendLog("device_low_memory=${memoryInfo.lowMemory}")
-        appendLog("gpu_memory_budget_bytes=$memoryBudget")
+        appendLog("gpu_memory_budget_estimate_bytes=$memoryBudget")
+        appendLog("gpu_memory_budget_source=android_system_memory_heuristic_not_gpu_vram_measurement")
         appendLog("requested_context_length=$contextLength")
         appendLog("activation_backend=dedicated_android_gpu_engine_only")
 
