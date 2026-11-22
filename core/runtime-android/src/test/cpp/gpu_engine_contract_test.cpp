@@ -480,6 +480,22 @@ void test_q5_decoders() {
     assert(!registry.can_execute_on_gpu(6) && !registry.can_execute_on_gpu(7));
 }
 
+
+void test_f16_bf16_reference_matmul_decoding() {
+    const float activations[2]={3.0f,4.0f};
+    const uint8_t f16_weights[4]={0x00,0x3c,0x00,0x40};
+    const uint8_t bf16_weights[4]={0x80,0x3f,0x00,0x40};
+    float f16_output=0.0f,bf16_output=0.0f;
+    assert(reference_f16_matmul(activations,f16_weights,4,&f16_output,1,1,2,false).ok());
+    assert(reference_f16_matmul(activations,bf16_weights,4,&bf16_output,1,1,2,true).ok());
+    assert(f16_output==11.0f&&bf16_output==11.0f);
+    const uint8_t half_subnormal[2]={0x01,0x00};
+    const float one[1]={1.0f};
+    float subnormal_output=0.0f;
+    assert(reference_f16_matmul(one,half_subnormal,2,&subnormal_output,1,1,1,false).ok());
+    assert(std::fabs(subnormal_output-5.960464477539063e-8f)<1.0e-12f);
+}
+
 void test_q4_decoders() {
     std::vector<uint8_t> q4_0(18, 0);
     q4_0[0] = 0x00; q4_0[1] = 0x38; // d = 0.5
@@ -3110,6 +3126,7 @@ int main() {
     test_independent_sampler_and_stop_controller();
     test_q4_decoders();
     test_q5_decoders();
+    test_f16_bf16_reference_matmul_decoding();
     test_dawn_q8_0_operator_registration_is_unverified();
     test_q5_matmul_lowerings_are_registered_for_both_backends();
     test_q8_0_gpu_validation_does_not_promote_fake_backend();
