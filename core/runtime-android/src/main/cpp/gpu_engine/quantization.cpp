@@ -3340,7 +3340,7 @@ Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
     q4_0.decoder_state = SupportState::Validated;
     q4_0.gpu_kernel_state = SupportState::Unverified;
     initialize_backend_states(q4_0);
-    Status status = registry.register_format(std::move(q4_0));
+    status = registry.register_format(std::move(q4_0));
     if (!status.ok()) return status;
 
     QuantizationFormat q4_1;
