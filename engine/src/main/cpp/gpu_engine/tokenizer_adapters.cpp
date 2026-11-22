@@ -515,7 +515,18 @@ private:
                     out.emplace_back(s.substr(start,i-start));continue;
                 }
             }
-            if(space(cp)){i+=n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(!space(c))break;i+=k;}}
+            if(space(cp)){
+                size_t last_space_start=i;
+                while(i<s.size()){
+                    size_t k=0;uint32_t c=codepoint(s,i,k);if(!space(c))break;
+                    last_space_start=i;i+=k;
+                }
+                // Qwen2's GPT-style regex leaves the final ASCII space for the
+                // optional-space prefix of the following word/punctuation run.
+                // Earlier spaces form a separate whitespace token.
+                if(i<s.size()&&i-last_space_start>=1&&s[last_space_start]==' '&&
+                   last_space_start>start) i=last_space_start;
+            }
             else if(letter(cp)){i+=n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(!letter(c))break;i+=k;}}
             else if(digit(cp)){size_t count=0;while(i<s.size()&&count<digit_group){size_t k=0;uint32_t c=codepoint(s,i,k);if(!digit(c))break;i+=k;++count;}}
             else{i+=n;while(i<s.size()){size_t k=0;uint32_t c=codepoint(s,i,k);if(space(c)||letter(c)||digit(c))break;i+=k;}while(i<s.size()&&(s[i]=='\r'||s[i]=='\n'))++i;}
