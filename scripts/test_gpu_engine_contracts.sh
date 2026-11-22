@@ -17,6 +17,7 @@ trap 'rm -rf "$TMP"' EXIT
   "$ENGINE/hybrid_gated_delta_net_recipe.cpp" \
   "$ENGINE/split_operator.cpp" \
   "$ENGINE/gdn_l2_norm_operator.cpp" \
+  "$ENGINE/hybrid_state_operators.cpp" \
   "$ENGINE/model_graph.cpp" \
   "$ENGINE/model_lowerings.cpp" \
   "$ENGINE/operators.cpp" \

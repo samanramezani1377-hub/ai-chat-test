@@ -141,6 +141,10 @@ bool load_qwen35_hyperparameters(const GgufFileInfo& model, Qwen35HybridConfig& 
     }
     out.conv_dimension = out.ssm_inner + 2 * out.key_dimension;
     const uint64_t value_head_dimension = out.ssm_inner / out.ssm_dt_rank;
+    if (value_head_dimension != out.ssm_state) {
+        error = "Qwen3.5 value-head dimension must equal the recurrent key/state dimension";
+        return false;
+    }
     if (value_head_dimension > UINT64_MAX / value_head_dimension ||
         value_head_dimension * value_head_dimension > UINT64_MAX / out.ssm_dt_rank) {
         error = "Qwen3.5 recurrent state dimensions overflow";
@@ -219,8 +223,7 @@ public:
         descriptor_.required_operators = {
             "Embedding", "MatMul", "RMSNorm", "MultiAxisRoPE", "Attention",
             "KVCacheAppend", "Sigmoid", "Softplus", "SSMConv1D", "GdnL2Norm",
-            "GatedDeltaNet", "RecurrentStateRead", "ConvStateRead",
-            "Split", "SiLU", "Multiply", "Add"
+            "GatedDeltaNet", "Split", "SiLU", "Multiply", "Add"
         };
         descriptor_.uses_attention = true;
         descriptor_.uses_kv_cache = true;
@@ -336,7 +339,13 @@ public:
         plan.rope_neox_style = true;
         plan.uses_recurrent_state = true;
         plan.uses_multi_axis_rope = true;
-        plan.external_inputs = {"token_ids", "position_ids"};
+        plan.external_inputs = {"token_ids"};
+        for (uint64_t layer = 0; layer < config.layers; ++layer) {
+            if (config.recurrent_layers[static_cast<size_t>(layer)] == 0) continue;
+            const std::string state_prefix = "layer." + std::to_string(layer) + ".";
+            plan.external_inputs.push_back(state_prefix + "recurrent_state");
+            plan.external_inputs.push_back(state_prefix + "conv_state");
+        }
         plan.retained_outputs = {"logits"};
 
         auto add = [&](std::string id, std::string op, std::vector<std::string> inputs,
@@ -384,13 +393,6 @@ public:
 
             std::string attention_output;
             if (config.recurrent_layers[static_cast<size_t>(layer)] != 0) {
-                add(x + "recurrent_state_read", "RecurrentStateRead", {},
-                    {}, x + "recurrent_state", {0, config.recurrent_state_elements});
-                plan.operations.back().integer_attributes["layer_index"] = layer;
-                add(x + "conv_state_read", "ConvStateRead", {},
-                    {}, x + "conv_state", {0, config.conv_dimension, config.conv_kernel - 1});
-                plan.operations.back().integer_attributes["layer_index"] = layer;
-
                 if (has(p + "attn_qkv_gate.weight")) {
                     add(x + "qkvz_projection", "MatMul", {x + "normalized"},
                         {p + "attn_qkv_gate.weight"}, x + "qkvz",
@@ -444,9 +446,9 @@ public:
 
                 add(x + "ssm_conv", "SSMConv1D", {x + "qkv", x + "conv_state"},
                     {p + "ssm_conv1d.weight"}, x + "conv_output",
-                    {0, config.conv_dimension}, true);
+                    {0, config.conv_dimension});
                 plan.operations.back().integer_attributes["layer_index"] = layer;
-                plan.operations.back().string_attributes["state_writeback"] = "conv_state";
+                plan.operations.back().integer_attributes["kernel_size"] = config.conv_kernel;
                 add(x + "ssm_conv_silu", "SiLU", {x + "conv_output"}, {},
                     x + "conv_output_silu", {0, config.conv_dimension});
                 add(x + "ssm_split_q", "Split", {x + "conv_output_silu"}, {}, x + "q",
@@ -477,13 +479,11 @@ public:
                 add(x + "gated_delta_net", "GatedDeltaNet",
                     {x + "q_norm", x + "k_norm", x + "v", x + "delta_gate",
                      x + "beta_gated", x + "recurrent_state"},
-                    {}, x + "recurrent_output", {0, config.ssm_inner}, true);
-                plan.operations.back().string_attributes["state_writeback"] = "recurrent_state";
+                    {}, x + "recurrent_output", {0, config.ssm_inner});
                 plan.operations.back().integer_attributes["layer_index"] = layer;
                 plan.operations.back().integer_attributes["state_size"] = config.ssm_state;
-                plan.operations.back().integer_attributes["group_count"] = config.ssm_groups;
+                plan.operations.back().integer_attributes["key_heads"] = config.ssm_groups;
                 plan.operations.back().integer_attributes["value_heads"] = config.ssm_dt_rank;
-                plan.operations.back().integer_attributes["value_head_size"] = config.ssm_inner / config.ssm_dt_rank;
                 add(x + "gdn_rms_norm", "RMSNorm",
                     {x + "recurrent_output"}, {p + "ssm_norm.weight"},
                     x + "gdn_rms_normalized", {0, config.ssm_inner});
@@ -521,12 +521,15 @@ public:
                     x + "k_normalized", {0, config.kv_heads, config.head_dimension});
                 for (const std::string suffix : {"q", "k"}) {
                     auto& rope = add(x + suffix + "_mrope", "MultiAxisRoPE",
-                        {x + (suffix == "q" ? "q_normalized" : "k_normalized"), "position_ids"},
+                        {x + (suffix == "q" ? "q_normalized" : "k_normalized")},
                         {}, x + suffix + "_rotated",
                         {0, suffix == "q" ? config.heads : config.kv_heads, config.head_dimension});
                     rope.float_attributes["theta"] = config.rope_theta;
+                    rope.integer_attributes["rotary_dimensions"] = config.head_dimension;
                     rope.integer_array_attributes["sections"] = config.rope_sections;
-                    rope.string_attributes["position_encoding"] = "qwen35_mrope";
+                    // In text-only mode all M-RoPE axes share the same position;
+                    // standard NeoX RoPE is therefore equivalent for this path.
+                    rope.string_attributes["position_encoding"] = "qwen35_text_only_mrope_equivalent";
                 }
                 add(x + "kv_cache_append", "KVCacheAppend",
                     {x + "k_rotated", x + "v"}, {}, x + "kv_cache_updated", {}, true);

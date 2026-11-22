@@ -451,6 +451,45 @@ void test_split_sigmoid_and_softplus_references() {
            StatusCode::InvalidArgument);
 }
 
+void test_ssm_conv1d_reference_preserves_causal_history() {
+    constexpr uint32_t tokens = 2, channels = 3, kernel_size = 4;
+    std::vector<float> input(tokens * channels, 1.0f);
+    std::vector<float> state(channels * (kernel_size - 1), 0.25f);
+    std::vector<float> weights(channels * kernel_size, 0.5f);
+    std::vector<float> output(tokens * channels, 0.0f);
+    assert(reference_ssm_conv1d_f32(input.data(), state.data(), weights.data(),
+        output.data(), tokens, channels, kernel_size).ok());
+    for (uint32_t channel = 0; channel < channels; ++channel) {
+        assert(std::fabs(output[channel] - 0.875f) < 1.0e-6f);
+        assert(std::fabs(output[channels + channel] - 1.25f) < 1.0e-6f);
+        assert(std::fabs(state[channel * (kernel_size - 1)] - 0.25f) < 1.0e-6f);
+        assert(std::fabs(state[channel * (kernel_size - 1) + 1] - 1.0f) < 1.0e-6f);
+        assert(std::fabs(state[channel * (kernel_size - 1) + 2] - 1.0f) < 1.0e-6f);
+    }
+}
+
+void test_gated_delta_net_reference_updates_state_and_output() {
+    constexpr uint32_t tokens = 1, state_size = 2, value_heads = 2, key_heads = 1;
+    const std::vector<float> q{1.0f, 0.0f};
+    const std::vector<float> k{1.0f, 0.0f};
+    const std::vector<float> v{2.0f, 3.0f, 4.0f, 5.0f};
+    const std::vector<float> gate{0.0f, 0.0f};
+    const std::vector<float> beta{1.0f, 1.0f};
+    std::vector<float> state(value_heads * state_size * state_size, 0.0f);
+    std::vector<float> output(v.size(), 0.0f);
+    assert(reference_gated_delta_net_f32(q.data(), k.data(), v.data(), gate.data(),
+        beta.data(), state.data(), output.data(), tokens, state_size,
+        value_heads, key_heads).ok());
+    assert(std::fabs(output[0] - 2.0f) < 1.0e-6f);
+    assert(std::fabs(output[1] - 3.0f) < 1.0e-6f);
+    assert(std::fabs(output[2] - 4.0f) < 1.0e-6f);
+    assert(std::fabs(output[3] - 5.0f) < 1.0e-6f);
+    assert(std::fabs(state[0] - 2.0f) < 1.0e-6f);
+    assert(std::fabs(state[1] - 3.0f) < 1.0e-6f);
+    assert(std::fabs(state[4] - 4.0f) < 1.0e-6f);
+    assert(std::fabs(state[5] - 5.0f) < 1.0e-6f);
+}
+
 void test_gdn_l2_norm_reference() {
     constexpr uint32_t tokens = 2;
     constexpr uint32_t state_size = 3;
@@ -538,10 +577,20 @@ void test_model_gpu_memory_estimate_includes_kv_and_scratch() {
     input.bytes_per_element = 4;
     input.safety_reserve_bytes = 512;
     input.device_budget_bytes = 4096;
+    ModelPlanOperation conv_state;
+    conv_state.operator_name = "SSMConv1D";
+    conv_state.output_shape = {0, 8};
+    conv_state.integer_attributes["kernel_size"] = 4;
+    model.operations.push_back(conv_state);
+    ModelPlanOperation recurrent_state;
+    recurrent_state.operator_name = "GatedDeltaNet";
+    recurrent_state.integer_attributes["state_size"] = 2;
+    recurrent_state.integer_attributes["value_heads"] = 4;
+    model.operations.push_back(recurrent_state);
     const auto report = estimate_model_gpu_memory(model, input);
     assert(report.plan.fits);
     assert(report.estimated_kv_cache_bytes == 256);
-    assert(report.estimated_scratch_bytes == 576);
+    assert(report.estimated_scratch_bytes == 736);
     assert(report.plan.resident_weight_bytes == 256);
 
     input.context_length = UINT64_MAX;
@@ -3748,6 +3797,8 @@ int main() {
     test_qwen35_hybrid_recipe_builds_generic_semantic_graph();
     test_split_sigmoid_and_softplus_references();
     test_gdn_l2_norm_reference();
+    test_ssm_conv1d_reference_preserves_causal_history();
+    test_gated_delta_net_reference_updates_state_and_output();
     test_gpu_memory_planner_respects_streaming_and_reserve();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";

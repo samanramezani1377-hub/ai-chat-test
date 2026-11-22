@@ -36,6 +36,8 @@ struct ModelExecutionContext {
     uint64_t context_length = 0;
     bool prefill = false;
     std::vector<MemoryLease> activation_leases;
+    // Recurrent and convolution state survives prefill/decode graph rebuilds.
+    std::vector<MemoryLease> state_leases;
 };
 
 struct ModelPlanOperation {

@@ -399,6 +399,119 @@ Status validate_gdn_l2_norm(Backend& backend, Validate&& build) {
 }
 
 template <typename Validate>
+Status validate_ssm_conv1d(Backend& backend, Validate&& build) {
+    auto run_case = [&](uint32_t tokens, uint32_t channels, uint32_t kernel_size) -> Status {
+        const uint32_t history = kernel_size - 1;
+        std::vector<float> input(static_cast<size_t>(tokens) * channels);
+        std::vector<float> state(static_cast<size_t>(channels) * history);
+        std::vector<float> weights(static_cast<size_t>(channels) * kernel_size);
+        for (size_t i = 0; i < input.size(); ++i)
+            input[i] = static_cast<float>(static_cast<int>(i % 11) - 5) * 0.13f;
+        for (size_t i = 0; i < state.size(); ++i)
+            state[i] = static_cast<float>(static_cast<int>(i % 7) - 3) * 0.17f;
+        for (size_t i = 0; i < weights.size(); ++i)
+            weights[i] = static_cast<float>(static_cast<int>(i % 5) - 2) * 0.09f;
+        std::vector<float> expected_state = state, expected(input.size());
+        Status status = reference_ssm_conv1d_f32(input.data(), expected_state.data(),
+            weights.data(), expected.data(), tokens, channels, kernel_size);
+        if (!status.ok()) return status;
+        TensorFixture input_tensor, state_tensor, weight_tensor, output_tensor;
+        status = make_f32_tensor(backend, {tokens, channels}, input, "validate-ssm-input", input_tensor);
+        if (!status.ok()) return status;
+        status = make_f32_tensor(backend, {channels, history}, state, "validate-ssm-state", state_tensor);
+        if (!status.ok()) return status;
+        status = make_f32_tensor(backend, {kernel_size, channels}, weights, "validate-ssm-weights", weight_tensor);
+        if (!status.ok()) return status;
+        status = make_f32_tensor(backend, {tokens, channels}, {}, "validate-ssm-output", output_tensor);
+        if (!status.ok()) return status;
+        ComputeDispatch dispatch;
+        status = build(input_tensor.tensor, state_tensor.tensor, weight_tensor.tensor,
+            output_tensor.tensor, kernel_size, dispatch);
+        if (!status.ok()) return status;
+        status = execute_and_compare(backend, dispatch, output_tensor.tensor, expected);
+        if (!status.ok()) return status;
+        std::vector<float> actual_state(state.size());
+        status = backend.readback(state_tensor.tensor.buffer(), state_tensor.tensor.byte_offset(),
+            actual_state.data(), actual_state.size() * sizeof(float));
+        if (!status.ok()) return status;
+        for (size_t i = 0; i < actual_state.size(); ++i)
+            if (!std::isfinite(actual_state[i]) ||
+                std::fabs(actual_state[i] - expected_state[i]) > 2.0e-4f)
+                return {StatusCode::NumericalFailure, "SSMConv1D persistent state differs from reference"};
+        return Status::success();
+    };
+    Status status = run_case(3, 7, 4);
+    if (!status.ok()) return status;
+    return run_case(1, 5, 5);
+}
+
+template <typename Validate>
+Status validate_gated_delta_net(Backend& backend, Validate&& build) {
+    auto run_case = [&](uint32_t tokens, uint32_t state_size,
+                        uint32_t value_heads, uint32_t key_heads) -> Status {
+        const size_t q_count = static_cast<size_t>(tokens) * key_heads * state_size;
+        const size_t v_count = static_cast<size_t>(tokens) * value_heads * state_size;
+        const size_t gate_count = static_cast<size_t>(tokens) * value_heads;
+        const size_t state_count = static_cast<size_t>(value_heads) * state_size * state_size;
+        std::vector<float> q(q_count), k(q_count), v(v_count), gate(gate_count), beta(gate_count);
+        std::vector<float> initial_state(state_count);
+        for (size_t i = 0; i < q.size(); ++i) {
+            q[i] = static_cast<float>(static_cast<int>(i % 11) - 5) * 0.07f;
+            k[i] = static_cast<float>(static_cast<int>(i % 7) - 3) * 0.11f;
+        }
+        for (size_t i = 0; i < v.size(); ++i)
+            v[i] = static_cast<float>(static_cast<int>(i % 13) - 6) * 0.09f;
+        for (size_t i = 0; i < gate.size(); ++i) {
+            gate[i] = -0.03f - static_cast<float>(i % 3) * 0.01f;
+            beta[i] = 0.2f + static_cast<float>(i % 5) * 0.1f;
+        }
+        for (size_t i = 0; i < initial_state.size(); ++i)
+            initial_state[i] = static_cast<float>(static_cast<int>(i % 9) - 4) * 0.013f;
+        std::vector<float> expected_state = initial_state, expected(v_count);
+        Status status = reference_gated_delta_net_f32(q.data(), k.data(), v.data(),
+            gate.data(), beta.data(), expected_state.data(), expected.data(),
+            tokens, state_size, value_heads, key_heads);
+        if (!status.ok()) return status;
+        TensorFixture q_tensor, k_tensor, v_tensor, gate_tensor, beta_tensor, state_tensor, output_tensor;
+        status = make_f32_tensor(backend, {tokens, key_heads * state_size}, q, "validate-gdn-q", q_tensor);
+        if (!status.ok()) return status;
+        status = make_f32_tensor(backend, {tokens, key_heads * state_size}, k, "validate-gdn-k", k_tensor);
+        if (!status.ok()) return status;
+        status = make_f32_tensor(backend, {tokens, value_heads * state_size}, v, "validate-gdn-v", v_tensor);
+        if (!status.ok()) return status;
+        status = make_f32_tensor(backend, {tokens, value_heads}, gate, "validate-gdn-gate", gate_tensor);
+        if (!status.ok()) return status;
+        status = make_f32_tensor(backend, {tokens, value_heads}, beta, "validate-gdn-beta", beta_tensor);
+        if (!status.ok()) return status;
+        status = make_f32_tensor(backend, {value_heads, state_size, state_size}, initial_state,
+            "validate-gdn-state", state_tensor);
+        if (!status.ok()) return status;
+        status = make_f32_tensor(backend, {tokens, value_heads * state_size}, {},
+            "validate-gdn-output", output_tensor);
+        if (!status.ok()) return status;
+        ComputeDispatch dispatch;
+        status = build(q_tensor.tensor, k_tensor.tensor, v_tensor.tensor, gate_tensor.tensor,
+            beta_tensor.tensor, state_tensor.tensor, output_tensor.tensor,
+            state_size, value_heads, key_heads, dispatch);
+        if (!status.ok()) return status;
+        status = execute_and_compare(backend, dispatch, output_tensor.tensor, expected);
+        if (!status.ok()) return status;
+        std::vector<float> actual_state(state_count);
+        status = backend.readback(state_tensor.tensor.buffer(), state_tensor.tensor.byte_offset(),
+            actual_state.data(), actual_state.size() * sizeof(float));
+        if (!status.ok()) return status;
+        for (size_t i = 0; i < actual_state.size(); ++i)
+            if (!std::isfinite(actual_state[i]) ||
+                std::fabs(actual_state[i] - expected_state[i]) > 2.0e-4f)
+                return {StatusCode::NumericalFailure, "GatedDeltaNet recurrent state differs from reference"};
+        return Status::success();
+    };
+    Status status = run_case(3, 4, 3, 1);
+    if (!status.ok()) return status;
+    return run_case(2, 5, 2, 1);
+}
+
+template <typename Validate>
 Status validate_rope(Backend& backend, Validate&& build) {
     TensorFixture input, output;
     const std::vector<float> x = {
@@ -637,6 +750,30 @@ Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& reg
                                 : build_silu_f32_candidate(input, out, dispatch);
                 }, false);
             });
+    run("SSMConv1D", gles ? "gles-ssm-conv1d-f32-v1" : "dawn-ssm-conv1d-f32-v1",
+        [&] {
+            return validate_ssm_conv1d(backend,
+                [&](const Tensor& input, const Tensor& state, const Tensor& weights,
+                    const Tensor& output, uint32_t kernel_size, ComputeDispatch& dispatch) {
+                    return gles
+                        ? build_ssm_conv1d_f32_gles_candidate(input, state, weights, output, kernel_size, dispatch)
+                        : build_ssm_conv1d_f32_candidate(input, state, weights, output, kernel_size, dispatch);
+                });
+        });
+    run("GatedDeltaNet", gles ? "gles-gated-delta-net-f32-v1" : "dawn-gated-delta-net-f32-v1",
+        [&] {
+            return validate_gated_delta_net(backend,
+                [&](const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& gate,
+                    const Tensor& beta, const Tensor& state, const Tensor& output,
+                    uint32_t state_size, uint32_t value_heads, uint32_t key_heads,
+                    ComputeDispatch& dispatch) {
+                    return gles
+                        ? build_gated_delta_net_f32_gles_candidate(q, k, v, gate, beta, state,
+                            output, state_size, value_heads, key_heads, dispatch)
+                        : build_gated_delta_net_f32_candidate(q, k, v, gate, beta, state,
+                            output, state_size, value_heads, key_heads, dispatch);
+                });
+        });
     run("GdnL2Norm", gles ? "gles-gdn-l2-norm-f32-v1" : "dawn-gdn-l2-norm-f32-v1",
         [&] {
             return validate_gdn_l2_norm(backend,
@@ -680,6 +817,15 @@ Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& reg
                     return gles ? build_softmax_f32_gles_candidate(input, out, dispatch)
                                 : build_softmax_f32_candidate(input, out, dispatch);
                 }, true);
+            });
+    run("MultiAxisRoPE",
+            gles ? "gles-multi-axis-rope-f32-text-v1" : "dawn-multi-axis-rope-f32-text-v1",
+            [&] {
+                return validate_rope(backend, [&](const Tensor& input, const Tensor& out,
+                                                  const RopeConfig& config, ComputeDispatch& dispatch) {
+                    return gles ? build_rope_f32_gles_candidate(input, out, config, dispatch)
+                                : build_rope_f32_candidate(input, out, config, dispatch);
+                });
             });
     run( "RoPE",
             gles ? "gles-rope-f32-generic-v1" : "dawn-rope-f32-generic-v1",

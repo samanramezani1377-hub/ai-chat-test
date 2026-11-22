@@ -108,6 +108,32 @@ Status reference_gdn_l2_norm_f32(const float* input, float* output,
                                  uint32_t tokens, uint32_t state_size,
                                  uint32_t group_count, float epsilon);
 Status register_gdn_l2_norm_operator_candidate(OperatorRegistry& registry, BackendKind backend);
+Status build_ssm_conv1d_f32_candidate(const Tensor& input, const Tensor& state,
+                                     const Tensor& weights, const Tensor& output,
+                                     uint32_t kernel_size, ComputeDispatch& dispatch);
+Status build_ssm_conv1d_f32_gles_candidate(const Tensor& input, const Tensor& state,
+                                           const Tensor& weights, const Tensor& output,
+                                           uint32_t kernel_size, ComputeDispatch& dispatch);
+Status reference_ssm_conv1d_f32(const float* input, float* state, const float* weights,
+                                float* output, uint32_t tokens, uint32_t channels,
+                                uint32_t kernel_size);
+Status register_ssm_conv1d_operator_candidate(OperatorRegistry& registry, BackendKind backend);
+Status build_gated_delta_net_f32_candidate(const Tensor& q, const Tensor& k, const Tensor& v,
+                                           const Tensor& gate, const Tensor& beta,
+                                           const Tensor& state, const Tensor& output,
+                                           uint32_t state_size, uint32_t value_heads,
+                                           uint32_t key_heads, ComputeDispatch& dispatch);
+Status build_gated_delta_net_f32_gles_candidate(const Tensor& q, const Tensor& k, const Tensor& v,
+                                                const Tensor& gate, const Tensor& beta,
+                                                const Tensor& state, const Tensor& output,
+                                                uint32_t state_size, uint32_t value_heads,
+                                                uint32_t key_heads, ComputeDispatch& dispatch);
+Status reference_gated_delta_net_f32(const float* q, const float* k, const float* v,
+                                     const float* gate, const float* beta,
+                                     float* state, float* output, uint32_t tokens,
+                                     uint32_t state_size, uint32_t value_heads,
+                                     uint32_t key_heads);
+Status register_gated_delta_net_operator_candidate(OperatorRegistry& registry, BackendKind backend);
 
 const char* softmax_f32_wgsl_source() noexcept;
 Status build_softmax_f32_candidate(const Tensor& input, const Tensor& output,

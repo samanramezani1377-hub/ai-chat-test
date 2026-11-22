@@ -647,6 +647,72 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     context_.backend = engine_->active_backend();
     context_.kv_cache = kv_cache_.get();
     context_.context_length = context_length_;
+
+    std::unordered_set<std::string> persistent_state_names;
+    auto allocate_persistent_state = [&](const std::string& name,
+                                         const std::vector<uint64_t>& shape) -> Status {
+        if (name.empty() || !persistent_state_names.insert(name).second)
+            return {StatusCode::InvalidArgument, "Hybrid state binding name is empty or duplicated"};
+        TensorDesc descriptor;
+        descriptor.shape = shape;
+        descriptor.data_type = DataType::F32;
+        descriptor.layout = TensorLayout::Contiguous;
+        descriptor.memory = MemoryDomain::Device;
+        descriptor.alignment = 4;
+        uint64_t bytes = 0;
+        Status result = Tensor::required_bytes(descriptor, bytes);
+        if (!result.ok()) return result;
+        if (bytes == 0 || bytes > SIZE_MAX)
+            return {StatusCode::InvalidArgument, "Hybrid state tensor has an invalid byte size"};
+        BufferDesc buffer_desc;
+        buffer_desc.size_bytes = bytes;
+        buffer_desc.alignment = 4;
+        buffer_desc.memory = MemoryDomain::Device;
+        buffer_desc.persistent = true;
+        buffer_desc.label = "hybrid-state-" + name;
+        MemoryLease lease;
+        result = memory_->allocate(buffer_desc, lease);
+        if (!result.ok()) return result;
+        if (!lease || !lease.buffer() || lease.buffer()->size_bytes() < bytes)
+            return {StatusCode::BackendFailure, "Hybrid state allocation returned an undersized buffer"};
+        std::vector<uint8_t> zeros(static_cast<size_t>(bytes), 0);
+        result = engine_->active_backend()->upload(lease.buffer(), 0, zeros.data(), bytes);
+        if (!result.ok()) return result;
+        Tensor tensor;
+        result = Tensor::create(std::move(descriptor), lease.buffer(), 0, tensor);
+        if (!result.ok()) return result;
+        context_.tensors.emplace(name, std::move(tensor));
+        context_.state_leases.push_back(std::move(lease));
+        return Status::success();
+    };
+    for (const auto& operation : plan_.operations) {
+        if (operation.operator_name == "SSMConv1D") {
+            if (operation.inputs.size() != 2 || operation.output_shape.size() != 2)
+                { last_error_ = "SSMConv1D state metadata is invalid"; unload_locked(); return {StatusCode::InvalidArgument, last_error_}; }
+            const auto kernel = operation.integer_attributes.find("kernel_size");
+            if (kernel == operation.integer_attributes.end() || kernel->second < 2 ||
+                operation.output_shape[1] == 0)
+                { last_error_ = "SSMConv1D state dimensions are invalid"; unload_locked(); return {StatusCode::InvalidArgument, last_error_}; }
+            status = allocate_persistent_state(operation.inputs[1],
+                {operation.output_shape[1], kernel->second - 1});
+        } else if (operation.operator_name == "GatedDeltaNet") {
+            if (operation.inputs.size() != 6)
+                { last_error_ = "GatedDeltaNet state metadata is invalid"; unload_locked(); return {StatusCode::InvalidArgument, last_error_}; }
+            const auto state_size = operation.integer_attributes.find("state_size");
+            const auto value_heads = operation.integer_attributes.find("value_heads");
+            if (state_size == operation.integer_attributes.end() ||
+                value_heads == operation.integer_attributes.end() ||
+                state_size->second == 0 || value_heads->second == 0)
+                { last_error_ = "GatedDeltaNet recurrent-state dimensions are invalid"; unload_locked(); return {StatusCode::InvalidArgument, last_error_}; }
+            status = allocate_persistent_state(operation.inputs[5],
+                {value_heads->second, state_size->second, state_size->second});
+        }
+        if (!status.ok()) {
+            last_error_ = "Hybrid persistent state allocation failed: " + status.message;
+            unload_locked();
+            return status;
+        }
+    }
     model_path_ = path;
     loaded_ = true;
     last_ttft_ms_ = 0;
@@ -718,6 +784,30 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
         return {StatusCode::InvalidArgument, last_error_};
     }
 
+    for (const auto& name : plan_.external_inputs) {
+        const bool recurrent = name.size() >= 15 &&
+            name.compare(name.size() - 15, 15, "recurrent_state") == 0;
+        const bool convolution = name.size() >= 10 &&
+            name.compare(name.size() - 10, 10, "conv_state") == 0;
+        if (!recurrent && !convolution) continue;
+        const auto found = context_.tensors.find(name);
+        if (found == context_.tensors.end() || !found->second.buffer()) {
+            last_error_ = "Hybrid state binding is missing: " + name;
+            return {StatusCode::NotReady, last_error_};
+        }
+        const uint64_t bytes = found->second.byte_size();
+        if (bytes == 0 || bytes > SIZE_MAX) {
+            last_error_ = "Hybrid state buffer size is invalid: " + name;
+            return {StatusCode::InvalidArgument, last_error_};
+        }
+        std::vector<uint8_t> zeros(static_cast<size_t>(bytes), 0);
+        status = engine_->active_backend()->upload(found->second.buffer(),
+            found->second.byte_offset(), zeros.data(), bytes);
+        if (!status.ok()) {
+            last_error_ = "Hybrid state reset failed: " + status.message;
+            return status;
+        }
+    }
     for (uint32_t layer = 0; layer < plan_.layer_count; ++layer) {
         status = kv_cache_->reset_layer(layer);
         if (!status.ok()) {

@@ -549,6 +549,91 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
         });
     if (!status.ok()) return status;
 
+    status = registry.register_lowering(backend, "SSMConv1D",
+        [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
+                  ComputeDispatch& dispatch) {
+            if (operation.inputs.size() != 2 || operation.weight_tensors.size() != 1)
+                return Status{StatusCode::InvalidArgument, "SSMConv1D requires input, state and one kernel weight"};
+            const Tensor *input = nullptr, *state = nullptr, *weights = nullptr, *output = nullptr;
+            Status result = lookup_operand(operation, context, 0, input);
+            if (!result.ok()) return result;
+            result = lookup_operand(operation, context, 1, state);
+            if (!result.ok()) return result;
+            result = lookup_operand(operation, context, 2, weights);
+            if (!result.ok()) return result;
+            result = lookup_output(operation, context, output);
+            if (!result.ok()) return result;
+            uint32_t kernel_size = 0;
+            result = required_integer(operation, "kernel_size", kernel_size);
+            if (!result.ok()) return result;
+            return backend == BackendKind::OpenGles
+                ? build_ssm_conv1d_f32_gles_candidate(*input, *state, *weights,
+                    *output, kernel_size, dispatch)
+                : build_ssm_conv1d_f32_candidate(*input, *state, *weights,
+                    *output, kernel_size, dispatch);
+        });
+    if (!status.ok()) return status;
+
+    status = registry.register_lowering(backend, "GatedDeltaNet",
+        [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
+                  ComputeDispatch& dispatch) {
+            if (operation.inputs.size() != 6 || !operation.weight_tensors.empty())
+                return Status{StatusCode::InvalidArgument, "GatedDeltaNet requires q, k, v, gate, beta and state"};
+            const Tensor *q = nullptr, *k = nullptr, *v = nullptr, *gate = nullptr;
+            const Tensor *beta = nullptr, *state = nullptr, *output = nullptr;
+            Status result = lookup_operand(operation, context, 0, q);
+            if (!result.ok()) return result;
+            result = lookup_operand(operation, context, 1, k);
+            if (!result.ok()) return result;
+            result = lookup_operand(operation, context, 2, v);
+            if (!result.ok()) return result;
+            result = lookup_operand(operation, context, 3, gate);
+            if (!result.ok()) return result;
+            result = lookup_operand(operation, context, 4, beta);
+            if (!result.ok()) return result;
+            result = lookup_operand(operation, context, 5, state);
+            if (!result.ok()) return result;
+            result = lookup_output(operation, context, output);
+            if (!result.ok()) return result;
+            uint32_t state_size = 0, value_heads = 0, key_heads = 0;
+            result = required_integer(operation, "state_size", state_size);
+            if (!result.ok()) return result;
+            result = required_integer(operation, "value_heads", value_heads);
+            if (!result.ok()) return result;
+            result = required_integer(operation, "key_heads", key_heads);
+            if (!result.ok()) return result;
+            return backend == BackendKind::OpenGles
+                ? build_gated_delta_net_f32_gles_candidate(*q, *k, *v, *gate,
+                    *beta, *state, *output, state_size, value_heads, key_heads, dispatch)
+                : build_gated_delta_net_f32_candidate(*q, *k, *v, *gate,
+                    *beta, *state, *output, state_size, value_heads, key_heads, dispatch);
+        });
+    if (!status.ok()) return status;
+
+    status = registry.register_lowering(backend, "MultiAxisRoPE",
+        [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
+                  ComputeDispatch& dispatch) {
+            if (operation.inputs.size() != 1 || !operation.weight_tensors.empty() ||
+                context.past_length > UINT32_MAX)
+                return Status{StatusCode::InvalidArgument, "Text M-RoPE requires one activation and a uint32 position"};
+            const Tensor *input = nullptr, *output = nullptr;
+            Status result = lookup_operand(operation, context, 0, input);
+            if (!result.ok()) return result;
+            result = lookup_output(operation, context, output);
+            if (!result.ok()) return result;
+            RopeConfig config;
+            result = required_integer(operation, "rotary_dimensions", config.rotary_dimensions);
+            if (!result.ok()) return result;
+            result = required_float(operation, "theta", config.theta);
+            if (!result.ok()) return result;
+            config.neox_style = true;
+            config.start_position = static_cast<uint32_t>(context.past_length);
+            return backend == BackendKind::OpenGles
+                ? build_rope_f32_gles_candidate(*input, *output, config, dispatch)
+                : build_rope_f32_candidate(*input, *output, config, dispatch);
+        });
+    if (!status.ok()) return status;
+
     status = registry.register_lowering(backend, "RoPE",
         [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
                   ComputeDispatch& dispatch) {

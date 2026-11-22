@@ -166,6 +166,41 @@ ModelGpuMemoryEstimateReport estimate_model_gpu_memory(
         report.blockers.emplace_back("MODEL_SCRATCH_SIZE_OVERFLOW");
         return report;
     }
+    uint64_t persistent_state_bytes = 0;
+    for (const auto& operation : model.operations) {
+        uint64_t elements = 0;
+        if (operation.operator_name == "SSMConv1D") {
+            const auto kernel = operation.integer_attributes.find("kernel_size");
+            if (kernel == operation.integer_attributes.end() || kernel->second < 2 ||
+                operation.output_shape.size() != 2 || operation.output_shape[1] == 0 ||
+                !checked_multiply(operation.output_shape[1], kernel->second - 1, elements)) {
+                report.blockers.emplace_back("MODEL_CONV_STATE_SIZE_INVALID");
+                return report;
+            }
+        } else if (operation.operator_name == "GatedDeltaNet") {
+            const auto state = operation.integer_attributes.find("state_size");
+            const auto heads = operation.integer_attributes.find("value_heads");
+            uint64_t square = 0;
+            if (state == operation.integer_attributes.end() || heads == operation.integer_attributes.end() ||
+                state->second == 0 || heads->second == 0 ||
+                !checked_multiply(state->second, state->second, square) ||
+                !checked_multiply(square, heads->second, elements)) {
+                report.blockers.emplace_back("MODEL_RECURRENT_STATE_SIZE_INVALID");
+                return report;
+            }
+        }
+        uint64_t bytes = 0;
+        if (elements != 0 &&
+            (!checked_multiply(elements, input.bytes_per_element, bytes) ||
+             !checked_add(persistent_state_bytes, bytes, persistent_state_bytes))) {
+            report.blockers.emplace_back("MODEL_PERSISTENT_STATE_SIZE_OVERFLOW");
+            return report;
+        }
+    }
+    if (!checked_add(scratch, persistent_state_bytes, scratch)) {
+        report.blockers.emplace_back("MODEL_SCRATCH_SIZE_OVERFLOW");
+        return report;
+    }
     report.estimated_scratch_bytes = scratch;
     GpuMemoryPlanInput plan_input;
     plan_input.total_weight_bytes = input.total_weight_bytes;
