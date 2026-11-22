@@ -26,6 +26,9 @@ class MainActivity : Activity() {
     private lateinit var logView: EditText
     private lateinit var statusView: TextView
     private lateinit var importButton: Button
+    private lateinit var generateButton: Button
+    private lateinit var promptInput: EditText
+    private lateinit var generatedOutput: TextView
     private val logBuffer = StringBuilder()
     private val requestImportModel = 4101
     private val contextLength = 2048
@@ -69,6 +72,28 @@ class MainActivity : Activity() {
         }
         root.addView(importButton, LinearLayout.LayoutParams(-1, -2))
 
+        promptInput = EditText(this).apply {
+            hint = "Enter a prompt to test GPU inference"
+            minLines = 2
+            maxLines = 4
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+        }
+        root.addView(promptInput, LinearLayout.LayoutParams(-1, -2))
+
+        generateButton = Button(this).apply {
+            text = "Generate on GPU"
+            isEnabled = false
+            setOnClickListener { generateText() }
+        }
+        root.addView(generateButton, LinearLayout.LayoutParams(-1, -2))
+
+        generatedOutput = TextView(this).apply {
+            text = "Generated output will appear here"
+            textSize = 14f
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        root.addView(generatedOutput, LinearLayout.LayoutParams(-1, -2))
+
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val copyButton = Button(this).apply {
             text = "Copy full log"
@@ -76,7 +101,7 @@ class MainActivity : Activity() {
         }
         val unloadButton = Button(this).apply {
             text = "Unload model"
-            setOnClickListener { unloadModel() }
+            setOnClickListener { GpuEngineTestApi.stop(); unloadModel() }
         }
         actions.addView(copyButton, LinearLayout.LayoutParams(0, -2, 1f))
         actions.addView(unloadButton, LinearLayout.LayoutParams(0, -2, 1f))
@@ -180,7 +205,33 @@ class MainActivity : Activity() {
 
         runOnUiThread {
             statusView.text = if (result == 0) "GPU model activation succeeded" else "GPU model activation failed (code $result)"
+            generateButton.isEnabled = result == 0
             importButton.isEnabled = true
+        }
+    }
+
+    private fun generateText() {
+        val prompt = promptInput.text.toString().trim()
+        if (prompt.isEmpty()) {
+            statusView.text = "Enter a prompt first"
+            return
+        }
+        generateButton.isEnabled = false
+        generatedOutput.text = ""
+        appendLog("GPU_GENERATION_BEGIN")
+        thread(name = "gpu-engine-generation") {
+            val startedAt = System.nanoTime()
+            val result = GpuEngineTestApi.generate(prompt, maxTokens = 64) { token ->
+                runOnUiThread { generatedOutput.append(token) }
+            }
+            val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L
+            appendLog("GPU_GENERATION_RESULT=$result")
+            appendLog("GPU_GENERATION_TIME_MS=$elapsedMs")
+            appendLog(GpuEngineTestApi.diagnostics())
+            runOnUiThread {
+                statusView.text = if (result == 0) "GPU generation completed" else "GPU generation failed (code $result)"
+                generateButton.isEnabled = true
+            }
         }
     }
 
