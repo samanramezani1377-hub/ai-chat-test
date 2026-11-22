@@ -5138,7 +5138,11 @@ Status decode_q3_k_blocks(const uint8_t*source,size_t source_bytes,float*destina
             ((aux1>>4u)&kmask2)|(((tmp>>6u)&kmask1)<<4u)
         };
         int8_t scales[16];
-        std::memcpy(scales,unpacked,sizeof(scales));
+        for(size_t index=0;index<16;++index){
+            const uint32_t word=unpacked[index/4];
+            const uint8_t value=static_cast<uint8_t>((word>>((index%4)*8u))&255u);
+            scales[index]=static_cast<int8_t>(value);
+        }
         const uint16_t d_bits=static_cast<uint16_t>(encoded[108])|static_cast<uint16_t>(encoded[109]<<8u);
         const float d=decode_f16_value(d_bits);
         if(!std::isfinite(d))return {StatusCode::NumericalFailure,"Q3_K block scale is non-finite"};
