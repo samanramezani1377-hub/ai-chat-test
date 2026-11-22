@@ -75,6 +75,7 @@ bool unicode_number(uint32_t c) {
            (c >= 0x3280 && c <= 0x3289) || (c >= 0x32b1 && c <= 0x32bf);
 }
 bool digit(uint32_t c) { return (c >= '0' && c <= '9') || unicode_number(c); }
+bool space(uint32_t c);
 bool letter(uint32_t c) {
     if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) return true;
     if (c < 0x80 || space(c) || unicode_number(c)) return false;
@@ -288,11 +289,23 @@ private:
 
 class BpeAdapter final : public BaseAdapter {
 public:
-    explicit BpeAdapter(std::string pre):desc_{"gpt2",std::move(pre),"byte-level-bpe",SupportState::Unverified}{build_bytes();}
+    explicit BpeAdapter(std::string pre):desc_{"gpt2",pre,"byte-level-bpe",
+        pre == "qwen35" ? SupportState::Validated : SupportState::Unverified}{build_bytes();}
     const TokenizerDescriptor& descriptor()const noexcept override{return desc_;}
     Status validate_metadata(const GgufTokenizerInfo&m)const override{
         Status s=validate_ids(m);if(!s.ok())return s;
         if(m.merges.empty())return {StatusCode::Unsupported,"BPE merge table is empty"};
+        if (desc_.pre_tokenizer == "qwen35") {
+            // Qwen3.5's published GGUF tokenizer profile. Fail closed if the
+            // tokenizer assets or special-token contract differ from this profile.
+            if (m.tokens.size() != 248320 || m.merges.size() != 247587 ||
+                m.token_types.size() != m.tokens.size() ||
+                m.bos_token_id != -1 || m.eos_token_id != 248046 ||
+                m.padding_token_id != 248044 || m.add_bos_token ||
+                m.add_eos_token || m.add_space_prefix || m.byte_fallback) {
+                return {StatusCode::Unsupported,"Qwen3.5 tokenizer metadata does not match the validated GGUF profile"};
+            }
+        }
         const auto vocabulary=token_map(m);
         std::unordered_set<std::string> unique_merges;
         unique_merges.reserve(m.merges.size());
@@ -304,8 +317,10 @@ public:
             const std::string key=merge.substr(0,separator)+"\x1f"+merge.substr(separator+1);
             if(!unique_merges.insert(key).second)
                 return {StatusCode::InvalidArgument,"BPE merge table contains a duplicate pair"};
-            if(vocabulary.find(merge.substr(0,separator)+merge.substr(separator+1))==vocabulary.end())
-                return {StatusCode::InvalidArgument,"BPE merge result is missing from the token vocabulary"};
+            if(vocabulary.find(merge.substr(0,separator))==vocabulary.end() ||
+               vocabulary.find(merge.substr(separator+1))==vocabulary.end() ||
+               vocabulary.find(merge.substr(0,separator)+merge.substr(separator+1))==vocabulary.end())
+                return {StatusCode::InvalidArgument,"BPE merge input or result is missing from the token vocabulary"};
         }
         return Status::success();
     }
@@ -493,7 +508,7 @@ Status register_builtin_tokenizer_adapters(TokenizerRegistry& registry) {
     Status s=registry.register_adapter(std::make_shared<SentencePieceAdapter>("llama","default"));if(!s.ok())return s;
     s=registry.register_adapter(std::make_shared<SentencePieceAdapter>("llama","llama"));if(!s.ok())return s;
     s=registry.register_adapter(std::make_shared<SentencePieceAdapter>("spm","default"));if(!s.ok())return s;
-    const char* profiles[]={"gpt2","llama3","qwen2","qwen3"};
+    const char* profiles[]={"gpt2","llama3","qwen2","qwen3","qwen35"};
     for(const char* p:profiles){s=registry.register_adapter(std::make_shared<BpeAdapter>(p));if(!s.ok())return s;}
     return Status::success();
 }
