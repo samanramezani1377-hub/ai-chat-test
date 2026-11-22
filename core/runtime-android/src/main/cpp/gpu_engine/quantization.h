@@ -13,6 +13,8 @@ namespace ai_chat::gpu_engine {
 Status decode_q4_0_blocks(const uint8_t* source, size_t source_bytes,
                           float* destination, size_t destination_elements);
 
+Status validate_q6_k_matmul_kernel(Backend&,OperatorRegistry&,QuantizationRegistry&);
+
 Status build_q6_k_matmul_candidate(const Tensor&,const std::shared_ptr<Buffer>&,uint64_t,const Tensor&,ComputeDispatch&);
 Status build_q6_k_matmul_gles_candidate(const Tensor&,const std::shared_ptr<Buffer>&,uint64_t,const Tensor&,ComputeDispatch&);
 Status reference_q6_k_matmul(const float*,const uint8_t*,uint64_t,float*,uint32_t,uint32_t,uint32_t);

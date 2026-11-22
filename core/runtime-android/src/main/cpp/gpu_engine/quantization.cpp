@@ -3292,6 +3292,20 @@ Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry
     status = registry.register_kernel(std::move(q4_1_gles));
     if (!status.ok()) return status;
 
+
+    KernelDefinition q6_k;
+    q6_k.operator_name="MatMul_Q6_K";q6_k.backend=BackendKind::DawnWebGpu;
+    q6_k.input_type=DataType::F32;q6_k.input_types={DataType::F32,DataType::U32};q6_k.output_type=DataType::F32;
+    q6_k.min_input_count=2;q6_k.max_input_count=2;q6_k.min_rank=2;q6_k.max_rank=3;
+    q6_k.validation=KernelValidation::Unverified;q6_k.kernel_id="dawn-q6-k-matmul-f32-activation-v1";q6_k.wgsl_source=kQ6_KMatMulWgsl;
+    status=registry.register_kernel(std::move(q6_k));if(!status.ok())return status;
+    KernelDefinition q6_k_gles;
+    q6_k_gles.operator_name="MatMul_Q6_K";q6_k_gles.backend=BackendKind::OpenGles;
+    q6_k_gles.input_type=DataType::F32;q6_k_gles.input_types={DataType::F32,DataType::U32};q6_k_gles.output_type=DataType::F32;
+    q6_k_gles.min_input_count=2;q6_k_gles.max_input_count=2;q6_k_gles.min_rank=2;q6_k_gles.max_rank=3;
+    q6_k_gles.validation=KernelValidation::Unverified;q6_k_gles.kernel_id="gles-q6-k-matmul-f32-activation-v1";q6_k_gles.glsl_source=kQ6_KMatMulGlsl;
+    status=registry.register_kernel(std::move(q6_k_gles));if(!status.ok())return status;
+
     for (const bool bf16 : {false,true}) {
         const std::string suffix=bf16?"bf16":"f16";
         const std::string matmul=bf16?"MatMul_BF16":"MatMul_F16";
@@ -4512,5 +4526,69 @@ Status reference_q6_k_matmul(const float*a,const uint8_t*w,uint64_t bytes,float*
     }
     return Status::success();
 }
+
+
+Status validate_q6_k_matmul_kernel_impl(Backend&backend,OperatorRegistry&operators,QuantizationRegistry&quantizations){
+    const BackendKind kind=backend.kind();if((kind!=BackendKind::DawnWebGpu&&kind!=BackendKind::OpenGles)||!backend.healthy())
+        return {StatusCode::NotReady,"Q6_K MatMul validation requires a healthy Dawn or GLES backend"};
+    auto format=quantizations.formats_.find(14);
+    if(format==quantizations.formats_.end()||format->second.decoder_state!=SupportState::Validated)
+        return {StatusCode::NotReady,"Q6_K host decoder is not validated"};
+    const std::string kernel_id=(kind==BackendKind::OpenGles?"gles-":"dawn-")+std::string("q6-k-matmul-f32-activation-v1");
+    auto kernel=std::find_if(operators.kernels_.begin(),operators.kernels_.end(),[&](const KernelDefinition&k){return k.kernel_id==kernel_id&&k.backend==kind;});
+    if(kernel==operators.kernels_.end())return {StatusCode::NotReady,"Q6_K MatMul candidate is not registered"};
+    if(kernel->validation==KernelValidation::Validated){format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;format->second.gpu_kernel_state=SupportState::Validated;return Status::success();}
+    if(kernel->validation!=KernelValidation::Unverified)return {StatusCode::Unsupported,"Q6_K MatMul candidate is rejected"};
+    const bool gles=kind==BackendKind::OpenGles;
+    const std::string& registered=gles?kernel->glsl_source:kernel->wgsl_source;
+    const std::string canonical=gles?std::string(kQ6_KMatMulGlsl):std::string(kQ6_KMatMulWgsl);
+    if(registered.empty()||registered!=canonical)return {StatusCode::InvalidArgument,"Q6_K MatMul shader differs from canonical source"};
+    constexpr uint32_t rows=2,channels=2,inner=256;
+    const uint64_t bytes=static_cast<uint64_t>(channels)*210;
+    std::vector<uint8_t> encoded(static_cast<size_t>(bytes),0);
+    for(uint32_t channel=0;channel<channels;++channel){
+        uint8_t*block=encoded.data()+channel*210;
+        std::fill(block,block+128,0x11);
+        for(uint32_t i=0;i<64;++i)block[128+i]=static_cast<uint8_t>(0x55u+i);
+        for(uint32_t i=0;i<16;++i)block[192+i]=static_cast<uint8_t>(1+(i%3));
+        block[208]=0x00;block[209]=0x3c;
+    }
+    std::vector<float> activations(rows*inner);
+    for(size_t i=0;i<activations.size();++i)activations[i]=(static_cast<int>(i%11)-5)*0.125f;
+    float expected[rows*channels]={},actual[rows*channels]={};
+    Status status=reference_q6_k_matmul(activations.data(),encoded.data(),bytes,expected,rows,channels,inner);
+    if(!status.ok())return status;
+    BufferDesc ad{activations.size()*sizeof(float),alignof(float),MemoryDomain::Device,false,"q6-k-validation-activations"};
+    BufferDesc wd{bytes,4,MemoryDomain::Device,true,"q6-k-validation-weights"};
+    BufferDesc od{sizeof(actual),alignof(float),MemoryDomain::Device,false,"q6-k-validation-output"};
+    std::shared_ptr<Buffer> ab,wb,ob;
+    status=backend.allocate(ad,ab);if(!status.ok())return status;
+    status=backend.allocate(wd,wb);if(!status.ok())return status;
+    status=backend.allocate(od,ob);if(!status.ok())return status;
+    status=backend.upload(ab,0,activations.data(),ad.size_bytes);if(!status.ok())return status;
+    status=backend.upload(wb,0,encoded.data(),bytes);if(!status.ok())return status;
+    TensorDesc atd;atd.shape={rows,inner};atd.data_type=DataType::F32;
+    TensorDesc otd;otd.shape={rows,channels};otd.data_type=DataType::F32;
+    Tensor at,ot;status=Tensor::create(atd,ab,0,at);if(!status.ok())return status;
+    status=Tensor::create(otd,ob,0,ot);if(!status.ok())return status;
+    ComputeDispatch dispatch;
+    status=gles?build_q6_k_matmul_gles_candidate(at,wb,bytes,ot,dispatch):build_q6_k_matmul_candidate(at,wb,bytes,ot,dispatch);
+    if(!status.ok())return status;
+    if(dispatch.kernel_id!=kernel_id||dispatch.backend!=kind)return {StatusCode::InvalidArgument,"Q6_K MatMul candidate identity mismatch"};
+    dispatch.validation=KernelValidation::Validated;
+    std::unique_ptr<CommandBatch>commands;status=backend.begin_commands(commands);if(!status.ok())return status;
+    if(!commands)return {StatusCode::BackendFailure,"Q6_K backend returned empty command batch"};
+    status=commands->dispatch_compute(dispatch);if(!status.ok())return status;
+    status=backend.submit(std::move(commands));if(!status.ok())return status;
+    status=backend.synchronize();if(!status.ok())return status;
+    status=backend.readback(ob,0,actual,sizeof(actual));if(!status.ok())return status;
+    for(size_t i=0;i<rows*channels;++i){const float tolerance=1.0e-4f*std::max(1.0f,std::fabs(expected[i]));
+        if(!std::isfinite(actual[i])||std::fabs(actual[i]-expected[i])>tolerance)
+            return {StatusCode::NumericalFailure,"Q6_K MatMul GPU output differs from independent block decoder"};}
+    kernel->validation=KernelValidation::Validated;
+    format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;format->second.gpu_kernel_state=SupportState::Validated;
+    return Status::success();
+}
+Status validate_q6_k_matmul_kernel(Backend&b,OperatorRegistry&o,QuantizationRegistry&q){return validate_q6_k_matmul_kernel_impl(b,o,q);}
 
 } // namespace ai_chat::gpu_engine
