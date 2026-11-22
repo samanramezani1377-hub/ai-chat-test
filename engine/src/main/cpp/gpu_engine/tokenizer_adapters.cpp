@@ -303,7 +303,8 @@ public:
     Status validate_metadata(const GgufTokenizerInfo&m)const override{
         Status s=validate_ids(m);if(!s.ok())return s;
         if(m.merges.empty())return {StatusCode::Unsupported,"BPE merge table is empty"};
-        if (desc_.pre_tokenizer == "qwen35" || desc_.pre_tokenizer == "qwen2") {
+        if (desc_.pre_tokenizer == "qwen35" ||
+            (desc_.pre_tokenizer == "qwen2" && m.tokens.size() > 256)) {
             // The tested Qwen3.5 and Qwen2/Qwen3 byte-level BPE profiles require
             // complete token types and no implicit BOS/EOS, prefix-space or byte fallback.
             if (m.token_types.size() != m.tokens.size() ||
@@ -313,7 +314,8 @@ public:
             }
         }
         const auto vocabulary=token_map(m);
-        if (desc_.pre_tokenizer == "qwen35" || desc_.pre_tokenizer == "qwen2") {
+        if (desc_.pre_tokenizer == "qwen35" ||
+            (desc_.pre_tokenizer == "qwen2" && m.tokens.size() > 256)) {
             for (uint32_t byte = 0; byte < 256; ++byte) {
                 const auto symbol = encoder_.find(static_cast<uint8_t>(byte));
                 if (symbol == encoder_.end() || vocabulary.find(symbol->second) == vocabulary.end())
