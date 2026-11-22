@@ -29,13 +29,13 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>,
         var sum = 0.0;
         for (var tap = 0u; tap < KERNEL_SIZE; tap = tap + 1u) {
             let source_index = token + tap;
-            var sample = 0.0;
+            var sample_value = 0.0;
             if (source_index < history) {
-                sample = conv_state[channel * history + source_index];
+                sample_value = conv_state[channel * history + source_index];
             } else {
-                sample = input_values[(source_index - history) * CHANNELS + channel];
+                sample_value = input_values[(source_index - history) * CHANNELS + channel];
             }
-            sum = sum + sample * conv_weights[channel * KERNEL_SIZE + tap];
+            sum = sum + sample_value * conv_weights[channel * KERNEL_SIZE + tap];
         }
         output_values[token * CHANNELS + channel] = sum;
     }
@@ -71,10 +71,10 @@ void main() {
         float sum = 0.0;
         for (uint tap = 0u; tap < KERNEL_SIZE; ++tap) {
             uint source_index = token + tap;
-            float sample = source_index < history
+            float sample_value = source_index < history
                 ? conv_state[channel * history + source_index]
                 : input_values[(source_index - history) * CHANNELS + channel];
-            sum += sample * conv_weights[channel * KERNEL_SIZE + tap];
+            sum += sample_value * conv_weights[channel * KERNEL_SIZE + tap];
         }
         output_values[token * CHANNELS + channel] = sum;
     }
