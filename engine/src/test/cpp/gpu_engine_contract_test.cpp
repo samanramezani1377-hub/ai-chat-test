@@ -2905,7 +2905,7 @@ void test_streamed_execution_loads_and_releases_quantized_weights_per_operation(
     plan.structurally_validated = true;
     plan.operator_coverage_validated = true;
     plan.operations.push_back({"q4-matmul", "MatMul_Q4_0", {"hidden"},
-        {"q4_weight"}, "logits", {1, 2}, {}, {}, {}, {}, false});
+        {"q4_weight"}, "logits", {1, 2}, {}, {}, {}, {}, false, {}, {}, {}});
     plan.retained_outputs = {"logits"};
 
     BufferDesc input_desc{2 * 32 * sizeof(float), alignof(float), MemoryDomain::Device, false, "streamed-hidden"};
@@ -3224,8 +3224,8 @@ void test_model_plan_graph_compilation_is_fail_closed() {
     plan.structurally_validated = true;
     plan.operator_coverage_validated = true;
     plan.operations = {
-        {"add", "Add", {"input_a", "input_b"}, {}, "sum", {4}, {}, {}, {}, {}, false},
-        {"mul", "Multiply", {"sum", "input_c"}, {}, "product", {4}, {}, {}, {}, {}, false}
+        {"add", "Add", {"input_a", "input_b"}, {}, "sum", {4}, {}, {}, {}, {}, false, {}, {}, {}},
+        {"mul", "Multiply", {"sum", "input_c"}, {}, "product", {4}, {}, {}, {}, {}, false, {}, {}, {}}
     };
     FakeBackend backend;
     ModelExecutionContext context;
