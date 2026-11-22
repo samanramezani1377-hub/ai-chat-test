@@ -27,6 +27,83 @@ bool add_overflow(uint64_t lhs, uint64_t rhs, uint64_t& result) {
     return false;
 }
 
+std::string safe_diagnostic_atom(const std::string& value) {
+    std::string out;
+    out.reserve(value.size());
+    for (unsigned char ch : value) {
+        if (ch == ';' || ch == '=' || ch == '|' || ch == ',' ||
+            ch == '\n' || ch == '\r' || ch == '\t') out.push_back('_');
+        else if (ch >= 0x20 && ch != 0x7f) out.push_back(static_cast<char>(ch));
+    }
+    return out;
+}
+
+std::string metadata_value_summary(const GgufMetadataValue& value) {
+    if (const auto* v = std::get_if<std::string>(&value)) return "s:" + safe_diagnostic_atom(*v);
+    if (const auto* v = std::get_if<uint64_t>(&value)) return "u:" + std::to_string(*v);
+    if (const auto* v = std::get_if<int64_t>(&value)) return "i:" + std::to_string(*v);
+    if (const auto* v = std::get_if<double>(&value)) {
+        std::ostringstream out; out << "f:" << *v; return out.str();
+    }
+    if (const auto* v = std::get_if<bool>(&value)) return *v ? "b:1" : "b:0";
+    if (const auto* v = std::get_if<GgufArrayInfo>(&value))
+        return "array:" + std::to_string(v->count) + ":type" + std::to_string(v->element_type);
+    if (const auto* v = std::get_if<std::vector<std::string>>(&value))
+        return "strings:" + std::to_string(v->size());
+    if (const auto* v = std::get_if<std::vector<double>>(&value))
+        return "floats:" + std::to_string(v->size());
+    if (const auto* v = std::get_if<std::vector<int64_t>>(&value))
+        return "ints:" + std::to_string(v->size());
+    return "unknown";
+}
+
+std::string describe_unsupported_gguf_structure(const GgufFileInfo& model,
+                                                size_t maximum_characters = 14000) {
+    std::ostringstream out;
+    out << "GGUF_STRUCTURE{version=" << model.version
+        << ",architecture=" << safe_diagnostic_atom(model.architecture)
+        << ",model=" << safe_diagnostic_atom(model.model_name)
+        << ",metadata_count=" << model.metadata_count
+        << ",tensor_count=" << model.tensor_count
+        << ",tokenizer_model=" << safe_diagnostic_atom(model.tokenizer.model)
+        << ",pre_tokenizer=" << safe_diagnostic_atom(model.tokenizer.pre_tokenizer)
+        << ",vocab=" << model.tokenizer.tokens.size()
+        << ",merges=" << model.tokenizer.merges.size()
+        << ",architecture_metadata=[";
+    bool first = true;
+    const std::string prefix = model.architecture + ".";
+    for (const auto& entry : model.metadata) {
+        if (entry.first != "general.architecture" &&
+            entry.first != "general.name" &&
+            entry.first.compare(0, prefix.size(), prefix) != 0) continue;
+        if (!first) out << ",";
+        first = false;
+        out << safe_diagnostic_atom(entry.first) << ":" << metadata_value_summary(entry.second);
+    }
+    out << "],tensors=[";
+    first = true;
+    for (const auto& tensor : model.tensors) {
+        if (!first) out << ",";
+        first = false;
+        out << safe_diagnostic_atom(tensor.name) << "[";
+        for (size_t i = 0; i < tensor.dimensions.size(); ++i) {
+            if (i) out << "x";
+            out << tensor.dimensions[i];
+        }
+        out << "]:" << safe_diagnostic_atom(tensor.type.name)
+            << "#" << tensor.type_id << ":";
+        if (tensor.byte_size_known) out << tensor.byte_size;
+        else out << "?";
+    }
+    out << "]}";
+    std::string result = out.str();
+    if (result.size() > maximum_characters) {
+        result.resize(maximum_characters);
+        result += "...TRUNCATED";
+    }
+    return result;
+}
+
 } // namespace
 
 GpuInferenceSession::~GpuInferenceSession() { unload(); }
@@ -146,6 +223,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     const auto architecture = architectures_->find(model.architecture);
     if (!architecture) {
         last_error_ = "Unsupported model architecture: " + model.architecture;
+        last_error_ += " | " + describe_unsupported_gguf_structure(model);
         unload_locked();
         return {StatusCode::Unsupported, last_error_};
     }
