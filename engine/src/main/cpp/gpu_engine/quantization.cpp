@@ -5085,7 +5085,8 @@ Status validate_q6_k_embedding_kernel(Backend&backend,OperatorRegistry&operators
     std::vector<uint8_t>encoded(static_cast<size_t>(bytes),0);
     for(uint32_t row=0;row<vocabulary;++row){
         uint8_t*block=encoded.data()+row*row_bytes;
-        for(uint32_t i=0;i<128;++i){block[i]=static_cast<uint8_t>((i*13u+row*7u)&255u);block[128+i]=static_cast<uint8_t>((i*29u+row*11u)&255u);}
+        for(uint32_t i=0;i<128;++i)block[i]=static_cast<uint8_t>((i*13u+row*7u)&255u);
+        for(uint32_t i=0;i<64;++i)block[128+i]=static_cast<uint8_t>((i*29u+row*11u)&255u);
         for(uint32_t i=0;i<16;++i)block[192+i]=static_cast<uint8_t>(static_cast<int8_t>(static_cast<int>(i%13)-6));
         block[208]=0x00;block[209]=0x3c; // FP16 block scale = 1.0
     }
