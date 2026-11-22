@@ -1,13 +1,15 @@
 cmake_minimum_required(VERSION 3.22)
-project(android_gpu_inference_engine LANGUAGES C CXX)
 
-# Use ccache in CI for Dawn and engine translation units. Local Android builds
-# remain independent of ccache and do not require an extra host tool.
+# Compiler launchers must be set before project() enables C/C++ languages.
+# This keeps local builds independent of ccache while enabling real compiler
+# cache hits in CI for both Dawn and engine translation units.
 if (DEFINED ENV{CI} AND DEFINED ENV{CCACHE_DIR})
     find_program(AI_CHAT_CCACHE_EXECUTABLE ccache REQUIRED)
     set(CMAKE_C_COMPILER_LAUNCHER "${AI_CHAT_CCACHE_EXECUTABLE}" CACHE STRING "C compiler launcher" FORCE)
     set(CMAKE_CXX_COMPILER_LAUNCHER "${AI_CHAT_CCACHE_EXECUTABLE}" CACHE STRING "C++ compiler launcher" FORCE)
 endif()
+
+project(android_gpu_inference_engine LANGUAGES C CXX)
 
 if (NOT ANDROID)
     message(FATAL_ERROR "The Android GPU engine must be built with the Android NDK toolchain")
