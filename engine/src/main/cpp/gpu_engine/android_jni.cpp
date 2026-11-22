@@ -139,7 +139,7 @@ Qwen35UnicodeCategories classify_qwen35_text(JNIEnv* env, const std::string& tex
         }
         i += width;
         uint8_t kind = 4; // Other
-        if (cp == '\\r' || cp == '\\n') kind = 3; // Newline
+        if (cp == '\r' || cp == '\n') kind = 3; // Newline
         else if (is_unicode_space(cp)) kind = 2; // Space
         else {
             const jint type = env->CallStaticIntMethod(character, get_type, static_cast<jint>(cp));
