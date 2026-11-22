@@ -170,6 +170,32 @@ private:
     Qwen35UnicodeCategories categories_;
 };
 
+size_t complete_utf8_prefix(const std::string& value) {
+    size_t i = 0;
+    while (i < value.size()) {
+        const uint8_t lead = static_cast<uint8_t>(value[i]);
+        size_t width = 1;
+        if (lead >= 0xc2 && lead <= 0xdf) width = 2;
+        else if (lead >= 0xe0 && lead <= 0xef) width = 3;
+        else if (lead >= 0xf0 && lead <= 0xf4) width = 4;
+        else if (lead >= 0x80) { ++i; continue; }
+        if (i + width > value.size()) break;
+        bool valid = true;
+        for (size_t j = 1; j < width; ++j)
+            if ((static_cast<uint8_t>(value[i+j]) & 0xc0) != 0x80) valid = false;
+        if (valid && width == 3) {
+            const uint8_t second = static_cast<uint8_t>(value[i+1]);
+            if ((lead == 0xe0 && second < 0xa0) || (lead == 0xed && second >= 0xa0)) valid = false;
+        }
+        if (valid && width == 4) {
+            const uint8_t second = static_cast<uint8_t>(value[i+1]);
+            if ((lead == 0xf0 && second < 0x90) || (lead == 0xf4 && second >= 0x90)) valid = false;
+        }
+        i += valid ? width : 1;
+    }
+    return i;
+}
+
 jstring to_java_string(JNIEnv* env, const std::string& value) {
     std::vector<jchar> utf16;
     utf16.reserve(value.size());
@@ -322,9 +348,14 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineGenerate(
         if (listener && !on_token) return static_cast<jint>(ai_chat::gpu_engine::StatusCode::InvalidArgument);
 
         bool callback_failed = false;
-        const auto callback = [env, listener, on_token, &callback_failed](const std::string& text) {
+        std::string utf8_pending;
+        const auto callback = [env, listener, on_token, &callback_failed, &utf8_pending](const std::string& text) {
             if (!listener || !on_token || callback_failed) return;
-            jstring chunk = ai_chat::gpu_engine::to_java_string(env, text);
+            utf8_pending += text;
+            const size_t complete = ai_chat::gpu_engine::complete_utf8_prefix(utf8_pending);
+            if (complete == 0) return;
+            jstring chunk = ai_chat::gpu_engine::to_java_string(env, utf8_pending.substr(0, complete));
+            utf8_pending.erase(0, complete);
             if (!chunk) { callback_failed = true; return; }
             env->CallVoidMethod(listener, on_token, chunk);
             env->DeleteLocalRef(chunk);
@@ -335,6 +366,14 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineGenerate(
         };
         const auto status = ai_chat::gpu_engine::gpu_inference_session().generate(
             prompt_text, static_cast<uint32_t>(max_tokens), sampling, callback);
+        if (!utf8_pending.empty() && listener && on_token && !callback_failed) {
+            jstring tail = ai_chat::gpu_engine::to_java_string(env, utf8_pending);
+            if (tail) {
+                env->CallVoidMethod(listener, on_token, tail);
+                env->DeleteLocalRef(tail);
+                if (env->ExceptionCheck()) { env->ExceptionClear(); callback_failed = true; }
+            } else callback_failed = true;
+        }
         if (callback_failed) return static_cast<jint>(ai_chat::gpu_engine::StatusCode::BackendFailure);
         if (status.code == ai_chat::gpu_engine::StatusCode::Cancelled) return 9;
         return status.ok() ? 0 : static_cast<jint>(status.code);
