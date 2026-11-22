@@ -48,6 +48,10 @@ private:
 
 TokenizerPreflightReport evaluate_tokenizer_preflight(
     const GgufTokenizerInfo& metadata, const TokenizerRegistry& registry);
+// Stable, delimiter-safe metadata summary for device-side diagnostics. This does
+// not imply that an adapter is supported or validated.
+std::string describe_tokenizer_metadata(
+    const GgufTokenizerInfo& metadata, const TokenizerRegistry& registry);
 Status register_builtin_tokenizer_adapters(TokenizerRegistry& registry);
 
 class TokenizerEngine {

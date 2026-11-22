@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <utility>
+#include <sstream>
 
 namespace ai_chat::gpu_engine {
 
@@ -40,6 +41,58 @@ std::vector<TokenizerDescriptor> TokenizerRegistry::registered_adapters() const 
         return a.pre_tokenizer < b.pre_tokenizer;
     });
     return result;
+}
+
+
+namespace {
+std::string diagnostic_value(const std::string& value) {
+    std::string result;
+    result.reserve(value.size());
+    for (unsigned char c : value) {
+        if (c == ';' || c == '=' || c == '\\n' || c == '\\r' || c < 0x20) {
+            static constexpr char hex[] = "0123456789ABCDEF";
+            result.push_back('%');
+            result.push_back(hex[c >> 4]);
+            result.push_back(hex[c & 0x0f]);
+        } else {
+            result.push_back(static_cast<char>(c));
+        }
+    }
+    return result;
+}
+} // namespace
+
+std::string describe_tokenizer_metadata(
+        const GgufTokenizerInfo& metadata, const TokenizerRegistry& registry) {
+    std::ostringstream out;
+    out << "tokenizer_model=" << diagnostic_value(metadata.model)
+        << ";tokenizer_pre_tokenizer=" << diagnostic_value(metadata.pre_tokenizer)
+        << ";tokenizer_vocab_count=" << metadata.tokens.size()
+        << ";tokenizer_merge_count=" << metadata.merges.size()
+        << ";tokenizer_score_count=" << metadata.scores.size()
+        << ";tokenizer_token_type_count=" << metadata.token_types.size()
+        << ";tokenizer_bos_id=" << metadata.bos_token_id
+        << ";tokenizer_eos_id=" << metadata.eos_token_id
+        << ";tokenizer_unk_id=" << metadata.unknown_token_id
+        << ";tokenizer_pad_id=" << metadata.padding_token_id
+        << ";tokenizer_add_bos=" << (metadata.add_bos_token ? "true" : "false")
+        << ";tokenizer_add_eos=" << (metadata.add_eos_token ? "true" : "false")
+        << ";tokenizer_add_space_prefix=" << (metadata.add_space_prefix ? "true" : "false")
+        << ";tokenizer_byte_fallback=" << (metadata.byte_fallback ? "true" : "false")
+        << ";tokenizer_registered_profiles=";
+    const auto adapters = registry.registered_adapters();
+    if (adapters.empty()) {
+        out << "none";
+    } else {
+        for (size_t i = 0; i < adapters.size(); ++i) {
+            if (i) out << ",";
+            out << diagnostic_value(adapters[i].model) << "/"
+                << diagnostic_value(adapters[i].pre_tokenizer) << "/"
+                << diagnostic_value(adapters[i].algorithm) << "/"
+                << (adapters[i].validation == SupportState::Validated ? "validated" : "unverified");
+        }
+    }
+    return out.str();
 }
 
 TokenizerPreflightReport evaluate_tokenizer_preflight(

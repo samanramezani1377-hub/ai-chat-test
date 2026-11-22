@@ -1162,6 +1162,16 @@ void test_tokenizer_engine_contracts() {
     assert(!report.adapter_registered && !report.ready);
     assert(std::find(report.blockers.begin(), report.blockers.end(),
                      "TOKENIZER_ADAPTER_NOT_REGISTERED") != report.blockers.end());
+    metadata.model = "qwen;profile";
+    metadata.pre_tokenizer = "qwen=3";
+    metadata.merges = {"a b"};
+    const std::string diagnostic = describe_tokenizer_metadata(metadata, registry);
+    assert(diagnostic.find("tokenizer_model=qwen%3Bprofile") != std::string::npos);
+    assert(diagnostic.find("tokenizer_pre_tokenizer=qwen%3D3") != std::string::npos);
+    assert(diagnostic.find("tokenizer_vocab_count=2") != std::string::npos);
+    assert(diagnostic.find("tokenizer_merge_count=1") != std::string::npos);
+    metadata.model = "test-bpe";
+    metadata.pre_tokenizer = "test-pretokenizer";
 
     assert(registry.register_adapter(std::make_shared<FakeTokenizerAdapter>()).ok());
     report = evaluate_tokenizer_preflight(metadata, registry);

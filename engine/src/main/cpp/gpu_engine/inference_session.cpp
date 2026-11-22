@@ -127,6 +127,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     const auto tokenizer_preflight = evaluate_tokenizer_preflight(model.tokenizer, *tokenizers_);
     if (!tokenizer_preflight.ready) {
         last_error_ = "Tokenizer is not validated for this GGUF model";
+        last_error_ += " | " + describe_tokenizer_metadata(model.tokenizer, *tokenizers_);
         for (const auto& blocker : tokenizer_preflight.blockers) last_error_ += " | " + blocker;
         unload_locked();
         return {StatusCode::Unsupported, last_error_};
