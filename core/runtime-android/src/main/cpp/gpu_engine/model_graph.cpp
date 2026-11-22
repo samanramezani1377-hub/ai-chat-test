@@ -358,8 +358,15 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
         {
             ComputeGraph graph;
             ModelGraphCompileReport compile_report;
+            std::vector<std::string> operation_external_inputs = external_inputs;
+            operation_external_inputs.reserve(operation_external_inputs.size() +
+                                               operation_context.tensors.size() + 1);
+            for (const auto& binding : operation_context.tensors)
+                operation_external_inputs.push_back(binding.first);
+            if (!operation_context.token_ids.empty())
+                operation_external_inputs.emplace_back("token_ids");
             status = compile_model_execution_plan(single, backend.kind(), lowerings,
-                operators, external_inputs, operation_context, graph, compile_report);
+                operators, operation_external_inputs, operation_context, graph, compile_report);
             report.missing_lowerings.insert(report.missing_lowerings.end(),
                 compile_report.missing_lowerings.begin(), compile_report.missing_lowerings.end());
             report.unresolved_inputs.insert(report.unresolved_inputs.end(),

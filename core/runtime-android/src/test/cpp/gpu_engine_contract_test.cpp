@@ -2602,8 +2602,17 @@ void test_streamed_execution_loads_and_releases_quantized_weights_per_operation(
     ModelLoweringRegistry lowerings;
     assert(register_builtin_model_lowerings(BackendKind::OpenGles, lowerings).ok());
     ModelGraphCompileReport report;
-    assert(execute_model_execution_plan_streamed(plan, backend, lowerings, operators,
-        {}, reader, memory, device, 2, nullptr, context, report).ok());
+    const Status streamed_status = execute_model_execution_plan_streamed(
+        plan, backend, lowerings, operators, {}, reader, memory, device, 2,
+        nullptr, context, report);
+    if (!streamed_status.ok()) {
+        std::cerr << "streamed execution failed: " << streamed_status.message << '\\n';
+        for (const auto& error : report.errors) std::cerr << "  " << error << '\\n';
+        for (const auto& unresolved : report.unresolved_inputs) std::cerr << "  unresolved: " << unresolved << '\\n';
+        for (const auto& missing : report.missing_lowerings) std::cerr << "  missing lowering: " << missing << '\\n';
+        for (const auto& missing : report.missing_weight_tensors) std::cerr << "  missing weight: " << missing << '\\n';
+    }
+    assert(streamed_status.ok());
     assert(report.compiled && report.executed && report.compiled_nodes == 1);
     assert(context.quantized_weights.empty());
     assert(context.tensors.find("q4_weight") == context.tensors.end());
