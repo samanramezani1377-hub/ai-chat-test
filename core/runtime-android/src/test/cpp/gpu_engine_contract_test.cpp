@@ -645,7 +645,7 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     assert(f16_format&&f16_format->gpu_kernel_state==SupportState::Unverified);
     assert(bf16_format&&bf16_format->gpu_kernel_state==SupportState::Unverified);
     assert(!quantizations.can_execute_on_gpu(1,BackendKind::DawnWebGpu));
-    assert(!quantizations.can_execute_on_gpu(30,BackendKind::OpenGles);
+    assert(!quantizations.can_execute_on_gpu(30,BackendKind::OpenGles));
     KernelDefinition q5_embedding_selected;
     assert(operators.select_kernel("Embedding_Q5_0", BackendKind::OpenGles,
         std::vector<DataType>{DataType::U32,DataType::U32}, DataType::F32, 2,
