@@ -13,6 +13,7 @@ trap 'rm -rf "$TMP"' EXIT
   "$ENGINE/execution_engine.cpp" \
   "$ENGINE/gguf_reader.cpp" \
   "$ENGINE/model_registry.cpp" \
+  "$ENGINE/model_structure_analyzer.cpp" \
   "$ENGINE/model_graph.cpp" \
   "$ENGINE/model_lowerings.cpp" \
   "$ENGINE/operators.cpp" \

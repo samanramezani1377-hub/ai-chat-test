@@ -2,6 +2,7 @@
 
 #include "gguf_reader.h"
 #include "model_graph.h"
+#include "model_structure_analyzer.h"
 
 #include <memory>
 #include <string>
@@ -127,6 +128,7 @@ struct ModelPreflightReport {
     bool all_quantization_decoders_validated = false;
     bool all_quantization_gpu_kernels_validated = false;
     bool gpu_execution_ready = false;
+    ModelStructureAnalysis structure_analysis;
     std::vector<std::string> blockers;
 };
 

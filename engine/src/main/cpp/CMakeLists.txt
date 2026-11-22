@@ -42,6 +42,7 @@ add_library(ai_chat_gpu_engine STATIC
     ${ENGINE_DIR}/execution_engine.cpp
     ${ENGINE_DIR}/gguf_reader.cpp
     ${ENGINE_DIR}/model_registry.cpp
+    ${ENGINE_DIR}/model_structure_analyzer.cpp
     ${ENGINE_DIR}/model_graph.cpp
     ${ENGINE_DIR}/model_lowerings.cpp
     ${ENGINE_DIR}/operators.cpp

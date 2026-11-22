@@ -461,6 +461,7 @@ ModelPreflightReport evaluate_model_preflight(const GgufFileInfo& model,
     ModelPreflightReport report;
     report.architecture = model.architecture;
     report.tensor_count = model.tensor_count;
+    report.structure_analysis = analyze_model_structure(model);
     if (model.tokenizer.model == "unknown" || model.tokenizer.tokens.empty()) {
         report.blockers.emplace_back("GGUF_TOKENIZER_METADATA_MISSING");
     }
@@ -471,7 +472,11 @@ ModelPreflightReport evaluate_model_preflight(const GgufFileInfo& model,
     const auto adapter = architectures.find(model.architecture);
     report.architecture_known = static_cast<bool>(adapter);
     if (!adapter) {
-        report.blockers.emplace_back("UNSUPPORTED_ARCHITECTURE:" + model.architecture);
+        report.blockers.emplace_back("NO_VALIDATED_SEMANTIC_RECIPE:" + model.architecture);
+        report.blockers.emplace_back(std::string("STRUCTURE_CANDIDATE:") +
+            model_structure_family_name(report.structure_analysis.candidate_family));
+        report.blockers.emplace_back("STRUCTURE_EVIDENCE_SCORE:" +
+            std::to_string(report.structure_analysis.evidence_score));
     } else {
         const Status metadata_status = adapter->validate_metadata(model);
         if (!metadata_status.ok()) {

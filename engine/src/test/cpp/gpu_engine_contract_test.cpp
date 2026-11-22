@@ -10,6 +10,7 @@
 #include "tokenizer.h"
 #include "model_graph.h"
 #include "model_lowerings.h"
+#include "model_structure_analyzer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -259,6 +260,41 @@ private:
 
 
 
+
+void test_gguf_structure_analyzer_is_evidence_only() {
+    GgufFileInfo model;
+    model.architecture = "qwen35";
+    model.tensors = {
+        {"token_embd.weight", {8, 32}, 0, 0, 0, 1024, true, GgufReader::tensor_type_info(0)},
+        {"output.weight", {8, 32}, 0, 0, 0, 1024, true, GgufReader::tensor_type_info(0)},
+        {"blk.0.attn_q.weight", {8, 8}, 0, 0, 0, 256, true, GgufReader::tensor_type_info(0)},
+        {"blk.0.attn_k.weight", {8, 8}, 0, 0, 0, 256, true, GgufReader::tensor_type_info(0)},
+        {"blk.1.ssm_conv1d.weight", {4, 4}, 0, 0, 0, 64, true, GgufReader::tensor_type_info(0)},
+        {"blk.1.ffn_gate_inp.weight", {8, 4}, 0, 0, 0, 128, true, GgufReader::tensor_type_info(0)},
+        {"blk.1.ffn_gate_exps.weight", {4, 8, 4}, 0, 0, 0, 512, true, GgufReader::tensor_type_info(0)},
+        {"blk.1.ffn_up_exps.weight", {4, 8, 4}, 0, 0, 0, 512, true, GgufReader::tensor_type_info(0)},
+        {"blk.1.ffn_down_exps.weight", {4, 4, 8}, 0, 0, 0, 512, true, GgufReader::tensor_type_info(0)}
+    };
+    const ModelStructureAnalysis analysis = analyze_model_structure(model, 3);
+    assert(analysis.candidate_family == ModelStructureFamily::HybridAttentionRecurrent);
+    assert(analysis.has_attention);
+    assert(analysis.has_recurrent_path);
+    assert(analysis.has_experts);
+    assert(analysis.has_embedding && analysis.has_output_projection);
+    assert(analysis.layer_count == 2);
+    assert(analysis.recognized_tensor_count >= 8);
+    assert(analysis.evidence.size() == 3);
+    assert(analysis.evidence_score > 0 && analysis.evidence_score <= 100);
+
+    GgufFileInfo unknown;
+    unknown.architecture = "new_architecture";
+    unknown.tensors.push_back({"unrecognized.tensor", {1}, 0, 0, 0, 4, true,
+                               GgufReader::tensor_type_info(0)});
+    const auto unknown_analysis = analyze_model_structure(unknown);
+    assert(unknown_analysis.candidate_family == ModelStructureFamily::Unknown);
+    assert(!unknown_analysis.blockers.empty());
+    assert(unknown_analysis.evidence_score == 10);
+}
 
 void test_gpu_memory_planner_respects_streaming_and_reserve() {
     GpuMemoryPlanInput input;
@@ -3526,6 +3562,7 @@ int main() {
     test_kv_cache_device_append_avoids_host_roundtrip();
     test_model_gpu_memory_estimate_includes_kv_and_scratch();
     test_gpu_backend_fallback_order();
+    test_gguf_structure_analyzer_is_evidence_only();
     test_gpu_memory_planner_respects_streaming_and_reserve();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";

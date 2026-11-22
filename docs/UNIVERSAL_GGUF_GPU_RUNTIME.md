@@ -44,6 +44,8 @@ GGUF does not necessarily encode the complete forward-pass program. Metadata and
 ## Implementation stages and exit criteria
 
 ### Stage A — inspectability and safe discovery
+
+Implementation on `engine`: a first-pass evidence-only analyzer now classifies tensor-name patterns for dense attention, MoE experts/router, recurrent/state-space paths, and multimodal components. It reports evidence and a deterministic evidence-strength score; it does not infer executable semantics or mark an architecture supported. Unknown architectures now report the candidate structure family and score instead of only a registry miss. Synthetic hybrid/MoE and unknown-architecture contract tests are included.
 - Expose complete, bounded metadata/tensor inventory diagnostics.
 - Build structure summaries without requiring an architecture adapter.
 - Detect duplicate/missing/contradictory tensor patterns and arithmetic overflow.
