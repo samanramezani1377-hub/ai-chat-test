@@ -15,8 +15,9 @@
 
 namespace ai_chat::gpu_engine {
 namespace {
+constexpr GLenum kGlContextLost = static_cast<GLenum>(0x0507);
 Status gl_error(const char* op, GLenum code) {
-    return {code == GL_CONTEXT_LOST ? StatusCode::DeviceLost : StatusCode::BackendFailure, std::string(op) + " failed (GLES error " + std::to_string(code) + ")"};
+    return {code == kGlContextLost ? StatusCode::DeviceLost : StatusCode::BackendFailure, std::string(op) + " failed (GLES error " + std::to_string(code) + ")"};
 }
 void clear_errors() { while (glGetError() != GL_NO_ERROR) {} }
 
@@ -227,7 +228,7 @@ Status self_test_gles_backend(const ai_chat::gpu::UniversalGpuCapabilities& caps
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
     if (unmapped != GL_TRUE || std::memcmp(output, expected, sizeof(expected)) != 0)
         return {StatusCode::NumericalFailure, "GLES backend self-test output mismatch"};
-    return gl_status("GLES backend self-test");
+    return gl_error("GLES backend self-test", glGetError());
 }
 
 class UniversalGlesBackend final : public Backend {
