@@ -1,178 +1,51 @@
-# AI Chat Test
+# Android GPU Inference Engine
 
-> Prototype / Technical Feasibility Test برای Chat چندمنبعی روی Android؛ با انتخاب اجرای مدل محلی یا Provider راه‌دور، به‌همراه Agent قابل‌اعتماد
+این شاخه فقط شامل موتور استنتاج GPU برای Android، مستندات آن، تست‌های مستقل و یک اپلیکیشن آزمایشی بسیار ساده است.
 
-این repository محیط آزمایشی برای بررسی Chat فارسی، Streaming، Agent، Action، Verification و AI Workspace است. کاربر می‌تواند منبع Inference را انتخاب کند: مدل محلی روی دستگاه یا یک Provider راه‌دور که در برنامه پیکربندی و پشتیبانی شده باشد. هدف، اعتبارسنجی معماری و قابلیت‌ها پیش از انتقال به WooGit است.
+## ساختار
 
-## نقشه مستندات
+- `engine/`: کتابخانه Android و هسته C++ موتور.
+- `engine/src/main/cpp/gpu_engine/`: GGUF، tokenizer، quantization، graph، memory planner، scheduler، inference session و backendها.
+- `test-app/`: اپ آزمایشی؛ فقط واردکردن فایل GGUF، تلاش برای فعال‌سازی با GPU و نمایش/کپی گزارش.
+- `docs/gpu-engine/`: وضعیت، معماری و نقشه راه موتور.
+- `docs/USAGE_FA.md`: راهنمای کامل ساخت و استفاده.
+- `scripts/`: تست قراردادهای C++ و بررسی استقلال موتور.
 
-| سند | موضوع |
-|---|---|
-| [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md) | Specification اصلی Prototype |
-| [`DECISIONS_21_30.md`](docs/DECISIONS_21_30.md) | تصمیم‌های نهایی ۲۱ تا ۳۰ |
-| [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) | معماری Core/UI و Adapterها |
-| [`ACTION_PROTOCOL.md`](docs/ACTION_PROTOCOL.md) | قرارداد Action و Tool Result |
-| [`ACTION_REGISTRY.md`](docs/ACTION_REGISTRY.md) | Registry دسته‌بندی‌شده Actionها |
-| [`ACTION_EXECUTION_VERIFICATION.md`](docs/ACTION_EXECUTION_VERIFICATION.md) | Executor، Verifier و شواهد اجرا |
-| [`TASK_STATE_MACHINE.md`](docs/TASK_STATE_MACHINE.md) | State Machine Task/Agent/Execution |
-| [`RECOVERY_FAILURE.md`](docs/RECOVERY_FAILURE.md) | Checkpoint، Recovery، Idempotency و Verification |
-| [`OBSERVABILITY_AND_ERROR_CENTER.md`](docs/OBSERVABILITY_AND_ERROR_CENTER.md) | Central Logging، Error Center و گزارش قابل ارسال به Agent |
-| [`ERROR_REPORT_SCHEMA.md`](docs/ERROR_REPORT_SCHEMA.md) | Contract استاندارد ErrorReport |
-| [`SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) | Permission، Confirmation و Risk |
-| [`DATA_AND_PRIVACY.md`](docs/DATA_AND_PRIVACY.md) | Data Boundary، Logging و Privacy |
-| [`AI_WORKSPACE.md`](docs/AI_WORKSPACE.md) | میز کار تعاملی AI |
-| [`PERFORMANCE_METRICS.md`](docs/PERFORMANCE_METRICS.md) | Performance و Network Monitoring |
-| [`SETTINGS_CORE.md`](docs/SETTINGS_CORE.md) | Central Settings Core، Versioning و Migration |
-| [`WOOGIT_INTEGRATION.md`](docs/WOOGIT_INTEGRATION.md) | WooGit Adapter + Capability Contract |
-| [`PLATFORM_RELEASE_CI.md`](docs/PLATFORM_RELEASE_CI.md) | Platform، Compatibility و CI |
-| [`TEST_MATRIX.md`](docs/TEST_MATRIX.md) | ماتریس تست و Benchmark |
-| [`IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | برنامه پیاده‌سازی و مهاجرت |
-| [`TRACEABILITY.md`](docs/TRACEABILITY.md) | نگاشت Contractها به Module/Package |
-| [`CONTRACT_INDEX.md`](docs/CONTRACT_INDEX.md) | فهرست مرجع تمام Contractها |
-| [`DEPENDENCY_RULES.md`](docs/DEPENDENCY_RULES.md) | قوانین وابستگی بین لایه‌ها |
-| [`DATA_FLOW_LIFECYCLE.md`](docs/DATA_FLOW_LIFECYCLE.md) | جریان کامل داده و Lifecycle |
-| [`FAILURE_MATRIX.md`](docs/FAILURE_MATRIX.md) | ماتریس Failure / Recovery / Verification |
-| [`MIGRATION_MAPPING.md`](docs/MIGRATION_MAPPING.md) | نگاشت Prototype به WooGit |
-| [`ACCEPTANCE_CRITERIA.md`](docs/ACCEPTANCE_CRITERIA.md) | معیارهای پذیرش و آمادگی انتقال |
-| [`QUESTION_BANK.md`](docs/QUESTION_BANK.md) | سؤالات و تصمیم‌های ثبت‌شده |
-| [`DOCUMENTATION_READINESS.md`](docs/DOCUMENTATION_READINESS.md) | وضعیت آمادگی مستندات |
+## اصول پروژه
 
-### UI Documentation
+- اجرای GPU از طریق موتور اختصاصی انجام می‌شود.
+- Vulkan غیرفعال است.
+- backendهای فعلی: Dawn/WebGPU با مسیر OpenGL ES و backend مستقل Universal GLES.
+- ABI فعلی Android: فقط `arm64-v8a`.
+- موتور برای مدل GGUF طراحی شده است.
+- هیچ مسیر CPU یا llama.cpp در این شاخه وجود ندارد.
+- مدل، معماری، tokenizer، quantization و kernel تا زمان عبور از preflight و اعتبارسنجی مربوطه مجاز به اجرا نیستند؛ رفتار موتور در موارد پشتیبانی‌نشده fail-closed است.
 
-UI مستندات ساختاریافته و جداگانه دارد تا Specification نهایی به یک فایل طولانی تبدیل نشود:
+## وضعیت پشتیبانی
 
-- [`docs/ui/README.md`](docs/ui/README.md) — نقطه ورود مستندات UI
-- [`docs/widgets/HOME_SCREEN_WIDGETS.md`](docs/widgets/HOME_SCREEN_WIDGETS.md) — ویجت چت و مکالمه صوتی نوبتی صفحه اصلی
-- [`docs/ui/REDESIGN_V2.md`](docs/ui/REDESIGN_V2.md) — بازطراحی Chat-first، تاریخچه و تنظیمات یکپارچه
-- [`docs/ui/DESIGN_SYSTEM.md`](docs/ui/DESIGN_SYSTEM.md) — Design System
-- [`docs/ui/NAVIGATION.md`](docs/ui/NAVIGATION.md) — Navigation Contract
-- [`docs/ui/STATES.md`](docs/ui/STATES.md) — State Contract
-- [`docs/ui/SCREENS.md`](docs/ui/SCREENS.md) — نقشه صفحات
-- [`docs/ui/questions/README.md`](docs/ui/questions/README.md) — Question Bank بیست‌گانه و وضعیت تصمیم‌ها
+وجود decoder یا kernel در کد به‌تنهایی به معنی پشتیبانی کامل نیست. پشتیبانی هر ترکیب مدل، tokenizer، quantization و backend باید با اعتبارسنجی عددی و اجرای واقعی تأیید شود. در حال حاضر نباید این پروژه را موتور عمومی تأییدشده برای تمام GPUها یا تمام مدل‌ها تلقی کرد. اجرای end-to-end روی سخت‌افزار واقعی هنوز باید جداگانه گزارش و تأیید شود.
 
-## معماری اصلی
+## ساخت و تست
 
-اصل کلیدی: **AI Core کاملاً مستقل از UI و Runtime است.**
+پیش‌نیازها: JDK 17، Gradle 8.13، Android SDK Platform 36، NDK 27.2.12479018، Python 3 و Go 1.24 برای تولید کد وابستگی Dawn.
 
-```text
-UI
-├── Chat
-├── Settings
-├── Error Center
-├── Technical Error Panel (hideable)
-└── AI Workspace
-        ↓
-     AI Core
-     ├── Inference Routing / Provider Selection
-     ├── Local Runtime Adapter
-     ├── Remote Provider Adapter
-     ├── Model / Inference
-     ├── Context / Conversation
-     ├── Agent
-     ├── Action Protocol / Registry
-     └── Central Observability / Logging
-        ↓
-   Action System
-   ├── Permission
-   ├── Validation
-   ├── Capability Check
-   ├── Adapter / Executor
-   └── Verifier
+تست مستقل هسته:
+
+```bash
+bash scripts/test_gpu_engine_contracts.sh
+bash scripts/verify_gpu_engine_independence.sh
 ```
 
-Runtime، Storage و WooGit نیز از طریق Contract/Adapter از Core جدا می‌مانند.
+ساخت APK آزمایشی:
 
-## Context
-
-Context ترکیبی است:
-
-```text
-System Context
-+ Persistent Task Context
-+ Conversation Summary
-+ Recent Messages (user-configurable)
-+ Workspace Context (query/select)
+```bash
+gradle :test-app:assembleDebug
 ```
 
-هیچ عدد ثابت غیرضروری نباید به‌عنوان محدودیت معماری فرض شود.
+APK در مسیر زیر ساخته می‌شود:
 
-## Action و تأیید
-
-Actionها در Registry مرکزی دسته‌بندی می‌شوند و هر Category قابلیت اضافه‌کردن Executor/Adapterهای بیشتر دارد. Capability Check پیش از Execution مشخص می‌کند محیط فعلی قابلیت لازم را دارد.
-
-مسیر مرجع:
-
-```text
-Action Registry → Action Contract → Capability Check → Adapter / Executor → Verifier
+```
+test-app/build/outputs/apk/debug/test-app-debug.apk
 ```
 
-برای Action حساس:
-
-```text
-Prepare → Preview / Snapshot → Validate → Final Approval → Execute → Verify → Result
-```
-
-تأیید کاربر اجازه اجرای همان عملیات آماده‌شده را می‌دهد؛ AI بعد از تأیید نباید دوباره تصمیم‌گیری کند. Approval به معنی Success نیست و Success فقط پس از Verification اعلام می‌شود.
-
-## AI Workspace
-
-Workspace یک میز کار تعاملی برای Task، Goal، Action، Result، Verification، Preview، Before/After، فایل و Artifact است. Workspace Executor نیست و Interactionها را به Core برمی‌گرداند.
-
-## Central Logging & Error Center
-
-تمام Error/Eventهای فنی باید از **Central Logging/Observability Core** عبور کنند.
-
-هر خطا دو سطح دارد:
-
-```text
-خطای فارسی و قابل فهم در محل رخداد
-                 +
-Raw Machine Error / Trace / Logs در Error Center
-```
-
-در **Error Center / بخش خطاها** کاربر باید بتواند خطاهای ثبت‌شده، Raw Machine Error، Trace، `eventId`، `taskId`، `actionId` و وضعیت Execution/Recovery/Verification را ببیند.
-
-همچنین یک دکمه **Copy Error Report** وجود دارد تا گزارش استاندارد شامل اطلاعات فنی لازم در Clipboard قرار گیرد و کاربر بتواند آن را برای Agent یا Developer ارسال کند.
-
-پنل نمایش کامل خطاهای فنی و Raw Machine Error یک بخش مستقل و **قابل مخفی‌سازی بدون حذف** است. در آینده می‌توان آن را با تغییر Visibility/Feature Flag از UI مخفی کرد، در حالی که Logging Core، Error Store و Error Report همچنان فعال می‌مانند و پنل در Developer/Debug Mode دوباره قابل نمایش است.
-
-Secret، credential، token و داده حساس غیرضروری باید قبل از نمایش یا Copy Redact شوند.
-
-جزئیات: [`OBSERVABILITY_AND_ERROR_CENTER.md`](docs/OBSERVABILITY_AND_ERROR_CENTER.md) و [`ERROR_REPORT_SCHEMA.md`](docs/ERROR_REPORT_SCHEMA.md)
-
-## Recovery
-
-Recovery بر پایه:
-
-```text
-State Machine + Checkpoint + Recovery Policy + Idempotency + Verification
-```
-
-Crash یا Restart نباید باعث اجرای دوباره کورکورانه Action شود. در وضعیت نامشخص، ابتدا State واقعی Verify می‌شود.
-
-## WooGit Migration
-
-مهاجرت به WooGit با `Adapter + Capability Contract` انجام می‌شود. AI Core مستقیماً به WooGit وابسته نیست و Action Contractها بین Prototype و WooGit قابل استفاده مجدد هستند.
-
-```text
-AI Core → Action Registry → Capability Check → WooGit Adapter → WooGit API/Service → Verifier
-```
-
-## CI و Release
-
-CI پایه از ابتدا فعال است: Build، Unit Test، Integration Test، Architecture Check، Static Analysis/Lint و Validation.
-
-تست‌های سخت‌گیرانه Action/Recovery از نظر زیرساخت آماده می‌شوند، اما تا رسیدن پروژه به آخرین سطح آمادگی و تأیید کیفیت اپ توسط مالک پروژه، Hard Gate اجباری نیستند.
-
-## Inference Source و Baseline
-
-کاربر باید بتواند منبع پاسخ‌گویی را از تنظیمات انتخاب کند:
-
-- **Local model:** اجرای مدل واردشده روی خود دستگاه از طریق Runtime محلی پشتیبانی‌شده؛ مسیر محلی باید بدون اینترنت هم قابل استفاده باشد، مشروط به آماده‌بودن مدل و Runtime.
-- **Provider:** ارسال درخواست به Provider راه‌دور پیکربندی‌شده، با تنظیمات لازم مانند endpoint، شناسه مدل و اعتبارنامه. این مسیر به شبکه و دسترسی معتبر Provider وابسته است.
-
-انتخاب منبع باید صریح و قابل مشاهده باشد؛ برنامه نباید بی‌اجازه از Local به Provider یا برعکس fallback کند. این ممنوعیت فقط درباره تغییر منبع است، نه Backend اجرای Local: اجرای CPU و CPU fallback در صورت نبودن/شکست GPU مجاز است و باید در Diagnostics به‌درستی گزارش شود. داده‌های ارسالی به Provider از دستگاه خارج می‌شوند، بنابراین وضعیت و مرز حریم خصوصی باید روشن باشد. قابلیت‌ها و تنظیمات وابسته به هر مسیر باید براساس پشتیبانی واقعی همان Adapter نمایش داده شوند.
-
-مدل مرجع تاریخی Prototype، **Qwen3-1.7B در GGUF/Q6_K با llama.cpp** بوده است؛ این مدل الزام معماری یا تنها مسیر اجرا نیست. Runtime و Provider باید قابل تعویض بمانند.
-
-**مرجع اصلی تصمیم‌های فنی:** [`PROTOTYPE_SPEC.md`](docs/PROTOTYPE_SPEC.md)
+راهنمای کامل: [docs/USAGE_FA.md](docs/USAGE_FA.md)

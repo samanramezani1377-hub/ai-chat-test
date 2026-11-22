@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENGINE="$ROOT/core/runtime-android/src/main/cpp/gpu_engine"
-TEST="$ROOT/core/runtime-android/src/test/cpp/gpu_engine_contract_test.cpp"
+ENGINE="$ROOT/engine/src/main/cpp/gpu_engine"
+TEST="$ROOT/engine/src/test/cpp/gpu_engine_contract_test.cpp"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -27,26 +27,5 @@ trap 'rm -rf "$TMP"' EXIT
   "$ENGINE/tokenizer_adapters.cpp" \
   "$TEST" \
   -o "$TMP/gpu_engine_contract_test"
-
-# The reusable engine core and standalone GPU backends must not import llama.cpp/GGML execution APIs.
-if grep -nE '#include[[:space:]]*[<"]((llama|ggml)[^>"]*)[>"]' \
-    "$ENGINE/gpu_engine.h" "$ENGINE/gpu_engine.cpp" \
-    "$ENGINE/execution_engine.h" "$ENGINE/execution_engine.cpp" \
-    "$ENGINE/gguf_reader.h" "$ENGINE/gguf_reader.cpp" \
-    "$ENGINE/model_registry.h" "$ENGINE/model_registry.cpp" \
-    "$ENGINE/model_graph.h" "$ENGINE/model_graph.cpp" \
-    "$ENGINE/model_lowerings.h" "$ENGINE/model_lowerings.cpp" \
-    "$ENGINE/operators.h" "$ENGINE/operators.cpp" \
-    "$ENGINE/weight_streamer.h" "$ENGINE/weight_streamer.cpp" \
-    "$ENGINE/sampler.h" "$ENGINE/sampler.cpp" \
-    "$ENGINE/quantization.h" "$ENGINE/quantization.cpp" \
-    "$ENGINE/kv_cache.h" "$ENGINE/kv_cache.cpp" \
-    "$ENGINE/runtime_router.h" "$ENGINE/runtime_router.cpp" \
-    "$ENGINE/memory_planner.h" "$ENGINE/memory_planner.cpp" \
-    "$ENGINE/tokenizer.h" "$ENGINE/tokenizer.cpp" "$ENGINE/tokenizer_adapters.cpp" "$ENGINE/dawn_backend.cpp" \
-    "$ENGINE/universal_gles_backend.cpp" "$ENGINE/universal_adapter_bridge.cpp"; then
-  echo "GPU engine backend boundary violation: llama.cpp/GGML include found" >&2
-  exit 1
-fi
 
 "$TMP/gpu_engine_contract_test"

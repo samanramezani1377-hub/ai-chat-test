@@ -1,40 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-engine_dir="$root/core/runtime-android/src/main/cpp/gpu_engine"
-cmake_file="$root/core/runtime-android/src/main/cpp/CMakeLists.txt"
-test -d "$engine_dir"
-test -f "$cmake_file"
-if grep -RInE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"].*(ggml|llama)|\b(ggml_[[:alnum:]_]*|llama_[[:alnum:]_]*)\b' "$engine_dir"; then
-    echo "::error::Standalone GPU engine core contains a llama.cpp/GGML API dependency."
-    exit 1
-fi
-extract_target() {
-    local target="$1"
-    sed -n "/add_library(${target} /,/^)/p" "$cmake_file"
-}
-core_block="$(extract_target ai_chat_gpu_engine)"
-dawn_block="$(extract_target ai_chat_gpu_backend_dawn)"
-gles_block="$(extract_target ai_chat_gpu_backend_gles)"
-android_block="$(extract_target ai_chat_gpu_backends_android)"
-test -n "$core_block" && test -n "$dawn_block" && test -n "$gles_block" && test -n "$android_block"
-if printf '%s\n' "$core_block" "$dawn_block" "$gles_block" "$android_block" | grep -Eiq '(ggml|llama)'; then
-    echo "::error::A standalone GPU engine target contains a llama.cpp/GGML dependency."
-    exit 1
-fi
-link_blocks="$(awk '
-    /^[[:space:]]*target_link_libraries\(ai_chat_gpu_/ { in_block = 1 }
-    in_block { print }
-    in_block && /\)/ { in_block = 0 }
-' "$cmake_file")"
-if printf '%s\n' "$link_blocks" | grep -Eiq '(ggml|llama)'; then
-    echo "::error::A GPU engine target links llama.cpp/GGML."
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENGINE="$ROOT/engine/src/main/cpp"
+test -d "$ENGINE/gpu_engine"
+test -f "$ENGINE/CMakeLists.txt"
+test -f "$ROOT/test-app/build.gradle.kts"
+
+# The GPU engine is intentionally standalone: GGUF parsing is implemented in
+# this project and does not import llama.cpp/GGML execution APIs.
+if grep -RInE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]((llama|ggml)[^>"]*)[>"]|FetchContent_Declare\(llama|target_link_libraries\([^)]*(llama|ggml)' "$ENGINE"; then
+    echo "::error::Unexpected llama.cpp/GGML execution dependency in the GPU engine."
     exit 1
 fi
 
-if ! grep -q 'set(GGML_VULKAN OFF' "$cmake_file"; then
-    echo "::error::Vulkan must remain explicitly disabled."
+if grep -RInE 'LLAMA_CPP_TAG|llama_cpp_SOURCE_DIR|GGML_WEBGPU|GGML_OPENCL|GGML_VULKAN' "$ENGINE/CMakeLists.txt"; then
+    echo "::error::Legacy llama.cpp/GGML build configuration remains in the engine."
     exit 1
 fi
-echo "GPU engine core, Dawn/GLES backends and Android composition are isolated from llama.cpp/GGML execution APIs."
-echo "Legacy llama.cpp remains linked only by ai_chat_runtime for the preserved CPU path."
+
+grep -q 'DAWN_ENABLE_VULKAN OFF' "$ENGINE/cmake/FindDawn.cmake"
+grep -q 'AI_CHAT_GPU_BACKEND_VULKAN=0' "$ENGINE/CMakeLists.txt"
+grep -q 'abiFilters += "arm64-v8a"' "$ROOT/engine/build.gradle.kts"
+echo "Standalone Android GPU engine boundary verified."
