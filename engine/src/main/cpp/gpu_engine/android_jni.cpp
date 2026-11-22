@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <vector>
+#include <memory>
 #include <string>
 
 namespace ai_chat::gpu_engine {
@@ -336,8 +337,16 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineGenerate(
     try {
         if (max_tokens <= 0)
             return static_cast<jint>(ai_chat::gpu_engine::StatusCode::InvalidArgument);
-        const std::string prompt_text = ai_chat::gpu_engine::normalized_java_text(env, prompt);
-        ai_chat::gpu_engine::ScopedQwen35UnicodeCategories unicode_categories(env, prompt_text);
+        auto& session = ai_chat::gpu_engine::gpu_inference_session();
+        const bool qwen35_tokenizer = session.uses_qwen35_tokenizer();
+        const std::string prompt_text = qwen35_tokenizer
+            ? ai_chat::gpu_engine::normalized_java_text(env, prompt)
+            : ai_chat::gpu_engine::from_java_string(env, prompt);
+        std::unique_ptr<ai_chat::gpu_engine::ScopedQwen35UnicodeCategories> unicode_categories;
+        if (qwen35_tokenizer) {
+            unicode_categories = std::make_unique<ai_chat::gpu_engine::ScopedQwen35UnicodeCategories>(
+                env, prompt_text);
+        }
         ai_chat::gpu_engine::SamplingConfig sampling;
         sampling.temperature = temperature;
         sampling.top_k = top_k > 0 ? static_cast<uint32_t>(top_k) : 0u;
@@ -367,7 +376,7 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineGenerate(
                 callback_failed = true;
             }
         };
-        const auto status = ai_chat::gpu_engine::gpu_inference_session().generate(
+        const auto status = session.generate(
             prompt_text, static_cast<uint32_t>(max_tokens), sampling, callback);
         if (!utf8_pending.empty() && listener && on_token && !callback_failed) {
             jstring tail = ai_chat::gpu_engine::to_java_string(env, utf8_pending);
@@ -390,9 +399,17 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineCountTokens(
         JNIEnv* env, jclass, jstring text) {
     try {
         uint32_t count = 0;
-        const std::string normalized = ai_chat::gpu_engine::normalized_java_text(env, text);
-        ai_chat::gpu_engine::ScopedQwen35UnicodeCategories unicode_categories(env, normalized);
-        const auto status = ai_chat::gpu_engine::gpu_inference_session().count_tokens(normalized, count);
+        auto& session = ai_chat::gpu_engine::gpu_inference_session();
+        const bool qwen35_tokenizer = session.uses_qwen35_tokenizer();
+        const std::string input_text = qwen35_tokenizer
+            ? ai_chat::gpu_engine::normalized_java_text(env, text)
+            : ai_chat::gpu_engine::from_java_string(env, text);
+        std::unique_ptr<ai_chat::gpu_engine::ScopedQwen35UnicodeCategories> unicode_categories;
+        if (qwen35_tokenizer) {
+            unicode_categories = std::make_unique<ai_chat::gpu_engine::ScopedQwen35UnicodeCategories>(
+                env, input_text);
+        }
+        const auto status = session.count_tokens(input_text, count);
         return status.ok() ? static_cast<jint>(count) : -1;
     } catch (...) {
         return -1;
