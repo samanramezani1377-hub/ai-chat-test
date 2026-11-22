@@ -49,7 +49,7 @@ std::string diagnostic_value(const std::string& value) {
     std::string result;
     result.reserve(value.size());
     for (unsigned char c : value) {
-        if (c == ';' || c == '=' || c == '\\n' || c == '\\r' || c < 0x20) {
+        if (c == ';' || c == '=' || c == '\n' || c == '\r' || c < 0x20) {
             static constexpr char hex[] = "0123456789ABCDEF";
             result.push_back('%');
             result.push_back(hex[c >> 4]);
