@@ -76,7 +76,9 @@ jobs:
 
       - name: Build test application
         run: |
-          gradle :test-app:assembleDebug --stacktrace --console=plain
+          # Reset counters only; keep all cached compiler objects.
+          ccache --zero-stats
+          gradle --parallel :test-app:assembleDebug --stacktrace --console=plain
           ccache --show-stats
 
       - name: Upload test APK
