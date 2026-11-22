@@ -247,6 +247,39 @@ void main() {
 }
 )glsl";
 
+constexpr char kElementwiseF32Wgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> input_values: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output_values: array<f32>;
+const ELEMENT_COUNT: u32 = 1u;
+const MODE: u32 = 0u;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= ELEMENT_COUNT) { return; }
+    let x = input_values[gid.x];
+    if (MODE == 0u) {
+        output_values[gid.x] = 1.0 / (1.0 + exp(-x));
+    } else {
+        output_values[gid.x] = max(x, 0.0) + log(1.0 + exp(-abs(x)));
+    }
+}
+)wgsl";
+
+constexpr char kElementwiseF32Glsl[] = R"glsl(#version 310 es
+precision highp float;
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Input { float input_values[]; };
+layout(std430, binding = 1) writeonly buffer Output { float output_values[]; };
+const uint ELEMENT_COUNT = 1u;
+const uint MODE = 0u;
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= ELEMENT_COUNT) return;
+    float x = input_values[index];
+    if (MODE == 0u) output_values[index] = 1.0 / (1.0 + exp(-x));
+    else output_values[index] = max(x, 0.0) + log(1.0 + exp(-abs(x)));
+}
+)glsl";
+
 constexpr char kSoftmaxF32Glsl[] = R"glsl(#version 310 es
 precision highp float;
 layout(local_size_x = 64) in;
@@ -1336,6 +1369,81 @@ Status reference_silu_f32(const float* input, float* output, uint64_t elements) 
     return Status::success();
 }
 
+namespace {
+Status build_elementwise_sigmoid_softplus(const Tensor& input, const Tensor& output,
+                                          bool softplus, bool gles,
+                                          ComputeDispatch& dispatch) {
+    dispatch = ComputeDispatch{};
+    if (!is_contiguous_f32(input) || !is_contiguous_f32(output))
+        return {StatusCode::Unsupported, "Sigmoid/Softplus requires contiguous F32 tensors"};
+    if (input.descriptor().shape != output.descriptor().shape ||
+        input.element_count() == 0 || input.element_count() > UINT32_MAX ||
+        !input.buffer() || !output.buffer() || input.buffer().get() == output.buffer().get())
+        return {StatusCode::InvalidArgument, "Sigmoid/Softplus input/output shape or buffers are invalid"};
+    dispatch.backend = gles ? BackendKind::OpenGles : BackendKind::DawnWebGpu;
+    dispatch.kernel_id = std::string(gles ? "gles-" : "dawn-") +
+        (softplus ? "softplus" : "sigmoid") + "-f32-v1";
+    dispatch.label = std::string(gles ? "gles-" : "dawn-") +
+        (softplus ? "softplus" : "sigmoid") + "-f32-unverified";
+    dispatch.workgroup_size_x = 64;
+    if (gles) {
+        dispatch.glsl_source = kElementwiseF32Glsl;
+        dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source),
+            "const uint ELEMENT_COUNT = 1u;",
+            "const uint ELEMENT_COUNT = " + std::to_string(input.element_count()) + "u;");
+        dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source),
+            "const uint MODE = 0u;", std::string("const uint MODE = ") + (softplus ? "1u;" : "0u;"));
+    } else {
+        dispatch.wgsl_source = kElementwiseF32Wgsl;
+        dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source),
+            "const ELEMENT_COUNT: u32 = 1u;",
+            "const ELEMENT_COUNT: u32 = " + std::to_string(input.element_count()) + "u;");
+        dispatch.wgsl_source = replace_once(std::move(dispatch.wgsl_source),
+            "const MODE: u32 = 0u;", std::string("const MODE: u32 = ") + (softplus ? "1u;" : "0u;"));
+    }
+    dispatch.workgroups_x = static_cast<uint32_t>((input.element_count() + 63) / 64);
+    dispatch.bindings = {
+        {0, input.buffer(), input.byte_offset(), input.byte_size()},
+        {1, output.buffer(), output.byte_offset(), output.byte_size()},
+    };
+    return Status::success();
+}
+} // namespace
+
+Status build_sigmoid_f32_candidate(const Tensor& input, const Tensor& output,
+                                   ComputeDispatch& dispatch) {
+    return build_elementwise_sigmoid_softplus(input, output, false, false, dispatch);
+}
+Status build_sigmoid_f32_gles_candidate(const Tensor& input, const Tensor& output,
+                                        ComputeDispatch& dispatch) {
+    return build_elementwise_sigmoid_softplus(input, output, false, true, dispatch);
+}
+Status build_softplus_f32_candidate(const Tensor& input, const Tensor& output,
+                                    ComputeDispatch& dispatch) {
+    return build_elementwise_sigmoid_softplus(input, output, true, false, dispatch);
+}
+Status build_softplus_f32_gles_candidate(const Tensor& input, const Tensor& output,
+                                         ComputeDispatch& dispatch) {
+    return build_elementwise_sigmoid_softplus(input, output, true, true, dispatch);
+}
+Status reference_sigmoid_f32(const float* input, float* output, uint64_t elements) {
+    if ((!input || !output) && elements != 0)
+        return {StatusCode::InvalidArgument, "Sigmoid reference received a null pointer"};
+    for (uint64_t i = 0; i < elements; ++i) {
+        const float x = input[i];
+        output[i] = x >= 0.0f ? 1.0f / (1.0f + std::exp(-x))
+                              : std::exp(x) / (1.0f + std::exp(x));
+    }
+    return Status::success();
+}
+Status reference_softplus_f32(const float* input, float* output, uint64_t elements) {
+    if ((!input || !output) && elements != 0)
+        return {StatusCode::InvalidArgument, "Softplus reference received a null pointer"};
+    for (uint64_t i = 0; i < elements; ++i)
+        output[i] = std::max(input[i], 0.0f) + std::log1p(std::exp(-std::fabs(input[i])));
+    return Status::success();
+}
+
 const char* softmax_f32_wgsl_source() noexcept { return kSoftmaxF32Wgsl; }
 
 Status build_softmax_f32_candidate(const Tensor& input, const Tensor& output,
@@ -1511,6 +1619,36 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     status = registry.register_kernel(std::move(silu));
     if (!status.ok()) return status;
 
+    KernelDefinition sigmoid;
+    sigmoid.operator_name = "Sigmoid";
+    sigmoid.backend = BackendKind::DawnWebGpu;
+    sigmoid.input_type = DataType::F32;
+    sigmoid.output_type = DataType::F32;
+    sigmoid.min_input_count = 1;
+    sigmoid.max_input_count = 1;
+    sigmoid.min_rank = 1;
+    sigmoid.max_rank = 16;
+    sigmoid.validation = KernelValidation::Unverified;
+    sigmoid.kernel_id = "dawn-sigmoid-f32-v1";
+    sigmoid.wgsl_source = kElementwiseF32Wgsl;
+    status = registry.register_kernel(std::move(sigmoid));
+    if (!status.ok()) return status;
+
+    KernelDefinition softplus;
+    softplus.operator_name = "Softplus";
+    softplus.backend = BackendKind::DawnWebGpu;
+    softplus.input_type = DataType::F32;
+    softplus.output_type = DataType::F32;
+    softplus.min_input_count = 1;
+    softplus.max_input_count = 1;
+    softplus.min_rank = 1;
+    softplus.max_rank = 16;
+    softplus.validation = KernelValidation::Unverified;
+    softplus.kernel_id = "dawn-softplus-f32-v1";
+    softplus.wgsl_source = kElementwiseF32Wgsl;
+    status = registry.register_kernel(std::move(softplus));
+    if (!status.ok()) return status;
+
     KernelDefinition softmax;
     softmax.operator_name = "Softmax";
     softmax.backend = BackendKind::DawnWebGpu;
@@ -1645,7 +1783,9 @@ Status register_builtin_operator_candidates(OperatorRegistry& registry) {
     q8.validation = KernelValidation::Unverified;
     q8.kernel_id = "dawn-q8-0-dequantize-generic-v1";
     q8.wgsl_source = q8_0_dequantize_wgsl_source();
-    return registry.register_kernel(std::move(q8));
+    status = registry.register_kernel(std::move(q8));
+    if (!status.ok()) return status;
+    return register_split_operator_candidate(registry, BackendKind::DawnWebGpu);
 }
 
 
@@ -1725,6 +1865,36 @@ Status register_builtin_gles_operator_candidates(OperatorRegistry& registry) {
     status = registry.register_kernel(std::move(silu));
     if (!status.ok()) return status;
 
+    KernelDefinition sigmoid;
+    sigmoid.operator_name = "Sigmoid";
+    sigmoid.backend = BackendKind::OpenGles;
+    sigmoid.input_type = DataType::F32;
+    sigmoid.output_type = DataType::F32;
+    sigmoid.min_input_count = 1;
+    sigmoid.max_input_count = 1;
+    sigmoid.min_rank = 1;
+    sigmoid.max_rank = 16;
+    sigmoid.validation = KernelValidation::Unverified;
+    sigmoid.kernel_id = "gles-sigmoid-f32-v1";
+    sigmoid.glsl_source = kElementwiseF32Glsl;
+    status = registry.register_kernel(std::move(sigmoid));
+    if (!status.ok()) return status;
+
+    KernelDefinition softplus;
+    softplus.operator_name = "Softplus";
+    softplus.backend = BackendKind::OpenGles;
+    softplus.input_type = DataType::F32;
+    softplus.output_type = DataType::F32;
+    softplus.min_input_count = 1;
+    softplus.max_input_count = 1;
+    softplus.min_rank = 1;
+    softplus.max_rank = 16;
+    softplus.validation = KernelValidation::Unverified;
+    softplus.kernel_id = "gles-softplus-f32-v1";
+    softplus.glsl_source = kElementwiseF32Glsl;
+    status = registry.register_kernel(std::move(softplus));
+    if (!status.ok()) return status;
+
     KernelDefinition softmax;
     softmax.operator_name = "Softmax";
     softmax.backend = BackendKind::OpenGles;
@@ -1786,7 +1956,7 @@ Status register_builtin_gles_operator_candidates(OperatorRegistry& registry) {
     status = registry.register_kernel(std::move(attention));
     if (!status.ok()) return status;
 
-    return Status::success();
+    return register_split_operator_candidate(registry, BackendKind::OpenGles);
 }
 
 } // namespace ai_chat::gpu_engine

@@ -77,6 +77,27 @@ const char* silu_f32_wgsl_source() noexcept;
 Status build_silu_f32_candidate(const Tensor& input, const Tensor& output,
                                 ComputeDispatch& dispatch);
 Status reference_silu_f32(const float* input, float* output, uint64_t elements);
+Status build_sigmoid_f32_candidate(const Tensor& input, const Tensor& output,
+                                   ComputeDispatch& dispatch);
+Status build_sigmoid_f32_gles_candidate(const Tensor& input, const Tensor& output,
+                                        ComputeDispatch& dispatch);
+Status reference_sigmoid_f32(const float* input, float* output, uint64_t elements);
+Status build_softplus_f32_candidate(const Tensor& input, const Tensor& output,
+                                    ComputeDispatch& dispatch);
+Status build_softplus_f32_gles_candidate(const Tensor& input, const Tensor& output,
+                                         ComputeDispatch& dispatch);
+Status reference_softplus_f32(const float* input, float* output, uint64_t elements);
+Status build_split_f32_candidate(const Tensor& input, const Tensor& output,
+                                 uint32_t axis, uint32_t offset,
+                                 ComputeDispatch& dispatch);
+Status build_split_f32_gles_candidate(const Tensor& input, const Tensor& output,
+                                      uint32_t axis, uint32_t offset,
+                                      ComputeDispatch& dispatch);
+Status reference_split_f32(const float* input, float* output,
+                           const std::vector<uint64_t>& input_shape,
+                           const std::vector<uint64_t>& output_shape,
+                           uint32_t axis, uint32_t offset);
+Status register_split_operator_candidate(OperatorRegistry& registry, BackendKind backend);
 
 const char* softmax_f32_wgsl_source() noexcept;
 Status build_softmax_f32_candidate(const Tensor& input, const Tensor& output,

@@ -467,7 +467,7 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
         });
     if (!status.ok()) return status;
 
-    for (const char* unary_name : {"SiLU", "Softmax"}) {
+    for (const char* unary_name : {"SiLU", "Softmax", "Sigmoid", "Softplus"}) {
         status = registry.register_lowering(backend, unary_name,
             [backend, unary_name](const ModelPlanOperation& operation,
                                  const ModelExecutionContext& context, ComputeDispatch& dispatch) {
@@ -482,12 +482,46 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
                     return backend == BackendKind::OpenGles
                         ? build_silu_f32_gles_candidate(*input, *output, dispatch)
                         : build_silu_f32_candidate(*input, *output, dispatch);
+                if (std::string(unary_name) == "Softmax")
+                    return backend == BackendKind::OpenGles
+                        ? build_softmax_f32_gles_candidate(*input, *output, dispatch)
+                        : build_softmax_f32_candidate(*input, *output, dispatch);
+                if (std::string(unary_name) == "Sigmoid")
+                    return backend == BackendKind::OpenGles
+                        ? build_sigmoid_f32_gles_candidate(*input, *output, dispatch)
+                        : build_sigmoid_f32_candidate(*input, *output, dispatch);
                 return backend == BackendKind::OpenGles
-                    ? build_softmax_f32_gles_candidate(*input, *output, dispatch)
-                    : build_softmax_f32_candidate(*input, *output, dispatch);
+                    ? build_softplus_f32_gles_candidate(*input, *output, dispatch)
+                    : build_softplus_f32_candidate(*input, *output, dispatch);
             });
         if (!status.ok()) return status;
     }
+
+    status = registry.register_lowering(backend, "Split",
+        [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,
+                  ComputeDispatch& dispatch) {
+            if (operation.inputs.size() != 1 || !operation.weight_tensors.empty())
+                return Status{StatusCode::InvalidArgument, "Split requires one activation and no weights"};
+            const Tensor *input = nullptr, *output = nullptr;
+            Status result = lookup_operand(operation, context, 0, input);
+            if (!result.ok()) return result;
+            result = lookup_output(operation, context, output);
+            if (!result.ok()) return result;
+            uint32_t axis = 0, offset = 0, length = 0;
+            result = required_integer(operation, "axis", axis);
+            if (!result.ok()) return result;
+            result = required_integer(operation, "offset", offset);
+            if (!result.ok()) return result;
+            result = required_integer(operation, "length", length);
+            if (!result.ok()) return result;
+            if (axis >= output->descriptor().shape.size() ||
+                output->descriptor().shape[axis] != length)
+                return Status{StatusCode::InvalidArgument, "Split output length does not match its declared slice"};
+            return backend == BackendKind::OpenGles
+                ? build_split_f32_gles_candidate(*input, *output, axis, offset, dispatch)
+                : build_split_f32_candidate(*input, *output, axis, offset, dispatch);
+        });
+    if (!status.ok()) return status;
 
     status = registry.register_lowering(backend, "RoPE",
         [backend](const ModelPlanOperation& operation, const ModelExecutionContext& context,

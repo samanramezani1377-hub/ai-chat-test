@@ -210,7 +210,7 @@ public:
         descriptor_.required_operators = {
             "Embedding", "MatMul", "RMSNorm", "MultiAxisRoPE", "Attention",
             "KVCacheAppend", "Sigmoid", "Softplus", "SSMConv1D", "GdnL2Norm",
-            "GatedDeltaNet", "GatedRMSNorm", "RecurrentStateRead", "RecurrentStateWrite",
+            "GatedDeltaNet", "RecurrentStateRead", "RecurrentStateWrite",
             "ConvStateRead", "ConvStateWrite", "Split", "SiLU", "Multiply", "Add"
         };
         descriptor_.uses_attention = true;
@@ -388,10 +388,14 @@ public:
                         {0, 2 * config.key_dimension + 2 * config.ssm_inner});
                     add(x + "qkv_split", "Split", {x + "qkvz"}, {}, x + "qkv",
                         {0, 2 * config.key_dimension + config.ssm_inner});
-                    plan.operations.back().string_attributes["slice"] = "qkv";
+                    plan.operations.back().integer_attributes["axis"] = 1;
+                    plan.operations.back().integer_attributes["offset"] = 0;
+                    plan.operations.back().integer_attributes["length"] = 2 * config.key_dimension + config.ssm_inner;
                     add(x + "z_split", "Split", {x + "qkvz"}, {}, x + "z",
                         {0, config.ssm_inner});
-                    plan.operations.back().string_attributes["slice"] = "z";
+                    plan.operations.back().integer_attributes["axis"] = 1;
+                    plan.operations.back().integer_attributes["offset"] = 2 * config.key_dimension + config.ssm_inner;
+                    plan.operations.back().integer_attributes["length"] = config.ssm_inner;
                 } else {
                     add(x + "qkv_projection", "MatMul", {x + "normalized"},
                         {p + "attn_qkv.weight"}, x + "qkv",
@@ -406,10 +410,14 @@ public:
                         {0, config.ssm_dt_rank * 2});
                     add(x + "beta_split", "Split", {x + "beta_alpha"}, {}, x + "beta",
                         {0, config.ssm_dt_rank});
-                    plan.operations.back().string_attributes["slice"] = "beta";
+                    plan.operations.back().integer_attributes["axis"] = 1;
+                    plan.operations.back().integer_attributes["offset"] = 0;
+                    plan.operations.back().integer_attributes["length"] = config.ssm_dt_rank;
                     add(x + "alpha_split", "Split", {x + "beta_alpha"}, {}, x + "alpha",
                         {0, config.ssm_dt_rank});
-                    plan.operations.back().string_attributes["slice"] = "alpha";
+                    plan.operations.back().integer_attributes["axis"] = 1;
+                    plan.operations.back().integer_attributes["offset"] = config.ssm_dt_rank;
+                    plan.operations.back().integer_attributes["length"] = config.ssm_dt_rank;
                 } else {
                     add(x + "beta_projection", "MatMul", {x + "normalized"},
                         {p + "ssm_beta.weight"}, x + "beta", {0, config.ssm_dt_rank});
@@ -429,24 +437,43 @@ public:
                     {p + "ssm_conv1d.weight"}, x + "conv_output",
                     {0, config.conv_dimension});
                 add(x + "ssm_split_q", "Split", {x + "conv_output"}, {}, x + "q",
-                    {0, config.ssm_state, config.ssm_groups});
-                plan.operations.back().string_attributes["slice"] = "q";
+                    {0, config.key_dimension});
+                plan.operations.back().integer_attributes["axis"] = 1;
+                plan.operations.back().integer_attributes["offset"] = 0;
+                plan.operations.back().integer_attributes["length"] = config.key_dimension;
                 add(x + "ssm_split_k", "Split", {x + "conv_output"}, {}, x + "k",
-                    {0, config.ssm_state, config.ssm_groups});
-                plan.operations.back().string_attributes["slice"] = "k";
+                    {0, config.key_dimension});
+                plan.operations.back().integer_attributes["axis"] = 1;
+                plan.operations.back().integer_attributes["offset"] = config.key_dimension;
+                plan.operations.back().integer_attributes["length"] = config.key_dimension;
                 add(x + "ssm_split_v", "Split", {x + "conv_output"}, {}, x + "v",
                     {0, config.ssm_inner});
-                plan.operations.back().string_attributes["slice"] = "v";
+                plan.operations.back().integer_attributes["axis"] = 1;
+                plan.operations.back().integer_attributes["offset"] = 2 * config.key_dimension;
+                plan.operations.back().integer_attributes["length"] = config.ssm_inner;
                 add(x + "q_l2_norm", "GdnL2Norm", {x + "q"}, {}, x + "q_norm",
-                    {0, config.ssm_state, config.ssm_groups});
+                    {0, config.key_dimension});
+                plan.operations.back().integer_attributes["state_size"] = config.ssm_state;
+                plan.operations.back().integer_attributes["group_count"] = config.ssm_groups;
                 add(x + "k_l2_norm", "GdnL2Norm", {x + "k"}, {}, x + "k_norm",
-                    {0, config.ssm_state, config.ssm_groups});
+                    {0, config.key_dimension});
+                plan.operations.back().integer_attributes["state_size"] = config.ssm_state;
+                plan.operations.back().integer_attributes["group_count"] = config.ssm_groups;
                 add(x + "gated_delta_net", "GatedDeltaNet",
                     {x + "q_norm", x + "k_norm", x + "v", x + "delta_gate",
                      x + "beta_gated", x + "recurrent_state"},
                     {}, x + "recurrent_output", {0, config.ssm_inner});
-                add(x + "gated_rms_norm", "GatedRMSNorm",
-                    {x + "recurrent_output", x + "z"}, {p + "ssm_norm.weight"},
+                plan.operations.back().integer_attributes["state_size"] = config.ssm_state;
+                plan.operations.back().integer_attributes["group_count"] = config.ssm_groups;
+                plan.operations.back().integer_attributes["value_heads"] = config.ssm_dt_rank;
+                plan.operations.back().integer_attributes["value_head_size"] = config.ssm_inner / config.ssm_dt_rank;
+                add(x + "gdn_rms_norm", "RMSNorm",
+                    {x + "recurrent_output"}, {p + "ssm_norm.weight"},
+                    x + "gdn_rms_normalized", {0, config.ssm_inner});
+                add(x + "gdn_gate_silu", "SiLU", {x + "z"}, {},
+                    x + "gdn_gate_activated", {0, config.ssm_inner});
+                add(x + "gdn_gate_multiply", "Multiply",
+                    {x + "gdn_rms_normalized", x + "gdn_gate_activated"}, {},
                     x + "gdn_normalized", {0, config.ssm_inner});
                 add(x + "recurrent_output_projection", "MatMul",
                     {x + "gdn_normalized"}, {p + "ssm_out.weight"},
@@ -466,10 +493,14 @@ public:
                     {0, config.heads, config.head_dimension * 2});
                 add(x + "q_split", "Split", {x + "q_full"}, {}, x + "q",
                     {0, config.heads, config.head_dimension});
-                plan.operations.back().string_attributes["slice"] = "query";
+                plan.operations.back().integer_attributes["axis"] = 2;
+                plan.operations.back().integer_attributes["offset"] = 0;
+                plan.operations.back().integer_attributes["length"] = config.head_dimension;
                 add(x + "query_gate_split", "Split", {x + "q_full"}, {}, x + "query_gate",
                     {0, config.heads, config.head_dimension});
-                plan.operations.back().string_attributes["slice"] = "gate";
+                plan.operations.back().integer_attributes["axis"] = 2;
+                plan.operations.back().integer_attributes["offset"] = config.head_dimension;
+                plan.operations.back().integer_attributes["length"] = config.head_dimension;
                 add(x + "k_projection", "MatMul", {x + "normalized"},
                     {p + "attn_k.weight"}, x + "k",
                     {0, config.kv_heads, config.head_dimension});

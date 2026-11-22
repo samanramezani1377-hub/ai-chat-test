@@ -289,6 +289,74 @@ Status validate_unary(Backend& backend, Validate&& build, bool softmax) {
     return execute_and_compare(backend, dispatch, output2.tensor, expected2);
 }
 
+template <typename Validate, typename Reference>
+Status validate_elementwise(Backend& backend, Validate&& build, Reference&& reference,
+                            const char* label) {
+    TensorFixture input, output;
+    const std::vector<float> x = {-100.0f, -20.0f, -3.0f, -1.0f,
+                                   0.0f, 0.5f, 2.0f, 100.0f};
+    Status status = make_f32_tensor(backend, {2, 4}, x, label, input);
+    if (!status.ok()) return status;
+    status = make_f32_tensor(backend, {2, 4}, {}, "validate-elementwise-output", output);
+    if (!status.ok()) return status;
+    std::vector<float> expected(x.size());
+    status = reference(x.data(), expected.data(), x.size());
+    if (!status.ok()) return status;
+    ComputeDispatch dispatch;
+    status = build(input.tensor, output.tensor, dispatch);
+    if (!status.ok()) return status;
+    status = execute_and_compare(backend, dispatch, output.tensor, expected);
+    if (!status.ok()) return status;
+
+    TensorFixture input2, output2;
+    std::vector<float> x2(129);
+    for (size_t i = 0; i < x2.size(); ++i)
+        x2[i] = static_cast<float>(static_cast<int>(i % 31) - 15) * 2.0f;
+    status = make_f32_tensor(backend, {1, 129}, x2, "validate-elementwise-input-odd", input2);
+    if (!status.ok()) return status;
+    status = make_f32_tensor(backend, {1, 129}, {}, "validate-elementwise-output-odd", output2);
+    if (!status.ok()) return status;
+    std::vector<float> expected2(x2.size());
+    status = reference(x2.data(), expected2.data(), x2.size());
+    if (!status.ok()) return status;
+    status = build(input2.tensor, output2.tensor, dispatch);
+    if (!status.ok()) return status;
+    return execute_and_compare(backend, dispatch, output2.tensor, expected2);
+}
+
+template <typename Validate>
+Status validate_split(Backend& backend, Validate&& build) {
+    TensorFixture input, output;
+    std::vector<float> values(2 * 3 * 4);
+    for (size_t i = 0; i < values.size(); ++i) values[i] = static_cast<float>(i) * 0.25f;
+    Status status = make_f32_tensor(backend, {2, 3, 4}, values, "validate-split-input", input);
+    if (!status.ok()) return status;
+    status = make_f32_tensor(backend, {2, 3, 2}, {}, "validate-split-output", output);
+    if (!status.ok()) return status;
+    std::vector<float> expected(2 * 3 * 2);
+    status = reference_split_f32(values.data(), expected.data(), {2, 3, 4}, {2, 3, 2}, 2, 1);
+    if (!status.ok()) return status;
+    ComputeDispatch dispatch;
+    status = build(input.tensor, output.tensor, 2, 1, dispatch);
+    if (!status.ok()) return status;
+    status = execute_and_compare(backend, dispatch, output.tensor, expected);
+    if (!status.ok()) return status;
+
+    TensorFixture input2, output2;
+    std::vector<float> values2(3 * 5);
+    for (size_t i = 0; i < values2.size(); ++i) values2[i] = static_cast<float>(i) - 4.0f;
+    status = make_f32_tensor(backend, {3, 5}, values2, "validate-split-input-axis1", input2);
+    if (!status.ok()) return status;
+    status = make_f32_tensor(backend, {3, 2}, {}, "validate-split-output-axis1", output2);
+    if (!status.ok()) return status;
+    std::vector<float> expected2(3 * 2);
+    status = reference_split_f32(values2.data(), expected2.data(), {3, 5}, {3, 2}, 1, 2);
+    if (!status.ok()) return status;
+    status = build(input2.tensor, output2.tensor, 1, 2, dispatch);
+    if (!status.ok()) return status;
+    return execute_and_compare(backend, dispatch, output2.tensor, expected2);
+}
+
 template <typename Validate>
 Status validate_rope(Backend& backend, Validate&& build) {
     TensorFixture input, output;
@@ -528,6 +596,31 @@ Status validate_builtin_operator_kernels(Backend& backend, OperatorRegistry& reg
                                 : build_silu_f32_candidate(input, out, dispatch);
                 }, false);
             });
+    run("Split", gles ? "gles-split-f32-v1" : "dawn-split-f32-v1",
+        [&] {
+            return validate_split(backend, [&](const Tensor& input, const Tensor& output,
+                                               uint32_t axis, uint32_t offset,
+                                               ComputeDispatch& dispatch) {
+                return gles ? build_split_f32_gles_candidate(input, output, axis, offset, dispatch)
+                            : build_split_f32_candidate(input, output, axis, offset, dispatch);
+            });
+        });
+    run("Sigmoid", gles ? "gles-sigmoid-f32-v1" : "dawn-sigmoid-f32-v1",
+        [&] {
+            return validate_elementwise(backend, [&](const Tensor& input, const Tensor& output,
+                                                      ComputeDispatch& dispatch) {
+                return gles ? build_sigmoid_f32_gles_candidate(input, output, dispatch)
+                            : build_sigmoid_f32_candidate(input, output, dispatch);
+            }, reference_sigmoid_f32, "validate-sigmoid-input");
+        });
+    run("Softplus", gles ? "gles-softplus-f32-v1" : "dawn-softplus-f32-v1",
+        [&] {
+            return validate_elementwise(backend, [&](const Tensor& input, const Tensor& output,
+                                                      ComputeDispatch& dispatch) {
+                return gles ? build_softplus_f32_gles_candidate(input, output, dispatch)
+                            : build_softplus_f32_candidate(input, output, dispatch);
+            }, reference_softplus_f32, "validate-softplus-input");
+        });
     run( "Softmax",
             gles ? "gles-softmax-f32-generic-v1" : "dawn-softmax-f32-generic-v1",
             [&] {

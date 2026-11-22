@@ -424,6 +424,31 @@ void test_qwen35_hybrid_recipe_builds_generic_semantic_graph() {
     assert(!adapter->build_execution_plan(invalid, rejected).ok());
 }
 
+void test_split_sigmoid_and_softplus_references() {
+    const std::vector<float> input = {-100.0f, -20.0f, -1.0f, 0.0f, 1.0f, 20.0f, 100.0f};
+    std::vector<float> sigmoid(input.size()), softplus(input.size());
+    assert(reference_sigmoid_f32(input.data(), sigmoid.data(), input.size()).ok());
+    assert(reference_softplus_f32(input.data(), softplus.data(), input.size()).ok());
+    for (float value : sigmoid) assert(std::isfinite(value));
+    for (float value : softplus) assert(std::isfinite(value));
+    assert(sigmoid.front() >= 0.0f && sigmoid.front() < 1.0e-30f);
+    assert(sigmoid.back() <= 1.0f && sigmoid.back() > 0.999f);
+    assert(softplus.front() >= 0.0f && softplus.front() < 1.0e-20f);
+    assert(std::fabs(softplus.back() - 100.0f) < 1.0e-5f);
+
+    const std::vector<float> source = {
+        0, 1, 2, 3, 4, 5,
+        6, 7, 8, 9, 10, 11
+    };
+    std::vector<float> sliced(2 * 2 * 2);
+    assert(reference_split_f32(source.data(), sliced.data(),
+                               {2, 2, 3}, {2, 2, 2}, 2, 1).ok());
+    assert((sliced == std::vector<float>{1, 2, 4, 5, 7, 8, 10, 11}));
+    assert(reference_split_f32(source.data(), sliced.data(),
+                               {2, 2, 3}, {2, 2, 2}, 2, 2).code ==
+           StatusCode::InvalidArgument);
+}
+
 void test_gpu_memory_planner_respects_streaming_and_reserve() {
     GpuMemoryPlanInput input;
     input.total_weight_bytes = 8ull * 1024 * 1024 * 1024;
@@ -3692,6 +3717,7 @@ int main() {
     test_gpu_backend_fallback_order();
     test_gguf_structure_analyzer_is_evidence_only();
     test_qwen35_hybrid_recipe_builds_generic_semantic_graph();
+    test_split_sigmoid_and_softplus_references();
     test_gpu_memory_planner_respects_streaming_and_reserve();
     test_graph_scheduler_order_and_cancel();
     std::cout << "GPU engine contract tests passed\n";
