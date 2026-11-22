@@ -966,7 +966,7 @@ layout(local_size_x=8,local_size_y=8)in;
 layout(std430,binding=0)readonly buffer Activations{float activations[];};
 layout(std430,binding=1)readonly buffer Weights{uint weights[];};
 layout(std430,binding=2)writeonly buffer Output{float output_values[];};
-const uint ROWS=1u,OUTPUT_CHANNELS=1u,INNER=256u,WEIGHT_ROW_BYTES=110u;
+const uint ROWS=1u;const uint OUTPUT_CHANNELS=1u;const uint INNER=256u;const uint WEIGHT_ROW_BYTES=110u;
 uint read_u8(uint o){uint w=weights[o>>2u];return(w>>((o&3u)*8u))&255u;}
 uint read_u16(uint o){uint w=weights[o>>2u];return(w>>((o&3u)*8u))&65535u;}
 uint read_u32(uint o){return read_u8(o)|(read_u8(o+1u)<<8u)|(read_u8(o+2u)<<16u)|(read_u8(o+3u)<<24u);}
