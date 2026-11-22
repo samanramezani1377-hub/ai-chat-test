@@ -589,6 +589,8 @@ void test_q5_matmul_lowerings_are_registered_for_both_backends() {
     assert(gles.find(BackendKind::OpenGles,"MatMul_BF16") != nullptr);
     assert(gles.find(BackendKind::OpenGles,"Embedding_F16") != nullptr);
     assert(gles.find(BackendKind::OpenGles,"Embedding_BF16") != nullptr);
+    assert(dawn.find(BackendKind::DawnWebGpu,"MatMul_Q6_K") != nullptr);
+    assert(gles.find(BackendKind::OpenGles,"MatMul_Q6_K") != nullptr);
     assert(dawn.find(BackendKind::DawnWebGpu,"MatMul_F16") != nullptr);
     assert(dawn.find(BackendKind::DawnWebGpu,"MatMul_BF16") != nullptr);
     assert(dawn.find(BackendKind::DawnWebGpu,"Embedding_F16") != nullptr);
@@ -624,6 +626,7 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     assert(validate_bf16_matmul_kernel(backend,operators,quantizations).code==StatusCode::NumericalFailure);
     assert(validate_f16_embedding_kernel(backend,operators,quantizations).code==StatusCode::NumericalFailure);
     assert(validate_bf16_embedding_kernel(backend,operators,quantizations).code==StatusCode::NumericalFailure);
+    assert(validate_q6_k_matmul_kernel(backend,operators,quantizations).code==StatusCode::NumericalFailure);
     FakeBackend dawn_backend(BackendKind::DawnWebGpu);
     OperatorRegistry dawn_operators;
     QuantizationRegistry dawn_quantizations;
@@ -662,6 +665,12 @@ void test_q8_0_gpu_validation_does_not_promote_fake_backend() {
     assert(bf16_format&&bf16_format->gpu_kernel_state==SupportState::Unverified);
     assert(!quantizations.can_execute_on_gpu(1,BackendKind::DawnWebGpu));
     assert(!quantizations.can_execute_on_gpu(30,BackendKind::OpenGles));
+    const QuantizationFormat* q6_k_format=quantizations.find(14);
+    assert(q6_k_format&&q6_k_format->decoder_state==SupportState::Validated);
+    assert(q6_k_format->gpu_kernel_state==SupportState::Unverified);
+    assert(!quantizations.can_execute_on_gpu(14,BackendKind::DawnWebGpu));
+    assert(operators.select_kernel("MatMul_Q6_K",BackendKind::DawnWebGpu,
+        std::vector<DataType>{DataType::F32,DataType::U32},DataType::F32,2,selected).code==StatusCode::Unsupported);
     KernelDefinition q5_embedding_selected;
     assert(operators.select_kernel("Embedding_Q5_0", BackendKind::OpenGles,
         std::vector<DataType>{DataType::U32,DataType::U32}, DataType::F32, 2,
@@ -1971,6 +1980,36 @@ void test_dense_model_plan_selects_q4_0_matmul_adapter() {
 
 
 
+
+void test_dense_model_plan_selects_q6_k_matmul_adapter(){
+    ArchitectureRegistry registry;assert(register_builtin_architecture_adapters(registry).ok());
+    const auto adapter=registry.find("llama");assert(adapter);
+    GgufFileInfo model;model.architecture="llama";
+    model.metadata["llama.block_count"]=uint64_t{1};model.metadata["llama.embedding_length"]=uint64_t{256};
+    model.metadata["llama.attention.head_count"]=uint64_t{1};model.metadata["llama.feed_forward_length"]=uint64_t{256};
+    model.tokenizer.tokens={"a","b"};
+    const std::vector<std::pair<std::string,std::vector<uint64_t>>> tensors={
+        {"token_embd.weight",{256,2}},{"output.weight",{256,2}},{"output_norm.weight",{256}},
+        {"blk.0.attn_norm.weight",{256}},{"blk.0.attn_q.weight",{256,256}},
+        {"blk.0.attn_k.weight",{256,256}},{"blk.0.attn_v.weight",{256,256}},
+        {"blk.0.attn_output.weight",{256,256}},{"blk.0.ffn_norm.weight",{256}},
+        {"blk.0.ffn_gate.weight",{256,256}},{"blk.0.ffn_up.weight",{256,256}},
+        {"blk.0.ffn_down.weight",{256,256}}
+    };
+    for(const auto&item:tensors){
+        GgufTensorInfo tensor;tensor.name=item.first;tensor.dimensions=item.second;
+        tensor.type_id=tensor.name=="blk.0.attn_q.weight"?14u:0u;
+        tensor.type=GgufReader::tensor_type_info(tensor.type_id);
+        uint64_t elements=1;for(uint64_t d:tensor.dimensions)elements*=d;
+        tensor.byte_size_known=true;tensor.byte_size=tensor.type_id==14?(elements/256)*210:elements*sizeof(float);
+        model.tensors.push_back(std::move(tensor));
+    }
+    ModelExecutionPlan plan;assert(adapter->build_execution_plan(model,plan).ok());
+    const auto projection=std::find_if(plan.operations.begin(),plan.operations.end(),
+        [](const ModelPlanOperation&op){return op.id=="layer.0.q_proj";});
+    assert(projection!=plan.operations.end()&&projection->operator_name=="MatMul_Q6_K");
+}
+
 void test_dense_model_plan_selects_fp16_matmul_adapter(uint32_t file_type_id,const std::string&expected_operator){
     ArchitectureRegistry registry;assert(register_builtin_architecture_adapters(registry).ok());
     const auto adapter=registry.find("llama");assert(adapter);
@@ -3231,6 +3270,7 @@ int main() {
     test_dense_model_plan_selects_q5_matmul_adapter(7, "MatMul_Q5_1");
     test_dense_model_plan_selects_fp16_matmul_adapter(1,"MatMul_F16");
     test_dense_model_plan_selects_fp16_matmul_adapter(30,"MatMul_BF16");
+    test_dense_model_plan_selects_q6_k_matmul_adapter();
     test_llama_model_execution_plan_is_structural_only();
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
     test_model_and_quantization_registry_fail_closed();
