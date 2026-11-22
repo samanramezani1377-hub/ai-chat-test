@@ -7,6 +7,13 @@ TEST="$ROOT/engine/src/test/cpp/gpu_engine_contract_test.cpp"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# "sample" is a reserved GLSL ES interpolation qualifier on mobile drivers.
+# Guard the embedded SSMConv1D shaders against reintroducing that identifier.
+if grep -Eq '\\bsample\\b' "$ENGINE/hybrid_state_operators.cpp"; then
+  echo "SSMConv1D shader contains the reserved GLSL identifier 'sample'." >&2
+  exit 1
+fi
+
 "${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror \
   -I "$ENGINE" \
   "$ENGINE/gpu_engine.cpp" \
