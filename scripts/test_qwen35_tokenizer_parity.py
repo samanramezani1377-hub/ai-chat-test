@@ -39,16 +39,20 @@ def build_gguf(data,config,destination):
         tid=int(tid)
         if tid in indexed and indexed[tid]!=token: raise RuntimeError(f"Duplicate vocabulary id {tid}")
         indexed[tid]=token
-    special_ids=set()
+    token_types={}
+    user_defined_contents=set()
     for item in data.get("added_tokens",[]):
         tid=int(item["id"]); token=item["content"]
         if tid in indexed and indexed[tid]!=token: raise RuntimeError(f"Added-token collision at {tid}")
         indexed[tid]=token
-        if item.get("special",False): special_ids.add(tid)
+        token_types[tid]=3 if item.get("special",False) else 4
+        if not item.get("special",False): user_defined_contents.add(token)
+    if "<|repo_name|>" not in user_defined_contents:
+        raise RuntimeError("Expected <|repo_name|> to be a non-special added token in the pinned reference")
     size=max(indexed)+1
     if len(indexed)!=size: raise RuntimeError(f"Vocabulary has missing IDs: {sorted(set(range(size))-set(indexed))[:8]}")
     tokens=[indexed[i] for i in range(size)]
-    types=[3 if i in special_ids else 1 for i in range(size)]
+    types=[token_types.get(i,1) for i in range(size)]
     merges=[]
     for merge in model.get("merges",[]):
         if isinstance(merge,list):
@@ -117,6 +121,7 @@ def main():
         "می‌خواهم ۱۲۳ عدد و emoji 🧠🚀 را تست کنم.","e\u0301 cafe\u0301",
         "line one\r\nline two\n\t  "," punctuation!!! ... ???","   ",
         "emoji 🧑🏽‍💻 and symbols ©™","<|im_start|>assistant\nHello<|im_end|>",
+        "<|repo_name|> my-repo",
         "中文、日本語、한국어 mixed with English 42","A\u030A and Å; NFC and decomposed forms.",
     ]
     cli=os.path.abspath(sys.argv[1])
