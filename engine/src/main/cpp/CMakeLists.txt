@@ -77,6 +77,22 @@ add_library(gpu_engine_android SHARED ${ENGINE_DIR}/android_jni.cpp)
 target_include_directories(gpu_engine_android PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
 target_compile_options(gpu_engine_android PRIVATE -Os -gline-tables-only -ffunction-sections -fdata-sections)
 target_link_options(gpu_engine_android PRIVATE -Wl,--gc-sections -Wl,--build-id=sha1)
+# Extract debug information before stripping so native crash symbols remain available
+# as a separate CI artifact, while the APK contains only runtime sections.
+if (NOT CMAKE_STRIP OR NOT CMAKE_OBJCOPY)
+    message(FATAL_ERROR "Android NDK strip and objcopy tools are required")
+endif()
+set(ENGINE_DEBUG_SYMBOLS "$<TARGET_FILE:gpu_engine_android>.debug")
+add_custom_command(TARGET gpu_engine_android POST_BUILD
+    COMMAND "${CMAKE_OBJCOPY}" --only-keep-debug
+            "$<TARGET_FILE:gpu_engine_android>" "${ENGINE_DEBUG_SYMBOLS}"
+    COMMAND "${CMAKE_STRIP}" --strip-debug "$<TARGET_FILE:gpu_engine_android>"
+    COMMAND "${CMAKE_OBJCOPY}" --add-gnu-debuglink="${ENGINE_DEBUG_SYMBOLS}"
+            "$<TARGET_FILE:gpu_engine_android>"
+    COMMENT "Extracting native debug symbols and stripping packaged GPU engine"
+    VERBATIM
+)
+
 target_link_libraries(gpu_engine_android PRIVATE
     ai_chat_gpu_backends_android
     ai_chat_gpu_engine
