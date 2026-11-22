@@ -988,7 +988,7 @@ void test_q8_0_decoder_and_registry() {
     assert(build_f16_embedding_gles_candidate(fp16_embed_weights,128,2,32,fp16_embed_tokens,fp16_embed_ids,fp16_embed_tensor,f16_embed_gles).ok());
     assert(build_bf16_embedding_gles_candidate(fp16_embed_weights,128,2,32,fp16_embed_tokens,fp16_embed_ids,fp16_embed_tensor,bf16_embed_gles).ok());
     assert(f16_embed_gles.backend==BackendKind::OpenGles&&bf16_embed_gles.backend==BackendKind::OpenGles);
-    BufferDesc q5_embedding_weights_desc{96,4,MemoryDomain::Device,true,"q5-embedding-weights"};
+    BufferDesc q5_embedding_weights_desc{48,4,MemoryDomain::Device,true,"q5-embedding-weights"};
     BufferDesc q5_embedding_tokens_desc{2*sizeof(uint32_t),4,MemoryDomain::Device,false,"q5-embedding-token-ids"};
     BufferDesc q5_embedding_output_desc{2*32*sizeof(float),4,MemoryDomain::Device,false,"q5-embedding-output"};
     std::shared_ptr<Buffer> q5_embedding_weights,q5_embedding_tokens,q5_embedding_output;
@@ -999,11 +999,11 @@ void test_q8_0_decoder_and_registry() {
     Tensor q5_embedding_tensor;assert(Tensor::create(q5_embedding_td,q5_embedding_output,0,q5_embedding_tensor).ok());
     const std::vector<uint32_t> q5_embedding_ids={1,0};
     ComputeDispatch q5_0_embedding_dispatch,q5_1_embedding_dispatch;
-    assert(build_q5_0_embedding_candidate(q5_embedding_weights,88,2,32,q5_embedding_tokens,q5_embedding_ids,q5_embedding_tensor,q5_0_embedding_dispatch).ok());
-    assert(build_q5_1_embedding_candidate(q5_embedding_weights,96,2,32,q5_embedding_tokens,q5_embedding_ids,q5_embedding_tensor,q5_1_embedding_dispatch).ok());
+    assert(build_q5_0_embedding_candidate(q5_embedding_weights,44,2,32,q5_embedding_tokens,q5_embedding_ids,q5_embedding_tensor,q5_0_embedding_dispatch).ok());
+    assert(build_q5_1_embedding_candidate(q5_embedding_weights,48,2,32,q5_embedding_tokens,q5_embedding_ids,q5_embedding_tensor,q5_1_embedding_dispatch).ok());
     ComputeDispatch q5_0_embedding_gles_dispatch,q5_1_embedding_gles_dispatch;
-    assert(build_q5_0_embedding_gles_candidate(q5_embedding_weights,88,2,32,q5_embedding_tokens,q5_embedding_ids,q5_embedding_tensor,q5_0_embedding_gles_dispatch).ok());
-    assert(build_q5_1_embedding_gles_candidate(q5_embedding_weights,96,2,32,q5_embedding_tokens,q5_embedding_ids,q5_embedding_tensor,q5_1_embedding_gles_dispatch).ok());
+    assert(build_q5_0_embedding_gles_candidate(q5_embedding_weights,44,2,32,q5_embedding_tokens,q5_embedding_ids,q5_embedding_tensor,q5_0_embedding_gles_dispatch).ok());
+    assert(build_q5_1_embedding_gles_candidate(q5_embedding_weights,48,2,32,q5_embedding_tokens,q5_embedding_ids,q5_embedding_tensor,q5_1_embedding_gles_dispatch).ok());
     assert(q5_0_embedding_gles_dispatch.backend==BackendKind::OpenGles&&q5_1_embedding_gles_dispatch.backend==BackendKind::OpenGles);
     assert(q5_0_embedding_gles_dispatch.glsl_source.find("#version 310 es")==0);
     assert(q5_1_embedding_gles_dispatch.glsl_source.find("#version 310 es")==0);
