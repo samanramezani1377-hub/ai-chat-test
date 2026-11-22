@@ -99,7 +99,7 @@ Status load_model_execution_weights(const GgufReader& reader,
             status = Tensor::create(std::move(descriptor), buffer, 0, weight);
             if (!status.ok()) return status;
             pending_tensors.emplace(name, std::move(weight));
-        } else if (tensor->type.name == "Q8_0" || tensor->type.name == "Q4_0" || tensor->type.name == "Q4_1" || tensor->type.name == "Q5_0" || tensor->type.name == "Q5_1" || tensor->type.name == "F16" || tensor->type.name == "BF16" || tensor->type.name == "Q6_K" || tensor->type.name == "Q4_K" || tensor->type.name == "Q5_K") {
+        } else if (tensor->type.name == "Q8_0" || tensor->type.name == "Q4_0" || tensor->type.name == "Q4_1" || tensor->type.name == "Q5_0" || tensor->type.name == "Q5_1" || tensor->type.name == "F16" || tensor->type.name == "BF16" || tensor->type.name == "Q6_K" || tensor->type.name == "Q4_K" || tensor->type.name == "Q5_K" || tensor->type.name == "Q2_K" || tensor->type.name == "Q3_K") {
             QuantizedWeightBinding binding;
             binding.buffer = buffer;
             binding.byte_size = tensor->byte_size;
