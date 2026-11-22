@@ -747,6 +747,67 @@ void main(){
 )glsl";
 
 
+constexpr char kQ6_KEmbeddingWgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> weights: array<u32>;
+@group(0) @binding(1) var<storage, read> token_ids: array<u32>;
+@group(0) @binding(2) var<storage, read_write> output: array<f32>;
+const VOCABULARY_SIZE:u32=1u;
+const EMBEDDING_DIMENSION:u32=256u;
+const TOKEN_COUNT:u32=1u;
+const TOTAL_ELEMENTS:u32=256u;
+const WEIGHT_ROW_BYTES:u32=210u;
+fn read_u8(byte_offset:u32)->u32{let word=weights[byte_offset>>2u];return(word>>((byte_offset&3u)*8u))&255u;}
+fn read_u16(byte_offset:u32)->u32{let word=weights[byte_offset>>2u];return(word>>((byte_offset&3u)*8u))&65535u;}
+fn decode_weight(token:u32,dimension:u32)->f32{
+ let block=dimension/256u;let within=dimension%256u;let group=within/128u;let local=within%128u;
+ let segment=local/32u;let lane=local%32u;let offset=token*WEIGHT_ROW_BYTES+block*210u;
+ let ql_index=group*64u+(segment%2u)*32u+lane;let qh_index=128u+group*32u+lane;
+ let scale_index=192u+group*8u+segment*2u+lane/16u;
+ let ql=read_u8(offset+ql_index);let qh=read_u8(offset+qh_index);
+ let nibble=select(ql&15u,ql>>4u,segment>=2u);let high=(qh>>(segment*2u))&3u;
+ let quantized=i32(nibble|(high<<4u))-32;
+ let scale=bitcast<i32>(read_u8(offset+scale_index)<<24u)>>24u;
+ let d=unpack2x16float(vec2<u32>(read_u16(offset+208u),0u)).x;
+ return d*f32(scale)*f32(quantized);
+}
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid:vec3<u32>){
+ if(gid.x>=TOTAL_ELEMENTS)return;
+ let token_row=gid.x/EMBEDDING_DIMENSION;let dimension=gid.x%EMBEDDING_DIMENSION;
+ if(token_row>=TOKEN_COUNT)return;let token=token_ids[token_row];
+ if(token>=VOCABULARY_SIZE){output[gid.x]=bitcast<f32>(0x7fc00000u);return;}
+ output[gid.x]=decode_weight(token,dimension);
+}
+)wgsl";
+
+constexpr char kQ6_KEmbeddingGlsl[] = R"glsl(#version 310 es
+precision highp float;precision highp int;
+layout(local_size_x=64) in;
+layout(std430,binding=0) readonly buffer Weights{uint weights[];};
+layout(std430,binding=1) readonly buffer TokenIds{uint token_ids[];};
+layout(std430,binding=2) writeonly buffer Output{float output_values[];};
+const uint VOCABULARY_SIZE=1u,EMBEDDING_DIMENSION=256u,TOKEN_COUNT=1u,TOTAL_ELEMENTS=256u,WEIGHT_ROW_BYTES=210u;
+uint read_u8(uint byte_offset){uint word=weights[byte_offset>>2u];return(word>>((byte_offset&3u)*8u))&255u;}
+uint read_u16(uint byte_offset){uint word=weights[byte_offset>>2u];return(word>>((byte_offset&3u)*8u))&65535u;}
+float decode_weight(uint token,uint dimension){
+ uint block=dimension/256u,within=dimension%256u,group=within/128u,local=within%128u;
+ uint segment=local/32u,lane=local%32u,offset=token*WEIGHT_ROW_BYTES+block*210u;
+ uint ql_index=group*64u+(segment%2u)*32u+lane,qh_index=128u+group*32u+lane;
+ uint scale_index=192u+group*8u+segment*2u+lane/16u;
+ uint ql=read_u8(offset+ql_index),qh=read_u8(offset+qh_index);
+ uint nibble=segment<2u?(ql&15u):(ql>>4u),high=(qh>>(segment*2u))&3u;
+ int quantized=int(nibble|(high<<4u))-32,scale=int(read_u8(offset+scale_index));if(scale>=128)scale-=256;
+ float d=unpackHalf2x16(read_u16(offset+208u)).x;
+ return d*float(scale)*float(quantized);
+}
+void main(){uint index=gl_GlobalInvocationID.x;if(index>=TOTAL_ELEMENTS)return;
+ uint token_row=index/EMBEDDING_DIMENSION,dimension=index%EMBEDDING_DIMENSION;
+ if(token_row>=TOKEN_COUNT)return;uint token=token_ids[token_row];
+ if(token>=VOCABULARY_SIZE){output_values[index]=uintBitsToFloat(0x7fc00000u);return;}
+ output_values[index]=decode_weight(token,dimension);
+}
+)glsl";
+
 constexpr char kQ4_KMatMulWgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage,read> activations:array<f32>;
 @group(0) @binding(1) var<storage,read> weights:array<u32>;
