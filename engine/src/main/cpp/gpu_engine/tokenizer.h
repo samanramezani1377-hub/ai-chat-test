@@ -52,6 +52,12 @@ TokenizerPreflightReport evaluate_tokenizer_preflight(
 // not imply that an adapter is supported or validated.
 std::string describe_tokenizer_metadata(
     const GgufTokenizerInfo& metadata, const TokenizerRegistry& registry);
+// Optional exact Unicode property classifications supplied by the Android ICU-backed
+// Java Character API for Qwen3.5's Unicode regex pre-tokenizer. Values map to
+// LetterMark=0, Number=1, Space=2, Newline=3, Other=4.
+using Qwen35UnicodeCategories = std::unordered_map<uint32_t, uint8_t>;
+void set_qwen35_unicode_categories(const Qwen35UnicodeCategories* categories) noexcept;
+
 Status register_builtin_tokenizer_adapters(TokenizerRegistry& registry);
 
 class TokenizerEngine {
