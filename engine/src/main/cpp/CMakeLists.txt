@@ -74,11 +74,11 @@ target_link_libraries(ai_chat_gpu_backends_android PUBLIC
     ai_chat_gpu_backend_gles
 )
 
-add_library(ai_chat_runtime SHARED ${ENGINE_DIR}/android_jni.cpp)
-target_include_directories(ai_chat_runtime PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
-target_compile_options(ai_chat_runtime PRIVATE -Os -gline-tables-only -ffunction-sections -fdata-sections)
-target_link_options(ai_chat_runtime PRIVATE -Wl,--gc-sections -Wl,--build-id=sha1)
-target_link_libraries(ai_chat_runtime PRIVATE
+add_library(gpu_engine_android SHARED ${ENGINE_DIR}/android_jni.cpp)
+target_include_directories(gpu_engine_android PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
+target_compile_options(gpu_engine_android PRIVATE -Os -gline-tables-only -ffunction-sections -fdata-sections)
+target_link_options(gpu_engine_android PRIVATE -Wl,--gc-sections -Wl,--build-id=sha1)
+target_link_libraries(gpu_engine_android PRIVATE
     ai_chat_gpu_backends_android
     ai_chat_gpu_engine
     ai_chat_gpu_backend_dawn
@@ -87,13 +87,13 @@ target_link_libraries(ai_chat_runtime PRIVATE
     android log EGL GLESv3
 )
 
-target_compile_definitions(ai_chat_runtime PRIVATE
+target_compile_definitions(gpu_engine_android PRIVATE
     AI_CHAT_GPU_BACKEND_WEBGPU=1
     AI_CHAT_GPU_BACKEND_OPENGL_ES=1
     AI_CHAT_GPU_BACKEND_VULKAN=0
 )
 
-set_target_properties(ai_chat_runtime PROPERTIES
+set_target_properties(gpu_engine_android PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
 )

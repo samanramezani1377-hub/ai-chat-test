@@ -1,12 +1,12 @@
-package com.woogit.aicore.runtime.android
+package com.samanramezani.gpuengine
 
 /**
  * JNI compatibility name retained for the native entry points. This module contains
  * only the independent GPU engine; there is no llama.cpp runtime in this project.
  */
-internal object NativeLlamaCpp {
+internal object NativeGpuEngine {
     init {
-        System.loadLibrary("ai_chat_runtime")
+        System.loadLibrary("gpu_engine_android")
     }
 
     @JvmStatic external fun nativeGpuEngineProbe(): String
@@ -18,15 +18,15 @@ internal object NativeLlamaCpp {
 /** Small public API consumed by the standalone test application. */
 object GpuEngineTestApi {
     @JvmStatic
-    fun probe(): String = NativeLlamaCpp.nativeGpuEngineProbe()
+    fun probe(): String = NativeGpuEngine.nativeGpuEngineProbe()
 
     @JvmStatic
     fun loadModel(path: String, contextLength: Int, memoryBudgetBytes: Long): Int =
-        NativeLlamaCpp.nativeGpuEngineLoadModel(path, contextLength, memoryBudgetBytes)
+        NativeGpuEngine.nativeGpuEngineLoadModel(path, contextLength, memoryBudgetBytes)
 
     @JvmStatic
-    fun diagnostics(): String = NativeLlamaCpp.nativeGpuEngineDiagnostics()
+    fun diagnostics(): String = NativeGpuEngine.nativeGpuEngineDiagnostics()
 
     @JvmStatic
-    fun unload() = NativeLlamaCpp.nativeGpuEngineUnload()
+    fun unload() = NativeGpuEngine.nativeGpuEngineUnload()
 }

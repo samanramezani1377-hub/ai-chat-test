@@ -109,7 +109,7 @@ std::string probe_gpu_engine() {
 } // namespace ai_chat::gpu_engine
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineProbe(
+Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineProbe(
         JNIEnv* env, jclass) {
     std::string result;
     try {
@@ -124,7 +124,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineProbe(
 
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineLoadModel(
+Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineLoadModel(
         JNIEnv* env, jclass, jstring path, jint context_length, jlong memory_budget_bytes) {
     try {
         if (context_length <= 0 || memory_budget_bytes <= 0)
@@ -140,7 +140,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineLoadModel(
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineGenerate(
+Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineGenerate(
         JNIEnv* env, jclass, jstring prompt, jint max_tokens, jfloat temperature,
         jint top_k, jfloat top_p, jfloat min_p, jobject listener) {
     try {
@@ -182,7 +182,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineGenerate(
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineCountTokens(
+Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineCountTokens(
         JNIEnv* env, jclass, jstring text) {
     try {
         uint32_t count = 0;
@@ -195,7 +195,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineCountTokens
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineContextLength(
+Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineContextLength(
         JNIEnv*, jclass) {
     try {
         const std::string diagnostics = ai_chat::gpu_engine::gpu_inference_session().diagnostics();
@@ -209,19 +209,19 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineContextLeng
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineStop(
+Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineStop(
         JNIEnv*, jclass) {
     ai_chat::gpu_engine::gpu_inference_session().cancel();
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineUnload(
+Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineUnload(
         JNIEnv*, jclass) {
     ai_chat::gpu_engine::gpu_inference_session().unload();
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineDiagnostics(
+Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineDiagnostics(
         JNIEnv* env, jclass) {
     std::string result;
     try {
@@ -235,7 +235,7 @@ Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineDiagnostics
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_woogit_aicore_runtime_android_NativeLlamaCpp_nativeGpuEngineResetStop(
+Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineResetStop(
         JNIEnv*, jclass) {
     ai_chat::gpu_engine::gpu_inference_session().reset_stop();
 }

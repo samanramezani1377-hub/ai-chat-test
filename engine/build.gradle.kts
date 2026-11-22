@@ -22,7 +22,7 @@ val extractDawnMetadata = tasks.register<Copy>("extractDawnMetadata") {
 }
 
 android {
-    namespace = "com.woogit.aicore.runtime.android"
+    namespace = "com.samanramezani.gpuengine"
     compileSdk = 36
     ndkVersion = "27.2.12479018"
 
