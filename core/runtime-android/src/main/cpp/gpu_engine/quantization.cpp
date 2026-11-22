@@ -3660,7 +3660,11 @@ Status validate_q5_embedding_kernel_impl(Backend& backend,OperatorRegistry& oper
         return k.kernel_id==kernel_id&&k.backend==kind;
     });
     if(kernel==operators.kernels_.end())return {StatusCode::NotReady,"Q5 Embedding candidate is not registered for selected backend"};
-    if(kernel->validation==KernelValidation::Validated)return Status::success();
+    if(kernel->validation==KernelValidation::Validated){
+        format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;
+        format->second.gpu_kernel_state=SupportState::Validated;
+        return Status::success();
+    }
     if(kernel->validation!=KernelValidation::Unverified)return {StatusCode::Unsupported,"Q5 Embedding candidate is rejected"};
     const bool gles=kind==BackendKind::OpenGles;
     const std::string& registered=gles?kernel->glsl_source:kernel->wgsl_source;
