@@ -89,3 +89,14 @@ The app's current memory budget is a conservative estimate derived from Android 
 - Physical-device runs: import a known GGUF file in the test app, capture the full diagnostic log, and record device/GPU/driver/model details.
 
 A passing CI run must never be described as proof of real-device inference.
+
+
+## Latest device-log follow-up (2026-11-23)
+
+The next Xiaomi 2303CRA44A run exposed two preflight/plan defects before GPU execution:
+
+- Qwen3.8-2B and Qwen3.5-0.8B both stopped at Embedding_Q6_K. The Q6_K packed kernel candidate and lowering existed, but the inference-session compatibility gate accepted Q6_K only for MatMul and rejected the same quantization on Embedding. The dense adapter also lacked the Q6_K embedding operator selection. Both routing/compatibility gaps are now corrected; backend-specific numerical validation remains mandatory.
+- Qwen3-0.6B reported projection and QK-Norm shape mismatches because the dense adapter assumed head_dim = hidden_size / attention_heads. Qwen3-0.6B uses hidden size 1024, 16 query heads, 8 KV heads and head dimension 128; its Q projection width is 2048. The adapter now obtains key/value head widths from GGUF metadata when present and otherwise derives them from the first projection tensor shapes, then validates every layer against those dimensions. The official model config also declares tied word embeddings for this exact 0.6B configuration; a narrowly matched config profile handles GGUF exports that omit the tie flag and output tensor. Source: https://huggingface.co/Qwen/Qwen3-0.6B/blob/main/config.json.
+- A regression contract now covers a dense Qwen3 graph with independent head width and Q6_K embedding operator selection.
+
+These code changes are not evidence of successful GPU inference. The next physical-device run must show a selected Dawn or GLES backend, successful backend numerical validation, a structurally valid and compiled model graph, and generated tokens. If Q6_K embedding fails validation, the diagnostic must preserve the specific backend/kernel validation error rather than reporting a generic missing operator.

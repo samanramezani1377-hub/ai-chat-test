@@ -102,37 +102,72 @@ public:
             expect_shape(embedding_weight, {embedding, model.tokenizer.tokens.size()});
         }
         expect_shape(output_norm, {embedding});
-        const uint64_t head_dimension = embedding / heads;
+        auto infer_projection_head_width = [&tensors, embedding](const std::string& name,
+                                                                  uint64_t heads,
+                                                                  uint64_t fallback) {
+            const auto found = tensors.find(name);
+            if (found == tensors.end() || found->second->dimensions.size() != 2 ||
+                found->second->dimensions[0] != embedding || heads == 0 ||
+                found->second->dimensions[1] % heads != 0) return fallback;
+            return found->second->dimensions[1] / heads;
+        };
+        uint64_t head_dimension = 0;
+        if (!metadata_u64(model, metadata_prefix + "attention.key_length", head_dimension))
+            head_dimension = infer_projection_head_width("blk.0.attn_q.weight", heads,
+                                                         embedding / heads);
+        uint64_t value_dimension = 0;
+        if (!metadata_u64(model, metadata_prefix + "attention.value_length", value_dimension))
+            value_dimension = infer_projection_head_width("blk.0.attn_v.weight", kv_heads,
+                                                          head_dimension);
+        if (head_dimension == 0 || value_dimension == 0 ||
+            heads > UINT64_MAX / head_dimension || kv_heads > UINT64_MAX / head_dimension ||
+            kv_heads > UINT64_MAX / value_dimension || heads > UINT64_MAX / value_dimension) {
+            plan.blockers.emplace_back("INVALID_ATTENTION_PROJECTION_DIMENSIONS");
+            return {StatusCode::Unsupported, "Dense transformer attention projection dimensions are invalid"};
+        }
+        const uint64_t query_dimension = head_dimension * heads;
         const uint64_t kv_dimension = head_dimension * kv_heads;
+        const uint64_t kv_value_dimension = value_dimension * kv_heads;
+        const uint64_t attention_output_dimension = value_dimension * heads;
+        if (value_dimension != head_dimension) {
+            plan.blockers.emplace_back("DENSE_KV_CACHE_REQUIRES_EQUAL_KEY_AND_VALUE_HEAD_WIDTHS");
+            return {StatusCode::Unsupported, "Dense attention key/value head widths differ but the current KV cache layout requires equal widths"};
+        }
         bool tied_output = false;
         if (!has_tensor("output.weight")) {
             const auto tie = model.metadata.find(metadata_prefix + "tie_word_embeddings");
             const bool* tied = tie == model.metadata.end() ? nullptr : std::get_if<bool>(&tie->second);
-            if (!tied || !*tied)
-                plan.blockers.emplace_back("OUTPUT_WEIGHT_MISSING_WITHOUT_EXPLICIT_TIED_EMBEDDINGS_METADATA");
+            // The official Qwen3-0.6B config is tied and has this exact architecture tuple.
+            // Do not infer tied embeddings for other Qwen3 sizes or variants.
+            const bool verified_qwen3_06b_profile =
+                architecture_name_ == "qwen3" && layers == 28 && embedding == 1024 &&
+                heads == 16 && kv_heads == 8 && feed_forward == 3072 &&
+                model.tokenizer.tokens.size() == 151936 && head_dimension == 128;
+            if (tied && *tied) tied_output = true;
+            else if (!tied && verified_qwen3_06b_profile) tied_output = true;
             else
-                tied_output = true;
+                plan.blockers.emplace_back("OUTPUT_WEIGHT_MISSING_WITHOUT_EXPLICIT_TIED_EMBEDDINGS_METADATA");
         }
         if (!tied_output && !model.tokenizer.tokens.empty())
             expect_shape("output.weight", {embedding, model.tokenizer.tokens.size()});
         for (uint64_t layer = 0; layer < layers; ++layer) {
             const std::string prefix = "blk." + std::to_string(layer) + ".";
             expect_shape(prefix + "attn_norm.weight", {embedding});
-            expect_shape(prefix + "attn_q.weight", {embedding, embedding});
+            expect_shape(prefix + "attn_q.weight", {embedding, query_dimension});
             expect_shape(prefix + "attn_k.weight", {embedding, kv_dimension});
             if (uses_qk_norm_) {
                 expect_shape(prefix + "attn_q_norm.weight", {head_dimension});
                 expect_shape(prefix + "attn_k_norm.weight", {head_dimension});
             }
-            expect_shape(prefix + "attn_v.weight", {embedding, kv_dimension});
+            expect_shape(prefix + "attn_v.weight", {embedding, kv_value_dimension});
             if (uses_qkv_bias_) {
-                expect_shape(prefix + "attn_q.bias", {embedding});
+                expect_shape(prefix + "attn_q.bias", {query_dimension});
                 expect_shape(prefix + "attn_k.bias", {kv_dimension});
-                expect_shape(prefix + "attn_v.bias", {kv_dimension});
+                expect_shape(prefix + "attn_v.bias", {kv_value_dimension});
                 expect_shape(prefix + "attn_output.bias", {embedding});
                 const std::pair<const char*, uint64_t> bias_layouts[] = {
-                    {"attn_q.bias", embedding}, {"attn_k.bias", kv_dimension},
-                    {"attn_v.bias", kv_dimension}, {"attn_output.bias", embedding}
+                    {"attn_q.bias", query_dimension}, {"attn_k.bias", kv_dimension},
+                    {"attn_v.bias", kv_value_dimension}, {"attn_output.bias", embedding}
                 };
                 for (const auto& bias : bias_layouts) {
                     const auto found = tensors.find(prefix + bias.first);
@@ -144,7 +179,7 @@ public:
                     }
                 }
             }
-            expect_shape(prefix + "attn_output.weight", {embedding, embedding});
+            expect_shape(prefix + "attn_output.weight", {attention_output_dimension, embedding});
             expect_shape(prefix + "ffn_norm.weight", {embedding});
             expect_shape(prefix + "ffn_gate.weight", {embedding, feed_forward});
             expect_shape(prefix + "ffn_up.weight", {embedding, feed_forward});
@@ -192,6 +227,8 @@ public:
                     operation.operator_name = "Embedding_Q5_0";
                 else if (found != model.tensors.end() && found->type.name == "Q5_1")
                     operation.operator_name = "Embedding_Q5_1";
+                else if (found != model.tensors.end() && found->type.name == "Q6_K")
+                    operation.operator_name = "Embedding_Q6_K";
                 else if (found != model.tensors.end() && found->type.name == "F16")
                     operation.operator_name = "Embedding_F16";
                 else if (found != model.tensors.end() && found->type.name == "BF16")
@@ -247,12 +284,12 @@ public:
                 add(x + "q_bias.apply", "Add", {x + "q_linear"}, {p + "attn_q.bias"}, x + "q", {0, heads, head_dimension});
                 add(x + "k_proj", "MatMul", {x + "normalized"}, {p + "attn_k.weight"}, x + "k_linear", {0, kv_heads, head_dimension});
                 add(x + "k_bias.apply", "Add", {x + "k_linear"}, {p + "attn_k.bias"}, x + "k", {0, kv_heads, head_dimension});
-                add(x + "v_proj", "MatMul", {x + "normalized"}, {p + "attn_v.weight"}, x + "v_linear", {0, kv_heads, head_dimension});
-                add(x + "v_bias.apply", "Add", {x + "v_linear"}, {p + "attn_v.bias"}, x + "v", {0, kv_heads, head_dimension});
+                add(x + "v_proj", "MatMul", {x + "normalized"}, {p + "attn_v.weight"}, x + "v_linear", {0, kv_heads, value_dimension});
+                add(x + "v_bias.apply", "Add", {x + "v_linear"}, {p + "attn_v.bias"}, x + "v", {0, kv_heads, value_dimension});
             } else {
                 add(x + "q_proj", "MatMul", {x + "normalized"}, {p + "attn_q.weight"}, x + "q", {0, heads, head_dimension});
                 add(x + "k_proj", "MatMul", {x + "normalized"}, {p + "attn_k.weight"}, x + "k", {0, kv_heads, head_dimension});
-                add(x + "v_proj", "MatMul", {x + "normalized"}, {p + "attn_v.weight"}, x + "v", {0, kv_heads, head_dimension});
+                add(x + "v_proj", "MatMul", {x + "normalized"}, {p + "attn_v.weight"}, x + "v", {0, kv_heads, value_dimension});
             }
             if (uses_qk_norm_) {
                 add(x + "q_norm", "RMSNorm", {x + "q"}, {p + "attn_q_norm.weight"}, x + "q_normalized", {0, heads, head_dimension});
@@ -265,7 +302,7 @@ public:
             plan.operations.back().integer_attributes["layer_index"] = layer;
             add(x + "attention", "Attention",
                 {x + "q_rotated", x + "cache_key", x + "cache_value"}, {},
-                x + "attention_output", {0, heads, head_dimension});
+                x + "attention_output", {0, heads, value_dimension});
             plan.operations.back().integer_attributes["layer_index"] = layer;
             plan.operations.back().control_inputs.push_back(x + "kv_cache_updated");
             if (uses_qkv_bias_) {

@@ -415,7 +415,8 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             const bool compatible_bf16 = tensor->type.name == "BF16" &&
                 (operation.operator_name == "MatMul_BF16" || operation.operator_name == "Embedding_BF16");
             const bool compatible_q6_k = tensor->type.name == "Q6_K" &&
-                operation.operator_name == "MatMul_Q6_K";
+                (operation.operator_name == "MatMul_Q6_K" ||
+                 operation.operator_name == "Embedding_Q6_K");
             const bool compatible_q4_k = tensor->type.name == "Q4_K" &&
                 operation.operator_name == "MatMul_Q4_K";
             const bool compatible_q5_k = tensor->type.name == "Q5_K" &&

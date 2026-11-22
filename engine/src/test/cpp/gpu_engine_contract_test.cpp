@@ -3552,6 +3552,64 @@ void test_qwen2_dense_adapter_builds_bias_aware_structural_plan() {
     assert(adapter->build_execution_plan(model, plan).code == StatusCode::Unsupported);
 }
 
+void test_qwen3_dense_adapter_uses_tensor_derived_head_width_and_q6_embedding() {
+    ArchitectureRegistry registry;
+    assert(register_builtin_architecture_adapters(registry).ok());
+    const auto adapter = registry.find("qwen3");
+    assert(adapter);
+    GgufFileInfo model;
+    model.architecture = "qwen3";
+    model.metadata["qwen3.block_count"] = uint64_t{1};
+    model.metadata["qwen3.embedding_length"] = uint64_t{8};
+    model.metadata["qwen3.attention.head_count"] = uint64_t{2};
+    model.metadata["qwen3.attention.head_count_kv"] = uint64_t{1};
+    model.metadata["qwen3.feed_forward_length"] = uint64_t{16};
+    model.metadata["qwen3.tie_word_embeddings"] = true;
+    model.metadata["qwen3.attention.layer_norm_rms_epsilon"] = 1e-6;
+    model.metadata["qwen3.rope.freq_base"] = 1000000.0;
+    model.tokenizer.tokens = {"a", "b"};
+    const std::vector<std::pair<std::string, std::vector<uint64_t>>> tensors = {
+        {"token_embd.weight", {8,2}}, {"output_norm.weight", {8}},
+        {"blk.0.attn_norm.weight", {8}}, {"blk.0.attn_q.weight", {8,12}},
+        {"blk.0.attn_k.weight", {8,6}}, {"blk.0.attn_v.weight", {8,6}},
+        {"blk.0.attn_q_norm.weight", {6}}, {"blk.0.attn_k_norm.weight", {6}},
+        {"blk.0.attn_output.weight", {12,8}}, {"blk.0.ffn_norm.weight", {8}},
+        {"blk.0.ffn_gate.weight", {8,16}}, {"blk.0.ffn_up.weight", {8,16}},
+        {"blk.0.ffn_down.weight", {16,8}}
+    };
+    for (const auto& item : tensors) {
+        GgufTensorInfo tensor;
+        tensor.name = item.first;
+        tensor.dimensions = item.second;
+        uint64_t elements = 1;
+        for (uint64_t dimension : tensor.dimensions) elements *= dimension;
+        tensor.byte_size_known = true;
+        tensor.byte_size = elements * 4;
+        model.tensors.push_back(tensor);
+    }
+    model.tensors.front().type.name = "Q6_K";
+    ModelExecutionPlan plan;
+    assert(adapter->build_execution_plan(model, plan).ok());
+    assert(plan.structurally_validated && plan.head_dimension == 6);
+    assert(plan.rotary_dimensions == 6 && plan.rope_theta == 1000000.0);
+    const auto embedding = std::find_if(plan.operations.begin(), plan.operations.end(),
+        [](const ModelPlanOperation& operation) { return operation.id == "embedding"; });
+    assert(embedding != plan.operations.end());
+    assert(embedding->operator_name == "Embedding_Q6_K");
+    const auto q_projection = std::find_if(plan.operations.begin(), plan.operations.end(),
+        [](const ModelPlanOperation& operation) { return operation.id == "layer.0.q_proj"; });
+    assert(q_projection != plan.operations.end());
+    assert((q_projection->output_shape == std::vector<uint64_t>{0,2,6}));
+    const auto v_projection = std::find_if(plan.operations.begin(), plan.operations.end(),
+        [](const ModelPlanOperation& operation) { return operation.id == "layer.0.v_proj"; });
+    assert(v_projection != plan.operations.end());
+    assert((v_projection->output_shape == std::vector<uint64_t>{0,1,6}));
+    const auto attention_output = std::find_if(plan.operations.begin(), plan.operations.end(),
+        [](const ModelPlanOperation& operation) { return operation.id == "layer.0.attention"; });
+    assert(attention_output != plan.operations.end());
+    assert((attention_output->output_shape == std::vector<uint64_t>{0,2,6}));
+}
+
 void test_model_and_quantization_registry_fail_closed() {
     QuantizationRegistry quantizations;
     QuantizationFormat q4;
@@ -3869,6 +3927,7 @@ int main() {
     test_dense_model_plan_selects_k23_matmul_adapter(11,"MatMul_Q3_K");
     test_llama_model_execution_plan_is_structural_only();
     test_qwen2_dense_adapter_builds_bias_aware_structural_plan();
+    test_qwen3_dense_adapter_uses_tensor_derived_head_width_and_q6_embedding();
     test_model_and_quantization_registry_fail_closed();
     test_builtin_architecture_adapter_is_fail_closed();
     test_dawn_add_validation_does_not_promote_fake_backend();
