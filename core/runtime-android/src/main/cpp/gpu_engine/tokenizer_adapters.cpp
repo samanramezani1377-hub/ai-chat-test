@@ -163,7 +163,7 @@ private:
             const uint32_t cp=codepoint(input,input_pos,width);
             if(m.remove_extra_whitespaces&&space(cp)){pending=!norm.empty();input_pos+=width;continue;}
             if (pending) {
-                if (m.escape_whitespaces) norm += "\\xe2\\x96\\x81";
+                if (m.escape_whitespaces) norm += "\xe2\x96\x81";
                 else norm.push_back(' ');
                 pending = false;
             }
