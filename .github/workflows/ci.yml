@@ -64,7 +64,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-android-arm64-ndk27-dawn-alpha06-${{ hashFiles('engine/src/main/cpp/CMakeLists.txt', 'engine/src/main/cpp/cmake/FindDawn.cmake') }}
+          key: ccache-android-arm64-ndk27-dawn-alpha06-${{ hashFiles('engine/src/main/cpp/CMakeLists.txt', 'engine/src/main/cpp/cmake/FindDawn.cmake') }}-${{ github.run_id }}
           restore-keys: |
             ccache-android-arm64-ndk27-dawn-alpha06-
 
@@ -88,6 +88,7 @@ jobs:
           path: engine/.cxx/**/libgpu_engine_android.so.debug
           if-no-files-found: error
           retention-days: 14
+          include-hidden-files: true
 
       - name: Upload test APK
         uses: actions/upload-artifact@v4
