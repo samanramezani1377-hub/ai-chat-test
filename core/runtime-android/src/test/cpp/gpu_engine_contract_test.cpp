@@ -518,12 +518,14 @@ void test_q2_k_q3_k_decoder_layouts(){
 
 void test_q4_k_q5_k_decoder_layouts(){
     std::vector<uint8_t> q4(144,0);q4[0]=0x00;q4[1]=0x3c;
-    std::fill(q4.begin()+4,q4.begin()+8,1); // scale fields = 1; minimum fields remain zero
+    std::fill(q4.begin()+4,q4.begin()+8,1); // first four packed scale fields
+    std::fill(q4.begin()+12,q4.begin()+16,1); // remaining four packed scale fields; minima stay zero
     std::fill(q4.begin()+16,q4.end(),0x11);
     std::vector<float> q4_out(256);assert(decode_q4_k_blocks(q4.data(),q4.size(),q4_out.data(),q4_out.size()).ok());
     for(float value:q4_out)assert(value==1.0f);
     std::vector<uint8_t> q5(176,0);q5[0]=0x00;q5[1]=0x3c;
-    std::fill(q5.begin()+4,q5.begin()+8,1); // scale fields = 1; minimum fields remain zero
+    std::fill(q5.begin()+4,q5.begin()+8,1); // first four packed scale fields
+    std::fill(q5.begin()+12,q5.begin()+16,1); // remaining four packed scale fields; minima stay zero
     std::fill(q5.begin()+16,q5.begin()+48,0xff);
     std::fill(q5.begin()+48,q5.end(),0x11);
     std::vector<float> q5_out(256);assert(decode_q5_k_blocks(q5.data(),q5.size(),q5_out.data(),q5_out.size()).ok());
