@@ -732,7 +732,8 @@ float decode_weight(uint channel,uint k){
     uint nibble=segment<2u?(ql&15u):(ql>>4u);
     uint high=(qh>>(segment*2u))&3u;
     int quantized=int(nibble|(high<<4u))-32;
-    int scale=int(read_u8(offset+scale_index)<<24u)>>24;
+    int scale=int(read_u8(offset+scale_index));
+    if(scale>=128)scale-=256;
     float d=unpackHalf2x16(read_u16(offset+208u)).x;
     return d*float(scale)*float(quantized);
 }
@@ -4426,6 +4427,8 @@ Status decode_q6_k_blocks(const uint8_t*source,size_t source_bytes,float*destina
     if(source_bytes%block_bytes!=0||destination_elements!=(source_bytes/block_bytes)*block_elements)
         return {StatusCode::InvalidArgument,"Q6_K source bytes and destination element count do not match complete blocks"};
     const size_t blocks=source_bytes/block_bytes;
+    if(blocks>std::numeric_limits<size_t>::max()/block_elements)
+        return {StatusCode::Unsupported,"Q6_K destination element count overflows"};
     for(size_t block=0;block<blocks;++block){
         const uint8_t*encoded=source+block*block_bytes;
         const uint8_t*ql=encoded;
@@ -4515,7 +4518,8 @@ Status reference_q6_k_matmul(const float*a,const uint8_t*w,uint64_t bytes,float*
     if((!a||!w||!out)&&rows&&channels&&inner)return {StatusCode::InvalidArgument,"Q6_K MatMul reference received a null pointer"};
     if(!rows||!channels||!inner||inner%256)return {StatusCode::InvalidArgument,"Q6_K MatMul dimensions must be block-aligned"};
     const uint64_t blocks=inner/256;
-    if(channels>UINT64_MAX/(blocks*210)||bytes!=static_cast<uint64_t>(channels)*blocks*210)
+    if(blocks==0||blocks>UINT64_MAX/210||channels>UINT64_MAX/(blocks*210)||
+       bytes!=static_cast<uint64_t>(channels)*blocks*210)
         return {StatusCode::InvalidArgument,"Q6_K MatMul weight bytes mismatch"};
     std::vector<float> decoded(inner);
     for(uint32_t channel=0;channel<channels;++channel){
