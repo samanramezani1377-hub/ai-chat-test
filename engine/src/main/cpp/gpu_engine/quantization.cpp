@@ -3647,6 +3647,22 @@ Status register_builtin_quantized_operator_candidates(OperatorRegistry& registry
     q6_k_gles.validation=KernelValidation::Unverified;q6_k_gles.kernel_id="gles-q6-k-matmul-f32-activation-v1";q6_k_gles.glsl_source=kQ6_KMatMulGlsl;
     status=registry.register_kernel(std::move(q6_k_gles));if(!status.ok())return status;
 
+    for(const bool gles:{false,true}){
+        KernelDefinition embedding;
+        embedding.operator_name="Embedding_Q6_K";
+        embedding.backend=gles?BackendKind::OpenGles:BackendKind::DawnWebGpu;
+        embedding.input_type=DataType::U32;
+        embedding.input_types={DataType::U32,DataType::U32};
+        embedding.output_type=DataType::F32;
+        embedding.min_input_count=2;embedding.max_input_count=2;
+        embedding.min_rank=2;embedding.max_rank=2;
+        embedding.validation=KernelValidation::Unverified;
+        embedding.kernel_id=gles?"gles-q6-k-embedding-f32-v1":"dawn-q6-k-embedding-f32-v1";
+        if(gles)embedding.glsl_source=kQ6_KEmbeddingGlsl;
+        else embedding.wgsl_source=kQ6_KEmbeddingWgsl;
+        status=registry.register_kernel(std::move(embedding));if(!status.ok())return status;
+    }
+
     for (const bool bf16 : {false,true}) {
         const std::string suffix=bf16?"bf16":"f16";
         const std::string matmul=bf16?"MatMul_BF16":"MatMul_F16";
