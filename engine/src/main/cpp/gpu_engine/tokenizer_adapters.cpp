@@ -298,15 +298,20 @@ public:
         if (desc_.pre_tokenizer == "qwen35") {
             // Qwen3.5's published GGUF tokenizer profile. Fail closed if the
             // tokenizer assets or special-token contract differ from this profile.
-            if (m.tokens.size() != 248320 || m.merges.size() != 247587 ||
-                m.token_types.size() != m.tokens.size() ||
-                m.bos_token_id != -1 || m.eos_token_id != 248046 ||
-                m.padding_token_id != 248044 || m.add_bos_token ||
-                m.add_eos_token || m.add_space_prefix || m.byte_fallback) {
-                return {StatusCode::Unsupported,"Qwen3.5 tokenizer metadata does not match the validated GGUF profile"};
+            if (m.token_types.size() != m.tokens.size() ||
+                m.add_bos_token || m.add_eos_token ||
+                m.add_space_prefix || m.byte_fallback) {
+                return {StatusCode::Unsupported,"Qwen3.5 requires a complete token-type table and byte-level BPE without implicit BOS/EOS, prefix-space or byte-fallback behavior"};
             }
         }
         const auto vocabulary=token_map(m);
+        if (desc_.pre_tokenizer == "qwen35") {
+            for (uint32_t byte = 0; byte < 256; ++byte) {
+                const auto symbol = encoder_.find(static_cast<uint8_t>(byte));
+                if (symbol == encoder_.end() || vocabulary.find(symbol->second) == vocabulary.end())
+                    return {StatusCode::Unsupported,"Qwen3.5 byte-level vocabulary is missing one of the 256 base byte symbols"};
+            }
+        }
         std::unordered_set<std::string> unique_merges;
         unique_merges.reserve(m.merges.size());
         for(const auto& merge:m.merges){
