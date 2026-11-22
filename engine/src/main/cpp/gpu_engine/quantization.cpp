@@ -4825,6 +4825,83 @@ Status decode_q6_k_blocks(const uint8_t*source,size_t source_bytes,float*destina
 }
 
 
+Status build_q6_k_embedding_candidate_impl(const std::shared_ptr<Buffer>&weights,uint64_t bytes,
+    uint32_t vocabulary,uint32_t dimension,const std::shared_ptr<Buffer>&token_buffer,
+    const std::vector<uint32_t>&token_ids,const Tensor&output,ComputeDispatch&dispatch,bool gles){
+    dispatch=ComputeDispatch{};
+    if(!weights||!token_buffer||weights->memory_domain()==MemoryDomain::Host||
+       token_buffer->memory_domain()==MemoryDomain::Host||!is_device_contiguous_f32(output)||
+       !output.buffer()||!vocabulary||!dimension||dimension%256||token_ids.empty()||
+       token_ids.size()>UINT32_MAX)
+        return {StatusCode::Unsupported,"Q6_K Embedding requires device packed weights, device token IDs and block-aligned F32 output"};
+    const uint64_t blocks=dimension/256;
+    if(blocks>UINT64_MAX/210||vocabulary>UINT64_MAX/(blocks*210))
+        return {StatusCode::InvalidArgument,"Q6_K Embedding packed weight size overflows"};
+    const uint64_t row_bytes=blocks*210,expected=static_cast<uint64_t>(vocabulary)*row_bytes;
+    if(bytes!=expected||bytes>UINT32_MAX-3ull||weights->size_bytes()<((bytes+3)&~uint64_t{3})||
+       token_buffer->size_bytes()<token_ids.size()*sizeof(uint32_t)||
+       output.descriptor().shape.size()!=2||output.descriptor().shape[0]!=token_ids.size()||
+       output.descriptor().shape[1]!=dimension||output.element_count()>UINT32_MAX||
+       output.byte_size()!=output.element_count()*sizeof(float))
+        return {StatusCode::InvalidArgument,"Q6_K Embedding weight, token or output buffer dimensions are inconsistent"};
+    for(uint32_t id:token_ids)if(id>=vocabulary)
+        return {StatusCode::InvalidArgument,"Q6_K Embedding token ID is outside the vocabulary"};
+    const uint64_t padded=(bytes+3)&~uint64_t{3};
+    dispatch.label=gles?"q6-k-embedding-gles-unverified":"q6-k-embedding-dawn-unverified";
+    dispatch.kernel_id=gles?"gles-q6-k-embedding-f32-v1":"dawn-q6-k-embedding-f32-v1";
+    dispatch.backend=gles?BackendKind::OpenGles:BackendKind::DawnWebGpu;
+    if(gles)dispatch.glsl_source=kQ6_KEmbeddingGlsl;else dispatch.wgsl_source=kQ6_KEmbeddingWgsl;
+    const std::pair<std::string,std::string> constants[]={
+        {"const uint VOCABULARY_SIZE=1u,EMBEDDING_DIMENSION=256u,TOKEN_COUNT=1u,TOTAL_ELEMENTS=256u,WEIGHT_ROW_BYTES=210u;",
+         "const uint VOCABULARY_SIZE="+std::to_string(vocabulary)+"u,EMBEDDING_DIMENSION="+std::to_string(dimension)+"u,TOKEN_COUNT="+std::to_string(token_ids.size())+"u,TOTAL_ELEMENTS="+std::to_string(output.element_count())+"u,WEIGHT_ROW_BYTES="+std::to_string(row_bytes)+"u;"},
+        {"const VOCABULARY_SIZE:u32=1u;","const VOCABULARY_SIZE:u32="+std::to_string(vocabulary)+"u;"},
+        {"const EMBEDDING_DIMENSION:u32=256u;","const EMBEDDING_DIMENSION:u32="+std::to_string(dimension)+"u;"},
+        {"const TOKEN_COUNT:u32=1u;","const TOKEN_COUNT:u32="+std::to_string(token_ids.size())+"u;"},
+        {"const TOTAL_ELEMENTS:u32=256u;","const TOTAL_ELEMENTS:u32="+std::to_string(output.element_count())+"u;"},
+        {"const WEIGHT_ROW_BYTES:u32=210u;","const WEIGHT_ROW_BYTES:u32="+std::to_string(row_bytes)+"u;"}
+    };
+    auto& source=gles?dispatch.glsl_source:dispatch.wgsl_source;
+    for(const auto&item:constants){
+        if(!gles&&item.first.rfind("const uint",0)==0)continue;
+        if(gles&&item.first.rfind("const uint",0)!=0)continue;
+        const size_t pos=source.find(item.first);
+        if(pos==std::string::npos)return {StatusCode::BackendFailure,"Q6_K Embedding shader placeholder missing"};
+        source.replace(pos,item.first.size(),item.second);
+    }
+    dispatch.workgroup_size_x=64;
+    dispatch.workgroups_x=static_cast<uint32_t>((output.element_count()+63)/64);
+    dispatch.bindings={{0,weights,0,padded},{1,token_buffer,0,token_ids.size()*sizeof(uint32_t)},
+                       {2,output.buffer(),output.byte_offset(),output.byte_size()}};
+    return Status::success();
+}
+Status build_q6_k_embedding_candidate(const std::shared_ptr<Buffer>&w,uint64_t b,uint32_t v,uint32_t d,
+    const std::shared_ptr<Buffer>&tb,const std::vector<uint32_t>&ids,const Tensor&o,ComputeDispatch&x){
+    return build_q6_k_embedding_candidate_impl(w,b,v,d,tb,ids,o,x,false);
+}
+Status build_q6_k_embedding_gles_candidate(const std::shared_ptr<Buffer>&w,uint64_t b,uint32_t v,uint32_t d,
+    const std::shared_ptr<Buffer>&tb,const std::vector<uint32_t>&ids,const Tensor&o,ComputeDispatch&x){
+    return build_q6_k_embedding_candidate_impl(w,b,v,d,tb,ids,o,x,true);
+}
+Status reference_q6_k_embedding(const uint8_t*w,uint64_t bytes,uint32_t vocabulary,uint32_t dimension,
+    const std::vector<uint32_t>&ids,float*out){
+    if((!w||!out)&&!ids.empty())return {StatusCode::InvalidArgument,"Q6_K Embedding reference received a null pointer"};
+    if(!vocabulary||!dimension||dimension%256||ids.empty())
+        return {StatusCode::InvalidArgument,"Q6_K Embedding dimensions must be non-empty and block-aligned"};
+    const uint64_t blocks=dimension/256;
+    if(blocks>UINT64_MAX/210||vocabulary>UINT64_MAX/(blocks*210)||
+       bytes!=static_cast<uint64_t>(vocabulary)*blocks*210)
+        return {StatusCode::InvalidArgument,"Q6_K Embedding weight bytes mismatch"};
+    const uint64_t row_bytes=blocks*210;
+    std::vector<float>decoded(dimension);
+    for(size_t row=0;row<ids.size();++row){
+        if(ids[row]>=vocabulary)return {StatusCode::InvalidArgument,"Q6_K Embedding token ID out of range"};
+        Status status=decode_q6_k_blocks(w+static_cast<uint64_t>(ids[row])*row_bytes,row_bytes,decoded.data(),decoded.size());
+        if(!status.ok())return status;
+        std::copy(decoded.begin(),decoded.end(),out+row*dimension);
+    }
+    return Status::success();
+}
+
 namespace {
 Status build_q6_k_matmul_candidate_impl(const Tensor&activations,const std::shared_ptr<Buffer>&weights,
     uint64_t bytes,const Tensor&output,ComputeDispatch&dispatch){
