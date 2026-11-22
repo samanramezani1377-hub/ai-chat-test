@@ -26,6 +26,12 @@ jobs:
       - name: Build and run C++ contract tests
         run: bash scripts/test_gpu_engine_contracts.sh
 
+      - name: Install pinned tokenizer reference runtime
+        run: python3 -m pip install --disable-pip-version-check tokenizers==0.22.1
+
+      - name: Verify Qwen3.5 tokenizer against Hugging Face reference
+        run: bash scripts/test_qwen35_tokenizer_parity.sh
+
   android-apk:
     name: Build Android GPU engine test APK
     runs-on: ubuntu-22.04

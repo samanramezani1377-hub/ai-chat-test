@@ -17,7 +17,7 @@ The goal is a reliable Android GPU inference engine that can grow across GPU ven
 |---|---|---|
 | 1 | Stabilize standalone Android build | CI builds and packages the arm64 test APK reproducibly |
 | 2 | Backend device qualification | Dawn/GLES discovery, limits, self-test and dispatch/readback logs on physical devices |
-| 3 | Tokenizer correctness | Exact BPE and SentencePiece profile parity with reference fixtures; only then mark profiles validated |
+| 3 | Tokenizer correctness | Qwen3.5 BPE profile has pinned Hugging Face encode/decode parity in CI; remaining BPE/SentencePiece profiles still require independent reference fixtures |
 | 4 | GGUF/model architecture coverage | Complete metadata and tensor mapping for each named architecture; unsupported layouts fail closed |
 | 5 | Quantization correctness | Independent block decoder tests plus backend-specific numerical parity for each format |
 | 6 | End-to-end inference | Real GGUF model activation, prefill, decode, KV cache and deterministic output tests on physical GPU |
@@ -30,7 +30,7 @@ The goal is a reliable Android GPU inference engine that can grow across GPU ven
 1. Get the new standalone Android build green and keep its CI artifact downloadable.
 2. Fix any compile/link/runtime issues exposed by the new test app.
 3. Use the test app to capture real-device backend and model activation logs.
-4. Complete tokenizer profile parity; current adapters must remain unverified until then.
+4. Keep the Qwen3.5 profile's pinned reference-parity test green; add independent reference suites before validating any other tokenizer profile.
 5. Expand model/quantization support only with independent reference tests and backend validation.
 
 ## Acceptance rules

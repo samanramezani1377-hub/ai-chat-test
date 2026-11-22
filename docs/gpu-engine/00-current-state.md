@@ -68,13 +68,13 @@ The first captured activation attempt imported a 1.49 GiB Qwen3.8-2B Q6_K GGUF s
 
 The SSMConv1D shader now uses `sample_value` in both embedded WGSL and GLSL sources, and the host contract script guards against reintroducing the reserved identifier. The test app now exposes the existing native generation/cancellation JNI entry points so end-to-end inference can be exercised once a model passes all validation gates.
 
-Model activation now honors the model preflight report and fails closed while architecture, tokenizer, quantization, graph or model-kernel validation remains incomplete. In particular, Qwen3.5 tokenizer metadata is no longer labelled validated before exact reference parity exists.
+Model activation now honors the model preflight report and fails closed while architecture, tokenizer, quantization, graph or model-kernel validation remains incomplete. In particular, the Qwen3.5 BPE adapter is marked validated only because CI compares native encode/decode results with the pinned upstream Hugging Face tokenizer on a multilingual and Unicode edge-case corpus. Vocabulary, merges, token types and special-token IDs are still read from each GGUF file; model-specific token IDs are not hard-coded.
 
 The app's current memory budget is a conservative estimate derived from Android system-memory information, not a measurement of dedicated GPU VRAM. Diagnostics should be interpreted accordingly.
 
 ## Known limitations
 
-1. Built-in tokenizer profiles remain unverified until exact profile parity is demonstrated against authoritative reference implementations and fixtures.
+1. The `gpt2/qwen35` BPE profile is validated by a pinned Hugging Face Qwen3.5 reference-parity suite in CI. Other built-in tokenizer profiles remain unverified until equivalent independent reference coverage exists.
 2. Model architecture and graph coverage is incomplete. Unsupported or unverified combinations must continue to fail closed.
 3. Kernel candidates become usable only after backend-specific numerical validation. Source presence or compilation is not validation.
 4. Android CI proves build/link and host contract behavior; it does not prove physical GPU compatibility or model output correctness.

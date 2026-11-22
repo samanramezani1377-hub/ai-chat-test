@@ -75,9 +75,15 @@ std::string describe_tokenizer_metadata(
         << ";tokenizer_eos_id=" << metadata.eos_token_id
         << ";tokenizer_unk_id=" << metadata.unknown_token_id
         << ";tokenizer_pad_id=" << metadata.padding_token_id
+        << ";tokenizer_bos_token=" << (metadata.bos_token_id >= 0 && static_cast<uint64_t>(metadata.bos_token_id) < metadata.tokens.size() ? diagnostic_value(metadata.tokens[static_cast<size_t>(metadata.bos_token_id)]) : "none")
+        << ";tokenizer_eos_token=" << (metadata.eos_token_id >= 0 && static_cast<uint64_t>(metadata.eos_token_id) < metadata.tokens.size() ? diagnostic_value(metadata.tokens[static_cast<size_t>(metadata.eos_token_id)]) : "none")
+        << ";tokenizer_unk_token=" << (metadata.unknown_token_id >= 0 && static_cast<uint64_t>(metadata.unknown_token_id) < metadata.tokens.size() ? diagnostic_value(metadata.tokens[static_cast<size_t>(metadata.unknown_token_id)]) : "none")
+        << ";tokenizer_pad_token=" << (metadata.padding_token_id >= 0 && static_cast<uint64_t>(metadata.padding_token_id) < metadata.tokens.size() ? diagnostic_value(metadata.tokens[static_cast<size_t>(metadata.padding_token_id)]) : "none")
         << ";tokenizer_add_bos=" << (metadata.add_bos_token ? "true" : "false")
         << ";tokenizer_add_eos=" << (metadata.add_eos_token ? "true" : "false")
         << ";tokenizer_add_space_prefix=" << (metadata.add_space_prefix ? "true" : "false")
+        << ";tokenizer_remove_extra_whitespaces=" << (metadata.remove_extra_whitespaces ? "true" : "false")
+        << ";tokenizer_escape_whitespaces=" << (metadata.escape_whitespaces ? "true" : "false")
         << ";tokenizer_byte_fallback=" << (metadata.byte_fallback ? "true" : "false")
         << ";tokenizer_registered_profiles=";
     const auto adapters = registry.registered_adapters();
