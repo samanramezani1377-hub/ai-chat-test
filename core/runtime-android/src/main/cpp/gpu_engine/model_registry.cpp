@@ -209,6 +209,7 @@ public:
                     else if (found->type.name == "Q5_1") operation.operator_name = "MatMul_Q5_1";
                     else if (found->type.name == "F16") operation.operator_name = "MatMul_F16";
                     else if (found->type.name == "BF16") operation.operator_name = "MatMul_BF16";
+                    else if (found->type.name == "Q6_K") operation.operator_name = "MatMul_Q6_K";
                 }
             }
             if (operation.operator_name == "RMSNorm")
