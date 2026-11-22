@@ -1038,7 +1038,7 @@ void test_tokenizer_engine_contracts() {
     auto unicode_space_adapter=builtins.find(unicode_spaces);
     assert(unicode_space_adapter&&unicode_space_adapter->validate_metadata(unicode_spaces).ok());
     std::vector<uint32_t> unicode_space_ids;
-    assert(unicode_space_adapter->encode(unicode_spaces,"a\xe2\x80\x83b",unicode_space_ids).ok());
+    assert(unicode_space_adapter->encode(unicode_spaces,"a\xe2\x80\x83" "b",unicode_space_ids).ok());
     assert((unicode_space_ids==std::vector<uint32_t>{4,5}));
     GgufTokenizerInfo byte_fallback;
     byte_fallback.model = "llama";
