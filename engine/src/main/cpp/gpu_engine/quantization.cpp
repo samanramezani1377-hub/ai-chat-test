@@ -5054,6 +5054,78 @@ Status validate_q6_k_matmul_kernel_impl(Backend&backend,OperatorRegistry&operato
     format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;format->second.gpu_kernel_state=SupportState::Validated;
     return Status::success();
 }
+Status validate_q6_k_embedding_kernel(Backend&backend,OperatorRegistry&operators,QuantizationRegistry&quantizations){
+    const BackendKind kind=backend.kind();
+    if((kind!=BackendKind::DawnWebGpu&&kind!=BackendKind::OpenGles)||!backend.healthy())
+        return {StatusCode::NotReady,"Q6_K Embedding validation requires a healthy Dawn or GLES backend"};
+    auto format=quantizations.formats_.find(14);
+    if(format==quantizations.formats_.end()||format->second.decoder_state!=SupportState::Validated)
+        return {StatusCode::NotReady,"Q6_K host decoder must be validated before embedding kernel promotion"};
+    const std::string kernel_id=kind==BackendKind::OpenGles?
+        "gles-q6-k-embedding-f32-v1":"dawn-q6-k-embedding-f32-v1";
+    auto kernel=std::find_if(operators.kernels_.begin(),operators.kernels_.end(),[&](const KernelDefinition&k){
+        return k.kernel_id==kernel_id&&k.backend==kind;
+    });
+    if(kernel==operators.kernels_.end())return {StatusCode::NotReady,"Q6_K Embedding candidate is not registered for selected backend"};
+    if(kernel->validation==KernelValidation::Validated){
+        format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;
+        format->second.gpu_kernel_state=SupportState::Validated;
+        return Status::success();
+    }
+    if(kernel->validation!=KernelValidation::Unverified)return {StatusCode::Unsupported,"Q6_K Embedding candidate is rejected"};
+    const bool gles=kind==BackendKind::OpenGles;
+    const std::string&registered=gles?kernel->glsl_source:kernel->wgsl_source;
+    const std::string canonical=gles?std::string(kQ6_KEmbeddingGlsl):std::string(kQ6_KEmbeddingWgsl);
+    if(registered.empty()||registered!=canonical)
+        return {StatusCode::InvalidArgument,"Q6_K Embedding registered shader differs from canonical source"};
+
+    constexpr uint32_t vocabulary=2,dimension=256;
+    constexpr uint64_t row_bytes=210,bytes=vocabulary*row_bytes;
+    const std::vector<uint32_t>token_ids={1,0};
+    std::vector<uint8_t>encoded(static_cast<size_t>(bytes),0);
+    for(uint32_t row=0;row<vocabulary;++row){
+        uint8_t*block=encoded.data()+row*row_bytes;
+        for(uint32_t i=0;i<128;++i){block[i]=static_cast<uint8_t>((i*13u+row*7u)&255u);block[128+i]=static_cast<uint8_t>((i*29u+row*11u)&255u);}
+        for(uint32_t i=0;i<16;++i)block[192+i]=static_cast<uint8_t>(static_cast<int8_t>(static_cast<int>(i%13)-6));
+        block[208]=0x00;block[209]=0x3c; // FP16 block scale = 1.0
+    }
+    std::vector<float>expected(token_ids.size()*dimension),actual(expected.size());
+    Status status=reference_q6_k_embedding(encoded.data(),bytes,vocabulary,dimension,token_ids,expected.data());
+    if(!status.ok())return status;
+    BufferDesc wd{bytes,4,MemoryDomain::Device,true,"q6-k-embedding-validation-weights"};
+    BufferDesc td{token_ids.size()*sizeof(uint32_t),alignof(uint32_t),MemoryDomain::Device,false,"q6-k-embedding-validation-ids"};
+    BufferDesc od{actual.size()*sizeof(float),alignof(float),MemoryDomain::Device,false,"q6-k-embedding-validation-output"};
+    std::shared_ptr<Buffer>wb,tb,ob;
+    status=backend.allocate(wd,wb);if(!status.ok())return status;
+    status=backend.allocate(td,tb);if(!status.ok())return status;
+    status=backend.allocate(od,ob);if(!status.ok())return status;
+    status=backend.upload(wb,0,encoded.data(),bytes);if(!status.ok())return status;
+    status=backend.upload(tb,0,token_ids.data(),td.size_bytes);if(!status.ok())return status;
+    TensorDesc output_desc;output_desc.shape={token_ids.size(),dimension};output_desc.data_type=DataType::F32;
+    Tensor output;status=Tensor::create(output_desc,ob,0,output);if(!status.ok())return status;
+    ComputeDispatch dispatch;
+    status=gles?build_q6_k_embedding_gles_candidate(wb,bytes,vocabulary,dimension,tb,token_ids,output,dispatch)
+               :build_q6_k_embedding_candidate(wb,bytes,vocabulary,dimension,tb,token_ids,output,dispatch);
+    if(!status.ok())return status;
+    if(dispatch.kernel_id!=kernel_id||dispatch.backend!=kind)
+        return {StatusCode::InvalidArgument,"Q6_K Embedding candidate identity mismatch"};
+    dispatch.validation=KernelValidation::Validated;
+    std::unique_ptr<CommandBatch>commands;status=backend.begin_commands(commands);if(!status.ok())return status;
+    if(!commands)return {StatusCode::BackendFailure,"Q6_K Embedding backend returned empty command batch"};
+    status=commands->dispatch_compute(dispatch);if(!status.ok())return status;
+    status=backend.submit(std::move(commands));if(!status.ok())return status;
+    status=backend.synchronize();if(!status.ok())return status;
+    status=backend.readback(ob,0,actual.data(),actual.size()*sizeof(float));if(!status.ok())return status;
+    for(size_t i=0;i<actual.size();++i){
+        const float tolerance=1.0e-4f*std::max(1.0f,std::fabs(expected[i]));
+        if(!std::isfinite(actual[i])||std::fabs(actual[i]-expected[i])>tolerance)
+            return {StatusCode::NumericalFailure,"Q6_K Embedding GPU output differs from independent block decoder"};
+    }
+    kernel->validation=KernelValidation::Validated;
+    format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;
+    format->second.gpu_kernel_state=SupportState::Validated;
+    return Status::success();
+}
 Status validate_q6_k_matmul_kernel(Backend&b,OperatorRegistry&o,QuantizationRegistry&q){return validate_q6_k_matmul_kernel_impl(b,o,q);}
 
 
