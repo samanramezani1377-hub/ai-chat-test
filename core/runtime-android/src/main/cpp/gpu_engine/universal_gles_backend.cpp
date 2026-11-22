@@ -228,7 +228,8 @@ Status self_test_gles_backend(const ai_chat::gpu::UniversalGpuCapabilities& caps
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
     if (unmapped != GL_TRUE || std::memcmp(output, expected, sizeof(expected)) != 0)
         return {StatusCode::NumericalFailure, "GLES backend self-test output mismatch"};
-    return gl_error("GLES backend self-test", glGetError());
+    const GLenum final_error = glGetError();
+    return final_error == GL_NO_ERROR ? Status::success() : gl_error("GLES backend self-test", final_error);
 }
 
 class UniversalGlesBackend final : public Backend {
