@@ -746,6 +746,134 @@ void main(){
 }
 )glsl";
 
+
+constexpr char kQ4_KMatMulWgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage,read> activations:array<f32>;
+@group(0) @binding(1) var<storage,read> weights:array<u32>;
+@group(0) @binding(2) var<storage,read_write> output:array<f32>;
+const ROWS:u32=1u;
+const OUTPUT_CHANNELS:u32=1u;
+const INNER:u32=256u;
+const WEIGHT_ROW_BYTES:u32=144u;
+fn read_u8(byte_offset:u32)->u32{let word=weights[byte_offset>>2u];return(word>>((byte_offset&3u)*8u))&255u;}
+fn read_u16(byte_offset:u32)->u32{let word=weights[byte_offset>>2u];return(word>>((byte_offset&3u)*8u))&65535u;}
+fn decode_weight(channel:u32,k:u32)->f32{
+ let block=k/256u;let within=k%256u;let group=within/64u;let local=within%64u;
+ let segment=local/32u;let lane=local%32u;let index=group*2u+segment;
+ let offset=channel*WEIGHT_ROW_BYTES+block*144u;
+ let scales_offset=offset+4u;
+ var scale:u32=0u;var minimum:u32=0u;
+ if(index<4u){scale=read_u8(scales_offset+index)&63u;minimum=read_u8(scales_offset+index+4u)&63u;}
+ else{scale=(read_u8(scales_offset+index+4u)&15u)|((read_u8(scales_offset+index-4u)>>6u)<<4u);
+      minimum=(read_u8(scales_offset+index+4u)>>4u)|((read_u8(scales_offset+index)>>6u)<<4u);}
+ let ql=read_u8(offset+16u+group*32u+lane);
+ let nibble=select(ql&15u,ql>>4u,segment==1u);
+ let high=0u;
+ let quantized=i32(nibble);
+ let d=unpack2x16float(vec2<u32>(read_u16(offset),0u)).x;
+ let dmin=unpack2x16float(vec2<u32>(read_u16(offset+2u),0u)).x;
+ return d*f32(scale)*f32(quantized)-dmin*f32(minimum);
+}
+@compute @workgroup_size(8,8)
+fn main(@builtin(global_invocation_id)gid:vec3<u32>){
+ let row=gid.y;let channel=gid.x;if(row>=ROWS||channel>=OUTPUT_CHANNELS){return;}
+ var sum=0.0;for(var k=0u;k<INNER;k=k+1u){sum+=activations[row*INNER+k]*decode_weight(channel,k);}
+ output[row*OUTPUT_CHANNELS+channel]=sum;
+}
+)wgsl";
+
+constexpr char kQ4_KMatMulGlsl[] = R"glsl(#version 310 es
+precision highp float;precision highp int;
+layout(local_size_x=8,local_size_y=8)in;
+layout(std430,binding=0)readonly buffer Activations{float activations[];};
+layout(std430,binding=1)readonly buffer Weights{uint weights[];};
+layout(std430,binding=2)writeonly buffer Output{float output_values[];};
+const uint ROWS=1u;const uint OUTPUT_CHANNELS=1u;const uint INNER=256u;const uint WEIGHT_ROW_BYTES=144u;
+uint read_u8(uint o){uint w=weights[o>>2u];return(w>>((o&3u)*8u))&255u;}
+uint read_u16(uint o){uint w=weights[o>>2u];return(w>>((o&3u)*8u))&65535u;}
+float decode_weight(uint channel,uint k){
+ uint block=k/256u,within=k%256u,group=within/64u,local=within%64u,segment=local/32u,lane=local%32u,index=group*2u+segment;
+ uint offset=channel*WEIGHT_ROW_BYTES+block*144u,scales_offset=offset+4u;
+ uint scale=0u,minimum=0u;
+ if(index<4u){scale=read_u8(scales_offset+index)&63u;minimum=read_u8(scales_offset+index+4u)&63u;}
+ else{scale=(read_u8(scales_offset+index+4u)&15u)|((read_u8(scales_offset+index-4u)>>6u)<<4u);
+      minimum=(read_u8(scales_offset+index+4u)>>4u)|((read_u8(scales_offset+index)>>6u)<<4u);}
+ uint ql=read_u8(offset+16u+group*32u+lane);
+ uint nibble=segment==0u?(ql&15u):(ql>>4u);
+ uint high=0u;
+ int quantized=int(nibble);
+ float d=unpackHalf2x16(read_u16(offset)).x,dmin=unpackHalf2x16(read_u16(offset+2u)).x;
+ return d*float(scale)*float(quantized)-dmin*float(minimum);
+}
+void main(){uint row=gl_GlobalInvocationID.y,channel=gl_GlobalInvocationID.x;if(row>=ROWS||channel>=OUTPUT_CHANNELS)return;
+ float sum=0.0;for(uint k=0u;k<INNER;++k)sum+=activations[row*INNER+k]*decode_weight(channel,k);
+ output_values[row*OUTPUT_CHANNELS+channel]=sum;}
+)glsl";
+
+
+constexpr char kQ5_KMatMulWgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage,read> activations:array<f32>;
+@group(0) @binding(1) var<storage,read> weights:array<u32>;
+@group(0) @binding(2) var<storage,read_write> output:array<f32>;
+const ROWS:u32=1u;
+const OUTPUT_CHANNELS:u32=1u;
+const INNER:u32=256u;
+const WEIGHT_ROW_BYTES:u32=176u;
+fn read_u8(byte_offset:u32)->u32{let word=weights[byte_offset>>2u];return(word>>((byte_offset&3u)*8u))&255u;}
+fn read_u16(byte_offset:u32)->u32{let word=weights[byte_offset>>2u];return(word>>((byte_offset&3u)*8u))&65535u;}
+fn decode_weight(channel:u32,k:u32)->f32{
+ let block=k/256u;let within=k%256u;let group=within/64u;let local=within%64u;
+ let segment=local/32u;let lane=local%32u;let index=group*2u+segment;
+ let offset=channel*WEIGHT_ROW_BYTES+block*176u;
+ let scales_offset=offset+4u;
+ var scale:u32=0u;var minimum:u32=0u;
+ if(index<4u){scale=read_u8(scales_offset+index)&63u;minimum=read_u8(scales_offset+index+4u)&63u;}
+ else{scale=(read_u8(scales_offset+index+4u)&15u)|((read_u8(scales_offset+index-4u)>>6u)<<4u);
+      minimum=(read_u8(scales_offset+index+4u)>>4u)|((read_u8(scales_offset+index)>>6u)<<4u);}
+ let ql=read_u8(offset+48u+group*32u+lane);
+ let nibble=select(ql&15u,ql>>4u,segment==1u);
+ let high=(read_u8(offset+16u+lane)>>(group*2u+segment))&1u;
+ let quantized=i32(nibble|(high<<4u));
+ let d=unpack2x16float(vec2<u32>(read_u16(offset),0u)).x;
+ let dmin=unpack2x16float(vec2<u32>(read_u16(offset+2u),0u)).x;
+ return d*f32(scale)*f32(quantized)-dmin*f32(minimum);
+}
+@compute @workgroup_size(8,8)
+fn main(@builtin(global_invocation_id)gid:vec3<u32>){
+ let row=gid.y;let channel=gid.x;if(row>=ROWS||channel>=OUTPUT_CHANNELS){return;}
+ var sum=0.0;for(var k=0u;k<INNER;k=k+1u){sum+=activations[row*INNER+k]*decode_weight(channel,k);}
+ output[row*OUTPUT_CHANNELS+channel]=sum;
+}
+)wgsl";
+
+constexpr char kQ5_KMatMulGlsl[] = R"glsl(#version 310 es
+precision highp float;precision highp int;
+layout(local_size_x=8,local_size_y=8)in;
+layout(std430,binding=0)readonly buffer Activations{float activations[];};
+layout(std430,binding=1)readonly buffer Weights{uint weights[];};
+layout(std430,binding=2)writeonly buffer Output{float output_values[];};
+const uint ROWS=1u;const uint OUTPUT_CHANNELS=1u;const uint INNER=256u;const uint WEIGHT_ROW_BYTES=176u;
+uint read_u8(uint o){uint w=weights[o>>2u];return(w>>((o&3u)*8u))&255u;}
+uint read_u16(uint o){uint w=weights[o>>2u];return(w>>((o&3u)*8u))&65535u;}
+float decode_weight(uint channel,uint k){
+ uint block=k/256u,within=k%256u,group=within/64u,local=within%64u,segment=local/32u,lane=local%32u,index=group*2u+segment;
+ uint offset=channel*WEIGHT_ROW_BYTES+block*176u,scales_offset=offset+4u;
+ uint scale=0u,minimum=0u;
+ if(index<4u){scale=read_u8(scales_offset+index)&63u;minimum=read_u8(scales_offset+index+4u)&63u;}
+ else{scale=(read_u8(scales_offset+index+4u)&15u)|((read_u8(scales_offset+index-4u)>>6u)<<4u);
+      minimum=(read_u8(scales_offset+index+4u)>>4u)|((read_u8(scales_offset+index)>>6u)<<4u);}
+ uint ql=read_u8(offset+48u+group*32u+lane);
+ uint nibble=segment==0u?(ql&15u):(ql>>4u);
+ uint high=(read_u8(offset+16u+lane)>>(group*2u+segment))&1u;
+ int quantized=int(nibble|(high<<4u));
+ float d=unpackHalf2x16(read_u16(offset)).x,dmin=unpackHalf2x16(read_u16(offset+2u)).x;
+ return d*float(scale)*float(quantized)-dmin*float(minimum);
+}
+void main(){uint row=gl_GlobalInvocationID.y,channel=gl_GlobalInvocationID.x;if(row>=ROWS||channel>=OUTPUT_CHANNELS)return;
+ float sum=0.0;for(uint k=0u;k<INNER;++k)sum+=activations[row*INNER+k]*decode_weight(channel,k);
+ output_values[row*OUTPUT_CHANNELS+channel]=sum;}
+)glsl";
+
 constexpr char kQ8_0MatMulWgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> activations: array<f32>;
 @group(0) @binding(1) var<storage, read> weights: array<u32>;
@@ -4669,6 +4797,76 @@ Status decode_q5_k_blocks(const uint8_t*source,size_t source_bytes,float*destina
         }
     }
     return Status::success();
+}
+
+
+namespace {
+Status build_k4_matmul_candidate_impl(const Tensor&a,const std::shared_ptr<Buffer>&w,uint64_t bytes,const Tensor&o,ComputeDispatch&d,bool q5){
+ d=ComputeDispatch{};const uint64_t block_bytes=q5?176:144;const std::string type=q5?"Q5_K":"Q4_K",suffix=q5?"q5-k":"q4-k";
+ if(!w||w->memory_domain()==MemoryDomain::Host||!is_device_contiguous_f32(a)||!is_device_contiguous_f32(o)||
+    !a.buffer()||!o.buffer()||a.descriptor().shape.size()!=2||(o.descriptor().shape.size()!=2&&o.descriptor().shape.size()!=3))
+    return {StatusCode::Unsupported,type+" MatMul requires F32 activations and packed K-quantized weights"};
+ const auto&as=a.descriptor().shape;const auto&os=o.descriptor().shape;
+ const uint64_t channels=os.size()==2?os[1]:(os[2]&&os[1]<=UINT64_MAX/os[2]?os[1]*os[2]:0);
+ if(!as[0]||!as[1]||as[1]%256||os[0]!=as[0]||!channels||as[0]>UINT32_MAX||as[1]>UINT32_MAX||
+    channels>UINT32_MAX||a.element_count()>UINT32_MAX||o.element_count()>UINT32_MAX)
+    return {StatusCode::InvalidArgument,type+" MatMul dimensions are invalid or K is not block-aligned"};
+ const uint64_t blocks=as[1]/256;if(blocks>UINT64_MAX/block_bytes||channels>UINT64_MAX/(blocks*block_bytes))
+    return {StatusCode::InvalidArgument,type+" weight byte size overflows"};
+ const uint64_t expected=channels*blocks*block_bytes;if(bytes!=expected||bytes>UINT32_MAX-3ull)
+    return {StatusCode::InvalidArgument,type+" weight bytes do not match [N,K]"};
+ const uint64_t padded=(bytes+3)&~uint64_t{3};
+ if(w->size_bytes()<padded||o.byte_size()!=o.element_count()*sizeof(float)||o.buffer().get()==a.buffer().get()||o.buffer().get()==w.get())
+    return {StatusCode::InvalidArgument,type+" MatMul buffer ranges are inconsistent"};
+ d.label=suffix+"-matmul-f32-activation-generic-unverified";d.kernel_id="dawn-"+suffix+"-matmul-f32-activation-v1";
+ d.backend=BackendKind::DawnWebGpu;d.wgsl_source=q5?kQ5_KMatMulWgsl:kQ4_KMatMulWgsl;d.workgroup_size_x=d.workgroup_size_y=8;
+ const std::pair<std::string,std::string> constants[]={
+  {"const ROWS:u32=1u;","const ROWS:u32="+std::to_string(as[0])+"u;"},
+  {"const OUTPUT_CHANNELS:u32=1u;","const OUTPUT_CHANNELS:u32="+std::to_string(channels)+"u;"},
+  {"const INNER:u32=256u;","const INNER:u32="+std::to_string(as[1])+"u;"},
+  {q5?"const WEIGHT_ROW_BYTES:u32=176u;":"const WEIGHT_ROW_BYTES:u32=144u;","const WEIGHT_ROW_BYTES:u32="+std::to_string(blocks*block_bytes)+"u;"}
+ };
+ for(const auto&x:constants){const size_t pos=d.wgsl_source.find(x.first);if(pos==std::string::npos)return {StatusCode::BackendFailure,type+" WGSL placeholder missing"};d.wgsl_source.replace(pos,x.first.size(),x.second);}
+ d.workgroups_x=static_cast<uint32_t>((channels+7)/8);d.workgroups_y=static_cast<uint32_t>((as[0]+7)/8);
+ d.bindings={{0,a.buffer(),a.byte_offset(),a.byte_size()},{1,w,0,padded},{2,o.buffer(),o.byte_offset(),o.byte_size()}};
+ return Status::success();
+}
+}
+Status build_q4_k_matmul_candidate(const Tensor&a,const std::shared_ptr<Buffer>&w,uint64_t b,const Tensor&o,ComputeDispatch&d){return build_k4_matmul_candidate_impl(a,w,b,o,d,false);}
+Status build_q5_k_matmul_candidate(const Tensor&a,const std::shared_ptr<Buffer>&w,uint64_t b,const Tensor&o,ComputeDispatch&d){return build_k4_matmul_candidate_impl(a,w,b,o,d,true);}
+static Status build_k4_matmul_gles_candidate_impl(const Tensor&a,const std::shared_ptr<Buffer>&w,uint64_t b,const Tensor&o,ComputeDispatch&d,bool q5){
+ Status status=build_k4_matmul_candidate_impl(a,w,b,o,d,q5);if(!status.ok())return status;
+ const uint64_t channels=o.element_count()/a.descriptor().shape[0],blocks=a.descriptor().shape[1]/256,bb=q5?176:144;
+ const std::string suffix=q5?"q5-k":"q4-k";d.label=suffix+"-matmul-f32-activation-gles-generic-unverified";
+ d.kernel_id="gles-"+suffix+"-matmul-f32-activation-v1";d.backend=BackendKind::OpenGles;d.wgsl_source.clear();d.glsl_source=q5?kQ5_KMatMulGlsl:kQ4_KMatMulGlsl;
+ const std::pair<std::string,std::string> constants[]={
+  {"const uint ROWS=1u;","const uint ROWS="+std::to_string(a.descriptor().shape[0])+"u;"},
+  {"const uint OUTPUT_CHANNELS=1u;","const uint OUTPUT_CHANNELS="+std::to_string(channels)+"u;"},
+  {"const uint INNER=256u;","const uint INNER="+std::to_string(a.descriptor().shape[1])+"u;"},
+  {q5?"const uint WEIGHT_ROW_BYTES=176u;":"const uint WEIGHT_ROW_BYTES=144u;","const uint WEIGHT_ROW_BYTES="+std::to_string(blocks*bb)+"u;"}
+ };
+ for(const auto&x:constants){const size_t pos=d.glsl_source.find(x.first);if(pos==std::string::npos)return {StatusCode::BackendFailure,"K4 GLES GLSL placeholder missing"};d.glsl_source.replace(pos,x.first.size(),x.second);}
+ return Status::success();
+}
+Status build_q4_k_matmul_gles_candidate(const Tensor&a,const std::shared_ptr<Buffer>&w,uint64_t b,const Tensor&o,ComputeDispatch&d){return build_k4_matmul_gles_candidate_impl(a,w,b,o,d,false);}
+Status build_q5_k_matmul_gles_candidate(const Tensor&a,const std::shared_ptr<Buffer>&w,uint64_t b,const Tensor&o,ComputeDispatch&d){return build_k4_matmul_gles_candidate_impl(a,w,b,o,d,true);}
+Status reference_q4_k_matmul(const float*a,const uint8_t*w,uint64_t bytes,float*out,uint32_t rows,uint32_t channels,uint32_t inner){
+ if((!a||!w||!out)&&rows&&channels&&inner)return {StatusCode::InvalidArgument,"Q4_K MatMul reference received null pointer"};
+ if(!rows||!channels||!inner||inner%256)return {StatusCode::InvalidArgument,"Q4_K MatMul dimensions must be block-aligned"};
+ const uint64_t blocks=inner/256;if(blocks>UINT64_MAX/144||channels>UINT64_MAX/(blocks*144)||bytes!=static_cast<uint64_t>(channels)*blocks*144)return {StatusCode::InvalidArgument,"Q4_K MatMul weight bytes mismatch"};
+ std::vector<float>decoded(inner);
+ for(uint32_t ch=0;ch<channels;++ch){Status st=decode_q4_k_blocks(w+static_cast<uint64_t>(ch)*blocks*144,blocks*144,decoded.data(),inner);if(!st.ok())return st;
+  for(uint32_t row=0;row<rows;++row){float sum=0;for(uint32_t k=0;k<inner;++k)sum+=a[static_cast<uint64_t>(row)*inner+k]*decoded[k];out[static_cast<uint64_t>(row)*channels+ch]=sum;}}
+ return Status::success();
+}
+Status reference_q5_k_matmul(const float*a,const uint8_t*w,uint64_t bytes,float*out,uint32_t rows,uint32_t channels,uint32_t inner){
+ if((!a||!w||!out)&&rows&&channels&&inner)return {StatusCode::InvalidArgument,"Q5_K MatMul reference received null pointer"};
+ if(!rows||!channels||!inner||inner%256)return {StatusCode::InvalidArgument,"Q5_K MatMul dimensions must be block-aligned"};
+ const uint64_t blocks=inner/256;if(blocks>UINT64_MAX/176||channels>UINT64_MAX/(blocks*176)||bytes!=static_cast<uint64_t>(channels)*blocks*176)return {StatusCode::InvalidArgument,"Q5_K MatMul weight bytes mismatch"};
+ std::vector<float>decoded(inner);
+ for(uint32_t ch=0;ch<channels;++ch){Status st=decode_q5_k_blocks(w+static_cast<uint64_t>(ch)*blocks*176,blocks*176,decoded.data(),inner);if(!st.ok())return st;
+  for(uint32_t row=0;row<rows;++row){float sum=0;for(uint32_t k=0;k<inner;++k)sum+=a[static_cast<uint64_t>(row)*inner+k]*decoded[k];out[static_cast<uint64_t>(row)*channels+ch]=sum;}}
+ return Status::success();
 }
 
 } // namespace ai_chat::gpu_engine
