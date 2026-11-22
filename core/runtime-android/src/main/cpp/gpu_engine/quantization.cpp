@@ -442,6 +442,225 @@ void main() {
 }
 )glsl";
 
+
+constexpr char kF16MatMulWgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> activations: array<f32>;
+@group(0) @binding(1) var<storage, read> weights: array<u32>;
+@group(0) @binding(2) var<storage, read_write> output: array<f32>;
+const ROWS: u32 = 1u;
+const OUTPUT_CHANNELS: u32 = 1u;
+const INNER: u32 = 1u;
+const WEIGHT_ROW_BYTES: u32 = 2u;
+fn read_u16(byte_offset: u32) -> u32 {
+    let word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let row = gid.y;
+    let channel = gid.x;
+    if (row >= ROWS || channel >= OUTPUT_CHANNELS) { return; }
+    var sum = 0.0;
+    for (var k = 0u; k < INNER; k = k + 1u) {
+        let offset = channel * WEIGHT_ROW_BYTES + k * 2u;
+        let weight = unpack2x16float(vec2<u32>(read_u16(offset), 0u)).x;
+        sum = sum + activations[row * INNER + k] * weight;
+    }
+    output[row * OUTPUT_CHANNELS + channel] = sum;
+}
+)wgsl";
+
+constexpr char kF16MatMulGlsl[] = R"glsl(#version 310 es
+precision highp float;
+precision highp int;
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(std430, binding = 0) readonly buffer Activations { float activations[]; };
+layout(std430, binding = 1) readonly buffer Weights { uint weights[]; };
+layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
+const uint ROWS = 1u;
+const uint OUTPUT_CHANNELS = 1u;
+const uint INNER = 1u;
+const uint WEIGHT_ROW_BYTES = 2u;
+uint read_u16(uint byte_offset) {
+    uint word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint channel = gl_GlobalInvocationID.x;
+    if (row >= ROWS || channel >= OUTPUT_CHANNELS) return;
+    float sum = 0.0;
+    for (uint k = 0u; k < INNER; ++k) {
+        uint offset = channel * WEIGHT_ROW_BYTES + k * 2u;
+        float weight = unpackHalf2x16(read_u16(offset)).x;
+        sum += activations[row * INNER + k] * weight;
+    }
+    output_values[row * OUTPUT_CHANNELS + channel] = sum;
+}
+)glsl";
+
+constexpr char kBF16MatMulWgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> activations: array<f32>;
+@group(0) @binding(1) var<storage, read> weights: array<u32>;
+@group(0) @binding(2) var<storage, read_write> output: array<f32>;
+const ROWS: u32 = 1u;
+const OUTPUT_CHANNELS: u32 = 1u;
+const INNER: u32 = 1u;
+const WEIGHT_ROW_BYTES: u32 = 2u;
+fn read_u16(byte_offset: u32) -> u32 {
+    let word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let row = gid.y;
+    let channel = gid.x;
+    if (row >= ROWS || channel >= OUTPUT_CHANNELS) { return; }
+    var sum = 0.0;
+    for (var k = 0u; k < INNER; k = k + 1u) {
+        let offset = channel * WEIGHT_ROW_BYTES + k * 2u;
+        let weight = bitcast<f32>(read_u16(offset) << 16u);
+        sum = sum + activations[row * INNER + k] * weight;
+    }
+    output[row * OUTPUT_CHANNELS + channel] = sum;
+}
+)wgsl";
+
+constexpr char kBF16MatMulGlsl[] = R"glsl(#version 310 es
+precision highp float;
+precision highp int;
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(std430, binding = 0) readonly buffer Activations { float activations[]; };
+layout(std430, binding = 1) readonly buffer Weights { uint weights[]; };
+layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
+const uint ROWS = 1u;
+const uint OUTPUT_CHANNELS = 1u;
+const uint INNER = 1u;
+const uint WEIGHT_ROW_BYTES = 2u;
+uint read_u16(uint byte_offset) {
+    uint word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint channel = gl_GlobalInvocationID.x;
+    if (row >= ROWS || channel >= OUTPUT_CHANNELS) return;
+    float sum = 0.0;
+    for (uint k = 0u; k < INNER; ++k) {
+        uint offset = channel * WEIGHT_ROW_BYTES + k * 2u;
+        float weight = uintBitsToFloat(read_u16(offset) << 16u);
+        sum += activations[row * INNER + k] * weight;
+    }
+    output_values[row * OUTPUT_CHANNELS + channel] = sum;
+}
+)glsl";
+
+constexpr char kF16EmbeddingWgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> weights: array<u32>;
+@group(0) @binding(1) var<storage, read> token_ids: array<u32>;
+@group(0) @binding(2) var<storage, read_write> output: array<f32>;
+const VOCABULARY_SIZE: u32 = 1u;
+const EMBEDDING_DIMENSION: u32 = 1u;
+const TOKEN_COUNT: u32 = 1u;
+const TOTAL_ELEMENTS: u32 = 1u;
+const WEIGHT_ROW_BYTES: u32 = 2u;
+fn read_u16(byte_offset: u32) -> u32 {
+    let word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= TOTAL_ELEMENTS) { return; }
+    let token_row = gid.x / EMBEDDING_DIMENSION;
+    let dimension = gid.x % EMBEDDING_DIMENSION;
+    let token_id = token_ids[token_row];
+    if (token_id >= VOCABULARY_SIZE) { return; }
+    let offset = token_id * WEIGHT_ROW_BYTES + dimension * 2u;
+    output[gid.x] = unpack2x16float(vec2<u32>(read_u16(offset), 0u)).x;
+}
+)wgsl";
+
+constexpr char kF16EmbeddingGlsl[] = R"glsl(#version 310 es
+precision highp float;
+precision highp int;
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Weights { uint weights[]; };
+layout(std430, binding = 1) readonly buffer TokenIds { uint token_ids[]; };
+layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
+const uint VOCABULARY_SIZE = 1u;
+const uint EMBEDDING_DIMENSION = 1u;
+const uint TOKEN_COUNT = 1u;
+const uint TOTAL_ELEMENTS = 1u;
+const uint WEIGHT_ROW_BYTES = 2u;
+uint read_u16(uint byte_offset) {
+    uint word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= TOTAL_ELEMENTS) return;
+    uint token_row = index / EMBEDDING_DIMENSION;
+    uint dimension = index % EMBEDDING_DIMENSION;
+    uint token_id = token_ids[token_row];
+    if (token_id >= VOCABULARY_SIZE) return;
+    uint offset = token_id * WEIGHT_ROW_BYTES + dimension * 2u;
+    output_values[index] = unpackHalf2x16(read_u16(offset)).x;
+}
+)glsl";
+
+constexpr char kBF16EmbeddingWgsl[] = R"wgsl(
+@group(0) @binding(0) var<storage, read> weights: array<u32>;
+@group(0) @binding(1) var<storage, read> token_ids: array<u32>;
+@group(0) @binding(2) var<storage, read_write> output: array<f32>;
+const VOCABULARY_SIZE: u32 = 1u;
+const EMBEDDING_DIMENSION: u32 = 1u;
+const TOKEN_COUNT: u32 = 1u;
+const TOTAL_ELEMENTS: u32 = 1u;
+const WEIGHT_ROW_BYTES: u32 = 2u;
+fn read_u16(byte_offset: u32) -> u32 {
+    let word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= TOTAL_ELEMENTS) { return; }
+    let token_row = gid.x / EMBEDDING_DIMENSION;
+    let dimension = gid.x % EMBEDDING_DIMENSION;
+    let token_id = token_ids[token_row];
+    if (token_id >= VOCABULARY_SIZE) { return; }
+    let offset = token_id * WEIGHT_ROW_BYTES + dimension * 2u;
+    output[gid.x] = bitcast<f32>(read_u16(offset) << 16u);
+}
+)wgsl";
+
+constexpr char kBF16EmbeddingGlsl[] = R"glsl(#version 310 es
+precision highp float;
+precision highp int;
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer Weights { uint weights[]; };
+layout(std430, binding = 1) readonly buffer TokenIds { uint token_ids[]; };
+layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
+const uint VOCABULARY_SIZE = 1u;
+const uint EMBEDDING_DIMENSION = 1u;
+const uint TOKEN_COUNT = 1u;
+const uint TOTAL_ELEMENTS = 1u;
+const uint WEIGHT_ROW_BYTES = 2u;
+uint read_u16(uint byte_offset) {
+    uint word = weights[byte_offset >> 2u];
+    return (word >> ((byte_offset & 3u) * 8u)) & 65535u;
+}
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= TOTAL_ELEMENTS) return;
+    uint token_row = index / EMBEDDING_DIMENSION;
+    uint dimension = index % EMBEDDING_DIMENSION;
+    uint token_id = token_ids[token_row];
+    if (token_id >= VOCABULARY_SIZE) return;
+    uint offset = token_id * WEIGHT_ROW_BYTES + dimension * 2u;
+    output_values[index] = uintBitsToFloat(read_u16(offset) << 16u);
+}
+)glsl";
+
 constexpr char kQ8_0MatMulWgsl[] = R"wgsl(
 @group(0) @binding(0) var<storage, read> activations: array<f32>;
 @group(0) @binding(1) var<storage, read> weights: array<u32>;
@@ -3732,4 +3951,118 @@ Status validate_q5_0_embedding_kernel(Backend& b,OperatorRegistry& o,Quantizatio
 Status validate_q5_1_embedding_kernel(Backend& b,OperatorRegistry& o,QuantizationRegistry& q){return validate_q5_embedding_kernel_impl(b,o,q,true);}
 
 
+
+namespace {
+float decode_f16_value(uint16_t value) {
+    const uint32_t sign = static_cast<uint32_t>(value & 0x8000u) << 16u;
+    uint32_t exponent = (value >> 10u) & 0x1fu;
+    uint32_t mantissa = value & 0x03ffu;
+    uint32_t bits = 0;
+    if (exponent == 0) {
+        if (mantissa == 0) bits = sign;
+        else {
+            int shift = 0;
+            while ((mantissa & 0x0400u) == 0) { mantissa <<= 1u; ++shift; }
+            mantissa &= 0x03ffu;
+            const uint32_t exp32 = static_cast<uint32_t>(127 - 15 - shift);
+            bits = sign | (exp32 << 23u) | (mantissa << 13u);
+        }
+    } else if (exponent == 0x1fu) {
+        bits = sign | 0x7f800000u | (mantissa << 13u);
+    } else {
+        bits = sign | ((exponent + (127u - 15u)) << 23u) | (mantissa << 13u);
+    }
+    float result = 0.0f;
+    std::memcpy(&result, &bits, sizeof(result));
+    return result;
+}
+float decode_bf16_value(uint16_t value) {
+    const uint32_t bits = static_cast<uint32_t>(value) << 16u;
+    float result = 0.0f;
+    std::memcpy(&result, &bits, sizeof(result));
+    return result;
+}
+Status decode_fp16_storage(const uint8_t* source,uint64_t bytes,float* output,uint64_t elements,bool bf16){
+    if((!source||!output)&&elements)return {StatusCode::InvalidArgument,"16-bit weight decoder received a null pointer"};
+    if(elements>UINT64_MAX/2||bytes!=elements*2)return {StatusCode::InvalidArgument,"16-bit weight storage size does not match element count"};
+    for(uint64_t i=0;i<elements;++i){
+        const uint16_t value=static_cast<uint16_t>(source[i*2])|static_cast<uint16_t>(source[i*2+1]<<8u);
+        output[i]=bf16?decode_bf16_value(value):decode_f16_value(value);
+        if(!std::isfinite(output[i]))return {StatusCode::NumericalFailure,"16-bit weight decoder produced a non-finite value"};
+    }
+    return Status::success();
+}
+Status build_fp16_matmul_candidate_impl(const Tensor& activations,const std::shared_ptr<Buffer>& weights,
+    uint64_t bytes,const Tensor& output,ComputeDispatch& dispatch,bool bf16){
+    dispatch=ComputeDispatch{};
+    const std::string type=bf16?"BF16":"F16",suffix=bf16?"bf16":"f16";
+    if(!weights||weights->memory_domain()==MemoryDomain::Host||!is_device_contiguous_f32(activations)||
+       !is_device_contiguous_f32(output)||!activations.buffer()||!output.buffer()||
+       activations.descriptor().shape.size()!=2||
+       (output.descriptor().shape.size()!=2&&output.descriptor().shape.size()!=3))
+        return {StatusCode::Unsupported,type+" MatMul requires F32 activations and packed 16-bit weights"};
+    const auto&a=activations.descriptor().shape;const auto&o=output.descriptor().shape;
+    const uint64_t channels=o.size()==2?o[1]:(o[2]&&o[1]<=UINT64_MAX/o[2]?o[1]*o[2]:0);
+    if(!a[0]||!a[1]||o[0]!=a[0]||!channels||a[0]>UINT32_MAX||a[1]>UINT32_MAX||
+       channels>UINT32_MAX||activations.element_count()>UINT32_MAX||output.element_count()>UINT32_MAX)
+        return {StatusCode::InvalidArgument,type+" MatMul dimensions are invalid"};
+    if(a[1]>UINT64_MAX/2||channels>UINT64_MAX/(a[1]*2))
+        return {StatusCode::InvalidArgument,type+" weight byte size overflows"};
+    const uint64_t expected=channels*a[1]*2;
+    if(bytes!=expected||bytes>UINT32_MAX-3ull)return {StatusCode::InvalidArgument,type+" weight bytes do not match [N,K]"};
+    const uint64_t padded=(bytes+3)&~uint64_t{3};
+    if(weights->size_bytes()<padded||output.byte_size()!=output.element_count()*sizeof(float)||
+       output.buffer().get()==activations.buffer().get()||output.buffer().get()==weights.get())
+        return {StatusCode::InvalidArgument,type+" MatMul buffer ranges are inconsistent"};
+    dispatch.label=suffix+"-matmul-f32-activation-generic-unverified";
+    dispatch.kernel_id="dawn-"+suffix+"-matmul-f32-activation-v1";
+    dispatch.backend=BackendKind::DawnWebGpu;
+    dispatch.wgsl_source=bf16?kBF16MatMulWgsl:kF16MatMulWgsl;
+    dispatch.workgroup_size_x=dispatch.workgroup_size_y=8;
+    const std::pair<std::string,std::string> constants[]={
+        {"const ROWS: u32 = 1u;","const ROWS: u32 = "+std::to_string(a[0])+"u;"},
+        {"const OUTPUT_CHANNELS: u32 = 1u;","const OUTPUT_CHANNELS: u32 = "+std::to_string(channels)+"u;"},
+        {"const INNER: u32 = 1u;","const INNER: u32 = "+std::to_string(a[1])+"u;"},
+        {"const WEIGHT_ROW_BYTES: u32 = 2u;","const WEIGHT_ROW_BYTES: u32 = "+std::to_string(a[1]*2)+"u;"}
+    };
+    for(const auto& item:constants){const size_t pos=dispatch.wgsl_source.find(item.first);if(pos==std::string::npos)return {StatusCode::BackendFailure,type+" WGSL placeholder missing"};dispatch.wgsl_source.replace(pos,item.first.size(),item.second);}
+    dispatch.workgroups_x=static_cast<uint32_t>((channels+7)/8);dispatch.workgroups_y=static_cast<uint32_t>((a[0]+7)/8);
+    dispatch.bindings={{0,activations.buffer(),activations.byte_offset(),activations.byte_size()},
+                       {1,weights,0,padded},{2,output.buffer(),output.byte_offset(),output.byte_size()}};
+    return Status::success();
+}
+}
+Status build_f16_matmul_candidate(const Tensor&a,const std::shared_ptr<Buffer>&w,uint64_t b,const Tensor&o,ComputeDispatch&d){return build_fp16_matmul_candidate_impl(a,w,b,o,d,false);}
+Status build_bf16_matmul_candidate(const Tensor&a,const std::shared_ptr<Buffer>&w,uint64_t b,const Tensor&o,ComputeDispatch&d){return build_fp16_matmul_candidate_impl(a,w,b,o,d,true);}
+static Status build_fp16_matmul_gles_candidate_impl(const Tensor&a,const std::shared_ptr<Buffer>&w,uint64_t b,const Tensor&o,ComputeDispatch&d,bool bf16){
+    Status status=build_fp16_matmul_candidate_impl(a,w,b,o,d,bf16);if(!status.ok())return status;
+    const std::string suffix=bf16?"bf16":"f16";
+    d.label=suffix+"-matmul-f32-activation-gles-generic-unverified";
+    d.kernel_id="gles-"+suffix+"-matmul-f32-activation-v1";d.backend=BackendKind::OpenGles;
+    d.wgsl_source.clear();d.glsl_source=bf16?kBF16MatMulGlsl:kF16MatMulGlsl;
+    const uint64_t channels=o.element_count()/a.descriptor().shape[0];
+    const std::pair<std::string,std::string> constants[]={
+        {"const uint ROWS = 1u;","const uint ROWS = "+std::to_string(a.descriptor().shape[0])+"u;"},
+        {"const uint OUTPUT_CHANNELS = 1u;","const uint OUTPUT_CHANNELS = "+std::to_string(channels)+"u;"},
+        {"const uint INNER = 1u;","const uint INNER = "+std::to_string(a.descriptor().shape[1])+"u;"},
+        {"const uint WEIGHT_ROW_BYTES = 2u;","const uint WEIGHT_ROW_BYTES = "+std::to_string(a.descriptor().shape[1]*2)+"u;"}
+    };
+    for(const auto& item:constants){const size_t pos=d.glsl_source.find(item.first);if(pos==std::string::npos)return {StatusCode::BackendFailure,"16-bit GLES MatMul placeholder missing"};d.glsl_source.replace(pos,item.first.size(),item.second);}
+    return Status::success();
+}
+Status build_f16_matmul_gles_candidate(const Tensor&a,const std::shared_ptr<Buffer>&w,uint64_t b,const Tensor&o,ComputeDispatch&d){return build_fp16_matmul_gles_candidate_impl(a,w,b,o,d,false);}
+Status build_bf16_matmul_gles_candidate(const Tensor&a,const std::shared_ptr<Buffer>&w,uint64_t b,const Tensor&o,ComputeDispatch&d){return build_fp16_matmul_gles_candidate_impl(a,w,b,o,d,true);}
+
+Status reference_f16_matmul(const float*a,const uint8_t*w,uint64_t bytes,float*out,uint32_t rows,uint32_t channels,uint32_t inner,bool bf16){
+    if((!a||!w||!out)&&rows&&channels&&inner)return {StatusCode::InvalidArgument,"16-bit MatMul reference received a null pointer"};
+    if(!rows||!channels||!inner||bytes!=static_cast<uint64_t>(channels)*inner*2)return {StatusCode::InvalidArgument,"16-bit MatMul dimensions or weight bytes are invalid"};
+    std::vector<float> decoded(inner);
+    for(uint32_t channel=0;channel<channels;++channel){
+        Status status=decode_fp16_storage(w+static_cast<uint64_t>(channel)*inner*2,static_cast<uint64_t>(inner)*2,decoded.data(),inner,bf16);
+        if(!status.ok())return status;
+        for(uint32_t row=0;row<rows;++row){float sum=0;for(uint32_t k=0;k<inner;++k)sum+=a[static_cast<uint64_t>(row)*inner+k]*decoded[k];
+            out[static_cast<uint64_t>(row)*channels+channel]=sum;}
+    }
+    return Status::success();
+}
 } // namespace ai_chat::gpu_engine
