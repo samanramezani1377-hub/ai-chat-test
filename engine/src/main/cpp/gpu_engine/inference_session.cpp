@@ -1,4 +1,5 @@
 #include "inference_session.h"
+#include "operators.h"
 
 #include <algorithm>
 #include <chrono>

@@ -49,7 +49,7 @@ target_compile_features(ai_chat_gpu_engine PUBLIC cxx_std_17)
 
 add_library(ai_chat_gpu_backend_dawn STATIC ${ENGINE_DIR}/dawn_backend.cpp)
 target_include_directories(ai_chat_gpu_backend_dawn PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
-target_compile_features(ai_chat_gpu_backend_dawn PUBLIC cxx_std_17)
+target_compile_features(ai_chat_gpu_backend_dawn PUBLIC cxx_std_20)
 target_link_libraries(ai_chat_gpu_backend_dawn PUBLIC ai_chat_gpu_engine PRIVATE dawn::webgpu_dawn)
 
 add_library(ai_chat_gpu_backend_gles STATIC

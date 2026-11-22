@@ -214,7 +214,7 @@ public:
         wgpu::AdapterInfo info{};
         adapter_.GetInfo(&info);
         wgpu::Limits supported{};
-        const bool has_limits = adapter_.GetLimits(&supported);
+        const bool has_limits = adapter_.GetLimits(&supported) == wgpu::Status::Success;
         device_limits_ = DeviceLimits{};
 
         DeviceInfo device;
