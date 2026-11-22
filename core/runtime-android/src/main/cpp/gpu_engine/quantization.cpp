@@ -3480,6 +3480,19 @@ Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
     if (!status.ok()) return status;
 
 
+
+    QuantizationFormat q4_k;
+    q4_k.file_type_id=12;q4_k.name="Q4_K";q4_k.block_elements=256;q4_k.bytes_per_block=144;
+    q4_k.quantized=true;q4_k.decoder_state=SupportState::Validated;q4_k.gpu_kernel_state=SupportState::Unverified;
+    initialize_backend_states(q4_k);
+    status=registry.register_format(std::move(q4_k));if(!status.ok())return status;
+
+    QuantizationFormat q5_k;
+    q5_k.file_type_id=13;q5_k.name="Q5_K";q5_k.block_elements=256;q5_k.bytes_per_block=176;
+    q5_k.quantized=true;q5_k.decoder_state=SupportState::Validated;q5_k.gpu_kernel_state=SupportState::Unverified;
+    initialize_backend_states(q5_k);
+    status=registry.register_format(std::move(q5_k));if(!status.ok())return status;
+
     QuantizationFormat q6_k;
     q6_k.file_type_id=14;q6_k.name="Q6_K";q6_k.block_elements=256;q6_k.bytes_per_block=210;
     q6_k.quantized=true;q6_k.decoder_state=SupportState::Validated;q6_k.gpu_kernel_state=SupportState::Unverified;
@@ -4596,5 +4609,66 @@ Status validate_q6_k_matmul_kernel_impl(Backend&backend,OperatorRegistry&operato
     return Status::success();
 }
 Status validate_q6_k_matmul_kernel(Backend&b,OperatorRegistry&o,QuantizationRegistry&q){return validate_q6_k_matmul_kernel_impl(b,o,q);}
+
+
+namespace {
+void decode_k4_scale_min(uint32_t index,const uint8_t*packed,uint8_t&scale,uint8_t&minimum){
+    if(index<4){scale=packed[index]&63u;minimum=packed[index+4]&63u;}
+    else{
+        scale=static_cast<uint8_t>((packed[index+4]&15u)|((packed[index-4]>>6u)<<4u));
+        minimum=static_cast<uint8_t>((packed[index+4]>>4u)|((packed[index]>>6u)<<4u));
+    }
+}
+}
+Status decode_q4_k_blocks(const uint8_t*source,size_t source_bytes,float*destination,size_t destination_elements){
+    constexpr size_t block_bytes=144,block_elements=256;
+    if((!source||!destination)&&source_bytes)return {StatusCode::InvalidArgument,"Q4_K decoder received a null pointer"};
+    if(source_bytes%block_bytes)return {StatusCode::InvalidArgument,"Q4_K source does not contain complete blocks"};
+    const size_t blocks=source_bytes/block_bytes;
+    if(blocks>std::numeric_limits<size_t>::max()/block_elements)return {StatusCode::Unsupported,"Q4_K output size overflows"};
+    if(destination_elements!=blocks*block_elements)return {StatusCode::InvalidArgument,"Q4_K destination element count mismatch"};
+    for(size_t block=0;block<blocks;++block){
+        const uint8_t*encoded=source+block*block_bytes;
+        const uint16_t d_bits=static_cast<uint16_t>(encoded[0])|static_cast<uint16_t>(encoded[1]<<8u);
+        const uint16_t min_bits=static_cast<uint16_t>(encoded[2])|static_cast<uint16_t>(encoded[3]<<8u);
+        const float d=decode_f16_value(d_bits),minimum=decode_f16_value(min_bits);
+        if(!std::isfinite(d)||!std::isfinite(minimum))return {StatusCode::NumericalFailure,"Q4_K block scales are non-finite"};
+        const uint8_t*scales=encoded+4;const uint8_t*qs=encoded+16;float*out=destination+block*block_elements;
+        uint32_t is=0;
+        for(uint32_t j=0;j<256;j+=64){
+            uint8_t sc1=0,m1=0,sc2=0,m2=0;
+            decode_k4_scale_min(is,scales,sc1,m1);decode_k4_scale_min(is+1,scales,sc2,m2);
+            for(uint32_t l=0;l<32;++l)out[j+l]=d*sc1*(qs[l]&15u)-minimum*m1;
+            for(uint32_t l=0;l<32;++l)out[j+l+32]=d*sc2*(qs[l]>>4u)-minimum*m2;
+            qs+=32;is+=2;
+        }
+    }
+    return Status::success();
+}
+Status decode_q5_k_blocks(const uint8_t*source,size_t source_bytes,float*destination,size_t destination_elements){
+    constexpr size_t block_bytes=176,block_elements=256;
+    if((!source||!destination)&&source_bytes)return {StatusCode::InvalidArgument,"Q5_K decoder received a null pointer"};
+    if(source_bytes%block_bytes)return {StatusCode::InvalidArgument,"Q5_K source does not contain complete blocks"};
+    const size_t blocks=source_bytes/block_bytes;
+    if(blocks>std::numeric_limits<size_t>::max()/block_elements)return {StatusCode::Unsupported,"Q5_K output size overflows"};
+    if(destination_elements!=blocks*block_elements)return {StatusCode::InvalidArgument,"Q5_K destination element count mismatch"};
+    for(size_t block=0;block<blocks;++block){
+        const uint8_t*encoded=source+block*block_bytes;
+        const uint16_t d_bits=static_cast<uint16_t>(encoded[0])|static_cast<uint16_t>(encoded[1]<<8u);
+        const uint16_t min_bits=static_cast<uint16_t>(encoded[2])|static_cast<uint16_t>(encoded[3]<<8u);
+        const float d=decode_f16_value(d_bits),minimum=decode_f16_value(min_bits);
+        if(!std::isfinite(d)||!std::isfinite(minimum))return {StatusCode::NumericalFailure,"Q5_K block scales are non-finite"};
+        const uint8_t*scales=encoded+4;const uint8_t*qh=encoded+16;const uint8_t*ql=encoded+48;
+        float*out=destination+block*block_elements;uint32_t is=0;uint8_t u1=1,u2=2;
+        for(uint32_t j=0;j<256;j+=64){
+            uint8_t sc1=0,m1=0,sc2=0,m2=0;
+            decode_k4_scale_min(is,scales,sc1,m1);decode_k4_scale_min(is+1,scales,sc2,m2);
+            for(uint32_t l=0;l<32;++l)out[j+l]=d*sc1*((ql[l]&15u)+((qh[l]&u1)?16u:0u))-minimum*m1;
+            for(uint32_t l=0;l<32;++l)out[j+l+32]=d*sc2*((ql[l]>>4u)+((qh[l]&u2)?16u:0u))-minimum*m2;
+            ql+=32;is+=2;u1=static_cast<uint8_t>(u1<<2u);u2=static_cast<uint8_t>(u2<<2u);
+        }
+    }
+    return Status::success();
+}
 
 } // namespace ai_chat::gpu_engine

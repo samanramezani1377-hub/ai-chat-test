@@ -19,6 +19,10 @@ Status build_q6_k_matmul_candidate(const Tensor&,const std::shared_ptr<Buffer>&,
 Status build_q6_k_matmul_gles_candidate(const Tensor&,const std::shared_ptr<Buffer>&,uint64_t,const Tensor&,ComputeDispatch&);
 Status reference_q6_k_matmul(const float*,const uint8_t*,uint64_t,float*,uint32_t,uint32_t,uint32_t);
 
+
+Status decode_q4_k_blocks(const uint8_t*,size_t,float*,size_t);
+Status decode_q5_k_blocks(const uint8_t*,size_t,float*,size_t);
+
 Status decode_q6_k_blocks(const uint8_t* source,size_t source_bytes,float* destination,size_t destination_elements);
 
 Status decode_q5_0_blocks(const uint8_t* source, size_t source_bytes,
