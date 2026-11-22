@@ -60,6 +60,7 @@ class QuantizationRegistry {
     friend Status validate_q5_matmul_kernel_impl(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations, bool q5_1);
     friend Status validate_q5_0_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
     friend Status validate_q5_1_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
+    friend Status validate_q6_k_embedding_kernel(Backend&,OperatorRegistry&,QuantizationRegistry&);
 public:
     Status register_format(QuantizationFormat format);
     const QuantizationFormat* find(uint32_t file_type_id) const noexcept;
