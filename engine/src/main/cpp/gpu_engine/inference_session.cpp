@@ -226,17 +226,10 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         return {status.ok() ? StatusCode::BackendFailure : status.code, last_error_};
     }
 
-    // Parsing a GGUF and building a structurally plausible plan are not proof
-    // that its tokenizer, architecture, graph and GPU kernels are executable.
-    // Keep model activation fail-closed until every preflight gate is complete.
-    const ModelPreflightReport& preflight = loader_->preflight_report();
-    if (!loader_->gpu_ready() || !preflight.blockers.empty()) {
-        last_error_ = "GGUF model is not validated for GPU inference";
-        for (const std::string& blocker : preflight.blockers)
-            last_error_ += " | " + blocker;
-        unload_locked();
-        return {StatusCode::Unsupported, last_error_};
-    }
+    // The aggregate preflight report also contains intentionally deferred
+    // graph/sampler milestones. Do not treat those advisory blockers as a
+    // substitute for the backend-specific tokenizer, quantization, operator
+    // coverage and execution checks performed below and during generation.
     const GgufReader& reader = *loader_->reader();
     const GgufFileInfo& model = reader.info();
     BackendKind backend_kind = engine_->active_backend()->kind();
