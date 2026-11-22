@@ -160,7 +160,12 @@ protected:
     }
     static std::vector<std::pair<std::string,uint32_t>> specials(const GgufTokenizerInfo& m) {
         std::vector<std::pair<std::string,uint32_t>> out;
-        for(uint32_t i=0;i<m.tokens.size();++i) if(special_type(m,i)) out.emplace_back(m.tokens[i],i);
+        for(uint32_t i=0;i<m.tokens.size();++i) {
+            const bool added = m.token_types.size()==m.tokens.size()
+                ? (m.token_types[i]==3 || m.token_types[i]==4)
+                : special_type(m,i);
+            if(added) out.emplace_back(m.tokens[i],i);
+        }
         std::sort(out.begin(),out.end(),[](const auto&a,const auto&b){return a.first.size()>b.first.size();});
         return out;
     }
@@ -346,9 +351,24 @@ public:
         add_eos(m,out);return Status::success();
     }
     Status decode(const GgufTokenizerInfo&m,const std::vector<uint32_t>&ids,std::string&out)const override{
-        out.clear();for(uint32_t id:ids){if(id>=m.tokens.size())return {StatusCode::InvalidArgument,"BPE token id out of range"};if(special_type(m,id))continue;
-            uint8_t b=0;if(byte_token(m.tokens[id],b)){out.push_back(static_cast<char>(b));continue;}
-            const auto&piece=m.tokens[id];for(size_t i=0;i<piece.size();){size_t n=0;uint32_t cp=codepoint(piece,i,n);auto it=decoder_.find(cp);if(it==decoder_.end())out.append(piece,i,n);else out.push_back(static_cast<char>(it->second));i+=n;}}
+        out.clear();
+        for(uint32_t id:ids){
+            if(id>=m.tokens.size())return {StatusCode::InvalidArgument,"BPE token id out of range"};
+            if(m.token_types.size()==m.tokens.size()){
+                const int64_t type=m.token_types[id];
+                if(type==3||type==5)continue; // CONTROL and UNUSED
+                if(type==4){out+=m.tokens[id];continue;} // USER_DEFINED is isolated but not a skippable special token
+            }else if(special_type(m,id))continue;
+            uint8_t b=0;
+            if(byte_token(m.tokens[id],b)){out.push_back(static_cast<char>(b));continue;}
+            const auto&piece=m.tokens[id];
+            for(size_t i=0;i<piece.size();){
+                size_t n=0;uint32_t cp=codepoint(piece,i,n);
+                auto it=decoder_.find(cp);
+                if(it==decoder_.end())out.append(piece,i,n);else out.push_back(static_cast<char>(it->second));
+                i+=n;
+            }
+        }
         return Status::success();
     }
 private:
