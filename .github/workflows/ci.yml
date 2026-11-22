@@ -81,6 +81,14 @@ jobs:
           gradle --parallel :test-app:assembleDebug --stacktrace --console=plain
           ccache --show-stats
 
+      - name: Upload native debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-gpu-engine-native-debug-symbols
+          path: engine/.cxx/**/libgpu_engine_android.so.debug
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload test APK
         uses: actions/upload-artifact@v4
         with:
