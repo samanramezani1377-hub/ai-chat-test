@@ -3380,6 +3380,13 @@ Status register_builtin_quantization_formats(QuantizationRegistry& registry) {
     status = registry.register_format(std::move(q5_1));
     if (!status.ok()) return status;
 
+
+    QuantizationFormat q6_k;
+    q6_k.file_type_id=14;q6_k.name="Q6_K";q6_k.block_elements=256;q6_k.bytes_per_block=210;
+    q6_k.quantized=true;q6_k.decoder_state=SupportState::Validated;q6_k.gpu_kernel_state=SupportState::Unverified;
+    initialize_backend_states(q6_k);
+    status=registry.register_format(std::move(q6_k));if(!status.ok())return status;
+
     QuantizationFormat q8;
     q8.file_type_id = 8;
     q8.name = "Q8_0";
@@ -4314,4 +4321,38 @@ Status validate_f16_matmul_kernel(Backend&b,OperatorRegistry&o,QuantizationRegis
 Status validate_bf16_matmul_kernel(Backend&b,OperatorRegistry&o,QuantizationRegistry&q){return validate_fp16_matmul_kernel_impl(b,o,q,true);}
 Status validate_f16_embedding_kernel(Backend&b,OperatorRegistry&o,QuantizationRegistry&q){return validate_fp16_embedding_kernel_impl(b,o,q,false);}
 Status validate_bf16_embedding_kernel(Backend&b,OperatorRegistry&o,QuantizationRegistry&q){return validate_fp16_embedding_kernel_impl(b,o,q,true);}
+
+Status decode_q6_k_blocks(const uint8_t*source,size_t source_bytes,float*destination,size_t destination_elements){
+    constexpr size_t block_bytes=210,block_elements=256;
+    if((!source||!destination)&&source_bytes)return {StatusCode::InvalidArgument,"Q6_K decoder received a null pointer"};
+    if(source_bytes%block_bytes!=0||destination_elements!=(source_bytes/block_bytes)*block_elements)
+        return {StatusCode::InvalidArgument,"Q6_K source bytes and destination element count do not match complete blocks"};
+    const size_t blocks=source_bytes/block_bytes;
+    for(size_t block=0;block<blocks;++block){
+        const uint8_t*encoded=source+block*block_bytes;
+        const uint8_t*ql=encoded;
+        const uint8_t*qh=encoded+128;
+        const int8_t*scales=reinterpret_cast<const int8_t*>(encoded+192);
+        const uint16_t half=static_cast<uint16_t>(encoded[208])|static_cast<uint16_t>(encoded[209]<<8u);
+        const float d=decode_f16_value(half);
+        if(!std::isfinite(d))return {StatusCode::NumericalFailure,"Q6_K block scale is non-finite"};
+        float*output=destination+block*block_elements;
+        for(size_t n=0;n<block_elements;n+=128){
+            for(size_t l=0;l<32;++l){
+                const size_t scale_group=l/16;
+                const int8_t q1=static_cast<int8_t>((ql[l]&0x0fu)|(((qh[l]>>0u)&3u)<<4u))-32;
+                const int8_t q2=static_cast<int8_t>((ql[l+32]&0x0fu)|(((qh[l]>>2u)&3u)<<4u))-32;
+                const int8_t q3=static_cast<int8_t>((ql[l]>>4u)|(((qh[l]>>4u)&3u)<<4u))-32;
+                const int8_t q4=static_cast<int8_t>((ql[l+32]>>4u)|(((qh[l]>>6u)&3u)<<4u))-32;
+                output[n+l]=d*scales[scale_group+0]*q1;
+                output[n+l+32]=d*scales[scale_group+2]*q2;
+                output[n+l+64]=d*scales[scale_group+4]*q3;
+                output[n+l+96]=d*scales[scale_group+6]*q4;
+            }
+            ql+=64;qh+=32;scales+=8;
+        }
+    }
+    return Status::success();
+}
+
 } // namespace ai_chat::gpu_engine

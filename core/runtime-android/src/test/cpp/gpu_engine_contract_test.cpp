@@ -496,6 +496,20 @@ void test_f16_bf16_reference_matmul_decoding() {
     assert(std::fabs(subnormal_output-5.960464477539063e-8f)<1.0e-12f);
 }
 
+
+void test_q6_k_decoder_layout() {
+    std::vector<uint8_t> block(210,0);
+    block[0]=0x11;
+    std::fill(block.begin()+192,block.begin()+208,1);
+    block[208]=0x00;block[209]=0x3c;
+    std::vector<float> decoded(256);
+    assert(decode_q6_k_blocks(block.data(),block.size(),decoded.data(),decoded.size()).ok());
+    for(float value:decoded)assert(value==-31.0f);
+    std::fill(block.begin()+128,block.begin()+192,0xff);
+    assert(decode_q6_k_blocks(block.data(),block.size(),decoded.data(),decoded.size()).ok());
+    for(float value:decoded)assert(value==17.0f);
+}
+
 void test_q4_decoders() {
     std::vector<uint8_t> q4_0(18, 0);
     q4_0[0] = 0x00; q4_0[1] = 0x38; // d = 0.5
@@ -3214,6 +3228,7 @@ int main() {
     test_independent_sampler_and_stop_controller();
     test_q4_decoders();
     test_q5_decoders();
+    test_q6_k_decoder_layout();
     test_f16_bf16_reference_matmul_decoding();
     test_dawn_q8_0_operator_registration_is_unverified();
     test_q5_matmul_lowerings_are_registered_for_both_backends();
