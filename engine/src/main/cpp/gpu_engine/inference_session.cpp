@@ -451,7 +451,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             else if (type_id == 7) { type_name="Q5_1"; matmul_name="MatMul_Q5_1"; embedding_name="Embedding_Q5_1"; }
             else if (type_id == 1) { type_name="F16"; matmul_name="MatMul_F16"; embedding_name="Embedding_F16"; }
             else if (type_id == 30) { type_name="BF16"; matmul_name="MatMul_BF16"; embedding_name="Embedding_BF16"; }
-            else if (type_id == 14) { type_name="Q6_K"; matmul_name="MatMul_Q6_K"; embedding_name.clear(); }
+            else if (type_id == 14) { type_name="Q6_K"; matmul_name="MatMul_Q6_K"; embedding_name="Embedding_Q6_K"; }
             else if (type_id == 12) { type_name="Q4_K"; matmul_name="MatMul_Q4_K"; embedding_name.clear(); }
             else if (type_id == 13) { type_name="Q5_K"; matmul_name="MatMul_Q5_K"; embedding_name.clear(); }
             else if (type_id == 10) { type_name="Q2_K"; matmul_name="MatMul_Q2_K"; embedding_name.clear(); }
@@ -480,6 +480,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
                 else if (type_id == 7) validation_status=validate_q5_1_embedding_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else if (type_id == 1) validation_status=validate_f16_embedding_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else if (type_id == 30) validation_status=validate_bf16_embedding_kernel(*engine_->active_backend(),*operators_,*quantizations_);
+                else if (type_id == 14) validation_status=validate_q6_k_embedding_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else validation_status=validate_q8_0_embedding_kernel(*engine_->active_backend(),*operators_);
             }
             if (!validation_status.ok()) {

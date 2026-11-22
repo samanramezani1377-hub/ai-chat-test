@@ -72,7 +72,7 @@ std::string from_java_string(JNIEnv* env, jstring value) {
     return result;
 }
 
-// Hugging Face's Qwen3.5 tokenizer applies Unicode NFC before pre-tokenization.
+// Hugging Face's Qwen3.5 and Qwen3/Qwen2 tokenizers apply Unicode NFC before pre-tokenization.
 // Use Android's ICU-backed java.text.Normalizer so the complete Unicode tables
 // are provided by the OS instead of a partial hand-maintained range table.
 std::string normalized_java_text(JNIEnv* env, jstring value) {
