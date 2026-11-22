@@ -9,6 +9,7 @@
 #include <set>
 #include <utility>
 #include <mutex>
+#include <type_traits>
 
 namespace ai_chat::gpu_engine {
 
@@ -189,10 +190,61 @@ bool read_metadata_value(Reader& reader, const std::string& key, uint32_t type, 
                 out = std::move(values);
                 return true;
             }
-            for (uint64_t i = 0; i < count; ++i) {
-                if (!reader.skip_value(element_type)) return false;
+            // Preserve all scalar array values. Architecture-specific arrays
+            // (for example RoPE scaling sections) can affect execution semantics.
+            auto read_array = [&](auto& values) {
+                for (uint64_t i = 0; i < count; ++i) {
+                    GgufMetadataValue item;
+                    if (!read_metadata_value(reader, key, element_type, item)) return false;
+                    using Item = typename std::decay_t<decltype(values)>::value_type;
+                    const auto* typed = std::get_if<Item>(&item);
+                    if (!typed) return false;
+                    values.push_back(*typed);
+                }
+                return true;
+            };
+            GgufMetadataArray array;
+            array.element_type = element_type;
+            switch (element_type) {
+                case 0: case 2: case 4: case 10: {
+                    std::vector<uint64_t> values;
+                    values.reserve(static_cast<size_t>(count));
+                    if (!read_array(values)) return false;
+                    array.values = std::move(values);
+                    break;
+                }
+                case 1: case 3: case 5: case 11: {
+                    std::vector<int64_t> values;
+                    values.reserve(static_cast<size_t>(count));
+                    if (!read_array(values)) return false;
+                    array.values = std::move(values);
+                    break;
+                }
+                case 6: case 12: {
+                    std::vector<double> values;
+                    values.reserve(static_cast<size_t>(count));
+                    if (!read_array(values)) return false;
+                    array.values = std::move(values);
+                    break;
+                }
+                case 7: {
+                    std::vector<bool> values;
+                    values.reserve(static_cast<size_t>(count));
+                    if (!read_array(values)) return false;
+                    array.values = std::move(values);
+                    break;
+                }
+                case 8: {
+                    std::vector<std::string> values;
+                    values.reserve(static_cast<size_t>(count));
+                    if (!read_array(values)) return false;
+                    array.values = std::move(values);
+                    break;
+                }
+                default:
+                    return false;
             }
-            out = GgufArrayInfo{element_type, count};
+            out = std::move(array);
             return true;
         }
         case 10:
@@ -273,6 +325,19 @@ GgufTensorTypeInfo GgufReader::tensor_type_info(uint32_t type_id) {
         case 28: return {28, "F64", 1, 8, false, true, true};
         case 29: return {29, "IQ1_M", 256, 56, true, true, false};
         case 30: return {30, "BF16", 1, 2, false, true, true};
+        case 31: return {31, "REMOVED_Q4_0_4_4", 0, 0, false, false, false};
+        case 32: return {32, "REMOVED_Q4_0_4_8", 0, 0, false, false, false};
+        case 33: return {33, "REMOVED_Q4_0_8_8", 0, 0, false, false, false};
+        case 34: return {34, "TQ1_0", 256, 54, true, true, false};
+        case 35: return {35, "TQ2_0", 256, 66, true, true, false};
+        case 36: return {36, "REMOVED_IQ4_NL_4_4", 0, 0, false, false, false};
+        case 37: return {37, "REMOVED_IQ4_NL_4_8", 0, 0, false, false, false};
+        case 38: return {38, "REMOVED_IQ4_NL_8_8", 0, 0, false, false, false};
+        case 39: return {39, "MXFP4", 32, 17, true, true, false};
+        case 40: return {40, "NVFP4", 64, 36, true, true, false};
+        case 41: return {41, "Q1_0", 128, 18, true, true, false};
+        case 42: return {42, "Q2_0", 64, 18, true, true, false};
+        case 43: return {43, "F8_E4M3", 1, 1, false, true, false};
         default: return {type_id, "UNKNOWN", 0, 0, false, false, false};
     }
 }

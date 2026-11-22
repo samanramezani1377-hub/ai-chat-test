@@ -50,6 +50,8 @@ std::string metadata_value_summary(const GgufMetadataValue& value) {
     if (const auto* v = std::get_if<bool>(&value)) return *v ? "b:1" : "b:0";
     if (const auto* v = std::get_if<GgufArrayInfo>(&value))
         return "array:" + std::to_string(v->count) + ":type" + std::to_string(v->element_type);
+    if (const auto* v = std::get_if<GgufMetadataArray>(&value))
+        return "array:" + std::to_string(v->size()) + ":type" + std::to_string(v->element_type);
     if (const auto* v = std::get_if<std::vector<std::string>>(&value))
         return "strings:" + std::to_string(v->size());
     if (const auto* v = std::get_if<std::vector<double>>(&value))

@@ -136,7 +136,7 @@ void test_independent_gguf_reader() {
         out.write("GGUF", 4);
         write_u32(out, 3);
         write_u64(out, 1); // tensor count
-        write_u64(out, 5); // metadata count
+        write_u64(out, 7); // metadata count
         write_string(out, "general.architecture");
         write_u32(out, 8); write_string(out, "llama");
         write_string(out, "general.alignment");
@@ -148,6 +148,17 @@ void test_independent_gguf_reader() {
         write_string(out, "tokenizer.ggml.tokens");
         write_u32(out, 9); write_u32(out, 8); write_u64(out, 2);
         write_string(out, "hello"); write_string(out, "world");
+        write_string(out, "llama.rope.scaling.values");
+        write_u32(out, 9); write_u32(out, 6); write_u64(out, 2);
+        const float scale_values[] = {0.5f, 1.5f};
+        for (float value : scale_values) {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &value, sizeof(bits));
+            write_u32(out, bits);
+        }
+        write_string(out, "llama.attention.head_sections");
+        write_u32(out, 9); write_u32(out, 4); write_u64(out, 2);
+        write_u32(out, 2); write_u32(out, 4);
         write_string(out, "test.weight");
         write_u32(out, 2);
         write_u64(out, 2); write_u64(out, 3);
@@ -168,6 +179,18 @@ void test_independent_gguf_reader() {
     assert(reader.info().alignment == 32);
     assert(reader.info().tokenizer.model == "gpt2");
     assert(reader.info().tokenizer.tokens.size() == 2);
+    const auto array_entry = reader.info().metadata.find("llama.rope.scaling.values");
+    assert(array_entry != reader.info().metadata.end());
+    const auto* typed_array = std::get_if<GgufMetadataArray>(&array_entry->second);
+    assert(typed_array && typed_array->element_type == 6 && typed_array->size() == 2);
+    const auto* scales = std::get_if<std::vector<double>>(&typed_array->values);
+    assert(scales && scales->size() == 2 && (*scales)[0] == 0.5 && (*scales)[1] == 1.5);
+    const auto sections_entry = reader.info().metadata.find("llama.attention.head_sections");
+    assert(sections_entry != reader.info().metadata.end());
+    const auto* sections = std::get_if<GgufMetadataArray>(&sections_entry->second);
+    assert(sections && sections->element_type == 4 && sections->size() == 2);
+    const auto* section_values = std::get_if<std::vector<uint64_t>>(&sections->values);
+    assert(section_values && (*section_values)[0] == 2 && (*section_values)[1] == 4);
     const GgufTensorInfo* streamed_tensor = reader.find_tensor("test.weight");
     assert(streamed_tensor && streamed_tensor->byte_size_known);
     std::vector<uint8_t> first_read(static_cast<size_t>(streamed_tensor->byte_size));
@@ -176,6 +199,22 @@ void test_independent_gguf_reader() {
     assert(reader.read_tensor_chunk(*streamed_tensor, 0, second_read.data(), second_read.size()).ok());
     assert(first_read == second_read);
     assert(reader.info().tensors.size() == 1);
+    const auto tq1 = GgufReader::tensor_type_info(34);
+    const auto tq2 = GgufReader::tensor_type_info(35);
+    const auto mxfp4 = GgufReader::tensor_type_info(39);
+    const auto nvfp4 = GgufReader::tensor_type_info(40);
+    const auto q1 = GgufReader::tensor_type_info(41);
+    const auto q2 = GgufReader::tensor_type_info(42);
+    const auto f8 = GgufReader::tensor_type_info(43);
+    assert(tq1.block_elements == 256 && tq1.bytes_per_block == 54 && tq1.quantized);
+    assert(tq2.block_elements == 256 && tq2.bytes_per_block == 66 && tq2.quantized);
+    assert(mxfp4.block_elements == 32 && mxfp4.bytes_per_block == 17 && mxfp4.quantized);
+    assert(nvfp4.block_elements == 64 && nvfp4.bytes_per_block == 36 && nvfp4.quantized);
+    assert(q1.block_elements == 128 && q1.bytes_per_block == 18 && q1.quantized);
+    assert(q2.block_elements == 64 && q2.bytes_per_block == 18 && q2.quantized);
+    assert(f8.block_elements == 1 && f8.bytes_per_block == 1 && !f8.quantized &&
+           !f8.decoder_validated);
+    assert(!GgufReader::tensor_type_info(31).storage_size_known);
     const auto* tensor = reader.find_tensor("test.weight");
     assert(tensor && tensor->byte_size_known && tensor->byte_size == 24);
     float values[6] = {};

@@ -18,8 +18,20 @@ struct GgufArrayInfo {
     uint64_t count = 0;
 };
 
+using GgufMetadataArrayValues = std::variant<std::vector<uint64_t>, std::vector<int64_t>,
+                                             std::vector<double>, std::vector<bool>,
+                                             std::vector<std::string>>;
+struct GgufMetadataArray {
+    uint32_t element_type = 0;
+    GgufMetadataArrayValues values;
+    uint64_t size() const noexcept {
+        return std::visit([](const auto& items) { return static_cast<uint64_t>(items.size()); }, values);
+    }
+};
+
 using GgufMetadataValue = std::variant<uint64_t, int64_t, double, bool, std::string, GgufArrayInfo,
-                                      std::vector<std::string>, std::vector<double>, std::vector<int64_t>>;
+                                      GgufMetadataArray, std::vector<std::string>,
+                                      std::vector<double>, std::vector<int64_t>>;
 
 struct GgufTensorTypeInfo {
     uint32_t type_id = 0;

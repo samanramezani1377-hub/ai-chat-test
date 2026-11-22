@@ -501,6 +501,10 @@ ModelPreflightReport evaluate_model_preflight(const GgufFileInfo& model,
             report.known_weight_bytes += tensor.byte_size;
         }
 
+        if (!tensor.type.quantized && !tensor.type.decoder_validated) {
+            report.blockers.emplace_back("UNVERIFIED_NON_QUANTIZED_TENSOR_TYPE:" + tensor.type.name);
+        }
+
         if (tensor.type.quantized) {
             if (std::find(report.quantization_formats.begin(), report.quantization_formats.end(),
                           tensor.type.name) == report.quantization_formats.end()) {
