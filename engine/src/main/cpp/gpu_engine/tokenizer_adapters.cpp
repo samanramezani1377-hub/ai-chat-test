@@ -11,6 +11,7 @@
 
 namespace ai_chat::gpu_engine {
 namespace {
+thread_local const Qwen35UnicodeCategories* g_qwen35_unicode_categories = nullptr;
 
 bool special_type(const GgufTokenizerInfo& m, uint32_t id) {
     if (id >= m.tokens.size()) return false;
@@ -351,6 +352,11 @@ public:
 private:
     enum class QwenKind : uint8_t { LetterMark, Number, Space, Newline, Other };
     static QwenKind qwen_kind(uint32_t cp) {
+        if (g_qwen35_unicode_categories) {
+            const auto found = g_qwen35_unicode_categories->find(cp);
+            if (found != g_qwen35_unicode_categories->end() && found->second <= 4)
+                return static_cast<QwenKind>(found->second);
+        }
         if (cp == '\\r' || cp == '\\n') return QwenKind::Newline;
         if (unicode_number(cp)) return QwenKind::Number;
         if (letter(cp)) return QwenKind::LetterMark;
@@ -508,6 +514,10 @@ private:
 };
 
 } // namespace
+
+void set_qwen35_unicode_categories(const Qwen35UnicodeCategories* categories) noexcept {
+    g_qwen35_unicode_categories = categories;
+}
 
 Status register_builtin_tokenizer_adapters(TokenizerRegistry& registry) {
     Status s=registry.register_adapter(std::make_shared<SentencePieceAdapter>("llama","default"));if(!s.ok())return s;
