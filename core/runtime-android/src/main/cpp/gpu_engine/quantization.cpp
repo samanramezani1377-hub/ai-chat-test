@@ -887,11 +887,11 @@ fn decode_weight(channel:u32,k:u32)->f32{
  let block=k/256u;let within=k%256u;let n=within/128u;let local=within%128u;
  let group=local/32u;let side=(local%32u)/16u;let lane=local%16u;let shift=group*2u;
  let scale_index=n*8u+group*2u+side;let offset=channel*WEIGHT_ROW_BYTES+block*84u;
-  let packed_scale=read_u8(offset+4u+scale_index);
+  let packed_scale=read_u8(offset+scale_index);
  let scale=packed_scale&15u;let minimum=packed_scale>>4u;
- let q=(read_u8(offset+20u+n*32u+side*16u+lane)>>shift)&3u;
- let d=unpack2x16float(vec2<u32>(read_u16(offset),0u)).x;
- let dmin=unpack2x16float(vec2<u32>(read_u16(offset+2u),0u)).x;
+ let q=(read_u8(offset+16u+n*32u+side*16u+lane)>>shift)&3u;
+ let d=unpack2x16float(vec2<u32>(read_u16(offset+80u),0u)).x;
+ let dmin=unpack2x16float(vec2<u32>(read_u16(offset+82u),0u)).x;
  return d*f32(scale)*f32(q)-dmin*f32(minimum);
 }
 @compute @workgroup_size(8,8)
@@ -907,7 +907,7 @@ layout(local_size_x=8,local_size_y=8)in;
 layout(std430,binding=0)readonly buffer Activations{float activations[];};
 layout(std430,binding=1)readonly buffer Weights{uint weights[];};
 layout(std430,binding=2)writeonly buffer Output{float output_values[];};
-const uint ROWS=1u,OUTPUT_CHANNELS=1u,INNER=256u,WEIGHT_ROW_BYTES=84u;
+const uint ROWS=1u;const uint OUTPUT_CHANNELS=1u;const uint INNER=256u;const uint WEIGHT_ROW_BYTES=84u;
 uint read_u8(uint o){uint w=weights[o>>2u];return(w>>((o&3u)*8u))&255u;}
 uint read_u16(uint o){uint w=weights[o>>2u];return(w>>((o&3u)*8u))&65535u;}
 uint read_u32(uint o){return read_u8(o)|(read_u8(o+1u)<<8u)|(read_u8(o+2u)<<16u)|(read_u8(o+3u)<<24u);}
@@ -915,9 +915,9 @@ float decode_weight(uint channel,uint k){
  uint block=k/256u,within=k%256u,n=within/128u,local=within%128u;
  uint group=local/32u,side=(local%32u)/16u,lane=local%16u,shift=group*2u;
  uint scale_index=n*8u+group*2u+side,offset=channel*WEIGHT_ROW_BYTES+block*84u;
-  uint packed_scale=read_u8(offset+4u+scale_index);uint scale=packed_scale&15u,minimum=packed_scale>>4u;
- uint q=(read_u8(offset+20u+n*32u+side*16u+lane)>>shift)&3u;
- float d=unpackHalf2x16(read_u16(offset)).x,dmin=unpackHalf2x16(read_u16(offset+2u)).x;
+  uint packed_scale=read_u8(offset+scale_index);uint scale=packed_scale&15u,minimum=packed_scale>>4u;
+ uint q=(read_u8(offset+16u+n*32u+side*16u+lane)>>shift)&3u;
+ float d=unpackHalf2x16(read_u16(offset+80u)).x,dmin=unpackHalf2x16(read_u16(offset+82u)).x;
  return d*float(scale)*float(q)-dmin*float(minimum);
 }
 void main(){uint row=gl_GlobalInvocationID.y,channel=gl_GlobalInvocationID.x;if(row>=ROWS||channel>=OUTPUT_CHANNELS)return;
@@ -5110,11 +5110,13 @@ Status decode_q2_k_blocks(const uint8_t*source,size_t source_bytes,float*destina
     if(destination_elements!=blocks*block_elements)return {StatusCode::InvalidArgument,"Q2_K destination element count mismatch"};
     for(size_t block=0;block<blocks;++block){
         const uint8_t*encoded=source+block*block_bytes;
-        const uint16_t d_bits=static_cast<uint16_t>(encoded[0])|static_cast<uint16_t>(encoded[1]<<8u);
-        const uint16_t min_bits=static_cast<uint16_t>(encoded[2])|static_cast<uint16_t>(encoded[3]<<8u);
+        // GGML block_q2_K stores 16 scale/min bytes, 64 quant bytes,
+        // then the two FP16 super-block multipliers (d and dmin).
+        const uint16_t d_bits=static_cast<uint16_t>(encoded[80])|static_cast<uint16_t>(encoded[81]<<8u);
+        const uint16_t min_bits=static_cast<uint16_t>(encoded[82])|static_cast<uint16_t>(encoded[83]<<8u);
         const float d=decode_f16_value(d_bits),minimum=decode_f16_value(min_bits);
         if(!std::isfinite(d)||!std::isfinite(minimum))return {StatusCode::NumericalFailure,"Q2_K block scales are non-finite"};
-        const uint8_t*scales=encoded+4;const uint8_t*qs=encoded+20;float*out=destination+block*block_elements;
+        const uint8_t*scales=encoded;const uint8_t*qs=encoded+16;float*out=destination+block*block_elements;
         size_t scale_index=0,output_index=0;
         for(size_t n=0;n<256;n+=128){
             uint32_t shift=0;
@@ -5282,7 +5284,8 @@ Status validate_k23_matmul_kernel_impl(Backend&backend,OperatorRegistry&operator
             std::fill(block+96,block+104,0x11);std::fill(block+104,block+108,0xaa);
             block[108]=0;block[109]=0x3c;
         }else{
-            block[0]=0;block[1]=0x3c;std::fill(block+4,block+20,0x01);std::fill(block+20,block+84,0x55);
+            std::fill(block,block+16,0x01);std::fill(block+16,block+80,0x55);
+            block[80]=0;block[81]=0x3c; // d = 1.0; dmin remains zero
         }
     }
     std::vector<float>activations(rows*inner);

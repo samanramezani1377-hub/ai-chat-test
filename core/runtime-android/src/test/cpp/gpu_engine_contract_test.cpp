@@ -500,10 +500,16 @@ void test_f16_bf16_reference_matmul_decoding() {
 
 
 void test_q2_k_q3_k_decoder_layouts(){
-    std::vector<uint8_t> q2(84,0);q2[0]=0x00;q2[1]=0x3c;
-    std::fill(q2.begin()+4,q2.begin()+20,0x01);std::fill(q2.begin()+20,q2.end(),0x55);
+    std::vector<uint8_t> q2(84,0);
+    std::fill(q2.begin(),q2.begin()+16,0x01); // 16 scale/min pairs: scale 1, minimum 0
+    std::fill(q2.begin()+16,q2.begin()+80,0x55); // packed 2-bit value 1
+    q2[80]=0x00;q2[81]=0x3c; // d = 1.0; dmin = 0
     std::vector<float> q2_out(256);assert(decode_q2_k_blocks(q2.data(),q2.size(),q2_out.data(),q2_out.size()).ok());
     for(float value:q2_out)assert(value==1.0f);
+    q2[0]=0x11;q2[83]=0x38; // first group uses min=1 and dmin=0.5
+    assert(decode_q2_k_blocks(q2.data(),q2.size(),q2_out.data(),q2_out.size()).ok());
+    for(size_t i=0;i<16;++i)assert(q2_out[i]==0.5f);
+    for(size_t i=16;i<q2_out.size();++i)assert(q2_out[i]==1.0f);
     std::vector<uint8_t> q3(110,0);std::fill(q3.begin(),q3.begin()+32,0xff);
     std::fill(q3.begin()+32,q3.begin()+96,0x55);
     std::fill(q3.begin()+96,q3.begin()+104,0x11);
