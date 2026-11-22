@@ -499,7 +499,7 @@ void test_f16_bf16_reference_matmul_decoding() {
 
 void test_q6_k_decoder_layout() {
     std::vector<uint8_t> block(210,0);
-    block[0]=0x11;
+    std::fill(block.begin(),block.begin()+128,0x11);
     std::fill(block.begin()+192,block.begin()+208,1);
     block[208]=0x00;block[209]=0x3c;
     std::vector<float> decoded(256);
