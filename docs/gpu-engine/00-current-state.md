@@ -58,6 +58,20 @@ There is no CPU inference fallback in this branch. A failed GPU activation is re
 
 These foundations do not imply that every listed model architecture, tokenizer, quantization or kernel is production-ready.
 
+## Latest physical-device finding (Xiaomi 2303CRA44A, Android 14)
+
+The first captured activation attempt imported a 1.49 GiB Qwen3.8-2B Q6_K GGUF successfully, but no backend completed baseline validation:
+
+- Dawn/WebGPU: baseline validation became unavailable at Embedding because the device was no longer ready. The current callback records only a boolean health state, so the underlying Dawn device-loss/uncaptured-error message is not yet preserved.
+- Universal GLES: SSMConv1D shader compilation failed because the GLSL identifier `sample` is reserved by the mobile GLSL ES compiler.
+- Vulkan is disabled as required; the app reports no CPU fallback.
+
+The SSMConv1D shader now uses `sample_value` in both embedded WGSL and GLSL sources, and the host contract script guards against reintroducing the reserved identifier. The test app now exposes the existing native generation/cancellation JNI entry points so end-to-end inference can be exercised once a model passes all validation gates.
+
+Model activation now honors the model preflight report and fails closed while architecture, tokenizer, quantization, graph or model-kernel validation remains incomplete. In particular, Qwen3.5 tokenizer metadata is no longer labelled validated before exact reference parity exists.
+
+The app's current memory budget is a conservative estimate derived from Android system-memory information, not a measurement of dedicated GPU VRAM. Diagnostics should be interpreted accordingly.
+
 ## Known limitations
 
 1. Built-in tokenizer profiles remain unverified until exact profile parity is demonstrated against authoritative reference implementations and fixtures.
