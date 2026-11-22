@@ -264,6 +264,8 @@ std::string probe_gpu_engine() {
         *engine.active_backend(), operators);
     const Status q6_k_embedding_status = validate_q6_k_embedding_kernel(
         *engine.active_backend(), operators, quantizations);
+    const Status q6_k_matmul_status = validate_q6_k_matmul_kernel(
+        *engine.active_backend(), operators, quantizations);
 
     const DeviceInfo* device = engine.active_device();
     report << ";backend=" << backend_name(engine.diagnostics().selected_backend)
@@ -277,6 +279,7 @@ std::string probe_gpu_engine() {
            << ";q4_1_validation=" << (q4_1_status.ok() ? "VALIDATED" : "UNVERIFIED")
            << ";q4_1_embedding_validation=" << (q4_1_embedding_status.ok() ? "VALIDATED" : "UNVERIFIED")
            << ";q6_k_embedding_validation=" << (q6_k_embedding_status.ok() ? "VALIDATED" : "UNVERIFIED")
+           << ";q6_k_matmul_validation=" << (q6_k_matmul_status.ok() ? "VALIDATED" : "UNVERIFIED")
            << ";fallback_used=" << (engine.diagnostics().fallback_used ? "true" : "false")
            << ";fallback_reason=" << (engine.diagnostics().fallback_reason.empty()
                 ? "none" : engine.diagnostics().fallback_reason);
