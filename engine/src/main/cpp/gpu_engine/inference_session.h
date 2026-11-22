@@ -39,6 +39,7 @@ public:
     void reset_stop() noexcept;
     void unload() noexcept;
     bool loaded() const noexcept;
+    bool uses_qwen35_tokenizer() const noexcept;
     std::string diagnostics() const;
 
 private:
