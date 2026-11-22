@@ -2606,11 +2606,11 @@ void test_streamed_execution_loads_and_releases_quantized_weights_per_operation(
         plan, backend, lowerings, operators, {}, reader, memory, device, 2,
         nullptr, context, report);
     if (!streamed_status.ok()) {
-        std::cerr << "streamed execution failed: " << streamed_status.message << '\\n';
-        for (const auto& error : report.errors) std::cerr << "  " << error << '\\n';
-        for (const auto& unresolved : report.unresolved_inputs) std::cerr << "  unresolved: " << unresolved << '\\n';
-        for (const auto& missing : report.missing_lowerings) std::cerr << "  missing lowering: " << missing << '\\n';
-        for (const auto& missing : report.missing_weight_tensors) std::cerr << "  missing weight: " << missing << '\\n';
+        std::cerr << "streamed execution failed: " << streamed_status.message << '\n';
+        for (const auto& error : report.errors) std::cerr << "  " << error << '\n';
+        for (const auto& unresolved : report.unresolved_inputs) std::cerr << "  unresolved: " << unresolved << '\n';
+        for (const auto& missing : report.missing_lowerings) std::cerr << "  missing lowering: " << missing << '\n';
+        for (const auto& missing : report.missing_weight_tensors) std::cerr << "  missing weight: " << missing << '\n';
     }
     assert(streamed_status.ok());
     assert(report.compiled && report.executed && report.compiled_nodes == 1);
@@ -2919,7 +2919,7 @@ void test_model_plan_graph_compilation_is_fail_closed() {
         kernel.min_rank = 1;
         kernel.max_rank = 1;
         kernel.validation = KernelValidation::Validated;
-        kernel.glsl_source = "#version 310 es\\nvoid main(){}";
+        kernel.glsl_source = "#version 310 es\nvoid main(){}";
         assert(operators.register_kernel(std::move(kernel)).ok());
     }
     ModelLoweringRegistry lowerings;
@@ -2934,7 +2934,7 @@ void test_model_plan_graph_compilation_is_fail_closed() {
                 const Tensor& output = context.tensors.at(operation.output);
                 dispatch.backend = BackendKind::OpenGles;
                 dispatch.kernel_id = kernel_id;
-                dispatch.glsl_source = "#version 310 es\\nvoid main(){}";
+                dispatch.glsl_source = "#version 310 es\nvoid main(){}";
                 dispatch.workgroups_x = 1;
                 dispatch.bindings = {
                     {0, lhs.buffer(), lhs.byte_offset(), lhs.byte_size()},
@@ -3222,7 +3222,7 @@ void test_operator_registry_fail_closed() {
     assert(authorized.validation == KernelValidation::Validated);
     ComputeDispatch tampered;
     tampered.kernel_id = selected.kernel_id;
-    tampered.wgsl_source = selected.wgsl_source + "\\n// changed shader body";
+    tampered.wgsl_source = selected.wgsl_source + "\n// changed shader body";
     assert(registry.authorize_dispatch(selected.kernel_id, selected.backend, tampered).code ==
            StatusCode::InvalidArgument);
 
@@ -3235,15 +3235,15 @@ void test_operator_registry_fail_closed() {
     specialized.min_input_count = specialized.max_input_count = 1;
     specialized.min_rank = specialized.max_rank = 1;
     specialized.validation = KernelValidation::Validated;
-    specialized.wgsl_source = "const ELEMENT_COUNT: u32 = 1u;\\n@compute @workgroup_size(64) fn main() {}";
+    specialized.wgsl_source = "const ELEMENT_COUNT: u32 = 1u;\n@compute @workgroup_size(64) fn main() {}";
     assert(registry.register_kernel(specialized).ok());
     ComputeDispatch specialized_dispatch;
     specialized_dispatch.kernel_id = specialized.kernel_id;
-    specialized_dispatch.wgsl_source = "const ELEMENT_COUNT: u32 = 4u;\\n@compute @workgroup_size(64) fn main() {}";
+    specialized_dispatch.wgsl_source = "const ELEMENT_COUNT: u32 = 4u;\n@compute @workgroup_size(64) fn main() {}";
     assert(registry.authorize_dispatch(specialized.kernel_id, specialized.backend,
                                        specialized_dispatch).ok());
     ComputeDispatch altered_specialization = specialized_dispatch;
-    altered_specialization.wgsl_source = "const ELEMENT_COUNT: u32 = 4u;\\n@compute @workgroup_size(64) fn main() { let x = 1u; }";
+    altered_specialization.wgsl_source = "const ELEMENT_COUNT: u32 = 4u;\n@compute @workgroup_size(64) fn main() { let x = 1u; }";
     assert(registry.authorize_dispatch(specialized.kernel_id, specialized.backend,
                                        altered_specialization).code == StatusCode::InvalidArgument);
 
@@ -3310,7 +3310,7 @@ void test_graph_scheduler_order_and_cancel() {
         definition.output_type = DataType::F32;
         definition.validation = KernelValidation::Validated;
         if (backend == BackendKind::OpenGles) {
-            definition.glsl_source = "#version 310 es\\nlayout(local_size_x=1) in; void main() {}";
+            definition.glsl_source = "#version 310 es\nlayout(local_size_x=1) in; void main() {}";
         } else {
             definition.wgsl_source = "@compute @workgroup_size(1) fn main() {}";
         }
