@@ -841,6 +841,53 @@ void test_q6_k_decoder_layout() {
     for(float value:decoded)assert(value==17.0f);
 }
 
+void test_q6_k_embedding_reference_and_dispatch() {
+    constexpr uint32_t vocabulary=2,dimension=256;
+    constexpr uint64_t row_bytes=210,bytes=vocabulary*row_bytes;
+    std::vector<uint8_t> encoded(bytes,0);
+    for(uint32_t row=0;row<vocabulary;++row){
+        uint8_t*block=encoded.data()+row*row_bytes;
+        for(uint32_t i=0;i<128;++i){
+            block[i]=static_cast<uint8_t>((i*13u+row*7u)&255u);
+            block[128+i]=static_cast<uint8_t>((i*29u+row*11u)&255u);
+        }
+        for(uint32_t i=0;i<16;++i)block[192+i]=static_cast<uint8_t>(static_cast<int8_t>(static_cast<int>(i%13)-6));
+        block[208]=0x00;block[209]=0x3c;
+    }
+    const std::vector<uint32_t>ids={1,0};
+    std::vector<float>reference(ids.size()*dimension);
+    assert(reference_q6_k_embedding(encoded.data(),bytes,vocabulary,dimension,ids,reference.data()).ok());
+    std::vector<float>row_reference(dimension);
+    for(size_t row=0;row<ids.size();++row){
+        assert(decode_q6_k_blocks(encoded.data()+ids[row]*row_bytes,row_bytes,
+                                  row_reference.data(),row_reference.size()).ok());
+        assert(std::equal(row_reference.begin(),row_reference.end(),
+                          reference.begin()+static_cast<std::ptrdiff_t>(row*dimension)));
+    }
+    assert(reference_q6_k_embedding(encoded.data(),bytes,vocabulary,dimension,{2},reference.data()).code==
+           StatusCode::InvalidArgument);
+
+    BufferDesc weight_desc{bytes,4,MemoryDomain::Device,true,"q6-k-embedding-test-weights"};
+    BufferDesc token_desc{ids.size()*sizeof(uint32_t),alignof(uint32_t),MemoryDomain::Device,false,"q6-k-embedding-test-ids"};
+    BufferDesc output_desc{reference.size()*sizeof(float),alignof(float),MemoryDomain::Device,false,"q6-k-embedding-test-output"};
+    auto weights=std::make_shared<FakeBuffer>(weight_desc);
+    auto token_buffer=std::make_shared<FakeBuffer>(token_desc);
+    auto output_buffer=std::make_shared<FakeBuffer>(output_desc);
+    TensorDesc tensor_desc;tensor_desc.shape={ids.size(),dimension};tensor_desc.data_type=DataType::F32;
+    Tensor output;assert(Tensor::create(tensor_desc,output_buffer,0,output).ok());
+    ComputeDispatch dispatch;
+    assert(build_q6_k_embedding_candidate(weights,bytes,vocabulary,dimension,token_buffer,ids,output,dispatch).ok());
+    assert(dispatch.kernel_id=="dawn-q6-k-embedding-f32-v1");
+    assert(dispatch.backend==BackendKind::DawnWebGpu);
+    assert(dispatch.bindings.size()==3);
+    assert(dispatch.wgsl_source.find("const VOCABULARY_SIZE:u32=2u;")!=std::string::npos);
+    ComputeDispatch gles_dispatch;
+    assert(build_q6_k_embedding_gles_candidate(weights,bytes,vocabulary,dimension,token_buffer,ids,output,gles_dispatch).ok());
+    assert(gles_dispatch.kernel_id=="gles-q6-k-embedding-f32-v1");
+    assert(gles_dispatch.backend==BackendKind::OpenGles);
+    assert(gles_dispatch.glsl_source.find("VOCABULARY_SIZE=2u")!=std::string::npos);
+}
+
 void test_q4_decoders() {
     std::vector<uint8_t> q4_0(18, 0);
     q4_0[0] = 0x00; q4_0[1] = 0x38; // d = 0.5
@@ -3834,6 +3881,7 @@ int main() {
     test_q4_decoders();
     test_q5_decoders();
     test_q6_k_decoder_layout();
+    test_q6_k_embedding_reference_and_dispatch();
     test_q4_k_q5_k_decoder_layouts();
     test_q2_k_q3_k_decoder_layouts();
     test_f16_bf16_reference_matmul_decoding();
