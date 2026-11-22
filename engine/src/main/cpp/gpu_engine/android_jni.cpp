@@ -11,7 +11,10 @@
 
 #include <exception>
 #include <cstdlib>
-#include <sstream>\n#include <stdexcept>\n#include <cstdint>\n#include <vector>
+#include <sstream>
+#include <stdexcept>
+#include <cstdint>
+#include <vector>
 #include <string>
 
 namespace ai_chat::gpu_engine {
