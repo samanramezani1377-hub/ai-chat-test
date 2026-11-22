@@ -466,7 +466,7 @@ class LlamaCppAndroidRuntimeAdapter(
         val usingIndependentGpuEngine = nativeInfo.startsWith("runtime=AIChatGpuEngine;status=READY")
         if (usingIndependentGpuEngine) {
             selectedBackend = nativeInfo.substringAfter("backend=", "").substringBefore(';').ifBlank { "UnknownGPU" }
-            selectedGpuLayers = requestedGpuLayers
+            // selectedGpuLayers was committed during successful model activation.
             selectedCpuThreads = 0
         } else if (nativeInfo.isNotBlank()) {
             selectedBackend = nativeInfo.substringAfter("backend=", "").substringBefore(';').ifBlank { "CPU" }
