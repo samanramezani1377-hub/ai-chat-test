@@ -4181,4 +4181,132 @@ Status reference_f16_embedding(const uint8_t*w,uint64_t bytes,uint32_t vocabular
     }
     return Status::success();
 }
+
+Status validate_fp16_matmul_kernel_impl(Backend&backend,OperatorRegistry&operators,QuantizationRegistry&quantizations,bool bf16){
+    const BackendKind kind=backend.kind();if((kind!=BackendKind::DawnWebGpu&&kind!=BackendKind::OpenGles)||!backend.healthy())
+        return {StatusCode::NotReady,"16-bit MatMul validation requires a healthy Dawn or GLES backend"};
+    const uint32_t type_id=bf16?30u:1u;auto format=quantizations.formats_.find(type_id);
+    if(format==quantizations.formats_.end()||format->second.decoder_state!=SupportState::Validated)
+        return {StatusCode::NotReady,"16-bit host decoder is not registered"};
+    const std::string suffix=bf16?"bf16":"f16";
+    const std::string kernel_id=(kind==BackendKind::OpenGles?"gles-":"dawn-")+suffix+"-matmul-f32-activation-v1";
+    auto kernel=std::find_if(operators.kernels_.begin(),operators.kernels_.end(),[&](const KernelDefinition&k){return k.kernel_id==kernel_id&&k.backend==kind;});
+    if(kernel==operators.kernels_.end())return {StatusCode::NotReady,"16-bit MatMul candidate is not registered"};
+    if(kernel->validation==KernelValidation::Validated){format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;format->second.gpu_kernel_state=SupportState::Validated;return Status::success();}
+    if(kernel->validation!=KernelValidation::Unverified)return {StatusCode::Unsupported,"16-bit MatMul candidate is rejected"};
+    const bool gles=kind==BackendKind::OpenGles;
+    const std::string& source=gles?kernel->glsl_source:kernel->wgsl_source;
+    const std::string& canonical=bf16?(gles?std::string(kBF16MatMulGlsl):std::string(kBF16MatMulWgsl))
+                                      :(gles?std::string(kF16MatMulGlsl):std::string(kF16MatMulWgsl));
+    if(source.empty()||source!=canonical)return {StatusCode::InvalidArgument,"16-bit MatMul shader differs from canonical source"};
+    constexpr uint32_t rows=2,channels=2,inner=4;
+    std::vector<float> activations={1.0f,0.5f,-1.0f,2.0f,0.25f,1.5f,0.5f,-0.5f};
+    const float values[8]={1.0f,2.0f,0.5f,-1.0f,0.25f,1.0f,-0.5f,2.0f};
+    std::vector<uint8_t> encoded(sizeof(values)/sizeof(float)*2);
+    auto write16=[&](size_t index,uint16_t value){encoded[index*2]=static_cast<uint8_t>(value&255u);encoded[index*2+1]=static_cast<uint8_t>(value>>8u);};
+    for(size_t i=0;i<8;++i){
+        uint16_t bits=0;
+        if(bf16){uint32_t raw=0;std::memcpy(&raw,&values[i],sizeof(raw));bits=static_cast<uint16_t>(raw>>16u);}
+        else {
+            // Values are exact half representables; use their canonical IEEE-754 binary16 encodings.
+            const uint16_t table[8]={0x3c00,0x4000,0x3800,0xbc00,0x3400,0x3c00,0xb800,0x4000};
+            bits=table[i];
+        }
+        write16(i,bits);
+    }
+    float expected[rows*channels]={},actual[rows*channels]={};
+    Status status=reference_f16_matmul(activations.data(),encoded.data(),encoded.size(),expected,rows,channels,inner,bf16);
+    if(!status.ok())return status;
+    BufferDesc ad{activations.size()*sizeof(float),alignof(float),MemoryDomain::Device,false,"fp16-validation-activations"};
+    BufferDesc wd{encoded.size(),4,MemoryDomain::Device,true,"fp16-validation-weights"};
+    BufferDesc od{sizeof(actual),alignof(float),MemoryDomain::Device,false,"fp16-validation-output"};
+    std::shared_ptr<Buffer> ab,wb,ob;
+    status=backend.allocate(ad,ab);if(!status.ok())return status;
+    status=backend.allocate(wd,wb);if(!status.ok())return status;
+    status=backend.allocate(od,ob);if(!status.ok())return status;
+    status=backend.upload(ab,0,activations.data(),ad.size_bytes);if(!status.ok())return status;
+    status=backend.upload(wb,0,encoded.data(),encoded.size());if(!status.ok())return status;
+    TensorDesc atd;atd.shape={rows,inner};atd.data_type=DataType::F32;
+    TensorDesc otd;otd.shape={rows,channels};otd.data_type=DataType::F32;
+    Tensor at,ot;status=Tensor::create(atd,ab,0,at);if(!status.ok())return status;
+    status=Tensor::create(otd,ob,0,ot);if(!status.ok())return status;
+    ComputeDispatch dispatch;
+    if(bf16)status=gles?build_bf16_matmul_gles_candidate(at,wb,encoded.size(),ot,dispatch):build_bf16_matmul_candidate(at,wb,encoded.size(),ot,dispatch);
+    else status=gles?build_f16_matmul_gles_candidate(at,wb,encoded.size(),ot,dispatch):build_f16_matmul_candidate(at,wb,encoded.size(),ot,dispatch);
+    if(!status.ok())return status;
+    if(dispatch.kernel_id!=kernel_id||dispatch.backend!=kind)return {StatusCode::InvalidArgument,"16-bit MatMul candidate identity mismatch"};
+    dispatch.validation=KernelValidation::Validated;
+    std::unique_ptr<CommandBatch> commands;status=backend.begin_commands(commands);if(!status.ok())return status;
+    if(!commands)return {StatusCode::BackendFailure,"16-bit MatMul backend returned empty command batch"};
+    status=commands->dispatch_compute(dispatch);if(!status.ok())return status;
+    status=backend.submit(std::move(commands));if(!status.ok())return status;
+    status=backend.synchronize();if(!status.ok())return status;
+    status=backend.readback(ob,0,actual,sizeof(actual));if(!status.ok())return status;
+    for(size_t i=0;i<rows*channels;++i){const float tolerance=1.0e-4f*std::max(1.0f,std::fabs(expected[i]));
+        if(!std::isfinite(actual[i])||std::fabs(actual[i]-expected[i])>tolerance)return {StatusCode::NumericalFailure,"16-bit MatMul GPU output differs from host decoder reference"};}
+    kernel->validation=KernelValidation::Validated;
+    format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;format->second.gpu_kernel_state=SupportState::Validated;
+    return Status::success();
+}
+Status validate_fp16_embedding_kernel_impl(Backend&backend,OperatorRegistry&operators,QuantizationRegistry&quantizations,bool bf16){
+    const BackendKind kind=backend.kind();if((kind!=BackendKind::DawnWebGpu&&kind!=BackendKind::OpenGles)||!backend.healthy())
+        return {StatusCode::NotReady,"16-bit Embedding validation requires a healthy Dawn or GLES backend"};
+    const uint32_t type_id=bf16?30u:1u;auto format=quantizations.formats_.find(type_id);
+    if(format==quantizations.formats_.end()||format->second.decoder_state!=SupportState::Validated)
+        return {StatusCode::NotReady,"16-bit host decoder is not registered"};
+    const std::string suffix=bf16?"bf16":"f16";
+    const std::string kernel_id=(kind==BackendKind::OpenGles?"gles-":"dawn-")+suffix+"-embedding-f32-v1";
+    auto kernel=std::find_if(operators.kernels_.begin(),operators.kernels_.end(),[&](const KernelDefinition&k){return k.kernel_id==kernel_id&&k.backend==kind;});
+    if(kernel==operators.kernels_.end())return {StatusCode::NotReady,"16-bit Embedding candidate is not registered"};
+    if(kernel->validation==KernelValidation::Validated){format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;format->second.gpu_kernel_state=SupportState::Validated;return Status::success();}
+    if(kernel->validation!=KernelValidation::Unverified)return {StatusCode::Unsupported,"16-bit Embedding candidate is rejected"};
+    const bool gles=kind==BackendKind::OpenGles;
+    const std::string& source=gles?kernel->glsl_source:kernel->wgsl_source;
+    const std::string& canonical=bf16?(gles?std::string(kBF16EmbeddingGlsl):std::string(kBF16EmbeddingWgsl))
+                                      :(gles?std::string(kF16EmbeddingGlsl):std::string(kF16EmbeddingWgsl));
+    if(source.empty()||source!=canonical)return {StatusCode::InvalidArgument,"16-bit Embedding shader differs from canonical source"};
+    constexpr uint32_t vocabulary=2,dimension=4;
+    const std::vector<uint32_t> ids={1,0};
+    const float values[8]={1.0f,2.0f,3.0f,4.0f,-1.0f,0.5f,2.0f,0.0f};
+    std::vector<uint8_t> encoded(16);
+    const uint16_t half_bits[8]={0x3c00,0x4000,0x4200,0x4400,0xbc00,0x3800,0x4000,0x0000};
+    for(size_t i=0;i<8;++i){uint16_t bits=half_bits[i];if(bf16){uint32_t raw=0;std::memcpy(&raw,&values[i],sizeof(raw));bits=static_cast<uint16_t>(raw>>16u);}encoded[i*2]=static_cast<uint8_t>(bits&255u);encoded[i*2+1]=static_cast<uint8_t>(bits>>8u);}
+    float expected[8]={},actual[8]={};
+    Status status=reference_f16_embedding(encoded.data(),encoded.size(),vocabulary,dimension,ids,expected,bf16);
+    if(!status.ok())return status;
+    BufferDesc wd{encoded.size(),4,MemoryDomain::Device,true,"fp16-embedding-validation-weights"};
+    BufferDesc td{ids.size()*sizeof(uint32_t),4,MemoryDomain::Device,false,"fp16-embedding-validation-ids"};
+    BufferDesc od{sizeof(actual),alignof(float),MemoryDomain::Device,false,"fp16-embedding-validation-output"};
+    std::shared_ptr<Buffer> wb,tb,ob;
+    status=backend.allocate(wd,wb);if(!status.ok())return status;
+    status=backend.allocate(td,tb);if(!status.ok())return status;
+    status=backend.allocate(od,ob);if(!status.ok())return status;
+    status=backend.upload(wb,0,encoded.data(),encoded.size());if(!status.ok())return status;
+    status=backend.upload(tb,0,ids.data(),td.size_bytes);if(!status.ok())return status;
+    TensorDesc otd;otd.shape={ids.size(),dimension};otd.data_type=DataType::F32;
+    Tensor output;status=Tensor::create(otd,ob,0,output);if(!status.ok())return status;
+    ComputeDispatch dispatch;
+    if(bf16)status=gles?build_bf16_embedding_gles_candidate(wb,encoded.size(),vocabulary,dimension,tb,ids,output,dispatch)
+                       :build_bf16_embedding_candidate(wb,encoded.size(),vocabulary,dimension,tb,ids,output,dispatch);
+    else status=gles?build_f16_embedding_gles_candidate(wb,encoded.size(),vocabulary,dimension,tb,ids,output,dispatch)
+                    :build_f16_embedding_candidate(wb,encoded.size(),vocabulary,dimension,tb,ids,output,dispatch);
+    if(!status.ok())return status;
+    if(dispatch.kernel_id!=kernel_id||dispatch.backend!=kind)return {StatusCode::InvalidArgument,"16-bit Embedding candidate identity mismatch"};
+    dispatch.validation=KernelValidation::Validated;
+    std::unique_ptr<CommandBatch> commands;status=backend.begin_commands(commands);if(!status.ok())return status;
+    if(!commands)return {StatusCode::BackendFailure,"16-bit Embedding backend returned empty command batch"};
+    status=commands->dispatch_compute(dispatch);if(!status.ok())return status;
+    status=backend.submit(std::move(commands));if(!status.ok())return status;
+    status=backend.synchronize();if(!status.ok())return status;
+    status=backend.readback(ob,0,actual,sizeof(actual));if(!status.ok())return status;
+    for(size_t i=0;i<8;++i){const float tolerance=1.0e-4f*std::max(1.0f,std::fabs(expected[i]));
+        if(!std::isfinite(actual[i])||std::fabs(actual[i]-expected[i])>tolerance)return {StatusCode::NumericalFailure,"16-bit Embedding GPU output differs from host decoder reference"};}
+    kernel->validation=KernelValidation::Validated;
+    format->second.backend_gpu_kernel_states[kind]=SupportState::Validated;format->second.gpu_kernel_state=SupportState::Validated;
+    return Status::success();
+}
+Status validate_f16_matmul_kernel(Backend&b,OperatorRegistry&o,QuantizationRegistry&q){return validate_fp16_matmul_kernel_impl(b,o,q,false);}
+Status validate_bf16_matmul_kernel(Backend&b,OperatorRegistry&o,QuantizationRegistry&q){return validate_fp16_matmul_kernel_impl(b,o,q,true);}
+Status validate_f16_embedding_kernel(Backend&b,OperatorRegistry&o,QuantizationRegistry&q){return validate_fp16_embedding_kernel_impl(b,o,q,false);}
+Status validate_bf16_embedding_kernel(Backend&b,OperatorRegistry&o,QuantizationRegistry&q){return validate_fp16_embedding_kernel_impl(b,o,q,true);}
 } // namespace ai_chat::gpu_engine
