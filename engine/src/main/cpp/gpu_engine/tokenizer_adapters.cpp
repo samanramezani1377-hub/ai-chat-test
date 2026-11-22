@@ -291,7 +291,7 @@ private:
 class BpeAdapter final : public BaseAdapter {
 public:
     explicit BpeAdapter(std::string pre):desc_{"gpt2",pre,"byte-level-bpe",
-        pre == "qwen35" ? SupportState::Validated : SupportState::Unverified}{build_bytes();}
+        SupportState::Unverified}{build_bytes();}
     const TokenizerDescriptor& descriptor()const noexcept override{return desc_;}
     Status validate_metadata(const GgufTokenizerInfo&m)const override{
         Status s=validate_ids(m);if(!s.ok())return s;
