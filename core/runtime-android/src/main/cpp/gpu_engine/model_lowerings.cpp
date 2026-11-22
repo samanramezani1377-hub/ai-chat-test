@@ -244,6 +244,34 @@ Status register_q6_k_matmul_lowering(BackendKind backend,ModelLoweringRegistry&r
     });
 }
 
+
+Status register_k4_matmul_lowering(BackendKind backend,ModelLoweringRegistry&registry,bool q5){
+    const std::string type=q5?"Q5_K":"Q4_K",op=q5?"MatMul_Q5_K":"MatMul_Q4_K";
+    const uint32_t type_id=q5?13u:12u;
+    return registry.register_lowering(backend,op,[backend,type,type_id,q5](
+        const ModelPlanOperation&operation,const ModelExecutionContext&context,ComputeDispatch&dispatch){
+        if(operation.inputs.size()!=1||operation.weight_tensors.size()!=1)
+            return Status{StatusCode::InvalidArgument,type+" MatMul requires one activation and one quantized weight"};
+        const Tensor*input=nullptr,*output=nullptr;Status result=lookup_operand(operation,context,0,input);if(!result.ok())return result;
+        result=lookup_output(operation,context,output);if(!result.ok())return result;
+        const auto weight=context.quantized_weights.find(operation.weight_tensors.front());
+        if(weight==context.quantized_weights.end()||!weight->second.buffer||weight->second.byte_size==0||
+           weight->second.file_type_id!=type_id||weight->second.dimensions.size()!=2)
+            return Status{StatusCode::InvalidArgument,type+" MatMul weight binding is missing or invalid"};
+        if(input->descriptor().shape.size()!=2||input->descriptor().shape[0]==0||
+           (output->descriptor().shape.size()!=2&&output->descriptor().shape.size()!=3))
+            return Status{StatusCode::Unsupported,type+" MatMul activation/output shapes are unsupported"};
+        const uint64_t channels=output->element_count()/input->descriptor().shape[0];
+        if(weight->second.dimensions[0]!=input->descriptor().shape[1]||weight->second.dimensions[1]!=channels)
+            return Status{StatusCode::InvalidArgument,type+" weight dimensions do not match activation/output"};
+        if(backend==BackendKind::OpenGles)
+            return q5?build_q5_k_matmul_gles_candidate(*input,weight->second.buffer,weight->second.byte_size,*output,dispatch)
+                     :build_q4_k_matmul_gles_candidate(*input,weight->second.buffer,weight->second.byte_size,*output,dispatch);
+        return q5?build_q5_k_matmul_candidate(*input,weight->second.buffer,weight->second.byte_size,*output,dispatch)
+                 :build_q4_k_matmul_candidate(*input,weight->second.buffer,weight->second.byte_size,*output,dispatch);
+    });
+}
+
 } // namespace
 
 Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegistry& registry) {
@@ -380,6 +408,10 @@ Status register_builtin_model_lowerings(BackendKind backend, ModelLoweringRegist
     status = register_fp16_embedding_lowering(backend, registry, true);
     if (!status.ok()) return status;
     status = register_q6_k_matmul_lowering(backend, registry);
+    if (!status.ok()) return status;
+    status = register_k4_matmul_lowering(backend, registry, false);
+    if (!status.ok()) return status;
+    status = register_k4_matmul_lowering(backend, registry, true);
     if (!status.ok()) return status;
 
     status = registry.register_lowering(backend, "RMSNorm",

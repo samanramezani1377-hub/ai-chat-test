@@ -598,6 +598,10 @@ void test_q5_matmul_lowerings_are_registered_for_both_backends() {
     assert(dawn.find(BackendKind::DawnWebGpu,"Embedding_BF16") != nullptr);
     assert(dawn.find(BackendKind::DawnWebGpu,"MatMul_Q6_K") != nullptr);
     assert(gles.find(BackendKind::OpenGles,"MatMul_Q6_K") != nullptr);
+    assert(dawn.find(BackendKind::DawnWebGpu,"MatMul_Q4_K") != nullptr);
+    assert(dawn.find(BackendKind::DawnWebGpu,"MatMul_Q5_K") != nullptr);
+    assert(gles.find(BackendKind::OpenGles,"MatMul_Q4_K") != nullptr);
+    assert(gles.find(BackendKind::OpenGles,"MatMul_Q5_K") != nullptr);
     assert(gles.find(BackendKind::OpenGles,"MatMul_F16") != nullptr);
     assert(gles.find(BackendKind::OpenGles,"MatMul_BF16") != nullptr);
     assert(gles.find(BackendKind::OpenGles,"Embedding_F16") != nullptr);
