@@ -915,6 +915,17 @@ void test_q8_0_decoder_and_registry() {
     assert(q4k_gles.backend==BackendKind::OpenGles&&q5k_gles.backend==BackendKind::OpenGles);
     assert(q4k_dawn.wgsl_source.find("WEIGHT_ROW_BYTES:u32=144u")!=std::string::npos);
     assert(q5k_dawn.wgsl_source.find("WEIGHT_ROW_BYTES:u32=176u")!=std::string::npos);
+    BufferDesc q2k_weights_desc{168,4,MemoryDomain::Device,true,"q2-k-weights"};
+    BufferDesc q3k_weights_desc{220,4,MemoryDomain::Device,true,"q3-k-weights"};
+    std::shared_ptr<Buffer> q2k_weights,q3k_weights;assert(backend.allocate(q2k_weights_desc,q2k_weights).ok());assert(backend.allocate(q3k_weights_desc,q3k_weights).ok());
+    ComputeDispatch q2k_dawn,q3k_dawn,q2k_gles,q3k_gles;
+    assert(build_q2_k_matmul_candidate(q6_a_tensor,q2k_weights,168,q6_o_tensor,q2k_dawn).ok());
+    assert(build_q3_k_matmul_candidate(q6_a_tensor,q3k_weights,220,q6_o_tensor,q3k_dawn).ok());
+    assert(build_q2_k_matmul_gles_candidate(q6_a_tensor,q2k_weights,168,q6_o_tensor,q2k_gles).ok());
+    assert(build_q3_k_matmul_gles_candidate(q6_a_tensor,q3k_weights,220,q6_o_tensor,q3k_gles).ok());
+    assert(q2k_gles.backend==BackendKind::OpenGles&&q3k_gles.backend==BackendKind::OpenGles);
+    assert(q2k_dawn.wgsl_source.find("WEIGHT_ROW_BYTES:u32=84u")!=std::string::npos);
+    assert(q3k_dawn.wgsl_source.find("WEIGHT_ROW_BYTES:u32=110u")!=std::string::npos);
     BufferDesc f16_weights_desc{256,4,MemoryDomain::Device,true,"f16-matmul-weights"};
     BufferDesc bf16_weights_desc{256,4,MemoryDomain::Device,true,"bf16-matmul-weights"};
     std::shared_ptr<Buffer> f16_weights,bf16_weights;
