@@ -357,7 +357,7 @@ private:
             if (found != g_qwen35_unicode_categories->end() && found->second <= 4)
                 return static_cast<QwenKind>(found->second);
         }
-        if (cp == '\\r' || cp == '\\n') return QwenKind::Newline;
+        if (cp == '\r' || cp == '\n') return QwenKind::Newline;
         if (unicode_number(cp)) return QwenKind::Number;
         if (letter(cp)) return QwenKind::LetterMark;
         if (space(cp)) return QwenKind::Space;
@@ -365,7 +365,7 @@ private:
     }
     static size_t contraction_length(const std::string& s, size_t at) {
         static constexpr const char* suffixes[] = {"'s","'t","'re","'ve","'m","'ll","'d"};
-        if (at >= s.size() || s[at] != '\\'') return 0;
+        if (at >= s.size() || s[at] != '\'') return 0;
         for (const char* suffix : suffixes) {
             const size_t length = std::char_traits<char>::length(suffix);
             if (at + length > s.size()) continue;
