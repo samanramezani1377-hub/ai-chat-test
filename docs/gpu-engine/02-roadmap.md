@@ -125,3 +125,5 @@ CI/source checks are useful but not hardware evidence. Do not wait for CI to pro
 - **2026-11-22 / Q5_0 and Q5_1 packed MatMul:** added per-backend candidate kernels, decoder-backed numerical validators, registry promotion only after readback parity, quantized model lowering, GGUF type-to-operator routing, streamed weight bindings and inference-session preflight/retry integration. Q5 MatMul remains **UNVERIFIED** until a physical backend passes its validator; Q5 embeddings are still unsupported and must fail closed.
 
 - **2026-11-22 / Q5 embedding integration:** completed candidate and reference paths for Q5_0/Q5_1 embeddings on Dawn and Universal GLES, registered the kernels, added numerical validation gates, wired architecture plan selection, streaming bindings and inference preflight. Real GPU parity remains **UNVERIFIED**.
+
+- **2026-11-22 / BPE metadata validation:** added strict vocabulary uniqueness and merge-table integrity checks before encoding. This prevents silently accepting malformed merge tables but leaves tokenizer algorithm parity and real-model fixtures outstanding.
