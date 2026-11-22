@@ -127,3 +127,5 @@ CI/source checks are useful but not hardware evidence. Do not wait for CI to pro
 - **2026-11-22 / Q5 embedding integration:** completed candidate and reference paths for Q5_0/Q5_1 embeddings on Dawn and Universal GLES, registered the kernels, added numerical validation gates, wired architecture plan selection, streaming bindings and inference preflight. Real GPU parity remains **UNVERIFIED**.
 
 - **2026-11-22 / BPE metadata validation:** added strict vocabulary uniqueness and merge-table integrity checks before encoding. This prevents silently accepting malformed merge tables but leaves tokenizer algorithm parity and real-model fixtures outstanding.
+
+- **2026-11-22 / F16 and BF16 execution:** added generic packed 16-bit MatMul and Embedding kernels for Dawn/GLES, IEEE-754 conversion references, backend validation and registry promotion, GGUF model routing and inference integration. This extends the engine beyond block quantization. Hardware validation and real-model generation remain **UNVERIFIED**.
