@@ -87,6 +87,10 @@ class OperatorRegistry {
     friend Status validate_q4_1_matmul_kernel(Backend& backend, OperatorRegistry& operators, QuantizationRegistry& quantizations);
 
 
+
+    friend Status validate_k4_matmul_kernel_impl(Backend&,OperatorRegistry&,QuantizationRegistry&,bool);
+    friend Status validate_q4_k_matmul_kernel(Backend&,OperatorRegistry&,QuantizationRegistry&);
+    friend Status validate_q5_k_matmul_kernel(Backend&,OperatorRegistry&,QuantizationRegistry&);
     friend Status validate_q6_k_matmul_kernel_impl(Backend&,OperatorRegistry&,QuantizationRegistry&);
     friend Status validate_q6_k_matmul_kernel(Backend&,OperatorRegistry&,QuantizationRegistry&);
     friend Status validate_fp16_matmul_kernel_impl(Backend&,OperatorRegistry&,QuantizationRegistry&,bool);

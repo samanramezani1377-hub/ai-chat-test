@@ -21,6 +21,9 @@ Status reference_q6_k_matmul(const float*,const uint8_t*,uint64_t,float*,uint32_
 
 
 
+Status validate_q4_k_matmul_kernel(Backend&,OperatorRegistry&,QuantizationRegistry&);
+Status validate_q5_k_matmul_kernel(Backend&,OperatorRegistry&,QuantizationRegistry&);
+
 Status build_q4_k_matmul_candidate(const Tensor&,const std::shared_ptr<Buffer>&,uint64_t,const Tensor&,ComputeDispatch&);
 Status build_q4_k_matmul_gles_candidate(const Tensor&,const std::shared_ptr<Buffer>&,uint64_t,const Tensor&,ComputeDispatch&);
 Status reference_q4_k_matmul(const float*,const uint8_t*,uint64_t,float*,uint32_t,uint32_t,uint32_t);
