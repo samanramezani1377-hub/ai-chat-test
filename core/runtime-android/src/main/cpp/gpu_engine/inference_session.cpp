@@ -281,7 +281,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             else if (type_id == 8) { type_name="Q8_0"; matmul_name="MatMul_Q8_0"; embedding_name="Embedding_Q8_0"; }
             else return {StatusCode::Unsupported,"No GPU validation route exists for GGUF quantization type "+std::to_string(type_id)};
 
-            if (has_operator(matmul_name)) {
+            if (has_operator(matmul_name) || type_id == 2 || type_id == 3 || type_id == 8) {
                 if (type_id == 2) validation_status=validate_q4_0_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else if (type_id == 3) validation_status=validate_q4_1_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else if (type_id == 6) validation_status=validate_q5_0_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
