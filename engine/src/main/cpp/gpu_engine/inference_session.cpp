@@ -889,6 +889,8 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     // frequently reused quantized MatMul weights; this is not a VRAM estimate.
     context_.persistent_weight_cache_limit_bytes = std::min<uint64_t>(
         memory_budget_bytes_ / 4, 256ull * 1024ull * 1024ull);
+    context_.weight_chunk_cache = std::make_shared<QuantizedWeightChunkCache>(
+        std::min<uint64_t>(memory_budget_bytes_ / 8, 128ull * 1024ull * 1024ull));
 
     std::unordered_set<std::string> persistent_state_names;
     auto allocate_persistent_state = [&](const std::string& name,
@@ -1018,6 +1020,7 @@ Status GpuInferenceSession::update_memory_budget(uint64_t allocation_cap_bytes) 
         if (allocation_cap_bytes < memory_->budget_bytes()) {
             context_.quantized_weights.clear();
             context_.weight_leases.clear();
+            if (context_.weight_chunk_cache) context_.weight_chunk_cache->clear();
         }
         Status status = memory_->update_budget(allocation_cap_bytes);
         if (!status.ok()) return status;
@@ -1025,6 +1028,10 @@ Status GpuInferenceSession::update_memory_budget(uint64_t allocation_cap_bytes) 
     memory_budget_bytes_ = allocation_cap_bytes;
     context_.persistent_weight_cache_limit_bytes = std::min<uint64_t>(
         memory_budget_bytes_ / 4, 256ull * 1024ull * 1024ull);
+    if (!context_.weight_chunk_cache)
+        context_.weight_chunk_cache = std::make_shared<QuantizedWeightChunkCache>();
+    context_.weight_chunk_cache->set_capacity(
+        std::min<uint64_t>(memory_budget_bytes_ / 8, 128ull * 1024ull * 1024ull));
     return Status::success();
 }
 
