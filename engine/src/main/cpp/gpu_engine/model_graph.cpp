@@ -349,16 +349,16 @@ Status execute_chunked_quantized_matmul_if_needed(
 
     // Pressure mode changes how weights are sourced, not whether reusable
     // chunks may be retained. Admission remains opportunistic under live budget.
-    bool cache_evicted_for_pressure = false;
     const auto reclaim_optional_memory = [&]() {
         bool had_optional_cached_weights = std::any_of(
             context.quantized_weights.begin(), context.quantized_weights.end(),
             [](const auto& entry) { return static_cast<bool>(entry.second.buffer); });
-        if (context.weight_chunk_cache && !cache_evicted_for_pressure) {
+        if (context.weight_chunk_cache) {
+            const auto cache_stats = context.weight_chunk_cache->stats();
             had_optional_cached_weights = had_optional_cached_weights ||
-                context.weight_chunk_cache->stats().resident_bytes != 0;
-            context.weight_chunk_cache->evict_all();
-            cache_evicted_for_pressure = true;
+                cache_stats.resident_bytes != 0;
+            if (cache_stats.resident_bytes != 0)
+                context.weight_chunk_cache->evict_all();
         }
         if (had_optional_cached_weights) {
             context.weight_cache_pressure_mode = true;
