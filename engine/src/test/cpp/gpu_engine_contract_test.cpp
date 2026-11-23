@@ -3616,10 +3616,20 @@ void test_llama_model_execution_plan_is_structural_only() {
     tied_model.metadata["llama.tie_word_embeddings"] = true;
     ModelExecutionPlan tied_plan;
     assert(adapter->build_execution_plan(tied_model, tied_plan).ok());
-    GgufFileInfo ambiguous_output = tied_model;
-    ambiguous_output.metadata.erase("llama.tie_word_embeddings");
-    ModelExecutionPlan ambiguous_plan;
-    assert(adapter->build_execution_plan(ambiguous_output, ambiguous_plan).code == StatusCode::Unsupported);
+    GgufFileInfo implicit_tied_output = tied_model;
+    implicit_tied_output.metadata.erase("llama.tie_word_embeddings");
+    ModelExecutionPlan implicit_tied_plan;
+    assert(adapter->build_execution_plan(implicit_tied_output, implicit_tied_plan).ok());
+    const auto implicit_logits = std::find_if(implicit_tied_plan.operations.begin(),
+        implicit_tied_plan.operations.end(),
+        [](const ModelPlanOperation& operation) { return operation.id == "logits"; });
+    assert(implicit_logits != implicit_tied_plan.operations.end());
+    assert(implicit_logits->weight_tensors == std::vector<std::string>{"token_embd.weight"});
+    GgufFileInfo explicitly_untied_output = implicit_tied_output;
+    explicitly_untied_output.metadata["llama.tie_word_embeddings"] = false;
+    ModelExecutionPlan explicitly_untied_plan;
+    assert(adapter->build_execution_plan(explicitly_untied_output, explicitly_untied_plan).code ==
+           StatusCode::Unsupported);
 
     OperatorRegistry operator_registry;
     ModelGraphCoverageReport coverage;
