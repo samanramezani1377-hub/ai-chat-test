@@ -922,6 +922,12 @@ Status execute_model_execution_plan(ModelExecutionPlan& plan, Backend& backend,
         report.errors.push_back("GRAPH_EXECUTION_FAILED:" + status.message);
         return status;
     }
+    status = flush_pending_graphs();
+    if (!status.ok()) {
+        report.errors.push_back("STREAMED_BATCH_DISPATCH_FAILED:" + status.message);
+        return status;
+    }
+
     for (const auto& operation : plan.operations) {
         if (operation.operator_name != "KVCacheAppend") continue;
         if (!context.kv_cache) {
@@ -1022,6 +1028,14 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
         ? &report.real_q6_k_parity_checks : nullptr;
 
     ExecutionScheduler scheduler;
+    std::vector<ComputeGraph> pending_graphs;
+    const auto flush_pending_graphs = [&]() -> Status {
+        if (pending_graphs.empty()) return Status::success();
+        Status flush_status = scheduler.execute_sequence(backend, pending_graphs, cancellation);
+        if (flush_status.ok()) pending_graphs.clear();
+        return flush_status;
+    };
+    const uint64_t graph_binding_limit = storage_binding_limit(device);
     for (const auto& original_operation : plan.operations) {
         if (cancellation && cancellation->load(std::memory_order_relaxed)) {
             report.errors.emplace_back("STREAMED_EXECUTION_CANCELLED");
@@ -1110,6 +1124,15 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
             }
         }
 
+        const bool streamed_embedding_candidate =
+            operation.operator_name.rfind("Embedding_", 0) == 0 &&
+            !operation.weight_tensors.empty() &&
+            operation_context.quantized_weights.count(operation.weight_tensors.front()) != 0 &&
+            !operation_context.quantized_weights.at(operation.weight_tensors.front()).buffer;
+        if (streamed_embedding_candidate) {
+            status = flush_pending_graphs();
+            if (!status.ok()) return status;
+        }
         bool chunked_embedding = false;
         status = execute_chunked_quantized_embedding_if_needed(operation, backend, lowerings,
             operators, reader, memory, device, operation_context, chunked_embedding,
@@ -1133,6 +1156,15 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
             continue;
         }
 
+        const bool streamed_matmul_candidate =
+            operation.operator_name.rfind("MatMul_", 0) == 0 &&
+            !operation.weight_tensors.empty() &&
+            operation_context.quantized_weights.count(operation.weight_tensors.front()) != 0 &&
+            !operation_context.quantized_weights.at(operation.weight_tensors.front()).buffer;
+        if (streamed_matmul_candidate) {
+            status = flush_pending_graphs();
+            if (!status.ok()) return status;
+        }
         bool chunked_matmul = false;
         status = execute_chunked_quantized_matmul_if_needed(operation, backend, lowerings,
             operators, reader, memory, device, operation_context, chunked_matmul,
@@ -1156,6 +1188,24 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
             continue;
         }
 
+        bool oversized_elementwise_candidate = false;
+        if (operation.operator_name == "SiLU" || operation.operator_name == "Sigmoid" ||
+            operation.operator_name == "Softplus" || operation.operator_name == "Add" ||
+            operation.operator_name == "Multiply") {
+            const auto out = operation_context.tensors.find(operation.output);
+            oversized_elementwise_candidate = out != operation_context.tensors.end() &&
+                out->second.byte_size() > graph_binding_limit;
+            for (const auto& input_name : operation.inputs) {
+                const auto in = operation_context.tensors.find(input_name);
+                oversized_elementwise_candidate = oversized_elementwise_candidate ||
+                    (in != operation_context.tensors.end() &&
+                     in->second.byte_size() > graph_binding_limit);
+            }
+        }
+        if (oversized_elementwise_candidate) {
+            status = flush_pending_graphs();
+            if (!status.ok()) return status;
+        }
         bool chunked_elementwise = false;
         status = execute_chunked_elementwise_if_needed(operation, backend, lowerings,
             operators, device, operation_context, chunked_elementwise);
@@ -1205,28 +1255,23 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
                 operation_context.weight_leases.clear();
                 return status;
             }
-            status = scheduler.execute(backend, graph, cancellation);
-            if (!status.ok()) {
-                report.errors.push_back(operation.id + ":STREAMED_DISPATCH_FAILED:" + status.message);
-                for (const auto& name : operation.weight_tensors) {
-                    operation_context.tensors.erase(name);
-                    operation_context.quantized_weights.erase(name);
+            pending_graphs.push_back(std::move(graph));
+            report.compiled_nodes += compile_report.compiled_nodes;
+            // Explicit numerical diagnostics need completed outputs before
+            // readback. The normal path batches consecutive graph fragments.
+            if (parity_counter != nullptr) {
+                status = flush_pending_graphs();
+                if (!status.ok()) {
+                    report.errors.push_back(operation.id + ":STREAMED_DISPATCH_FAILED:" + status.message);
+                    return status;
                 }
-                operation_context.weight_leases.clear();
-                return status;
-            }
-            status = validate_resident_q6_k_matmul_sample(operation, reader, backend,
-                operation_context, parity_counter);
-            if (!status.ok()) {
-                report.errors.push_back(operation.id + ":REAL_Q6_K_PARITY_FAILED:" + status.message);
-                for (const auto& name : operation.weight_tensors) {
-                    operation_context.tensors.erase(name);
-                    operation_context.quantized_weights.erase(name);
+                status = validate_resident_q6_k_matmul_sample(operation, reader, backend,
+                    operation_context, parity_counter);
+                if (!status.ok()) {
+                    report.errors.push_back(operation.id + ":REAL_Q6_K_PARITY_FAILED:" + status.message);
+                    return status;
                 }
-                operation_context.weight_leases.clear();
-                return status;
             }
-            ++report.compiled_nodes;
         }
 
         // Keep only admitted resident quantized weights in the long-lived
