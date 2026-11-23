@@ -363,7 +363,7 @@ Status execute_chunked_quantized_matmul_if_needed(
             return {StatusCode::DeviceLost, "GPU backend became unhealthy during quantized MatMul chunking"};
 
         uint64_t available = memory.available_bytes();
-        uint64_t reclaimed_pool_bytes = 0;
+        uint64_t reclaimed_optional_bytes = 0;
         // Optional cached weights yield before the planner rejects a legal tile.
         // Disable admissions for this operation so pressure cannot refill the cache.
         if (available < bytes_per_channel) {
@@ -371,7 +371,7 @@ Status execute_chunked_quantized_matmul_if_needed(
             const uint64_t before_reclaim = available;
             reclaim_optional_memory();
             available = memory.available_bytes();
-            reclaimed_pool_bytes = available > before_reclaim ? available - before_reclaim : 0;
+            reclaimed_optional_bytes = available > before_reclaim ? available - before_reclaim : 0;
         }
         const uint64_t available_for_chunks = available > 3 ? available - 3 : 0;
         uint64_t maximum_channels = std::min(padded_binding_limit / row_bytes,
@@ -392,7 +392,13 @@ Status execute_chunked_quantized_matmul_if_needed(
                     operation.id + " weight=" + weight_name +
                     " required_min_bytes=" + std::to_string(bytes_per_channel + 3) +
                     " available_bytes=" + std::to_string(available) +
-                    " reclaimed_transient_pool_bytes=" + std::to_string(reclaimed_pool_bytes) +
+                    " reclaimed_optional_memory_bytes=" + std::to_string(reclaimed_optional_bytes) +
+                    " rows=" + std::to_string(rows) +
+                    " inner=" + std::to_string(inner) +
+                    " weight_row_bytes=" + std::to_string(row_bytes) +
+                    " output_channel_bytes=" + std::to_string(output_channel_bytes) +
+                    " quant_type=" + type.name +
+                    " chunk_cache_resident_bytes=" + std::to_string(context.weight_chunk_cache ? context.weight_chunk_cache->stats().resident_bytes : 0) +
                     " budget_bytes=" + std::to_string(memory.budget_bytes())};
             Status status = flush_batch();
             if (!status.ok()) return status;
