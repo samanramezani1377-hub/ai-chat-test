@@ -593,7 +593,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             [](const ModelPlanOperation& operation) { return operation.operator_name == "MatMul_Q6_K"; });
         const bool needs_q6_embedding = std::any_of(plan_.operations.begin(), plan_.operations.end(),
             [](const ModelPlanOperation& operation) { return operation.operator_name == "Embedding_Q6_K"; });
-        q6_backend_validation_ = std::string("decode_reference=validated;active_backend=") +
+        q6_backend_validation_ = std::string("decode_reference=not_run;active_backend_kernel_validation=") +
             backend_label(backend_kind) + ":passed";
         const BackendKind alternate_backend = backend_kind == BackendKind::DawnWebGpu
             ? BackendKind::OpenGles : BackendKind::DawnWebGpu;

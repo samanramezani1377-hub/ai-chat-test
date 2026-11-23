@@ -379,7 +379,7 @@ layout(std430, binding = 1) readonly buffer Rhs { float rhs[]; };
 layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
 void main() {
     uint index = gl_GlobalInvocationID.x;
-    if (index < uint(output_values.length())) output_values[index] = lhs[index] * rhs[index];
+    if (index < uint(output_values.length())) output_values[index] = lhs[index] * rhs[index % uint(rhs.length())];
 }
 )glsl";
 
@@ -390,7 +390,7 @@ constexpr char kMultiplyF32Wgsl[] = R"wgsl(
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x < arrayLength(&output)) {
-        output[gid.x] = lhs[gid.x] * rhs[gid.x];
+        output[gid.x] = lhs[gid.x] * rhs[gid.x % arrayLength(&rhs)];
     }
 }
 )wgsl";
@@ -867,7 +867,7 @@ const char* multiply_f32_wgsl_source() noexcept { return kMultiplyF32Wgsl; }
 Status build_multiply_f32_candidate(const Tensor& lhs, const Tensor& rhs,
                                     const Tensor& output, ComputeDispatch& dispatch) {
     return build_binary_f32_candidate(lhs, rhs, output, dispatch,
-                                      "multiply-f32-generic-unverified", "dawn-multiply-f32-generic-v1", kMultiplyF32Wgsl);
+                                      "multiply-f32-generic-unverified", "dawn-multiply-f32-generic-v1", kMultiplyF32Wgsl, true);
 }
 
 Status build_add_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
@@ -999,7 +999,7 @@ Status validate_gles_add_f32_kernel(Backend& backend, OperatorRegistry& registry
 Status build_multiply_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
                                          const Tensor& output, ComputeDispatch& dispatch) {
     Status status = build_binary_f32_candidate(lhs, rhs, output, dispatch,
-        "gles-multiply-f32-generic-unverified", "gles-multiply-f32-generic-v1", kMultiplyF32Wgsl);
+        "gles-multiply-f32-generic-unverified", "gles-multiply-f32-generic-v1", kMultiplyF32Wgsl, true);
     if (!status.ok()) return status;
     dispatch.backend = BackendKind::OpenGles;
     dispatch.kernel_id = "gles-multiply-f32-generic-v1";

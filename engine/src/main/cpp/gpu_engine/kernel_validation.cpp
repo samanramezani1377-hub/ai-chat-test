@@ -170,7 +170,28 @@ Status validate_multiply(Backend& backend, Validate&& build) {
     if (!status.ok()) return status;
     status = build(lhs2.tensor, rhs2.tensor, output2.tensor, dispatch);
     if (!status.ok()) return status;
-    return execute_and_compare(backend, dispatch, output2.tensor, expected2);
+    status = execute_and_compare(backend, dispatch, output2.tensor, expected2);
+    if (!status.ok()) return status;
+
+    // General operator contract: a trailing one-dimensional operand broadcasts
+    // over the final dimension for every leading row, independent of model family.
+    TensorFixture lhs3, rhs3, output3;
+    const std::vector<float> a3 = {
+        1.0f, -2.0f, 0.5f, 4.0f,
+        3.0f, -1.0f, 2.0f, 0.25f
+    };
+    const std::vector<float> b3 = {0.5f, -2.0f, 3.0f, 0.25f};
+    status = make_f32_tensor(backend, {2, 4}, a3, "validate-multiply-broadcast-a", lhs3);
+    if (!status.ok()) return status;
+    status = make_f32_tensor(backend, {4}, b3, "validate-multiply-broadcast-b", rhs3);
+    if (!status.ok()) return status;
+    status = make_f32_tensor(backend, {2, 4}, {}, "validate-multiply-broadcast-out", output3);
+    if (!status.ok()) return status;
+    std::vector<float> expected3(a3.size());
+    for (size_t i = 0; i < a3.size(); ++i) expected3[i] = a3[i] * b3[i % b3.size()];
+    status = build(lhs3.tensor, rhs3.tensor, output3.tensor, dispatch);
+    if (!status.ok()) return status;
+    return execute_and_compare(backend, dispatch, output3.tensor, expected3);
 }
 
 template <typename Validate>
