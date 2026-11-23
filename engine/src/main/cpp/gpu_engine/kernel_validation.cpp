@@ -544,9 +544,11 @@ Status validate_gated_delta_net(Backend& backend, Validate&& build) {
                 return {StatusCode::NumericalFailure, "GatedDeltaNet recurrent state differs from reference"};
         return Status::success();
     };
-    Status status = run_case(3, 4, 3, 1);
+    // Qwen3.5 GGUF stores V heads in tiled order. Exercise multiple K heads
+    // and a non-trivial V:K ratio so grouped-order indexing cannot pass by accident.
+    Status status = run_case(3, 4, 4, 2);
     if (!status.ok()) return status;
-    return run_case(2, 5, 2, 1);
+    return run_case(2, 5, 6, 2);
 }
 
 template <typename Validate>
