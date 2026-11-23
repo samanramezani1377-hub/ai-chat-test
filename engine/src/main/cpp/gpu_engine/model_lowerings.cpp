@@ -267,15 +267,30 @@ Status register_q6_k_matmul_lowering(BackendKind backend,ModelLoweringRegistry&r
            weight->second.file_type_id!=14||weight->second.dimensions.size()!=2)
             return Status{StatusCode::InvalidArgument,"Q6_K MatMul weight binding is missing or invalid"};
         const auto& activation_shape=input->descriptor().shape;
-        if(activation_shape.size()<2||output->descriptor().shape.size()<2)
+        const auto& output_shape=output->descriptor().shape;
+        if(activation_shape.size()<2||output_shape.size()<2)
             return Status{StatusCode::Unsupported,"Q6_K MatMul requires rank-2-or-higher activation and output tensors"};
+        // Match the common leading dimensions, then flatten all remaining
+        // activation dimensions into K. Attention output projections commonly
+        // map [tokens, heads, head_dim] to [tokens, embedding].
+        size_t leading_rank=0;
+        const size_t max_leading_rank=std::min(activation_shape.size(),output_shape.size())-1;
+        while(leading_rank<max_leading_rank&&activation_shape[leading_rank]==output_shape[leading_rank])
+            ++leading_rank;
+        if(leading_rank==0)
+            return Status{StatusCode::InvalidArgument,"Q6_K MatMul activation/output tensors have no matching leading dimensions"};
         uint64_t rows=1;
-        for(size_t axis=0;axis+1<activation_shape.size();++axis){
+        for(size_t axis=0;axis<leading_rank;++axis){
             if(activation_shape[axis]==0||rows>UINT64_MAX/activation_shape[axis])
                 return Status{StatusCode::InvalidArgument,"Q6_K MatMul activation leading dimensions are invalid or overflow"};
             rows*=activation_shape[axis];
         }
-        const uint64_t inner=activation_shape.back();
+        uint64_t inner=1;
+        for(size_t axis=leading_rank;axis<activation_shape.size();++axis){
+            if(activation_shape[axis]==0||inner>UINT64_MAX/activation_shape[axis])
+                return Status{StatusCode::InvalidArgument,"Q6_K MatMul flattened activation dimensions are invalid or overflow"};
+            inner*=activation_shape[axis];
+        }
         if(inner==0||output->element_count()==0||output->element_count()%rows!=0)
             return Status{StatusCode::InvalidArgument,"Q6_K MatMul activation/output element counts are inconsistent"};
         const uint64_t channels=output->element_count()/rows;
