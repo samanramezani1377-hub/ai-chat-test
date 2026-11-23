@@ -181,20 +181,22 @@ class MainActivity : Activity() {
         val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val memoryInfo = ActivityManager.MemoryInfo()
         activityManager.getMemoryInfo(memoryInfo)
-        val memoryBudget = (memoryInfo.availMem - memoryInfo.threshold).coerceAtLeast(0L) / 4L
+        // This is an application allocation safety cap derived from current host
+        // memory headroom. Android does not expose total/free GPU VRAM here.
+        val allocationCapBytes = (memoryInfo.availMem - memoryInfo.threshold).coerceAtLeast(0L) / 4L
 
         appendLog("device_total_memory_bytes=${memoryInfo.totalMem}")
         appendLog("device_available_memory_bytes=${memoryInfo.availMem}")
         appendLog("device_memory_threshold_bytes=${memoryInfo.threshold}")
         appendLog("device_low_memory=${memoryInfo.lowMemory}")
-        appendLog("gpu_memory_budget_estimate_bytes=$memoryBudget")
-        appendLog("gpu_memory_budget_source=android_system_memory_heuristic_not_gpu_vram_measurement")
+        appendLog("gpu_engine_allocation_cap_bytes=$allocationCapBytes")
+        appendLog("gpu_engine_allocation_cap_source=host_memory_safety_policy_not_gpu_vram_measurement")
         appendLog("requested_context_length=$contextLength")
         appendLog("activation_backend=dedicated_android_gpu_engine_only")
 
         runOnUiThread { statusView.text = "Activating GPU engine…" }
         val startedAt = System.nanoTime()
-        val result = GpuEngineTestApi.loadModel(modelFile.absolutePath, contextLength, memoryBudget)
+        val result = GpuEngineTestApi.loadModel(modelFile.absolutePath, contextLength, allocationCapBytes)
         val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L
         val nativeReport = GpuEngineTestApi.diagnostics()
 
