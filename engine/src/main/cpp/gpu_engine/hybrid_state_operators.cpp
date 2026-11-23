@@ -108,7 +108,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>,
     if (task >= tasks) { return; }
     let head = task / STATE_SIZE;
     let column = task % STATE_SIZE;
-    let key_head = head / (VALUE_HEADS / KEY_HEADS);
+    let key_head = head % KEY_HEADS;
     let state_base = head * STATE_SIZE * STATE_SIZE;
     for (var token = 0u; token < TOKENS; token = token + 1u) {
         let decay = exp(gate_values[token * VALUE_HEADS + head]);
@@ -154,7 +154,7 @@ void main() {
     if (task >= tasks) return;
     uint head = task / STATE_SIZE;
     uint column = task % STATE_SIZE;
-    uint key_head = head / (VALUE_HEADS / KEY_HEADS);
+    uint key_head = head % KEY_HEADS;
     uint state_base = head * STATE_SIZE * STATE_SIZE;
     for (uint token = 0u; token < TOKENS; ++token) {
         float decay = exp(gate_values[token * VALUE_HEADS + head]);
@@ -414,7 +414,7 @@ Status reference_gated_delta_net_f32(const float* q, const float* k, const float
         return {StatusCode::InvalidArgument, "GatedDeltaNet reference received invalid pointers or dimensions"};
     for (uint32_t token = 0; token < tokens; ++token)
         for (uint32_t head = 0; head < value_heads; ++head) {
-            const uint32_t key_head = head / (value_heads / key_heads);
+            const uint32_t key_head = head % key_heads;
             const float decay = std::exp(gate[static_cast<size_t>(token) * value_heads + head]);
             const float rate = beta[static_cast<size_t>(token) * value_heads + head];
             float* head_state = state + static_cast<size_t>(head) * state_size * state_size;
