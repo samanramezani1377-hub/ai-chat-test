@@ -212,24 +212,48 @@ Status execute_chunked_quantized_matmul_if_needed(
     const Tensor& output = output_it->second;
     const auto& dimensions = weight_it->second.dimensions;
     const auto& type = source->type;
+    const auto& input_shape = input.descriptor().shape;
+    const auto& output_shape = output.descriptor().shape;
     if (input.descriptor().data_type != DataType::F32 ||
         output.descriptor().data_type != DataType::F32 ||
-        input.descriptor().shape.size() != 2 ||
-        (output.descriptor().shape.size() != 2 && output.descriptor().shape.size() != 3) ||
+        input_shape.size() < 2 || input_shape.size() > 4 ||
+        output_shape.empty() || output_shape.size() > 4 ||
+        input.descriptor().layout != TensorLayout::Contiguous ||
+        output.descriptor().layout != TensorLayout::Contiguous ||
         dimensions.size() != 2 || source->dimensions != dimensions ||
         source->type_id != weight_it->second.file_type_id ||
-        input.descriptor().shape[1] != dimensions[0] ||
-        input.descriptor().shape[0] == 0 || !input.buffer() || !output.buffer() ||
+        !input.buffer() || !output.buffer() ||
         !type.storage_size_known || type.block_elements == 0 || type.bytes_per_block == 0)
-        return {StatusCode::Unsupported, "Chunked MatMul GGUF layout or activation/output shapes are incompatible"};
+        return {StatusCode::Unsupported,
+            "Chunked MatMul metadata is incompatible: op=" + operation.id +
+            " weight=" + weight_name + " quant_type=" + type.name +
+            " input_rank=" + std::to_string(input_shape.size()) +
+            " output_rank=" + std::to_string(output_shape.size())};
 
     const uint64_t inner = dimensions[0];
     const uint64_t total_channels = dimensions[1];
-    const uint64_t rows = input.descriptor().shape[0];
     if (inner == 0 || total_channels == 0 || inner % type.block_elements != 0 ||
-        total_channels > UINT32_MAX || rows > UINT32_MAX ||
-        output.element_count() / rows != total_channels)
-        return {StatusCode::Unsupported, "Chunked MatMul dimensions are not aligned to the GGUF storage block"};
+        total_channels > UINT32_MAX || inner > UINT32_MAX ||
+        input.element_count() == 0 || input.element_count() % inner != 0)
+        return {StatusCode::Unsupported,
+            "Chunked MatMul activation elements do not form complete GGUF K rows: op=" +
+            operation.id + " K=" + std::to_string(inner) +
+            " activation_elements=" + std::to_string(input.element_count())};
+
+    // Model plans may express activations as [batch, sequence, K] or
+    // [tokens, heads, head_dim]. The quantized matrix is [K, N], so all
+    // contiguous leading activation dimensions are flattened into M rows.
+    // This is a view only: no host copy or data reordering is performed.
+    const uint64_t rows = input.element_count() / inner;
+    uint64_t expected_output_elements = 0;
+    if (rows == 0 || rows > UINT32_MAX ||
+        !checked_product(rows, total_channels, expected_output_elements) ||
+        output.element_count() != expected_output_elements)
+        return {StatusCode::Unsupported,
+            "Chunked MatMul output element count does not match flattened MxN: op=" +
+            operation.id + " M=" + std::to_string(rows) +
+            " N=" + std::to_string(total_channels) +
+            " output_elements=" + std::to_string(output.element_count())};
 
     uint64_t row_bytes = 0, expected_weight_bytes = 0, output_bytes_per_channel = 0;
     if (!checked_product(inner / type.block_elements, type.bytes_per_block, row_bytes) ||
@@ -418,6 +442,17 @@ Status execute_chunked_quantized_matmul_if_needed(
         if (!status.ok()) return status;
 
         ModelExecutionContext chunk_context = context;
+        // Canonicalize contiguous activations to [M, K]. This supports rank-2,
+        // rank-3 and rank-4 model-plan tensors without changing their byte order.
+        TensorDesc activation_view_desc = input.descriptor();
+        activation_view_desc.shape = {rows, inner};
+        activation_view_desc.strides_bytes.clear();
+        Tensor activation_view;
+        status = Tensor::create(std::move(activation_view_desc), input.buffer(),
+            input.byte_offset(), activation_view);
+        if (!status.ok()) return status;
+        chunk_context.tensors[operation.inputs.front()] = std::move(activation_view);
+
         QuantizedWeightBinding chunk_weight = weight_it->second;
         chunk_weight.buffer = chunk.weight_lease.buffer();
         chunk_weight.byte_size = weight_bytes;
