@@ -82,6 +82,7 @@ private:
     bool last_decode_timing_valid_ = false;
     std::string last_generation_stage_ = "not_started";
     std::string last_model_graph_validation_ = "not_run";
+    uint64_t last_real_q6_k_parity_checks_ = 0;
     std::string cross_backend_quantization_validation_ = "not_run";
     uint64_t last_prompt_tokens_ = 0;
     uint64_t last_output_tokens_ = 0;
