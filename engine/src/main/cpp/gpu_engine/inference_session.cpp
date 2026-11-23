@@ -1013,10 +1013,18 @@ Status GpuInferenceSession::update_memory_budget(uint64_t allocation_cap_bytes) 
         return {StatusCode::InvalidArgument, "GPU engine allocation cap must be non-zero"};
     std::lock_guard<std::mutex> lock(mutex_);
     if (memory_) {
+        // A lower host-memory safety cap invalidates optional cached weights
+        // first. KV/state allocations remain owned by their dedicated leases.
+        if (allocation_cap_bytes < memory_->budget_bytes()) {
+            context_.quantized_weights.clear();
+            context_.weight_leases.clear();
+        }
         Status status = memory_->update_budget(allocation_cap_bytes);
         if (!status.ok()) return status;
     }
     memory_budget_bytes_ = allocation_cap_bytes;
+    context_.persistent_weight_cache_limit_bytes = std::min<uint64_t>(
+        memory_budget_bytes_ / 4, 256ull * 1024ull * 1024ull);
     return Status::success();
 }
 
