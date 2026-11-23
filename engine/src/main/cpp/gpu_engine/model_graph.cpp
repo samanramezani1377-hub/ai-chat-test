@@ -88,6 +88,70 @@ Status verify_chunk_output_binding(const ComputeDispatch& dispatch, BackendKind 
     return Status::success();
 }
 
+Status validate_resident_q6_k_matmul_sample(
+        const ModelPlanOperation& operation, const GgufReader& reader,
+        Backend& backend, const ModelExecutionContext& context,
+        uint64_t* parity_checks) {
+    if (!context.prefill || parity_checks == nullptr ||
+        operation.operator_name != "MatMul_Q6_K" ||
+        operation.inputs.size() != 1 || operation.weight_tensors.size() != 1)
+        return Status::success();
+
+    const GgufTensorInfo* source = reader.find_tensor(operation.weight_tensors.front());
+    const auto input_it = context.tensors.find(operation.inputs.front());
+    const auto output_it = context.tensors.find(operation.output);
+    if (!source || source->type.name != "Q6_K" ||
+        input_it == context.tensors.end() || output_it == context.tensors.end())
+        return {StatusCode::InvalidArgument, "Real Q6_K MatMul validation could not resolve its GGUF weight or tensors"};
+
+    const Tensor& input = input_it->second;
+    const Tensor& output = output_it->second;
+    if (!source->byte_size_known || source->dimensions.size() != 2 ||
+        input.descriptor().data_type != DataType::F32 ||
+        output.descriptor().data_type != DataType::F32 ||
+        input.descriptor().shape.size() != 2 || input.descriptor().shape[0] == 0 ||
+        input.descriptor().shape[1] != source->dimensions[0] ||
+        output.element_count() / input.descriptor().shape[0] != source->dimensions[1] ||
+        source->dimensions[0] > UINT32_MAX || source->dimensions[1] == 0 ||
+        source->dimensions[0] % 256 != 0)
+        return {StatusCode::Unsupported, "Real Q6_K MatMul sample validation received incompatible tensor shapes"};
+
+    const uint64_t inner = source->dimensions[0];
+    const uint64_t channels = source->dimensions[1];
+    const uint64_t row_bytes = (inner / 256) * 210;
+    const uint32_t sample_channels = static_cast<uint32_t>(std::min<uint64_t>(4, channels));
+    const uint64_t sample_weight_bytes = static_cast<uint64_t>(sample_channels) * row_bytes;
+    std::vector<uint8_t> sample_weights(static_cast<size_t>(sample_weight_bytes));
+    Status status = reader.read_tensor_chunk(*source, 0, sample_weights.data(), sample_weight_bytes);
+    if (!status.ok()) return status;
+
+    std::vector<float> activations(static_cast<size_t>(inner));
+    std::vector<float> expected(sample_channels), actual(sample_channels);
+    status = backend.readback(input.buffer(), input.byte_offset(), activations.data(),
+                              activations.size() * sizeof(float));
+    if (!status.ok()) return status;
+    status = reference_q6_k_matmul(activations.data(), sample_weights.data(),
+        sample_weight_bytes, expected.data(), 1, sample_channels,
+        static_cast<uint32_t>(inner));
+    if (!status.ok()) return status;
+    status = backend.readback(output.buffer(), output.byte_offset(), actual.data(),
+                              actual.size() * sizeof(float));
+    if (!status.ok()) return status;
+
+    for (size_t index = 0; index < actual.size(); ++index) {
+        const float tolerance = 2.0e-3f +
+            2.0e-3f * std::max(std::fabs(expected[index]), 1.0f);
+        if (!std::isfinite(actual[index]) ||
+            std::fabs(actual[index] - expected[index]) > tolerance) {
+            return {StatusCode::NumericalFailure,
+                "Resident real GGUF Q6_K MatMul parity failed for " + operation.id +
+                " at sample_channel=" + std::to_string(index)};
+        }
+    }
+    ++(*parity_checks);
+    return Status::success();
+}
+
 Status execute_chunked_quantized_matmul_if_needed(
         const ModelPlanOperation& operation, Backend& backend,
         const ModelLoweringRegistry& lowerings, const OperatorRegistry& operators,
@@ -1027,6 +1091,17 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
             status = scheduler.execute(backend, graph, cancellation);
             if (!status.ok()) {
                 report.errors.push_back(operation.id + ":STREAMED_DISPATCH_FAILED:" + status.message);
+                for (const auto& name : operation.weight_tensors) {
+                    operation_context.tensors.erase(name);
+                    operation_context.quantized_weights.erase(name);
+                }
+                operation_context.weight_leases.clear();
+                return status;
+            }
+            status = validate_resident_q6_k_matmul_sample(operation, reader, backend,
+                operation_context, &report.real_q6_k_parity_checks);
+            if (!status.ok()) {
+                report.errors.push_back(operation.id + ":REAL_Q6_K_PARITY_FAILED:" + status.message);
                 for (const auto& name : operation.weight_tensors) {
                     operation_context.tensors.erase(name);
                     operation_context.quantized_weights.erase(name);
