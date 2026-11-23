@@ -193,6 +193,11 @@ class ExecutionScheduler {
 public:
     Status execute(Backend& backend, const ComputeGraph& graph,
                    const std::atomic<bool>* cancellation = nullptr) const;
+    // Executes an ordered run of independently compiled graph fragments in one
+    // command batch. Graph order is preserved; each fragment still validates
+    // its own internal dependencies before any GPU work is submitted.
+    Status execute_sequence(Backend& backend, const std::vector<ComputeGraph>& graphs,
+                            const std::atomic<bool>* cancellation = nullptr) const;
 };
 
 } // namespace ai_chat::gpu_engine
