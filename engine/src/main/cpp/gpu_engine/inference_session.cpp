@@ -350,64 +350,21 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         total_weight_bytes_ = next_total;
         largest_weight_tensor_bytes_ = std::max(largest_weight_tensor_bytes_, tensor->byte_size);
 
-        if (tensor->type.name == "F32") continue;
-        if (tensor->type.name == "Q4_0") {
-            quantization_types.insert(2);
-            continue;
+        if (tensor->type.name == "F32" && tensor->type_id == 0) continue;
+        const QuantizationFormat* registered_format = quantizations_->find(tensor->type_id);
+        if (!registered_format || registered_format->name != tensor->type.name) {
+            last_error_ = "GGUF weight type has no registered GPU execution format: " +
+                tensor->type.name + " | gguf_type_id=" + std::to_string(tensor->type_id) +
+                " | tensor=" + name;
+            unload_locked();
+            return {StatusCode::Unsupported, last_error_};
         }
-        if (tensor->type.name == "Q4_1") {
-            quantization_types.insert(3);
-            continue;
-        }
-        if (tensor->type.name == "Q8_0") {
-            quantization_types.insert(8);
-            continue;
-        }
-        if (tensor->type.name == "Q5_0") {
-            quantization_types.insert(6);
-            continue;
-        }
-        if (tensor->type.name == "Q5_1") {
-            quantization_types.insert(7);
-            continue;
-        }
-        if (tensor->type.name == "F16") {
-            quantization_types.insert(1);
-            continue;
-        }
-        if (tensor->type.name == "BF16") {
-            quantization_types.insert(30);
-            continue;
-        }
-        if (tensor->type.name == "Q6_K") {
-            quantization_types.insert(14);
-            continue;
-        }
-        if (tensor->type.name == "Q4_K") {
-            quantization_types.insert(12);
-            continue;
-        }
-        if (tensor->type.name == "Q5_K") {
-            quantization_types.insert(13);
-            continue;
-        }
-        if (tensor->type.name == "Q2_K") {
-            quantization_types.insert(10);
-            continue;
-        }
-        if (tensor->type.name == "Q3_K") {
-            quantization_types.insert(11);
-            continue;
-        }
-        last_error_ = "Weight type is not implemented by the current GPU loader: " +
-                      tensor->type.name + " (" + name + ")";
-        unload_locked();
-        return {StatusCode::Unsupported, last_error_};
+        quantization_types.insert(tensor->type_id);
     }
 
-    // Estimate the actual peak resident weight set. Q6_K MatMul streams
-    // complete output-channel rows; Q6_K Embedding gathers only the requested
-    // token rows instead of pinning the entire vocabulary matrix.
+    // Estimate peak resident storage from each GGUF tensor's own block layout
+    // and the operation that consumes it. This applies uniformly to registered
+    // packed formats rather than relying on a particular quantization name.
     peak_operation_weight_bytes_ = 0;
     const DeviceInfo* memory_device = engine_->active_device();
     const uint64_t weight_binding_limit = memory_device
@@ -433,16 +390,23 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
                 return {StatusCode::InvalidArgument, last_error_};
             }
             uint64_t resident_bytes = (tensor->byte_size + 3) & ~uint64_t{3};
-            if (tensor->type.name == "Q6_K" && tensor->type_id == 14 &&
-                tensor->dimensions.size() == 2 && tensor->dimensions[0] % 256 == 0) {
-                const uint64_t row_bytes = (tensor->dimensions[0] / 256) * 210;
-                if (operation.operator_name == "MatMul_Q6_K" && row_bytes != 0 &&
-                    weight_binding_limit >= row_bytes) {
-                    resident_bytes = std::min(resident_bytes,
-                        (weight_binding_limit / row_bytes) * row_bytes);
-                } else if (operation.operator_name == "Embedding_Q6_K" && row_bytes != 0 &&
-                           context_length <= UINT64_MAX / row_bytes) {
-                    resident_bytes = std::min(resident_bytes, context_length * row_bytes);
+            const bool matmul_weight = operation.operator_name.rfind("MatMul_", 0) == 0;
+            const bool embedding_weight = operation.operator_name.rfind("Embedding_", 0) == 0;
+            if (tensor->type.name != "F32" && tensor->type.storage_size_known &&
+                tensor->type.block_elements != 0 && tensor->type.bytes_per_block != 0 &&
+                tensor->dimensions.size() == 2 &&
+                tensor->dimensions[0] % tensor->type.block_elements == 0) {
+                const uint64_t blocks_per_row =
+                    tensor->dimensions[0] / tensor->type.block_elements;
+                if (blocks_per_row <= UINT64_MAX / tensor->type.bytes_per_block) {
+                    const uint64_t row_bytes = blocks_per_row * tensor->type.bytes_per_block;
+                    if (row_bytes != 0 && matmul_weight && weight_binding_limit >= row_bytes) {
+                        resident_bytes = std::min(resident_bytes,
+                            (weight_binding_limit / row_bytes) * row_bytes);
+                    } else if (row_bytes != 0 && embedding_weight &&
+                               context_length <= UINT64_MAX / row_bytes) {
+                        resident_bytes = std::min(resident_bytes, context_length * row_bytes);
+                    }
                 }
             }
             uint64_t next_operation_bytes = 0;
