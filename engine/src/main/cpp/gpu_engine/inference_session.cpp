@@ -885,6 +885,10 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     context_.backend = engine_->active_backend();
     context_.kv_cache = kv_cache_.get();
     context_.context_length = context_length_;
+    // Retain a conservative fraction of the application allocation cap for
+    // frequently reused quantized MatMul weights; this is not a VRAM estimate.
+    context_.persistent_weight_cache_limit_bytes = std::min<uint64_t>(
+        memory_budget_bytes_ / 4, 256ull * 1024ull * 1024ull);
 
     std::unordered_set<std::string> persistent_state_names;
     auto allocate_persistent_state = [&](const std::string& name,
@@ -1352,6 +1356,11 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";last_failed_storage_binding_limit_bytes=" << last_failed_storage_binding_limit_bytes_
            << ";gpu_memory_total=unknown"
            << ";gpu_memory_free=unknown"
+           << ";weight_cache_limit_bytes=" << context_.persistent_weight_cache_limit_bytes
+           << ";weight_cache_hits=" << context_.persistent_weight_cache_hits
+           << ";weight_cache_misses=" << context_.persistent_weight_cache_misses
+           << ";weight_cache_resident_bytes=" << [&]() { uint64_t total = 0; for (const auto& item : context_.quantized_weights) { if (item.second.buffer && item.second.byte_size <= UINT64_MAX - total) total += item.second.byte_size; } return total; }()
+           << ";weight_cache_resident_tensors=" << std::count_if(context_.quantized_weights.begin(), context_.quantized_weights.end(), [](const auto& item) { return static_cast<bool>(item.second.buffer); })
            << ";weight_streaming=operation-aware-chunked"
            << ";single_tensor_chunking=GGUF_BLOCK_AWARE_MATMUL_CHANNELS_AND_EMBEDDING_TOKEN_ROWS"
            << ";chunked_operator_support=F32_ELEMENTWISE,GGUF_BLOCK_MATMUL,GGUF_BLOCK_EMBEDDING"
