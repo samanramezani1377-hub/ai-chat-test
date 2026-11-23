@@ -223,6 +223,13 @@ void test_independent_gguf_reader() {
     std::remove(path.c_str());
 }
 
+void test_runtime_quantization_parity_validation_is_opt_in() {
+    ModelExecutionContext context;
+    assert(!context.enable_runtime_quantization_parity_validation);
+    context.enable_runtime_quantization_parity_validation = true;
+    assert(context.enable_runtime_quantization_parity_validation);
+}
+
 void test_tensor_and_memory_lease() {
     FakeBackend backend;
     MemoryManager memory(backend, 128);
@@ -4274,6 +4281,7 @@ void test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends
 }
 
 int main() {
+    test_runtime_quantization_parity_validation_is_opt_in();
     test_q6_k_matmul_flattens_attention_head_dimensions_for_rank_reduced_output();
     test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends();
     test_generic_chunk_executor_preserves_offsets_and_aggregates();
