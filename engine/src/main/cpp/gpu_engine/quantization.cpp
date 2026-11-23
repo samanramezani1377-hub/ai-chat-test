@@ -668,6 +668,8 @@ constexpr char kQ6_KMatMulWgsl[] = R"wgsl(
 @group(0) @binding(2) var<storage, read_write> output: array<f32>;
 const ROWS: u32 = 1u;
 const OUTPUT_CHANNELS: u32 = 1u;
+const OUTPUT_CHANNELS_TOTAL: u32 = 1u;
+const OUTPUT_CHANNEL_OFFSET: u32 = 0u;
 const INNER: u32 = 256u;
 const WEIGHT_ROW_BYTES: u32 = 210u;
 fn read_u8(byte_offset:u32)->u32 {
@@ -704,7 +706,7 @@ fn main(@builtin(global_invocation_id) gid:vec3<u32>){
     if(row>=ROWS||channel>=OUTPUT_CHANNELS){return;}
     var sum=0.0;
     for(var k=0u;k<INNER;k=k+1u){sum=sum+activations[row*INNER+k]*decode_weight(channel,k);}
-    output[row*OUTPUT_CHANNELS+channel]=sum;
+    output[row*OUTPUT_CHANNELS_TOTAL+OUTPUT_CHANNEL_OFFSET+channel]=sum;
 }
 )wgsl";
 
@@ -717,6 +719,8 @@ layout(std430,binding=1) readonly buffer Weights{uint weights[];};
 layout(std430,binding=2) writeonly buffer Output{float output_values[];};
 const uint ROWS=1u;
 const uint OUTPUT_CHANNELS=1u;
+const uint OUTPUT_CHANNELS_TOTAL=1u;
+const uint OUTPUT_CHANNEL_OFFSET=0u;
 const uint INNER=256u;
 const uint WEIGHT_ROW_BYTES=210u;
 uint read_u8(uint byte_offset){uint word=weights[byte_offset>>2u];return(word>>((byte_offset&3u)*8u))&255u;}
@@ -742,7 +746,7 @@ void main(){
     if(row>=ROWS||channel>=OUTPUT_CHANNELS)return;
     float sum=0.0;
     for(uint k=0u;k<INNER;++k)sum+=activations[row*INNER+k]*decode_weight(channel,k);
-    output_values[row*OUTPUT_CHANNELS+channel]=sum;
+    output_values[row*OUTPUT_CHANNELS_TOTAL+OUTPUT_CHANNEL_OFFSET+channel]=sum;
 }
 )glsl";
 
@@ -4919,62 +4923,110 @@ Status reference_q6_k_embedding(const uint8_t*w,uint64_t bytes,uint32_t vocabula
 }
 
 namespace {
-Status build_q6_k_matmul_candidate_impl(const Tensor&activations,const std::shared_ptr<Buffer>&weights,
-    uint64_t bytes,const Tensor&output,ComputeDispatch&dispatch){
-    dispatch=ComputeDispatch{};
-    if(!weights||weights->memory_domain()==MemoryDomain::Host||!is_device_contiguous_f32(activations)||
-       !is_device_contiguous_f32(output)||!activations.buffer()||!output.buffer()||
-       activations.descriptor().shape.size()!=2||
-       (output.descriptor().shape.size()!=2&&output.descriptor().shape.size()!=3))
-        return {StatusCode::Unsupported,"Q6_K MatMul requires F32 activations and packed Q6_K weights"};
-    const auto&a=activations.descriptor().shape;const auto&o=output.descriptor().shape;
-    const uint64_t channels=o.size()==2?o[1]:(o[2]&&o[1]<=UINT64_MAX/o[2]?o[1]*o[2]:0);
-    if(!a[0]||!a[1]||a[1]%256||o[0]!=a[0]||!channels||a[0]>UINT32_MAX||a[1]>UINT32_MAX||
-       channels>UINT32_MAX||activations.element_count()>UINT32_MAX||output.element_count()>UINT32_MAX)
-        return {StatusCode::InvalidArgument,"Q6_K MatMul dimensions are invalid or K is not block-aligned"};
-    const uint64_t blocks=a[1]/256;
-    if(blocks>UINT64_MAX/210||channels>UINT64_MAX/(blocks*210))
-        return {StatusCode::InvalidArgument,"Q6_K weight byte size overflows"};
-    const uint64_t expected=channels*blocks*210;
-    if(bytes!=expected||bytes>UINT32_MAX-3ull)return {StatusCode::InvalidArgument,"Q6_K weight bytes do not match [N,K]"};
-    const uint64_t padded=(bytes+3)&~uint64_t{3};
-    if(weights->size_bytes()<padded||output.byte_size()!=output.element_count()*sizeof(float)||
-       output.buffer().get()==activations.buffer().get()||output.buffer().get()==weights.get())
-        return {StatusCode::InvalidArgument,"Q6_K MatMul buffer ranges are inconsistent"};
-    dispatch.label="q6-k-matmul-f32-activation-generic-unverified";
-    dispatch.kernel_id="dawn-q6-k-matmul-f32-activation-v1";
-    dispatch.backend=BackendKind::DawnWebGpu;dispatch.wgsl_source=kQ6_KMatMulWgsl;
-    dispatch.workgroup_size_x=dispatch.workgroup_size_y=8;
-    const std::pair<std::string,std::string> constants[]={
-        {"const ROWS: u32 = 1u;","const ROWS: u32 = "+std::to_string(a[0])+"u;"},
-        {"const OUTPUT_CHANNELS: u32 = 1u;","const OUTPUT_CHANNELS: u32 = "+std::to_string(channels)+"u;"},
-        {"const INNER: u32 = 256u;","const INNER: u32 = "+std::to_string(a[1])+"u;"},
-        {"const WEIGHT_ROW_BYTES: u32 = 210u;","const WEIGHT_ROW_BYTES: u32 = "+std::to_string(blocks*210)+"u;"}
+Status build_q6_k_matmul_candidate_impl(const Tensor& activations,
+    const std::shared_ptr<Buffer>& weights, uint64_t bytes, const Tensor& output,
+    uint32_t channel_offset, uint32_t requested_chunk_channels, bool gles,
+    ComputeDispatch& dispatch) {
+    dispatch = ComputeDispatch{};
+    if (!weights || weights->memory_domain() == MemoryDomain::Host ||
+        !is_device_contiguous_f32(activations) || !is_device_contiguous_f32(output) ||
+        !activations.buffer() || !output.buffer() ||
+        activations.descriptor().shape.size() != 2 ||
+        (output.descriptor().shape.size() != 2 && output.descriptor().shape.size() != 3))
+        return {StatusCode::Unsupported, "Q6_K MatMul requires F32 activations and packed Q6_K weights"};
+    const auto& a = activations.descriptor().shape;
+    const auto& o = output.descriptor().shape;
+    const uint64_t total_channels = o.size() == 2 ? o[1] :
+        (o[2] && o[1] <= UINT64_MAX / o[2] ? o[1] * o[2] : 0);
+    const uint64_t chunk_channels = requested_chunk_channels == 0
+        ? total_channels : requested_chunk_channels;
+    if (!a[0] || !a[1] || a[1] % 256 || o[0] != a[0] || !total_channels ||
+        !chunk_channels || channel_offset > total_channels ||
+        chunk_channels > total_channels - channel_offset ||
+        a[0] > UINT32_MAX || a[1] > UINT32_MAX ||
+        total_channels > UINT32_MAX || chunk_channels > UINT32_MAX ||
+        activations.element_count() > UINT32_MAX || output.element_count() > UINT32_MAX)
+        return {StatusCode::InvalidArgument, "Q6_K MatMul dimensions or output-channel chunk are invalid"};
+    const uint64_t blocks = a[1] / 256;
+    if (blocks > UINT64_MAX / 210 || chunk_channels > UINT64_MAX / (blocks * 210))
+        return {StatusCode::InvalidArgument, "Q6_K weight byte size overflows"};
+    const uint64_t expected = chunk_channels * blocks * 210;
+    if (bytes != expected || bytes > UINT32_MAX - 3ull)
+        return {StatusCode::InvalidArgument, "Q6_K weight bytes do not match the requested output-channel chunk"};
+    const uint64_t padded = (bytes + 3) & ~uint64_t{3};
+    if (weights->size_bytes() < padded ||
+        output.byte_size() != output.element_count() * sizeof(float) ||
+        output.buffer().get() == activations.buffer().get() ||
+        output.buffer().get() == weights.get())
+        return {StatusCode::InvalidArgument, "Q6_K MatMul buffer ranges are inconsistent"};
+
+    dispatch.label = gles ? "q6-k-matmul-chunk-gles-unverified" : "q6-k-matmul-chunk-dawn-unverified";
+    dispatch.kernel_id = (gles ? "gles-" : "dawn-") + std::string("q6-k-matmul-f32-activation-v1");
+    dispatch.backend = gles ? BackendKind::OpenGles : BackendKind::DawnWebGpu;
+    if (gles) dispatch.glsl_source = kQ6_KMatMulGlsl;
+    else dispatch.wgsl_source = kQ6_KMatMulWgsl;
+    dispatch.workgroup_size_x = dispatch.workgroup_size_y = 8;
+
+    const std::pair<std::string, std::string> wgsl_constants[] = {
+        {"const ROWS: u32 = 1u;", "const ROWS: u32 = " + std::to_string(a[0]) + "u;"},
+        {"const OUTPUT_CHANNELS: u32 = 1u;", "const OUTPUT_CHANNELS: u32 = " + std::to_string(chunk_channels) + "u;"},
+        {"const OUTPUT_CHANNELS_TOTAL: u32 = 1u;", "const OUTPUT_CHANNELS_TOTAL: u32 = " + std::to_string(total_channels) + "u;"},
+        {"const OUTPUT_CHANNEL_OFFSET: u32 = 0u;", "const OUTPUT_CHANNEL_OFFSET: u32 = " + std::to_string(channel_offset) + "u;"},
+        {"const INNER: u32 = 256u;", "const INNER: u32 = " + std::to_string(a[1]) + "u;"},
+        {"const WEIGHT_ROW_BYTES: u32 = 210u;", "const WEIGHT_ROW_BYTES: u32 = " + std::to_string(blocks * 210) + "u;"}
     };
-    for(const auto&item:constants){const size_t pos=dispatch.wgsl_source.find(item.first);if(pos==std::string::npos)return {StatusCode::BackendFailure,"Q6_K WGSL placeholder missing"};dispatch.wgsl_source.replace(pos,item.first.size(),item.second);}
-    dispatch.workgroups_x=static_cast<uint32_t>((channels+7)/8);dispatch.workgroups_y=static_cast<uint32_t>((a[0]+7)/8);
-    dispatch.bindings={{0,activations.buffer(),activations.byte_offset(),activations.byte_size()},
-                       {1,weights,0,padded},{2,output.buffer(),output.byte_offset(),output.byte_size()}};
+    const std::pair<std::string, std::string> glsl_constants[] = {
+        {"const uint ROWS=1u;", "const uint ROWS=" + std::to_string(a[0]) + "u;"},
+        {"const uint OUTPUT_CHANNELS=1u;", "const uint OUTPUT_CHANNELS=" + std::to_string(chunk_channels) + "u;"},
+        {"const uint OUTPUT_CHANNELS_TOTAL=1u;", "const uint OUTPUT_CHANNELS_TOTAL=" + std::to_string(total_channels) + "u;"},
+        {"const uint OUTPUT_CHANNEL_OFFSET=0u;", "const uint OUTPUT_CHANNEL_OFFSET=" + std::to_string(channel_offset) + "u;"},
+        {"const uint INNER=256u;", "const uint INNER=" + std::to_string(a[1]) + "u;"},
+        {"const uint WEIGHT_ROW_BYTES=210u;", "const uint WEIGHT_ROW_BYTES=" + std::to_string(blocks * 210) + "u;"}
+    };
+    auto specialize = [](std::string& source,
+                         const std::pair<std::string, std::string>* constants,
+                         size_t count) -> Status {
+        for (size_t i = 0; i < count; ++i) {
+            const size_t position = source.find(constants[i].first);
+            if (position == std::string::npos)
+                return {StatusCode::BackendFailure, "Q6_K MatMul shader specialization placeholder is missing"};
+            source.replace(position, constants[i].first.size(), constants[i].second);
+        }
+        return Status::success();
+    };
+    Status status = gles
+        ? specialize(dispatch.glsl_source, glsl_constants, sizeof(glsl_constants) / sizeof(glsl_constants[0]))
+        : specialize(dispatch.wgsl_source, wgsl_constants, sizeof(wgsl_constants) / sizeof(wgsl_constants[0]));
+    if (!status.ok()) return status;
+
+    dispatch.workgroups_x = static_cast<uint32_t>((chunk_channels + 7) / 8);
+    dispatch.workgroups_y = static_cast<uint32_t>((a[0] + 7) / 8);
+    dispatch.bindings = {
+        {0, activations.buffer(), activations.byte_offset(), activations.byte_size()},
+        {1, weights, 0, padded},
+        {2, output.buffer(), output.byte_offset(), output.byte_size()}
+    };
     return Status::success();
 }
 }
-Status build_q6_k_matmul_candidate(const Tensor&a,const std::shared_ptr<Buffer>&w,uint64_t b,const Tensor&o,ComputeDispatch&d){return build_q6_k_matmul_candidate_impl(a,w,b,o,d);}
-static Status build_q6_k_matmul_gles_candidate_impl(const Tensor&a,const std::shared_ptr<Buffer>&w,uint64_t b,const Tensor&o,ComputeDispatch&d){
-    Status status=build_q6_k_matmul_candidate_impl(a,w,b,o,d);if(!status.ok())return status;
-    const uint64_t channels=o.element_count()/a.descriptor().shape[0],blocks=a.descriptor().shape[1]/256;
-    d.label="q6-k-matmul-f32-activation-gles-generic-unverified";
-    d.kernel_id="gles-q6-k-matmul-f32-activation-v1";d.backend=BackendKind::OpenGles;
-    d.wgsl_source.clear();d.glsl_source=kQ6_KMatMulGlsl;
-    const std::pair<std::string,std::string> constants[]={
-        {"const uint ROWS=1u;","const uint ROWS="+std::to_string(a.descriptor().shape[0])+"u;"},
-        {"const uint OUTPUT_CHANNELS=1u;","const uint OUTPUT_CHANNELS="+std::to_string(channels)+"u;"},
-        {"const uint INNER=256u;","const uint INNER="+std::to_string(a.descriptor().shape[1])+"u;"},
-        {"const uint WEIGHT_ROW_BYTES=210u;","const uint WEIGHT_ROW_BYTES="+std::to_string(blocks*210)+"u;"}
-    };
-    for(const auto&item:constants){const size_t pos=d.glsl_source.find(item.first);if(pos==std::string::npos)return {StatusCode::BackendFailure,"Q6_K GLES GLSL placeholder missing"};d.glsl_source.replace(pos,item.first.size(),item.second);}
-    return Status::success();
+
+Status build_q6_k_matmul_candidate(const Tensor& a, const std::shared_ptr<Buffer>& w,
+    uint64_t b, const Tensor& o, ComputeDispatch& d) {
+    return build_q6_k_matmul_candidate_impl(a, w, b, o, 0, 0, false, d);
 }
-Status build_q6_k_matmul_gles_candidate(const Tensor&a,const std::shared_ptr<Buffer>&w,uint64_t b,const Tensor&o,ComputeDispatch&d){return build_q6_k_matmul_gles_candidate_impl(a,w,b,o,d);}
+Status build_q6_k_matmul_gles_candidate(const Tensor& a, const std::shared_ptr<Buffer>& w,
+    uint64_t b, const Tensor& o, ComputeDispatch& d) {
+    return build_q6_k_matmul_candidate_impl(a, w, b, o, 0, 0, true, d);
+}
+Status build_q6_k_matmul_chunk_candidate(const Tensor& a, const std::shared_ptr<Buffer>& w,
+    uint64_t b, const Tensor& o, uint32_t offset, uint32_t count, ComputeDispatch& d) {
+    return build_q6_k_matmul_candidate_impl(a, w, b, o, offset, count, false, d);
+}
+Status build_q6_k_matmul_chunk_gles_candidate(const Tensor& a, const std::shared_ptr<Buffer>& w,
+    uint64_t b, const Tensor& o, uint32_t offset, uint32_t count, ComputeDispatch& d) {
+    return build_q6_k_matmul_candidate_impl(a, w, b, o, offset, count, true, d);
+}
+
 Status reference_q6_k_matmul(const float*a,const uint8_t*w,uint64_t bytes,float*out,uint32_t rows,uint32_t channels,uint32_t inner){
     if((!a||!w||!out)&&rows&&channels&&inner)return {StatusCode::InvalidArgument,"Q6_K MatMul reference received a null pointer"};
     if(!rows||!channels||!inner||inner%256)return {StatusCode::InvalidArgument,"Q6_K MatMul dimensions must be block-aligned"};

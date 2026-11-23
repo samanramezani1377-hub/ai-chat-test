@@ -175,6 +175,7 @@ struct ChunkExecutionConfig {
     uint64_t element_size_bytes = 0;
     uint64_t output_base_offset_bytes = 0;
     uint32_t output_binding = 1;
+    bool output_binding_is_chunk_slice = true;
     std::shared_ptr<Buffer> output_buffer;
 };
 

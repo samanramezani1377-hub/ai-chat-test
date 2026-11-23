@@ -381,10 +381,17 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         return {StatusCode::Unsupported, last_error_};
     }
 
-    // We load only the current operation's weights, but all weights attached
-    // to that operation coexist until its dispatch completes. Estimate that
-    // peak set rather than only the largest individual tensor.
+    // Estimate the actual peak resident weight set. Q6_K MatMul streams
+    // complete output-channel rows; Q6_K Embedding gathers only the requested
+    // token rows instead of pinning the entire vocabulary matrix.
     peak_operation_weight_bytes_ = 0;
+    const DeviceInfo* memory_device = engine_->active_device();
+    const uint64_t weight_binding_limit = memory_device
+        ? std::min(memory_device->limits.max_storage_buffer_binding_size,
+                   memory_device->limits.max_buffer_size == 0
+                       ? memory_device->limits.max_storage_buffer_binding_size
+                       : memory_device->limits.max_buffer_size)
+        : 0;
     for (const auto& operation : plan_.operations) {
         uint64_t operation_weight_bytes = 0;
         std::unordered_set<std::string> operation_weights;
@@ -401,9 +408,21 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
                 unload_locked();
                 return {StatusCode::InvalidArgument, last_error_};
             }
-            const uint64_t padded_bytes = (tensor->byte_size + 3) & ~uint64_t{3};
+            uint64_t resident_bytes = (tensor->byte_size + 3) & ~uint64_t{3};
+            if (tensor->type.name == "Q6_K" && tensor->type_id == 14 &&
+                tensor->dimensions.size() == 2 && tensor->dimensions[0] % 256 == 0) {
+                const uint64_t row_bytes = (tensor->dimensions[0] / 256) * 210;
+                if (operation.operator_name == "MatMul_Q6_K" && row_bytes != 0 &&
+                    weight_binding_limit >= row_bytes) {
+                    resident_bytes = std::min(resident_bytes,
+                        (weight_binding_limit / row_bytes) * row_bytes);
+                } else if (operation.operator_name == "Embedding_Q6_K" && row_bytes != 0 &&
+                           context_length <= UINT64_MAX / row_bytes) {
+                    resident_bytes = std::min(resident_bytes, context_length * row_bytes);
+                }
+            }
             uint64_t next_operation_bytes = 0;
-            if (add_overflow(operation_weight_bytes, padded_bytes, next_operation_bytes)) {
+            if (add_overflow(operation_weight_bytes, resident_bytes, next_operation_bytes)) {
                 last_error_ = "Peak per-operation weight set size overflowed";
                 unload_locked();
                 return {StatusCode::InvalidArgument, last_error_};
@@ -621,16 +640,35 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     }
     const uint64_t max_single_buffer = std::min(device->limits.max_buffer_size,
                                                 device->limits.max_storage_buffer_binding_size);
-    const uint64_t padded_largest_weight_bytes =
-        largest_weight_tensor_bytes_ > UINT64_MAX - 3 ? UINT64_MAX : (largest_weight_tensor_bytes_ + 3) & ~uint64_t{3};
-    if (padded_largest_weight_bytes > max_single_buffer) {
-        last_failed_tensor_bytes_ = padded_largest_weight_bytes;
+    for (const auto& tensor : model.tensors) {
+        if (!tensor.byte_size_known || tensor.byte_size <= max_single_buffer) continue;
+        bool referenced = false;
+        bool all_uses_chunkable = true;
+        uint64_t row_bytes = 0;
+        const bool q6_k = tensor.type.name == "Q6_K" && tensor.type_id == 14 &&
+                          tensor.dimensions.size() == 2 && tensor.dimensions[0] != 0 &&
+                          tensor.dimensions[0] % 256 == 0;
+        if (q6_k) row_bytes = (tensor.dimensions[0] / 256) * 210;
+        for (const auto& operation : plan_.operations) {
+            if (std::find(operation.weight_tensors.begin(), operation.weight_tensors.end(),
+                          tensor.name) == operation.weight_tensors.end()) continue;
+            referenced = true;
+            const bool supported_q6_use = q6_k &&
+                (operation.operator_name == "MatMul_Q6_K" ||
+                 operation.operator_name == "Embedding_Q6_K") &&
+                row_bytes != 0 && row_bytes <= max_single_buffer;
+            if (!supported_q6_use) all_uses_chunkable = false;
+        }
+        if (!referenced || all_uses_chunkable) continue;
+        const uint64_t padded_bytes = tensor.byte_size > UINT64_MAX - 3
+            ? UINT64_MAX : (tensor.byte_size + 3) & ~uint64_t{3};
+        last_failed_tensor_bytes_ = padded_bytes;
         last_failed_storage_binding_limit_bytes_ = max_single_buffer;
         last_failed_memory_budget_bytes_ = memory_budget_bytes;
-        last_error_ = "A single model tensor exceeds the backend storage-buffer limit; " +
-            std::string("tensor_bytes=") + std::to_string(padded_largest_weight_bytes) +
-            " | max_storage_binding_bytes=" + std::to_string(max_single_buffer) +
-            " | multi_chunk_operator_execution=NOT_INTEGRATED";
+        last_error_ = "A model tensor exceeds the backend storage-buffer limit and has no validated chunk-aware operator path; " +
+            std::string("tensor=") + tensor.name +
+            " | tensor_bytes=" + std::to_string(padded_bytes) +
+            " | max_storage_binding_bytes=" + std::to_string(max_single_buffer);
         unload_locked();
         return {StatusCode::Unsupported, last_error_};
     }
@@ -1096,8 +1134,9 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";memory_budget_bytes=" << (memory_budget_bytes_ != 0
                 ? memory_budget_bytes_ : last_failed_memory_budget_bytes_)
            << ";memory_budget_kind=application_allocation_cap_not_vram"
-           << ";memory_active_bytes=" << (memory_ ? memory_->allocated_bytes() : 0)
-           << ";memory_available_bytes=" << (memory_ ? memory_->available_bytes() : 0)
+           << ";memory_active_bytes=" << (memory_ ? std::to_string(memory_->allocated_bytes()) : "unknown")
+           << ";memory_available_bytes=" << (memory_ ? std::to_string(memory_->available_bytes()) : "unknown")
+           << ";memory_accounting_initialized=" << (memory_ ? "true" : "false")
            << ";memory_required_bytes=" << (memory_estimate_.plan.required_bytes != 0
                 ? memory_estimate_.plan.required_bytes : last_failed_memory_required_bytes_)
            << ";memory_usable_budget_bytes=" << (memory_estimate_.plan.usable_budget_bytes != 0
@@ -1111,8 +1150,9 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";last_failed_storage_binding_limit_bytes=" << last_failed_storage_binding_limit_bytes_
            << ";gpu_memory_total=unknown"
            << ";gpu_memory_free=unknown"
-           << ";weight_streaming=per-operation"
-           << ";single_tensor_chunking=NOT_INTEGRATED"
+           << ";weight_streaming=operation-aware-chunked"
+           << ";single_tensor_chunking=Q6_K_MATMUL_CHANNELS_AND_EMBEDDING_ROW_GATHER"
+           << ";chunked_operator_support=F32_ELEMENTWISE,Q6_K_MATMUL,Q6_K_EMBEDDING"
            << ";backend_kernel_validation=runtime-numerical"
            << ";model_reference_parity=UNVERIFIED"
            << ";model_graph_validation=UNVERIFIED"

@@ -21,6 +21,8 @@ Status reference_q6_k_embedding(const uint8_t*,uint64_t,uint32_t,uint32_t,const 
 
 Status build_q6_k_matmul_candidate(const Tensor&,const std::shared_ptr<Buffer>&,uint64_t,const Tensor&,ComputeDispatch&);
 Status build_q6_k_matmul_gles_candidate(const Tensor&,const std::shared_ptr<Buffer>&,uint64_t,const Tensor&,ComputeDispatch&);
+Status build_q6_k_matmul_chunk_candidate(const Tensor&,const std::shared_ptr<Buffer>&,uint64_t,const Tensor&,uint32_t,uint32_t,ComputeDispatch&);
+Status build_q6_k_matmul_chunk_gles_candidate(const Tensor&,const std::shared_ptr<Buffer>&,uint64_t,const Tensor&,uint32_t,uint32_t,ComputeDispatch&);
 Status reference_q6_k_matmul(const float*,const uint8_t*,uint64_t,float*,uint32_t,uint32_t,uint32_t);
 
 

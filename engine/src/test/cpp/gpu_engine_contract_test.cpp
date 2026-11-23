@@ -4080,7 +4080,48 @@ void test_generic_chunk_executor_preserves_offsets_and_aggregates() {
     assert(execute_chunked_compute(backend, config, build).code == StatusCode::InvalidArgument);
 }
 
+
+void test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends() {
+    FakeBackend backend(BackendKind::OpenGles);
+    BufferDesc activation_desc{2u * 256u * sizeof(float), 4, MemoryDomain::Device, false, "q6-chunk-activations"};
+    BufferDesc weight_desc{2u * 210u, 4, MemoryDomain::Device, true, "q6-chunk-weights"};
+    BufferDesc output_desc{2u * 4u * sizeof(float), 4, MemoryDomain::Device, false, "q6-chunk-output"};
+    std::shared_ptr<Buffer> activations, weights, output_buffer;
+    assert(backend.allocate(activation_desc, activations).ok());
+    assert(backend.allocate(weight_desc, weights).ok());
+    assert(backend.allocate(output_desc, output_buffer).ok());
+
+    TensorDesc activation_tensor_desc;
+    activation_tensor_desc.shape = {2, 256};
+    activation_tensor_desc.data_type = DataType::F32;
+    TensorDesc output_tensor_desc;
+    output_tensor_desc.shape = {2, 4};
+    output_tensor_desc.data_type = DataType::F32;
+    Tensor activation_tensor, output_tensor;
+    assert(Tensor::create(activation_tensor_desc, activations, 0, activation_tensor).ok());
+    assert(Tensor::create(output_tensor_desc, output_buffer, 0, output_tensor).ok());
+
+    ComputeDispatch gles;
+    assert(build_q6_k_matmul_chunk_gles_candidate(
+        activation_tensor, weights, 420, output_tensor, 2, 2, gles).ok());
+    assert(gles.kernel_id == "gles-q6-k-matmul-f32-activation-v1");
+    assert(gles.glsl_source.find("OUTPUT_CHANNELS=2u") != std::string::npos);
+    assert(gles.glsl_source.find("OUTPUT_CHANNELS_TOTAL=4u") != std::string::npos);
+    assert(gles.glsl_source.find("OUTPUT_CHANNEL_OFFSET=2u") != std::string::npos);
+    assert(gles.bindings.size() == 3 && gles.bindings[2].offset_bytes == 0 &&
+           gles.bindings[2].size_bytes == output_desc.size_bytes);
+
+    ComputeDispatch dawn;
+    assert(build_q6_k_matmul_chunk_candidate(
+        activation_tensor, weights, 420, output_tensor, 2, 2, dawn).ok());
+    assert(dawn.kernel_id == "dawn-q6-k-matmul-f32-activation-v1");
+    assert(dawn.wgsl_source.find("OUTPUT_CHANNELS: u32 = 2u") != std::string::npos);
+    assert(dawn.wgsl_source.find("OUTPUT_CHANNELS_TOTAL: u32 = 4u") != std::string::npos);
+    assert(dawn.wgsl_source.find("OUTPUT_CHANNEL_OFFSET: u32 = 2u") != std::string::npos);
+}
+
 int main() {
+    test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends();
     test_generic_chunk_executor_preserves_offsets_and_aggregates();
     test_dispatch_authorization_accepts_only_declared_mode_specialization();
     test_sampler_min_p_filter();

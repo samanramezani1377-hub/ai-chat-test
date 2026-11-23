@@ -23,7 +23,7 @@ std::string normalize_kernel_specialization(const std::string& source) {
         "SEQUENCE_LENGTH", "SCALE", "HEADS", "ROTARY_DIM", "START_POSITION",
         "THETA", "NEOX_STYLE", "ROWS", "COLUMNS", "INNER", "EPSILON", "MODE",
         "INPUT_AXIS_DIM", "OUTPUT_AXIS_DIM", "INNER_SIZE", "OFFSET",
-        "OUTPUT_CHANNELS", "WEIGHT_ROW_BYTES"
+        "OUTPUT_CHANNELS", "OUTPUT_CHANNELS_TOTAL", "OUTPUT_CHANNEL_OFFSET", "WEIGHT_ROW_BYTES"
     };
     std::string normalized;
     normalized.reserve(source.size());
@@ -575,12 +575,18 @@ Status execute_chunked_compute(Backend& backend, const ChunkExecutionConfig& con
 
         const auto output = std::find_if(dispatch.bindings.begin(), dispatch.bindings.end(),
             [&](const BufferBinding& binding) { return binding.binding == config.output_binding; });
-        const uint64_t expected_offset = config.output_base_offset_bytes + byte_offset;
         if (output == dispatch.bindings.end() || output->buffer.get() != config.output_buffer.get() ||
-            output->offset_bytes != expected_offset || output->size_bytes < byte_size ||
-            output->offset_bytes > output->buffer->size_bytes() ||
-            output->size_bytes > output->buffer->size_bytes() - output->offset_bytes)
+        output->offset_bytes > output->buffer->size_bytes() ||
+        output->size_bytes > output->buffer->size_bytes() - output->offset_bytes)
+        return {StatusCode::InvalidArgument, "Chunk dispatch output binding is outside its backing buffer"};
+    if (config.output_binding_is_chunk_slice) {
+        const uint64_t expected_offset = config.output_base_offset_bytes + byte_offset;
+        if (output->offset_bytes != expected_offset || output->size_bytes < byte_size)
             return {StatusCode::InvalidArgument, "Chunk dispatch output binding does not match the planned offset and byte range"};
+    } else if (output->offset_bytes != config.output_base_offset_bytes ||
+               output->size_bytes < total_bytes) {
+        return {StatusCode::InvalidArgument, "Chunk dispatch full-output binding does not cover the planned tensor"};
+    }
 
         std::unique_ptr<CommandBatch> commands;
         status = backend.begin_commands(commands);

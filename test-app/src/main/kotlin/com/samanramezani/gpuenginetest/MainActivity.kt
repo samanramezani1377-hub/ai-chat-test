@@ -38,12 +38,21 @@ class MainActivity : Activity() {
         val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val memoryInfo = ActivityManager.MemoryInfo()
         activityManager.getMemoryInfo(memoryInfo)
-        val capBytes = ((memoryInfo.availMem - memoryInfo.threshold).coerceAtLeast(0L) / 4L)
-            .coerceAtLeast(1L)
+        val criticalPressure = memoryInfo.lowMemory ||
+            reason == "low-memory" ||
+            (reason.startsWith("trim-") &&
+                reason.removePrefix("trim-").toIntOrNull()?.let {
+                    it == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+                    it == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
+                } == true)
+        val headroom = (memoryInfo.availMem - memoryInfo.threshold).coerceAtLeast(0L)
+        val divisor = if (criticalPressure) 4L else 2L
+        val capBytes = minOf(headroom / divisor, memoryInfo.totalMem / 4L).coerceAtLeast(1L)
         val result = GpuEngineTestApi.updateMemoryBudget(capBytes)
         appendLog("memory_pressure_event=$reason")
         appendLog("gpu_engine_allocation_cap_bytes=$capBytes")
         appendLog("gpu_engine_allocation_cap_update_result=$result")
+        appendLog("gpu_engine_allocation_cap_policy_divisor=$divisor")
         appendLog("gpu_engine_allocation_cap_source=dynamic_host_memory_safety_policy_not_gpu_vram")
     }
 
@@ -213,13 +222,18 @@ class MainActivity : Activity() {
         activityManager.getMemoryInfo(memoryInfo)
         // This is an application allocation safety cap derived from current host
         // memory headroom. Android does not expose total/free GPU VRAM here.
-        val allocationCapBytes = (memoryInfo.availMem - memoryInfo.threshold).coerceAtLeast(0L) / 4L
+        val initialDivisor = if (memoryInfo.lowMemory) 4L else 2L
+        val allocationCapBytes = minOf(
+            (memoryInfo.availMem - memoryInfo.threshold).coerceAtLeast(0L) / initialDivisor,
+            memoryInfo.totalMem / 4L
+        ).coerceAtLeast(1L)
 
         appendLog("device_total_memory_bytes=${memoryInfo.totalMem}")
         appendLog("device_available_memory_bytes=${memoryInfo.availMem}")
         appendLog("device_memory_threshold_bytes=${memoryInfo.threshold}")
         appendLog("device_low_memory=${memoryInfo.lowMemory}")
         appendLog("gpu_engine_allocation_cap_bytes=$allocationCapBytes")
+        appendLog("gpu_engine_allocation_cap_policy_divisor=$initialDivisor")
         appendLog("gpu_engine_allocation_cap_source=host_memory_safety_policy_not_gpu_vram_measurement")
         appendLog("requested_context_length=$contextLength")
         appendLog("activation_backend=dedicated_android_gpu_engine_only")

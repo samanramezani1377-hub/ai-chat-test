@@ -28,6 +28,7 @@ struct LoadedWeightTensor {
 struct WeightStreamingPolicy {
     uint64_t preferred_chunk_bytes = 4 * 1024 * 1024;
     uint64_t maximum_chunk_bytes = 0; // zero means use backend-reported limits
+    uint64_t required_chunk_alignment_bytes = 0; // operation-level row/group boundary
     MemoryDomain target_memory = MemoryDomain::Device;
 };
 
