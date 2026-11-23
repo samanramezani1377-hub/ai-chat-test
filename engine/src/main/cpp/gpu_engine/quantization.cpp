@@ -4931,23 +4931,29 @@ Status build_q6_k_matmul_candidate_impl(const Tensor& activations,
     if (!weights || weights->memory_domain() == MemoryDomain::Host ||
         !is_device_contiguous_f32(activations) || !is_device_contiguous_f32(output) ||
         !activations.buffer() || !output.buffer() ||
-        activations.descriptor().shape.size() != 2 ||
-        (output.descriptor().shape.size() != 2 && output.descriptor().shape.size() != 3))
-        return {StatusCode::Unsupported, "Q6_K MatMul requires F32 activations and packed Q6_K weights"};
+        activations.descriptor().shape.size() < 2 ||
+        output.descriptor().shape.size() < 2)
+        return {StatusCode::Unsupported, "Q6_K MatMul requires rank-2-or-higher F32 activations/output and packed Q6_K weights"};
     const auto& a = activations.descriptor().shape;
-    const auto& o = output.descriptor().shape;
-    const uint64_t total_channels = o.size() == 2 ? o[1] :
-        (o[2] && o[1] <= UINT64_MAX / o[2] ? o[1] * o[2] : 0);
+    uint64_t rows = 1;
+    for (size_t axis = 0; axis + 1 < a.size(); ++axis) {
+        if (a[axis] == 0 || rows > UINT64_MAX / a[axis])
+            return {StatusCode::InvalidArgument, "Q6_K MatMul activation leading dimensions are invalid or overflow"};
+        rows *= a[axis];
+    }
+    const uint64_t inner = a.back();
+    if (inner == 0 || output.element_count() == 0 || output.element_count() % rows != 0)
+        return {StatusCode::InvalidArgument, "Q6_K MatMul flattened activation/output dimensions are inconsistent"};
+    const uint64_t total_channels = output.element_count() / rows;
     const uint64_t chunk_channels = requested_chunk_channels == 0
         ? total_channels : requested_chunk_channels;
-    if (!a[0] || !a[1] || a[1] % 256 || o[0] != a[0] || !total_channels ||
-        !chunk_channels || channel_offset > total_channels ||
-        chunk_channels > total_channels - channel_offset ||
-        a[0] > UINT32_MAX || a[1] > UINT32_MAX ||
+    if (inner % 256 || !total_channels || !chunk_channels ||
+        channel_offset > total_channels || chunk_channels > total_channels - channel_offset ||
+        rows > UINT32_MAX || inner > UINT32_MAX ||
         total_channels > UINT32_MAX || chunk_channels > UINT32_MAX ||
         activations.element_count() > UINT32_MAX || output.element_count() > UINT32_MAX)
         return {StatusCode::InvalidArgument, "Q6_K MatMul dimensions or output-channel chunk are invalid"};
-    const uint64_t blocks = a[1] / 256;
+    const uint64_t blocks = inner / 256;
     if (blocks > UINT64_MAX / 210 || chunk_channels > UINT64_MAX / (blocks * 210))
         return {StatusCode::InvalidArgument, "Q6_K weight byte size overflows"};
     const uint64_t expected = chunk_channels * blocks * 210;
@@ -4968,7 +4974,7 @@ Status build_q6_k_matmul_candidate_impl(const Tensor& activations,
     dispatch.workgroup_size_x = dispatch.workgroup_size_y = 8;
 
     const std::pair<std::string, std::string> wgsl_constants[] = {
-        {"const ROWS: u32 = 1u;", "const ROWS: u32 = " + std::to_string(a[0]) + "u;"},
+        {"const ROWS: u32 = 1u;", "const ROWS: u32 = " + std::to_string(rows) + "u;"},
         {"const OUTPUT_CHANNELS: u32 = 1u;", "const OUTPUT_CHANNELS: u32 = " + std::to_string(chunk_channels) + "u;"},
         {"const OUTPUT_CHANNELS_TOTAL: u32 = 1u;", "const OUTPUT_CHANNELS_TOTAL: u32 = " + std::to_string(total_channels) + "u;"},
         {"const OUTPUT_CHANNEL_OFFSET: u32 = 0u;", "const OUTPUT_CHANNEL_OFFSET: u32 = " + std::to_string(channel_offset) + "u;"},
@@ -4976,7 +4982,7 @@ Status build_q6_k_matmul_candidate_impl(const Tensor& activations,
         {"const WEIGHT_ROW_BYTES: u32 = 210u;", "const WEIGHT_ROW_BYTES: u32 = " + std::to_string(blocks * 210) + "u;"}
     };
     const std::pair<std::string, std::string> glsl_constants[] = {
-        {"const uint ROWS=1u;", "const uint ROWS=" + std::to_string(a[0]) + "u;"},
+        {"const uint ROWS=1u;", "const uint ROWS=" + std::to_string(rows) + "u;"},
         {"const uint OUTPUT_CHANNELS=1u;", "const uint OUTPUT_CHANNELS=" + std::to_string(chunk_channels) + "u;"},
         {"const uint OUTPUT_CHANNELS_TOTAL=1u;", "const uint OUTPUT_CHANNELS_TOTAL=" + std::to_string(total_channels) + "u;"},
         {"const uint OUTPUT_CHANNEL_OFFSET=0u;", "const uint OUTPUT_CHANNEL_OFFSET=" + std::to_string(channel_offset) + "u;"},
@@ -5000,7 +5006,7 @@ Status build_q6_k_matmul_candidate_impl(const Tensor& activations,
     if (!status.ok()) return status;
 
     dispatch.workgroups_x = static_cast<uint32_t>((chunk_channels + 7) / 8);
-    dispatch.workgroups_y = static_cast<uint32_t>((a[0] + 7) / 8);
+    dispatch.workgroups_y = static_cast<uint32_t>((rows + 7) / 8);
     dispatch.bindings = {
         {0, activations.buffer(), activations.byte_offset(), activations.byte_size()},
         {1, weights, 0, padded},

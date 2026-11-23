@@ -48,8 +48,9 @@ struct DawnHealthState {
         healthy.store(true, std::memory_order_relaxed);
     }
     void mark_unhealthy(std::string reason) {
-        { std::lock_guard<std::mutex> lock(mutex); error = std::move(reason); }
-        healthy.store(false, std::memory_order_relaxed);
+        std::lock_guard<std::mutex> lock(mutex);
+        if (healthy.exchange(false, std::memory_order_acq_rel) || error.empty())
+            error = std::move(reason);
     }
     std::string diagnostic() const {
         std::lock_guard<std::mutex> lock(mutex);
@@ -78,8 +79,10 @@ private:
 
 class DawnCommandBatch final : public CommandBatch {
 public:
-    explicit DawnCommandBatch(wgpu::Device device, DeviceLimits limits)
-        : device_(std::move(device)), limits_(limits), encoder_(device_.CreateCommandEncoder()) {}
+    explicit DawnCommandBatch(wgpu::Device device, DeviceLimits limits,
+                              std::shared_ptr<DawnHealthState> health)
+        : device_(std::move(device)), limits_(limits), health_(std::move(health)),
+          encoder_(device_.CreateCommandEncoder()) {}
 
     bool valid() const noexcept { return encoder_ != nullptr; }
 
@@ -153,9 +156,20 @@ public:
         pipeline_desc.compute.entryPoint = dispatch.entry_point.c_str();
         wgpu::ComputePipeline pipeline = device_.CreateComputePipeline(&pipeline_desc);
         if (!pipeline) return backend_error("CreateComputePipeline", dispatch.label);
+        if (health_ && !health_->healthy.load(std::memory_order_acquire)) {
+            const std::string detail = health_->diagnostic();
+            return backend_error("CreateComputePipeline validation", detail.empty() ? dispatch.label : detail);
+        }
 
         wgpu::BindGroupLayout layout = pipeline.GetBindGroupLayout(0);
-        if (!layout) return backend_error("GetBindGroupLayout", dispatch.label);
+        if (!layout) {
+            const std::string detail = health_ ? health_->diagnostic() : std::string{};
+            return backend_error("GetBindGroupLayout", detail.empty() ? dispatch.label : detail);
+        }
+        if (health_ && !health_->healthy.load(std::memory_order_acquire)) {
+            const std::string detail = health_->diagnostic();
+            return backend_error("GetBindGroupLayout validation", detail.empty() ? dispatch.label : detail);
+        }
 
         std::vector<wgpu::BindGroupEntry> entries;
         entries.reserve(dispatch.bindings.size());
@@ -210,6 +224,7 @@ public:
 private:
     wgpu::Device device_;
     DeviceLimits limits_;
+    std::shared_ptr<DawnHealthState> health_;
     wgpu::CommandEncoder encoder_;
 };
 
@@ -387,7 +402,7 @@ public:
             const std::string detail = health_->diagnostic();
             return {StatusCode::DeviceLost, detail.empty() ? "Dawn device is not ready" : "Dawn device is not ready: " + detail};
         }
-        auto batch = std::make_unique<DawnCommandBatch>(device_, device_limits_);
+        auto batch = std::make_unique<DawnCommandBatch>(device_, device_limits_, health_);
         if (!batch->valid()) return backend_error("CreateCommandEncoder", "Dawn returned an empty encoder");
         out = std::move(batch);
         return Status::success();

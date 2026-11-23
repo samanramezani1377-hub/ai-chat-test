@@ -265,12 +265,21 @@ Status register_q6_k_matmul_lowering(BackendKind backend,ModelLoweringRegistry&r
         if(weight==context.quantized_weights.end()||!weight->second.buffer||weight->second.byte_size==0||
            weight->second.file_type_id!=14||weight->second.dimensions.size()!=2)
             return Status{StatusCode::InvalidArgument,"Q6_K MatMul weight binding is missing or invalid"};
-        if(input->descriptor().shape.size()!=2||input->descriptor().shape[0]==0||
-           (output->descriptor().shape.size()!=2&&output->descriptor().shape.size()!=3))
-            return Status{StatusCode::Unsupported,"Q6_K MatMul activation/output shapes are unsupported"};
-        const uint64_t channels=output->element_count()/input->descriptor().shape[0];
-        if(weight->second.dimensions[0]!=input->descriptor().shape[1]||weight->second.dimensions[1]!=channels)
-            return Status{StatusCode::InvalidArgument,"Q6_K weight dimensions do not match activation/output"};
+        const auto& activation_shape=input->descriptor().shape;
+        if(activation_shape.size()<2||output->descriptor().shape.size()<2)
+            return Status{StatusCode::Unsupported,"Q6_K MatMul requires rank-2-or-higher activation and output tensors"};
+        uint64_t rows=1;
+        for(size_t axis=0;axis+1<activation_shape.size();++axis){
+            if(activation_shape[axis]==0||rows>UINT64_MAX/activation_shape[axis])
+                return Status{StatusCode::InvalidArgument,"Q6_K MatMul activation leading dimensions are invalid or overflow"};
+            rows*=activation_shape[axis];
+        }
+        const uint64_t inner=activation_shape.back();
+        if(inner==0||output->element_count()==0||output->element_count()%rows!=0)
+            return Status{StatusCode::InvalidArgument,"Q6_K MatMul activation/output element counts are inconsistent"};
+        const uint64_t channels=output->element_count()/rows;
+        if(weight->second.dimensions[0]!=inner||weight->second.dimensions[1]!=channels)
+            return Status{StatusCode::InvalidArgument,"Q6_K weight dimensions do not match flattened activation/output shapes"};
         return backend==BackendKind::OpenGles
             ?build_q6_k_matmul_gles_candidate(*input,weight->second.buffer,weight->second.byte_size,*output,dispatch)
             :build_q6_k_matmul_candidate(*input,weight->second.buffer,weight->second.byte_size,*output,dispatch);

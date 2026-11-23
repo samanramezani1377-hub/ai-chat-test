@@ -4138,10 +4138,10 @@ void test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends
     assert(backend.allocate(output_desc, output_buffer).ok());
 
     TensorDesc activation_tensor_desc;
-    activation_tensor_desc.shape = {2, 256};
+    activation_tensor_desc.shape = {1, 2, 256};
     activation_tensor_desc.data_type = DataType::F32;
     TensorDesc output_tensor_desc;
-    output_tensor_desc.shape = {2, 4};
+    output_tensor_desc.shape = {1, 2, 4};
     output_tensor_desc.data_type = DataType::F32;
     Tensor activation_tensor, output_tensor;
     assert(Tensor::create(activation_tensor_desc, activations, 0, activation_tensor).ok());

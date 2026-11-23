@@ -23,7 +23,8 @@ std::string normalize_kernel_specialization(const std::string& source) {
         "SEQUENCE_LENGTH", "SCALE", "HEADS", "ROTARY_DIM", "START_POSITION",
         "THETA", "NEOX_STYLE", "ROWS", "COLUMNS", "INNER", "EPSILON", "MODE",
         "INPUT_AXIS_DIM", "OUTPUT_AXIS_DIM", "INNER_SIZE", "OFFSET",
-        "OUTPUT_CHANNELS", "OUTPUT_CHANNELS_TOTAL", "OUTPUT_CHANNEL_OFFSET", "WEIGHT_ROW_BYTES"
+        "OUTPUT_CHANNELS", "OUTPUT_CHANNELS_TOTAL", "OUTPUT_CHANNEL_OFFSET", "WEIGHT_ROW_BYTES",
+        "CHANNELS", "KERNEL_SIZE", "WORKGROUPS_X", "STATE_SIZE", "VALUE_HEADS", "KEY_HEADS"
     };
     std::string normalized;
     normalized.reserve(source.size());
