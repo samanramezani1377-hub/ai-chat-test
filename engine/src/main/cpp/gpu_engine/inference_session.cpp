@@ -885,12 +885,10 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     context_.backend = engine_->active_backend();
     context_.kv_cache = kv_cache_.get();
     context_.context_length = context_length_;
-    // Retain a conservative fraction of the application allocation cap for
-    // frequently reused quantized MatMul weights; this is not a VRAM estimate.
-    context_.persistent_weight_cache_limit_bytes = std::min<uint64_t>(
-        memory_budget_bytes_ / 4, 256ull * 1024ull * 1024ull);
-    context_.weight_chunk_cache = std::make_shared<QuantizedWeightChunkCache>(
-        std::min<uint64_t>(memory_budget_bytes_ / 8, 128ull * 1024ull * 1024ull));
+    // Cache budgets are assigned after essential KV/recurrent state allocations,
+    // from actual remaining application headroom (never a VRAM estimate).
+    context_.persistent_weight_cache_limit_bytes = 0;
+    context_.weight_chunk_cache = std::make_shared<QuantizedWeightChunkCache>(0);
 
     std::unordered_set<std::string> persistent_state_names;
     auto allocate_persistent_state = [&](const std::string& name,
@@ -957,6 +955,11 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             return status;
         }
     }
+    const uint64_t optional_cache_budget = memory_->available_bytes() / 4;
+    context_.persistent_weight_cache_limit_bytes = optional_cache_budget / 2;
+    context_.weight_chunk_cache->set_capacity(
+        optional_cache_budget - context_.persistent_weight_cache_limit_bytes);
+
     model_path_ = path;
     loaded_ = true;
     last_ttft_ms_ = 0;
@@ -1026,12 +1029,14 @@ Status GpuInferenceSession::update_memory_budget(uint64_t allocation_cap_bytes) 
         if (!status.ok()) return status;
     }
     memory_budget_bytes_ = allocation_cap_bytes;
-    context_.persistent_weight_cache_limit_bytes = std::min<uint64_t>(
-        memory_budget_bytes_ / 4, 256ull * 1024ull * 1024ull);
+    // Recompute optional cache budgets from currently free memory. The two
+    // caches together may use at most one quarter of that headroom.
+    const uint64_t optional_cache_budget = memory_->available_bytes() / 4;
+    context_.persistent_weight_cache_limit_bytes = optional_cache_budget / 2;
     if (!context_.weight_chunk_cache)
         context_.weight_chunk_cache = std::make_shared<QuantizedWeightChunkCache>();
     context_.weight_chunk_cache->set_capacity(
-        std::min<uint64_t>(memory_budget_bytes_ / 8, 128ull * 1024ull * 1024ull));
+        optional_cache_budget - context_.persistent_weight_cache_limit_bytes);
     return Status::success();
 }
 
