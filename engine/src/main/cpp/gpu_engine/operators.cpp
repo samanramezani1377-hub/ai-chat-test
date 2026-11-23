@@ -916,6 +916,70 @@ Status build_add_f32_gles_candidate(const Tensor& lhs, const Tensor& rhs,
 
 
 
+Status validate_add_trailing_vector_broadcast(Backend& backend,
+                                                const KernelDefinition& kernel) {
+    constexpr float lhs_values[] = {
+        1.0f, -2.0f, 0.5f, 4.0f,
+        3.0f, -1.0f, 2.0f, 0.25f
+    };
+    constexpr float rhs_values[] = {0.5f, -2.0f, 3.0f, 0.25f};
+    float expected[8] = {};
+    float actual[8] = {};
+    for (size_t index = 0; index < 8; ++index)
+        expected[index] = lhs_values[index] + rhs_values[index % 4];
+
+    BufferDesc lhs_desc{sizeof(lhs_values), alignof(float), MemoryDomain::Device,
+                        false, "add-broadcast-validation-lhs"};
+    BufferDesc rhs_desc{sizeof(rhs_values), alignof(float), MemoryDomain::Device,
+                        false, "add-broadcast-validation-rhs"};
+    BufferDesc output_desc{sizeof(actual), alignof(float), MemoryDomain::Device,
+                           false, "add-broadcast-validation-output"};
+    std::shared_ptr<Buffer> lhs_buffer, rhs_buffer, output_buffer;
+    Status status = backend.allocate(lhs_desc, lhs_buffer); if (!status.ok()) return status;
+    status = backend.allocate(rhs_desc, rhs_buffer); if (!status.ok()) return status;
+    status = backend.allocate(output_desc, output_buffer); if (!status.ok()) return status;
+    status = backend.upload(lhs_buffer, 0, lhs_values, sizeof(lhs_values)); if (!status.ok()) return status;
+    status = backend.upload(rhs_buffer, 0, rhs_values, sizeof(rhs_values)); if (!status.ok()) return status;
+
+    TensorDesc lhs_tensor_desc;
+    lhs_tensor_desc.shape = {2, 4};
+    lhs_tensor_desc.data_type = DataType::F32;
+    lhs_tensor_desc.memory = MemoryDomain::Device;
+    lhs_tensor_desc.alignment = alignof(float);
+    TensorDesc rhs_tensor_desc = lhs_tensor_desc;
+    rhs_tensor_desc.shape = {4};
+    TensorDesc output_tensor_desc = lhs_tensor_desc;
+    Tensor lhs, rhs, output;
+    status = Tensor::create(lhs_tensor_desc, lhs_buffer, 0, lhs); if (!status.ok()) return status;
+    status = Tensor::create(rhs_tensor_desc, rhs_buffer, 0, rhs); if (!status.ok()) return status;
+    status = Tensor::create(output_tensor_desc, output_buffer, 0, output); if (!status.ok()) return status;
+
+    ComputeDispatch dispatch;
+    status = backend.kind() == BackendKind::OpenGles
+        ? build_add_f32_gles_candidate(lhs, rhs, output, dispatch)
+        : build_add_f32_candidate(lhs, rhs, output, dispatch);
+    if (!status.ok()) return status;
+    if (dispatch.kernel_id != kernel.kernel_id ||
+        (backend.kind() == BackendKind::OpenGles
+            ? dispatch.glsl_source != kernel.glsl_source
+            : dispatch.wgsl_source != kernel.wgsl_source))
+        return {StatusCode::InvalidArgument, "Add broadcast dispatch differs from its registered backend kernel"};
+    dispatch.validation = KernelValidation::Validated;
+    std::unique_ptr<CommandBatch> commands;
+    status = backend.begin_commands(commands); if (!status.ok()) return status;
+    if (!commands) return {StatusCode::BackendFailure, "Add broadcast validation received an empty command batch"};
+    status = commands->dispatch_compute(dispatch); if (!status.ok()) return status;
+    status = backend.submit(std::move(commands)); if (!status.ok()) return status;
+    status = backend.synchronize(); if (!status.ok()) return status;
+    status = backend.readback(output_buffer, 0, actual, sizeof(actual)); if (!status.ok()) return status;
+    for (size_t index = 0; index < 8; ++index) {
+        const float tolerance = 1.0e-5f * std::max(1.0f, std::fabs(expected[index]));
+        if (!std::isfinite(actual[index]) || std::fabs(actual[index] - expected[index]) > tolerance)
+            return {StatusCode::NumericalFailure, "Add trailing-vector broadcast differs from the independent F32 reference"};
+    }
+    return Status::success();
+}
+
 Status validate_dawn_add_f32_kernel(Backend& backend, OperatorRegistry& registry) {
     if (backend.kind() != BackendKind::DawnWebGpu || !backend.healthy())
         return {StatusCode::NotReady, "Dawn Add validation requires an initialized healthy Dawn backend"};
@@ -964,6 +1028,8 @@ Status validate_dawn_add_f32_kernel(Backend& backend, OperatorRegistry& registry
         if (!std::isfinite(actual[i]) || std::fabs(actual[i] - expected[i]) > tolerance)
             return {StatusCode::NumericalFailure, "Dawn Add GPU output did not match the independent F32 reference"};
     }
+    status = validate_add_trailing_vector_broadcast(backend, *kernel);
+    if (!status.ok()) return status;
     kernel->validation = KernelValidation::Validated;
     return Status::success();
 }
@@ -1024,6 +1090,8 @@ Status validate_gles_add_f32_kernel(Backend& backend, OperatorRegistry& registry
         if (!std::isfinite(actual[i]) || std::fabs(actual[i] - expected[i]) > tolerance)
             return {StatusCode::NumericalFailure, "GLES Add GPU output did not match the independent F32 reference"};
     }
+    status = validate_add_trailing_vector_broadcast(backend, *kernel);
+    if (!status.ok()) return status;
     kernel->validation = KernelValidation::Validated;
     return Status::success();
 }

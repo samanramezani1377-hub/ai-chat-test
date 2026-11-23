@@ -531,8 +531,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             else return {StatusCode::Unsupported,
                          "No GPU validation route exists for GGUF quantization type " + std::to_string(type_id)};
 
-            const bool require_matmul = has_operator(matmul_name) ||
-                type_id == 2 || type_id == 3 || type_id == 8;
+            const bool require_matmul = has_operator(matmul_name);
             if (require_matmul) {
                 Status validation_status = Status::success();
                 if (type_id == 2) validation_status=validate_q4_0_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
@@ -605,6 +604,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             if (status.ok()) {
                 backend_kind = alternate_backend;
                 backend_fallback_reason_ = first_backend_failure.message;
+                last_error_.clear();
                 status = validate_quantization_kernels_for_active_backend();
             }
         }
@@ -617,44 +617,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     }
 
 
-    if (!quantization_types.empty()) {
-        const std::string primary_error = last_error_;
-        cross_backend_quantization_validation_ =
-            std::string("decode_reference=not_run;active_backend_kernel_validation=") +
-            backend_label(backend_kind) + ":passed";
-        const BackendKind alternate_backend = backend_kind == BackendKind::DawnWebGpu
-            ? BackendKind::OpenGles : BackendKind::DawnWebGpu;
 
-        engine_->shutdown();
-        Status alternate_status = engine_->initialize(alternate_backend);
-        if (alternate_status.ok() && engine_->active_backend() &&
-            engine_->active_backend()->kind() == alternate_backend) {
-            const std::string alternate_previous_error = last_error_;
-            alternate_status = validate_quantization_kernels_for_active_backend(true);
-            const std::string alternate_detail = alternate_status.ok()
-                ? "all_model_gguf_formats_passed"
-                : alternate_status.message;
-            last_error_ = alternate_previous_error;
-            cross_backend_quantization_validation_ += ";" +
-                std::string("alternate_backend=") + backend_label(alternate_backend) + ":" +
-                (alternate_status.ok() ? "passed:" : "failed:") + alternate_detail;
-        } else {
-            cross_backend_quantization_validation_ += std::string(";alternate_backend=") +
-                backend_label(alternate_backend) + ":unavailable:" + alternate_status.message;
-        }
-
-        engine_->shutdown();
-        Status restore_status = engine_->initialize(backend_kind);
-        if (!restore_status.ok()) {
-            last_error_ = "Failed to restore the selected GPU backend after cross-backend GGUF validation: " +
-                          restore_status.message;
-            unload_locked();
-            return {restore_status.code, last_error_};
-        }
-        last_error_ = primary_error;
-    } else {
-        cross_backend_quantization_validation_ = "not_required_no_packed_gguf_weights";
-    }
 
     auto quantization_report = evaluate_model_quantization_backend(model, *quantizations_, backend_kind);
     if (!quantization_report.compatible) {
@@ -721,7 +684,47 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         }
         backend_kind = alternate_backend;
         backend_fallback_reason_ = first_backend_reason;
+        last_error_.clear();
         coverage = std::move(alternate_coverage);
+    }
+
+    if (!quantization_types.empty()) {
+        const std::string primary_error = last_error_;
+        cross_backend_quantization_validation_ =
+            std::string("decode_reference=not_run;active_backend_kernel_validation=") +
+            backend_label(backend_kind) + ":passed";
+        const BackendKind alternate_backend = backend_kind == BackendKind::DawnWebGpu
+            ? BackendKind::OpenGles : BackendKind::DawnWebGpu;
+
+        engine_->shutdown();
+        Status alternate_status = engine_->initialize(alternate_backend);
+        if (alternate_status.ok() && engine_->active_backend() &&
+            engine_->active_backend()->kind() == alternate_backend) {
+            const std::string alternate_previous_error = last_error_;
+            alternate_status = validate_quantization_kernels_for_active_backend(true);
+            const std::string alternate_detail = alternate_status.ok()
+                ? "all_model_gguf_formats_passed"
+                : alternate_status.message;
+            last_error_ = alternate_previous_error;
+            cross_backend_quantization_validation_ += ";" +
+                std::string("alternate_backend=") + backend_label(alternate_backend) + ":" +
+                (alternate_status.ok() ? "passed:" : "failed:") + alternate_detail;
+        } else {
+            cross_backend_quantization_validation_ += std::string(";alternate_backend=") +
+                backend_label(alternate_backend) + ":unavailable:" + alternate_status.message;
+        }
+
+        engine_->shutdown();
+        Status restore_status = engine_->initialize(backend_kind);
+        if (!restore_status.ok()) {
+            last_error_ = "Failed to restore the selected GPU backend after cross-backend GGUF validation: " +
+                          restore_status.message;
+            unload_locked();
+            return {restore_status.code, last_error_};
+        }
+        last_error_ = primary_error;
+    } else {
+        cross_backend_quantization_validation_ = "not_required_no_packed_gguf_weights";
     }
 
     const DeviceInfo* device = engine_->active_device();
