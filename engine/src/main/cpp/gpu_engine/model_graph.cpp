@@ -347,6 +347,16 @@ Status execute_chunked_quantized_matmul_if_needed(
         return Status::success();
     };
 
+    bool cache_admission_enabled = true;
+    bool cache_evicted_for_pressure = false;
+    const auto reclaim_optional_memory = [&]() {
+        if (context.weight_chunk_cache && !cache_evicted_for_pressure) {
+            context.weight_chunk_cache->evict_all();
+            cache_evicted_for_pressure = true;
+        }
+        memory.reclaim_transient_pool();
+    };
+
     uint64_t channel_offset = 0;
     while (channel_offset < total_channels) {
         if (!backend.healthy())
@@ -354,24 +364,25 @@ Status execute_chunked_quantized_matmul_if_needed(
 
         uint64_t available = memory.available_bytes();
         uint64_t reclaimed_pool_bytes = 0;
-        // The memory manager deliberately retains released transient buffers
-        // for fast reuse. They are not active tensors, however, and must not
-        // make the tile planner conclude that even one output channel cannot
-        // fit. Reclaim the idle pool only when the minimum legal tile is blocked.
+        // Optional cached weights yield before the planner rejects a legal tile.
+        // Disable admissions for this operation so pressure cannot refill the cache.
         if (available < bytes_per_channel) {
-            reclaimed_pool_bytes = memory.reclaim_transient_pool();
+            cache_admission_enabled = false;
+            const uint64_t before_reclaim = available;
+            reclaim_optional_memory();
             available = memory.available_bytes();
+            reclaimed_pool_bytes = available > before_reclaim ? available - before_reclaim : 0;
         }
         const uint64_t available_for_chunks = available > 3 ? available - 3 : 0;
         uint64_t maximum_channels = std::min(padded_binding_limit / row_bytes,
                                              binding_limit / output_channel_bytes);
         maximum_channels = std::min(maximum_channels, available_for_chunks / bytes_per_channel);
-        // Keep chunk geometry stable across decode steps so the LRU can reuse
-        // identical tensor slices. The cap is backend/format agnostic; a single
-        // quantized output row may exceed it and is still handled as one chunk.
-        constexpr uint64_t kPreferredWeightChunkBytes = 4ull * 1024ull * 1024ull;
-        const uint64_t preferred_channels = std::max<uint64_t>(1,
-            kPreferredWeightChunkBytes / row_bytes);
+        // Derive tile size from live headroom rather than a fixed model/GPU byte
+        // constant. Bound each staging tile to a fraction of available memory.
+        const uint64_t target_tile_bytes = std::max<uint64_t>(
+            bytes_per_channel, available_for_chunks / 4);
+        const uint64_t preferred_channels = std::max<uint64_t>(
+            1, target_tile_bytes / bytes_per_channel);
         maximum_channels = std::min(maximum_channels, preferred_channels);
         maximum_channels = std::min<uint64_t>(maximum_channels, UINT32_MAX);
         if (maximum_channels == 0) {
@@ -408,6 +419,12 @@ Status execute_chunked_quantized_matmul_if_needed(
         if (!chunk_cache_hit) {
             status = allocate_chunk_buffer(memory, device, weight_bytes,
                 "quantized-matmul-weight-chunk:" + weight_name, chunk.weight_lease);
+            if (!status.ok() && status.code == StatusCode::OutOfMemory) {
+                cache_admission_enabled = false;
+                reclaim_optional_memory();
+                status = allocate_chunk_buffer(memory, device, weight_bytes,
+                    "quantized-matmul-weight-chunk:" + weight_name, chunk.weight_lease);
+            }
             if (!status.ok()) {
                 if (pending.empty()) return status;
                 status = flush_batch();
@@ -417,14 +434,11 @@ Status execute_chunked_quantized_matmul_if_needed(
         }
         status = allocate_chunk_buffer(memory, device, output_chunk_bytes,
             "quantized-matmul-output-chunk:" + operation.id, chunk.output_lease);
-        if (!status.ok() && chunk_cache_hit && context.weight_chunk_cache) {
-            // Drop idle cache entries under pressure, while the active lease
-            // remains alive for this chunk; then retry the output allocation.
-            context.weight_chunk_cache->set_capacity(0);
+        if (!status.ok() && status.code == StatusCode::OutOfMemory) {
+            cache_admission_enabled = false;
+            reclaim_optional_memory();
             status = allocate_chunk_buffer(memory, device, output_chunk_bytes,
                 "quantized-matmul-output-chunk:" + operation.id, chunk.output_lease);
-            context.weight_chunk_cache->set_capacity(std::min<uint64_t>(
-                memory.budget_bytes() / 8, 128ull * 1024ull * 1024ull));
         }
         if (!status.ok()) {
             if (pending.empty()) return status;
@@ -440,7 +454,12 @@ Status execute_chunked_quantized_matmul_if_needed(
             if (!status.ok()) return status;
             status = backend.upload(chunk.weight_lease.buffer(), 0, staging.data(), staging.size());
             if (!status.ok()) return status;
-            if (context.weight_chunk_cache)
+            // Admission is opportunistic: keep a safety margin for subsequent
+            // compute allocations instead of pinning every streamed slice.
+            const uint64_t cache_headroom = memory.available_bytes();
+            const uint64_t cache_reserve = memory.budget_bytes() / 16;
+            if (cache_admission_enabled && context.weight_chunk_cache &&
+                cache_headroom >= std::max<uint64_t>(weight_bytes, cache_reserve))
                 context.weight_chunk_cache->insert(chunk_cache_key, weight_bytes, chunk.weight_lease);
         }
         if (validate_q6_k) {
