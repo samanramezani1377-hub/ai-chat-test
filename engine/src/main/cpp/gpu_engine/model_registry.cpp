@@ -137,14 +137,7 @@ public:
         if (!has_tensor("output.weight")) {
             const auto tie = model.metadata.find(metadata_prefix + "tie_word_embeddings");
             const bool* tied = tie == model.metadata.end() ? nullptr : std::get_if<bool>(&tie->second);
-            // The official Qwen3-0.6B config is tied and has this exact architecture tuple.
-            // Do not infer tied embeddings for other Qwen3 sizes or variants.
-            const bool verified_qwen3_06b_profile =
-                architecture_name_ == "qwen3" && layers == 28 && embedding == 1024 &&
-                heads == 16 && kv_heads == 8 && feed_forward == 3072 &&
-                model.tokenizer.tokens.size() == 151936 && head_dimension == 128;
             if (tied && *tied) tied_output = true;
-            else if (!tied && verified_qwen3_06b_profile) tied_output = true;
             else
                 plan.blockers.emplace_back("OUTPUT_WEIGHT_MISSING_WITHOUT_EXPLICIT_TIED_EMBEDDINGS_METADATA");
         }

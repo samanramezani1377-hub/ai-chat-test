@@ -22,6 +22,15 @@ bool metadata_u64_value(const GgufFileInfo& model, const std::string& key, uint6
     return false;
 }
 
+bool metadata_bool_value(const GgufFileInfo& model, const std::string& key, bool& value) {
+    const auto found = model.metadata.find(key);
+    if (found == model.metadata.end()) return false;
+    const auto* item = std::get_if<bool>(&found->second);
+    if (!item) return false;
+    value = *item;
+    return true;
+}
+
 bool metadata_f64_value(const GgufFileInfo& model, const std::string& key, double& value) {
     const auto found = model.metadata.find(key);
     if (found == model.metadata.end()) return false;
@@ -321,8 +330,20 @@ public:
         if (model.tokenizer.tokens.empty()) plan.blockers.emplace_back("TOKENIZER_VOCABULARY_REQUIRED");
         else expect("token_embd.weight", {config.embedding, model.tokenizer.tokens.size()});
         expect("output_norm.weight", {config.embedding});
-        const bool tied_output = !has("output.weight");
-        if (!tied_output) expect("output.weight", {config.embedding, model.tokenizer.tokens.size()});
+        bool tied_output = false;
+        if (!has("output.weight")) {
+            bool metadata_declares_tied_embeddings = false;
+            if (metadata_bool_value(model, "qwen35.tie_word_embeddings",
+                                    metadata_declares_tied_embeddings) &&
+                metadata_declares_tied_embeddings) {
+                tied_output = true;
+            } else {
+                plan.blockers.emplace_back(
+                    "OUTPUT_WEIGHT_MISSING_WITHOUT_EXPLICIT_TIED_EMBEDDINGS_METADATA");
+            }
+        }
+        if (!tied_output && !model.tokenizer.tokens.empty())
+            expect("output.weight", {config.embedding, model.tokenizer.tokens.size()});
 
         for (uint64_t layer = 0; layer < config.layers; ++layer) {
             const std::string prefix = "blk." + std::to_string(layer) + ".";
