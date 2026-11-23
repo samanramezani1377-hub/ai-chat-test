@@ -1171,10 +1171,11 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
             if (weight_binding != context.quantized_weights.end() && !weight_binding->second.buffer &&
                 activation_binding != context.tensors.end() && weight_info &&
                 weight_info->dimensions.size() == 2 && weight_info->type.storage_size_known &&
-                weight_info->type.block_elements != 0 &&
+                weight_info->type.block_elements != 0 && weight_info->type.bytes_per_block != 0 &&
                 weight_info->dimensions[0] % weight_info->type.block_elements == 0) {
                 const uint64_t inner_width = weight_info->dimensions[0];
-                const uint64_t row_count = activation_binding->second.element_count() / inner_width;
+                const uint64_t row_count = inner_width != 0
+                    ? activation_binding->second.element_count() / inner_width : 0;
                 uint64_t weight_row_bytes = 0, output_channel_bytes = 0, minimum_tile_bytes = 0;
                 if (inner_width != 0 && activation_binding->second.element_count() % inner_width == 0 &&
                     checked_product(inner_width / weight_info->type.block_elements,
@@ -1208,6 +1209,7 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
         operation_context.quantized_weights = context.quantized_weights;
         operation_context.weight_leases = context.weight_leases;
         operation_context.persistent_weight_cache_limit_bytes = context.persistent_weight_cache_limit_bytes;
+        operation_context.weight_cache_pressure_mode = context.weight_cache_pressure_mode;
         // Share the session-owned LRU across per-operation contexts. Without
         // this assignment streamed MatMul silently bypasses the chunk cache.
         operation_context.weight_chunk_cache = context.weight_chunk_cache;
