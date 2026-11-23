@@ -4299,6 +4299,20 @@ void test_q6_k_matmul_flattens_attention_head_dimensions_for_rank_reduced_output
     assert(gles.workgroup_size_x==8&&gles.workgroup_size_y==8);
     assert(gles.workgroups_x==32&&gles.workgroups_y==2);
 
+    // The streamed path canonicalizes higher-rank contiguous activations to
+    // [M,K]. Verify the exact rank-reduced view accepted by the Q6_K kernels.
+    TensorDesc flattened_activation_desc = activation.descriptor();
+    flattened_activation_desc.shape = {2, 512};
+    flattened_activation_desc.strides_bytes.clear();
+    Tensor flattened_activation;
+    assert(Tensor::create(flattened_activation_desc, activations, 0,
+                          flattened_activation).ok());
+    ComputeDispatch flattened_gles;
+    assert(build_q6_k_matmul_gles_candidate(flattened_activation, weights,
+        weight_desc.size_bytes, output, flattened_gles).ok());
+    assert(flattened_gles.glsl_source.find("const uint ROWS=2u;") != std::string::npos);
+    assert(flattened_gles.glsl_source.find("const uint INNER=512u;") != std::string::npos);
+
     ComputeDispatch dawn;
     assert(build_q6_k_matmul_candidate(activation, weights, weight_desc.size_bytes, output, dawn).ok());
     assert(dawn.wgsl_source.find("const ROWS: u32 = 2u;") != std::string::npos);
