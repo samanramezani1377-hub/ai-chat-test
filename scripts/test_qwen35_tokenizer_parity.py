@@ -121,6 +121,7 @@ def main():
         "می‌خواهم ۱۲۳ عدد و emoji 🧠🚀 را تست کنم.","e\u0301 cafe\u0301",
         "line one\r\nline two\n\t  "," punctuation!!! ... ???","   ",
         "emoji 🧑🏽‍💻 and symbols ©™","<|im_start|>assistant\nHello<|im_end|>",
+        "<|im_start|>user\nسلام<|im_end|>\n<|im_start|>assistant\n<think>\n",
         "<|repo_name|> my-repo",
         "中文、日本語、한국어 mixed with English 42","A\u030A and Å; NFC and decomposed forms.",
     ]
