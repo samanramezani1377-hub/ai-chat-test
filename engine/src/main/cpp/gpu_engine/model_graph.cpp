@@ -1108,7 +1108,7 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
         bool chunked_matmul = false;
         status = execute_chunked_quantized_matmul_if_needed(operation, backend, lowerings,
             operators, reader, memory, device, operation_context, chunked_matmul,
-            &report.real_q6_k_parity_checks);
+            parity_counter);
         if (!status.ok()) {
             report.errors.push_back(operation.id + ":CHUNKED_QUANTIZED_MATMUL_FAILED:" + status.message);
             for (const auto& name : operation.weight_tensors) {
@@ -1188,7 +1188,7 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
                 return status;
             }
             status = validate_resident_q6_k_matmul_sample(operation, reader, backend,
-                operation_context, &report.real_q6_k_parity_checks);
+                operation_context, parity_counter);
             if (!status.ok()) {
                 report.errors.push_back(operation.id + ":REAL_Q6_K_PARITY_FAILED:" + status.message);
                 for (const auto& name : operation.weight_tensors) {
