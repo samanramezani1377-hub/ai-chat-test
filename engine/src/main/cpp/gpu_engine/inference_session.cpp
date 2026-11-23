@@ -173,28 +173,8 @@ void GpuInferenceSession::unload_locked() noexcept {
     largest_weight_tensor_bytes_ = 0;
     peak_operation_weight_bytes_ = 0;
     kv_cache_bytes_ = 0;
-    last_tokenization_ms_ = 0;
-    last_prefill_ms_ = 0;
-    last_prefill_readback_ms_ = 0;
-    last_ttft_ms_ = 0;
-    last_decode_ms_ = 0;
-    last_tokenization_timing_valid_ = false;
-    last_prefill_timing_valid_ = false;
-    last_prefill_readback_timing_valid_ = false;
-    last_ttft_timing_valid_ = false;
-    last_decode_timing_valid_ = false;
-    last_generation_stage_ = "not_started";
-    last_model_graph_validation_ = "not_run";
-    cross_backend_quantization_validation_ = "not_run";
-    last_prompt_tokens_ = 0;
-    last_output_tokens_ = 0;
-    last_decode_tokens_per_second_ = 0.0;
-    last_generation_completed_ = false;
-    last_prompt_utf8_bytes_ = 0;
-    last_prompt_token_ids_ = "none";
-    last_generated_token_ids_ = "none";
-    last_first_step_top_logits_ = "none";
-    last_sampling_config_ = "none";
+    // Preserve the last generation report across unload/cancel so callers can
+    // inspect token IDs, timings and the failure after releasing GPU resources.
     model_path_.clear();
     backend_fallback_reason_.clear();
     loaded_ = false;
@@ -257,6 +237,30 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
                                        uint64_t memory_budget_bytes) {
     std::lock_guard<std::mutex> lock(mutex_);
     unload_locked();
+    last_tokenization_ms_ = 0;
+    last_prefill_ms_ = 0;
+    last_prefill_readback_ms_ = 0;
+    last_ttft_ms_ = 0;
+    last_decode_ms_ = 0;
+    last_tokenization_timing_valid_ = false;
+    last_prefill_timing_valid_ = false;
+    last_prefill_readback_timing_valid_ = false;
+    last_ttft_timing_valid_ = false;
+    last_decode_timing_valid_ = false;
+    last_generation_stage_ = "not_started";
+    last_model_graph_validation_ = "not_run";
+    cross_backend_quantization_validation_ = "not_run";
+    last_prompt_tokens_ = 0;
+    last_output_tokens_ = 0;
+    last_decode_tokens_per_second_ = 0.0;
+    last_generation_completed_ = false;
+    last_prompt_utf8_bytes_ = 0;
+    last_prompt_token_ids_ = "none";
+    last_generated_token_ids_ = "none";
+    last_first_step_top_logits_ = "none";
+    last_sampling_config_ = "none";
+    last_attempt_model_name_ = "unknown";
+    last_attempt_chat_template_kind_ = "none";
     last_failed_memory_budget_bytes_ = 0;
     last_failed_memory_required_bytes_ = 0;
     last_failed_memory_usable_bytes_ = 0;
@@ -321,6 +325,27 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     // coverage and execution checks performed below and during generation.
     const GgufReader& reader = *loader_->reader();
     const GgufFileInfo& model = reader.info();
+    last_attempt_model_name_ = safe_diagnostic_atom(model.model_name);
+    const auto chat_template = model.metadata.find("tokenizer.chat_template");
+    auto classify_chat_template = [&](const std::string& value) {
+        if (value.empty()) return;
+        if (value.find("<|im_start|>") != std::string::npos &&
+            value.find("<|im_end|>") != std::string::npos) {
+            last_attempt_chat_template_kind_ = "qwen_im_start";
+        } else {
+            last_attempt_chat_template_kind_ = "present_unrecognized";
+        }
+    };
+    if (chat_template != model.metadata.end()) {
+        if (const auto* value = std::get_if<std::string>(&chat_template->second)) {
+            classify_chat_template(*value);
+        } else if (const auto* values = std::get_if<std::vector<std::string>>(&chat_template->second)) {
+            for (const auto& value : *values) classify_chat_template(value);
+        } else if (const auto* array = std::get_if<GgufMetadataArray>(&chat_template->second)) {
+            if (const auto* values = std::get_if<std::vector<std::string>>(&array->values))
+                for (const auto& value : *values) classify_chat_template(value);
+        }
+    }
     BackendKind backend_kind = engine_->active_backend()->kind();
 
     const auto tokenizer_preflight = evaluate_tokenizer_preflight(model.tokenizer, *tokenizers_);
@@ -1206,6 +1231,12 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
         if (!status.ok()) {
             last_decode_ms_ = static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::milliseconds>(decode_compute_elapsed).count());
+            if (status.code == StatusCode::Cancelled ||
+                cancelled_.load(std::memory_order_relaxed)) {
+                last_generation_stage_ = "cancelled";
+                last_error_ = "Generation cancelled by user while executing a streamed GPU operation: " + status.message;
+                return {StatusCode::Cancelled, last_error_};
+            }
             last_generation_stage_ = "decode_dispatch_failed";
             last_error_ = "Decode dispatch failed: " + status.message;
             return status;
@@ -1268,23 +1299,8 @@ std::string GpuInferenceSession::diagnostics() const {
     const std::string gpu_api = device && !device->api_version.empty() ? device->api_version :
         (last_attempt_gpu_api_.empty() ? "unknown" : last_attempt_gpu_api_);
     const auto& gpu_features = device ? device->features : last_attempt_gpu_features_;
-    std::string chat_template_kind = "none";
-    std::string model_name = "unknown";
-    if (loaded_ && loader_ && loader_->reader()) {
-        const auto& model = loader_->reader()->info();
-        model_name = safe_diagnostic_atom(model.model_name);
-        const auto found = model.metadata.find("tokenizer.chat_template");
-        if (found != model.metadata.end()) {
-            if (const auto* value = std::get_if<std::string>(&found->second)) {
-                if (value->find("<|im_start|>") != std::string::npos &&
-                    value->find("<|im_sep|>") != std::string::npos &&
-                    value->find("<|im_end|>") != std::string::npos)
-                    chat_template_kind = "qwen_im_start";
-                else if (!value->empty())
-                    chat_template_kind = "present_unrecognized";
-            }
-        }
-    }
+    const std::string chat_template_kind = last_attempt_chat_template_kind_;
+    const std::string model_name = last_attempt_model_name_;
     report << "runtime=AndroidGpuInferenceEngine"
            << ";status=" << (loaded_ ? "READY" : "UNLOADED")
            << ";runtime_version=0.1.0"
