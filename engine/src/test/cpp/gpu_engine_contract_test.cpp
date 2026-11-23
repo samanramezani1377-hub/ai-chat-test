@@ -884,15 +884,41 @@ void test_q4_k_q5_k_decoder_layouts(){
 
 void test_q6_k_decoder_layout() {
     std::vector<uint8_t> block(210,0);
-    std::fill(block.begin(),block.begin()+128,0x11);
-    std::fill(block.begin()+192,block.begin()+208,1);
+    // d = 1.0, ql low/high nibbles = 1/2, and qh = 0.
+    std::fill(block.begin(),block.begin()+128,0x21);
+    for (size_t group = 0; group < 16; ++group)
+        block[192 + group] = static_cast<uint8_t>(group + 1);
     block[208]=0x00;block[209]=0x3c;
     std::vector<float> decoded(256);
     assert(decode_q6_k_blocks(block.data(),block.size(),decoded.data(),decoded.size()).ok());
-    for(float value:decoded)assert(value==-31.0f);
-    std::fill(block.begin()+128,block.begin()+192,0xff);
-    assert(decode_q6_k_blocks(block.data(),block.size(),decoded.data(),decoded.size()).ok());
-    for(float value:decoded)assert(value==17.0f);
+
+    // Independently check the four 32-value lanes and their 16-value scale groups.
+    for (size_t half = 0; half < 2; ++half) {
+        for (size_t lane = 0; lane < 4; ++lane) {
+            for (size_t i = 0; i < 32; ++i) {
+                const size_t output_index = half * 128 + lane * 32 + i;
+                const size_t scale_index = half * 8 + lane * 2 + (i / 16);
+                const float quantized = (lane < 2 ? -31.0f : -30.0f);
+                assert(decoded[output_index] == quantized * static_cast<float>(scale_index + 1));
+            }
+        }
+    }
+
+    std::vector<float> two_blocks(512);
+    std::vector<uint8_t> two_encoded(420);
+    std::copy(block.begin(), block.end(), two_encoded.begin());
+    std::copy(block.begin(), block.end(), two_encoded.begin() + 210);
+    assert(decode_q6_k_blocks(two_encoded.data(), two_encoded.size(),
+                              two_blocks.data(), two_blocks.size()).ok());
+    assert(std::equal(decoded.begin(), decoded.end(), two_blocks.begin()));
+    assert(std::equal(decoded.begin(), decoded.end(), two_blocks.begin() + 256));
+
+    assert(decode_q6_k_blocks(block.data(), block.size() - 1,
+                              decoded.data(), decoded.size()).code == StatusCode::InvalidArgument);
+    assert(decode_q6_k_blocks(block.data(), block.size(),
+                              decoded.data(), decoded.size() - 1).code == StatusCode::InvalidArgument);
+    assert(decode_q6_k_blocks(nullptr, block.size(),
+                              decoded.data(), decoded.size()).code == StatusCode::InvalidArgument);
 }
 
 void test_q6_k_embedding_reference_and_dispatch() {

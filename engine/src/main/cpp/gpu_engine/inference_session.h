@@ -69,8 +69,13 @@ private:
     uint64_t largest_weight_tensor_bytes_ = 0;
     uint64_t peak_operation_weight_bytes_ = 0;
     uint64_t kv_cache_bytes_ = 0;
+    uint64_t last_prefill_ms_ = 0;
     uint64_t last_ttft_ms_ = 0;
+    uint64_t last_decode_ms_ = 0;
+    uint64_t last_prompt_tokens_ = 0;
+    uint64_t last_output_tokens_ = 0;
     double last_decode_tokens_per_second_ = 0.0;
+    bool last_generation_completed_ = false;
     std::string model_path_;
     std::string backend_fallback_reason_;
     std::string last_error_;

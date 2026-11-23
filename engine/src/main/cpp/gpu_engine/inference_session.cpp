@@ -145,8 +145,13 @@ void GpuInferenceSession::unload_locked() noexcept {
     largest_weight_tensor_bytes_ = 0;
     peak_operation_weight_bytes_ = 0;
     kv_cache_bytes_ = 0;
+    last_prefill_ms_ = 0;
     last_ttft_ms_ = 0;
+    last_decode_ms_ = 0;
+    last_prompt_tokens_ = 0;
+    last_output_tokens_ = 0;
     last_decode_tokens_per_second_ = 0.0;
+    last_generation_completed_ = false;
     model_path_.clear();
     backend_fallback_reason_.clear();
     loaded_ = false;
@@ -866,6 +871,13 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
     context_.past_length = 0;
     context_.sequence_length = prompt_tokens.size();
     context_.prefill = true;
+    last_prefill_ms_ = 0;
+    last_ttft_ms_ = 0;
+    last_decode_ms_ = 0;
+    last_prompt_tokens_ = prompt_tokens.size();
+    last_output_tokens_ = 0;
+    last_decode_tokens_per_second_ = 0.0;
+    last_generation_completed_ = false;
     const auto generation_started = std::chrono::steady_clock::now();
     status = run_model_step(prompt_tokens.size());
     if (!status.ok()) return status;
@@ -879,6 +891,7 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
     const auto first_logits_ready = std::chrono::steady_clock::now();
     last_ttft_ms_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
         first_logits_ready - generation_started).count());
+    last_prefill_ms_ = last_ttft_ms_; // Includes prefill dispatch and first-logits readback.
 
     Sampler sampler(sampling);
     std::vector<int32_t> history;
@@ -944,8 +957,11 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
     const uint64_t decode_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
         generation_finished - decode_started).count());
     const uint64_t decode_tokens = generated.size() > 1 ? generated.size() - 1 : 0;
+    last_decode_ms_ = decode_ms;
+    last_output_tokens_ = generated.size();
     last_decode_tokens_per_second_ = decode_ms && decode_tokens
         ? static_cast<double>(decode_tokens) * 1000.0 / static_cast<double>(decode_ms) : 0.0;
+    last_generation_completed_ = true;
     last_error_.clear();
     return Status::success();
 }
@@ -990,6 +1006,7 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";peak_operation_weight_bytes=" << peak_operation_weight_bytes_
            << ";kv_cache_bytes=" << kv_cache_bytes_
            << ";memory_budget_bytes=" << memory_budget_bytes_
+           << ";memory_budget_kind=application_allocation_cap_not_vram"
            << ";memory_active_bytes=" << (memory_ ? memory_->allocated_bytes() : 0)
            << ";memory_available_bytes=" << (memory_ ? memory_->available_bytes() : 0)
            << ";memory_required_bytes=" << memory_estimate_.plan.required_bytes
@@ -1001,8 +1018,13 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";model_reference_parity=UNVERIFIED"
            << ";model_graph_validation=UNVERIFIED"
            << ";context_length=" << context_length_
+           << ";prefill_ms=" << last_prefill_ms_
            << ";ttft_ms=" << last_ttft_ms_
+           << ";decode_ms=" << last_decode_ms_
+           << ";prompt_tokens=" << last_prompt_tokens_
+           << ";output_tokens=" << last_output_tokens_
            << ";decode_tokens_per_second=" << last_decode_tokens_per_second_
+           << ";generation_result=" << (last_generation_completed_ ? "COMPLETED" : "NOT_COMPLETED")
            << ";cpu_fallback_available=false"
            << ";gpu_feature_count=" << (device ? device->features.size() : 0)
            << ";gpu_features=";
