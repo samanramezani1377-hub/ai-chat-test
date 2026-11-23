@@ -1268,6 +1268,23 @@ std::string GpuInferenceSession::diagnostics() const {
     const std::string gpu_api = device && !device->api_version.empty() ? device->api_version :
         (last_attempt_gpu_api_.empty() ? "unknown" : last_attempt_gpu_api_);
     const auto& gpu_features = device ? device->features : last_attempt_gpu_features_;
+    std::string chat_template_kind = "none";
+    std::string model_name = "unknown";
+    if (loaded_ && loader_ && loader_->reader()) {
+        const auto& model = loader_->reader()->info();
+        model_name = safe_diagnostic_atom(model.model_name);
+        const auto found = model.metadata.find("tokenizer.chat_template");
+        if (found != model.metadata.end()) {
+            if (const auto* value = std::get_if<std::string>(&found->second)) {
+                if (value->find("<|im_start|>") != std::string::npos &&
+                    value->find("<|im_sep|>") != std::string::npos &&
+                    value->find("<|im_end|>") != std::string::npos)
+                    chat_template_kind = "qwen_im_start";
+                else if (!value->empty())
+                    chat_template_kind = "present_unrecognized";
+            }
+        }
+    }
     report << "runtime=AndroidGpuInferenceEngine"
            << ";status=" << (loaded_ ? "READY" : "UNLOADED")
            << ";runtime_version=0.1.0"
@@ -1285,6 +1302,8 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";gpu_max_workgroup_invocations=" << (device ? device->limits.max_compute_workgroup_invocations : last_attempt_gpu_max_workgroup_invocations_)
            << ";architecture=" << (!plan_.architecture.empty() ? plan_.architecture :
                 (last_attempt_architecture_.empty() ? "unknown" : last_attempt_architecture_))
+           << ";model_name=" << model_name
+           << ";chat_template_kind=" << chat_template_kind
            << ";device=" << gpu_device
            << ";model=" << (!model_path_.empty() ? model_path_ :
                 (last_attempt_model_path_.empty() ? "unknown" : last_attempt_model_path_))
