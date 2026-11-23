@@ -1375,6 +1375,11 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";weight_cache_limit_bytes=" << context_.persistent_weight_cache_limit_bytes
            << ";weight_cache_hits=" << context_.persistent_weight_cache_hits
            << ";weight_cache_misses=" << context_.persistent_weight_cache_misses
+           << ";weight_chunk_cache_hits=" << (context_.weight_chunk_cache ? context_.weight_chunk_cache->stats().hits : 0)
+           << ";weight_chunk_cache_misses=" << (context_.weight_chunk_cache ? context_.weight_chunk_cache->stats().misses : 0)
+           << ";weight_chunk_cache_evictions=" << (context_.weight_chunk_cache ? context_.weight_chunk_cache->stats().evictions : 0)
+           << ";weight_chunk_cache_resident_bytes=" << (context_.weight_chunk_cache ? context_.weight_chunk_cache->stats().resident_bytes : 0)
+           << ";weight_chunk_cache_resident_chunks=" << (context_.weight_chunk_cache ? context_.weight_chunk_cache->stats().resident_chunks : 0)
            << ";weight_cache_resident_bytes=" << [&]() { uint64_t total = 0; for (const auto& item : context_.quantized_weights) { if (item.second.buffer && item.second.byte_size <= UINT64_MAX - total) total += item.second.byte_size; } return total; }()
            << ";weight_cache_resident_tensors=" << std::count_if(context_.quantized_weights.begin(), context_.quantized_weights.end(), [](const auto& item) { return static_cast<bool>(item.second.buffer); })
            << ";weight_streaming=operation-aware-chunked"
