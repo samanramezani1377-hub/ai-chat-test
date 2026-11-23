@@ -1390,7 +1390,7 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";weight_chunk_cache_hits=" << (context_.weight_chunk_cache ? context_.weight_chunk_cache->stats().hits : 0)
            << ";weight_chunk_cache_misses=" << (context_.weight_chunk_cache ? context_.weight_chunk_cache->stats().misses : 0)
            << ";weight_chunk_cache_evictions=" << (context_.weight_chunk_cache ? context_.weight_chunk_cache->stats().evictions : 0)
-           << ";weight_chunk_cache_capacity_bytes=" << (context_.weight_chunk_cache ? context_.weight_chunk_cache->capacity_bytes() : 0)
+           << ";weight_chunk_cache_capacity_bytes=" << (context_.weight_chunk_cache ? total_weight_bytes_ : 0)
            << ";weight_chunk_cache_resident_bytes=" << (context_.weight_chunk_cache ? context_.weight_chunk_cache->stats().resident_bytes : 0)
            << ";weight_chunk_cache_resident_chunks=" << (context_.weight_chunk_cache ? context_.weight_chunk_cache->stats().resident_chunks : 0)
            << ";weight_cache_resident_bytes=" << [&]() { uint64_t total = 0; for (const auto& item : context_.quantized_weights) { if (item.second.buffer && item.second.byte_size <= UINT64_MAX - total) total += item.second.byte_size; } return total; }()
