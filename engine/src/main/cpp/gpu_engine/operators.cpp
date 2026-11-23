@@ -1218,7 +1218,7 @@ Status build_rms_norm_f32_candidate(const Tensor& input, const Tensor& weight,
     const auto& w = weight.descriptor().shape;
     if ((x.size() != 2 && x.size() != 3) || w.size() != 1 ||
         output.descriptor().shape != x || w[0] == 0 ||
-        input.element_count() == 0 || input.element_count() % w[0] != 0 ||
+        input.element_count() == 0 || x.back() == 0 || x.back() % w[0] != 0 ||
         input.element_count() > UINT32_MAX || output.element_count() > UINT32_MAX ||
         input.element_count() / w[0] > UINT32_MAX)
         return {StatusCode::InvalidArgument, "RMSNorm expects input/output rank 2 or 3 and a nonzero weight width that evenly divides the input"};
