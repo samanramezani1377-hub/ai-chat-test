@@ -700,7 +700,7 @@ fn decode_weight(channel:u32,k:u32)->f32 {
     let d=unpack2x16float(read_u16(offset+208u)).x;
     return d*f32(scale)*f32(quantized);
 }
-@compute @workgroup_size(8,8)
+@compute @workgroup_size(64,1)
 fn main(@builtin(global_invocation_id) gid:vec3<u32>){
     let row=gid.y;let channel=gid.x;
     if(row>=ROWS||channel>=OUTPUT_CHANNELS){return;}
@@ -713,7 +713,7 @@ fn main(@builtin(global_invocation_id) gid:vec3<u32>){
 constexpr char kQ6_KMatMulGlsl[] = R"glsl(#version 310 es
 precision highp float;
 precision highp int;
-layout(local_size_x=8,local_size_y=8) in;
+layout(local_size_x=64,local_size_y=1) in;
 layout(std430,binding=0) readonly buffer Activations{float activations[];};
 layout(std430,binding=1) readonly buffer Weights{uint weights[];};
 layout(std430,binding=2) writeonly buffer Output{float output_values[];};
@@ -4171,7 +4171,8 @@ Status build_q5_matmul_candidate_impl(const Tensor& activations, const std::shar
     dispatch.kernel_id = "dawn-" + suffix + "-matmul-f32-activation-v1";
     dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = q5_1 ? kQ5_1MatMulWgsl : kQ5_0MatMulWgsl;
-    dispatch.workgroup_size_x = dispatch.workgroup_size_y = 8;
+    dispatch.workgroup_size_x = 64;
+    dispatch.workgroup_size_y = 1;
     const std::pair<std::string,std::string> constants[] = {
         {"const ROWS: u32 = 1u;", "const ROWS: u32 = "+std::to_string(a[0])+"u;"},
         {"const OUTPUT_CHANNELS: u32 = 1u;", "const OUTPUT_CHANNELS: u32 = "+std::to_string(channels)+"u;"},
