@@ -136,16 +136,10 @@ public:
         bool tied_output = false;
         if (!has_tensor("output.weight")) {
             const auto tie = model.metadata.find(metadata_prefix + "tie_word_embeddings");
-            if (tie == model.metadata.end()) {
-                // GGUF may encode tied embeddings by omitting output.weight.
-                // The tensor table is the format-level source of truth; no
-                // model-size or layer-count profile is used to infer this.
-                tied_output = has_tensor("token_embd.weight");
-            } else if (const bool* tied = std::get_if<bool>(&tie->second)) {
-                tied_output = *tied;
-            }
-            if (!tied_output)
-                plan.blockers.emplace_back("OUTPUT_WEIGHT_MISSING_WITHOUT_GGUF_TIED_EMBEDDING_EVIDENCE");
+            const bool* tied = tie == model.metadata.end() ? nullptr : std::get_if<bool>(&tie->second);
+            if (tied && *tied) tied_output = true;
+            else
+                plan.blockers.emplace_back("OUTPUT_WEIGHT_MISSING_WITHOUT_EXPLICIT_TIED_EMBEDDINGS_METADATA");
         }
         if (!tied_output && !model.tokenizer.tokens.empty())
             expect_shape("output.weight", {embedding, model.tokenizer.tokens.size()});

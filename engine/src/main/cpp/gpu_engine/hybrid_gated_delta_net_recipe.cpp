@@ -324,16 +324,11 @@ public:
         bool tied_output = false;
         if (!has("output.weight")) {
             const auto tie = model.metadata.find("qwen35.tie_word_embeddings");
-            if (tie == model.metadata.end()) {
-                // GGUF tensor omission is the generic tied-output convention
-                // when the matching token embedding tensor is present.
-                tied_output = has("token_embd.weight");
-            } else if (const bool* declared = std::get_if<bool>(&tie->second)) {
-                tied_output = *declared;
-            }
-            if (!tied_output)
+            const bool* declared = tie == model.metadata.end() ? nullptr : std::get_if<bool>(&tie->second);
+            if (declared && *declared) tied_output = true;
+            else
                 plan.blockers.emplace_back(
-                    "OUTPUT_WEIGHT_MISSING_WITHOUT_GGUF_TIED_EMBEDDING_EVIDENCE");
+                    "OUTPUT_WEIGHT_MISSING_WITHOUT_EXPLICIT_TIED_EMBEDDINGS_METADATA");
         }
         if (!tied_output && !model.tokenizer.tokens.empty())
             expect("output.weight", {config.embedding, model.tokenizer.tokens.size()});
