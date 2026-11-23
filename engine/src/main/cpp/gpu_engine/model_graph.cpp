@@ -268,7 +268,7 @@ Status execute_chunked_quantized_matmul_if_needed(
         uint64_t chunk_channels = 0;
         MemoryLease weight_lease;
         MemoryLease output_lease;
-        std::vector<uint8_t> staging;
+        std::vector<uint8_t> sample_weights;
     };
     std::vector<PendingChunk> pending;
     std::unique_ptr<CommandBatch> commands;
@@ -287,7 +287,7 @@ Status execute_chunked_quantized_matmul_if_needed(
                     std::min<uint64_t>(4, chunk.chunk_channels));
                 std::vector<float> expected(sample_channels), actual(sample_channels);
                 const uint64_t sample_weight_bytes = static_cast<uint64_t>(sample_channels) * row_bytes;
-                status = reference_q6_k_matmul(sample_activations.data(), chunk.staging.data(),
+                status = reference_q6_k_matmul(sample_activations.data(), chunk.sample_weights.data(),
                     sample_weight_bytes, expected.data(), 1, sample_channels,
                     static_cast<uint32_t>(inner));
                 if (!status.ok()) return status;
@@ -359,11 +359,17 @@ Status execute_chunked_quantized_matmul_if_needed(
             continue;
         }
 
-        chunk.staging.assign(static_cast<size_t>((weight_bytes + 3) & ~uint64_t{3}), 0);
-        status = reader.read_tensor_chunk(*source, source_offset, chunk.staging.data(), weight_bytes);
+        std::vector<uint8_t> staging(static_cast<size_t>((weight_bytes + 3) & ~uint64_t{3}), 0);
+        status = reader.read_tensor_chunk(*source, source_offset, staging.data(), weight_bytes);
         if (!status.ok()) return status;
-        status = backend.upload(chunk.weight_lease.buffer(), 0, chunk.staging.data(), chunk.staging.size());
+        status = backend.upload(chunk.weight_lease.buffer(), 0, staging.data(), staging.size());
         if (!status.ok()) return status;
+        if (validate_q6_k) {
+            const uint64_t sample_weight_bytes =
+                static_cast<uint64_t>(std::min<uint64_t>(4, chunk_channels)) * row_bytes;
+            chunk.sample_weights.assign(staging.begin(),
+                staging.begin() + static_cast<std::ptrdiff_t>(sample_weight_bytes));
+        }
 
         TensorDesc output_descriptor;
         output_descriptor.shape = {rows, chunk_channels};
