@@ -3317,6 +3317,9 @@ void test_streamed_execution_loads_and_releases_quantized_weights_per_operation(
     context.tensors.emplace("hidden", input);
     context.token_ids = {0, 1};
     context.prefill = true;
+    // Session pressure mode must force generic MatMul weight streaming even
+    // when the tensor would otherwise fit in a single backend binding.
+    context.weight_cache_pressure_mode = true;
 
     OperatorRegistry operators;
     KernelDefinition q4_kernel;
