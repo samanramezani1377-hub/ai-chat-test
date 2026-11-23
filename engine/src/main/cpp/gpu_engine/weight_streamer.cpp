@@ -94,6 +94,14 @@ void QuantizedWeightChunkCache::set_capacity(uint64_t capacity_bytes) {
     }
 }
 
+void QuantizedWeightChunkCache::evict_all() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    evictions_ += static_cast<uint64_t>(lru_.size());
+    index_.clear();
+    lru_.clear();
+    resident_bytes_ = 0;
+}
+
 void QuantizedWeightChunkCache::clear() {
     std::lock_guard<std::mutex> lock(mutex_);
     index_.clear();
