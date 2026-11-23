@@ -223,6 +223,39 @@ void test_independent_gguf_reader() {
     std::remove(path.c_str());
 }
 
+void test_quantized_weight_chunk_cache_lru_and_budget() {
+    FakeBackend backend;
+    MemoryManager memory(backend, 128);
+    MemoryLease a, b, c;
+    BufferDesc desc{8, 4, MemoryDomain::Device, true, "lru-test"};
+    assert(memory.allocate(desc, a).ok());
+    assert(memory.allocate(desc, b).ok());
+    assert(memory.allocate(desc, c).ok());
+
+    QuantizedWeightChunkCache cache(16);
+    cache.insert("a", 8, a);
+    cache.insert("b", 8, b);
+    MemoryLease hit;
+    assert(cache.find("a", hit));
+    cache.insert("c", 8, c); // a was touched; b is the least-recently-used entry.
+    MemoryLease missing;
+    assert(!cache.find("b", missing));
+    assert(cache.find("a", hit));
+    const auto stats = cache.stats();
+    assert(stats.hits == 2);
+    assert(stats.misses == 1);
+    assert(stats.evictions == 1);
+    assert(stats.resident_bytes == 16);
+    assert(stats.resident_chunks == 2);
+
+    cache.set_capacity(8);
+    const auto trimmed = cache.stats();
+    assert(trimmed.resident_bytes == 8);
+    assert(trimmed.resident_chunks == 1);
+    cache.clear();
+    assert(cache.stats().resident_bytes == 0);
+}
+
 void test_runtime_quantization_parity_validation_is_opt_in() {
     ModelExecutionContext context;
     assert(!context.enable_runtime_quantization_parity_validation);
@@ -4281,6 +4314,7 @@ void test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends
 }
 
 int main() {
+    test_quantized_weight_chunk_cache_lru_and_budget();
     test_runtime_quantization_parity_validation_is_opt_in();
     test_q6_k_matmul_flattens_attention_head_dimensions_for_rank_reduced_output();
     test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends();
