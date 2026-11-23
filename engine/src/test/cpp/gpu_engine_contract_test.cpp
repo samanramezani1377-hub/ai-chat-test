@@ -286,6 +286,21 @@ void test_quantized_weight_chunk_cache_lru_and_budget() {
     assert(stats.resident_bytes == 16);
     assert(stats.resident_chunks == 2);
 
+    // Pressure eviction drops cache ownership without disabling future use.
+    MemoryManager pressure_memory(backend, 128);
+    BufferDesc pressure_desc{64, 4, MemoryDomain::Device, false, "cache-pressure"};
+    MemoryLease pressure_lease;
+    assert(pressure_memory.allocate(pressure_desc, pressure_lease).ok());
+    QuantizedWeightChunkCache pressure_cache(64);
+    pressure_cache.insert("pressure", 64, pressure_lease);
+    pressure_lease = MemoryLease{};
+    assert(pressure_memory.allocated_bytes() == 64); // Cache still owns the lease.
+    pressure_cache.evict_all();
+    assert(pressure_cache.stats().resident_bytes == 0);
+    assert(pressure_memory.allocated_bytes() == 0);
+    assert(pressure_memory.reclaim_transient_pool() == 64);
+    assert(pressure_memory.available_bytes() == 128);
+
     cache.set_capacity(8);
     const auto trimmed = cache.stats();
     assert(trimmed.resident_bytes == 8);
