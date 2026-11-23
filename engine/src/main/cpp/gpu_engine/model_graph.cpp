@@ -347,7 +347,7 @@ Status execute_chunked_quantized_matmul_if_needed(
         return Status::success();
     };
 
-    bool cache_admission_enabled = true;
+    bool cache_admission_enabled = !context.weight_cache_pressure_mode;
     bool cache_evicted_for_pressure = false;
     const auto reclaim_optional_memory = [&]() {
         if (context.weight_chunk_cache && !cache_evicted_for_pressure) {
@@ -1124,6 +1124,11 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
         return flush_status;
     };
     const uint64_t graph_binding_limit = storage_binding_limit(device);
+    std::unordered_set<std::string> plan_weight_names;
+    for (const auto& planned_operation : plan.operations)
+        for (const auto& name : planned_operation.weight_tensors)
+            plan_weight_names.insert(name);
+
     for (const auto& original_operation : plan.operations) {
         if (cancellation && cancellation->load(std::memory_order_relaxed)) {
             report.errors.emplace_back("STREAMED_EXECUTION_CANCELLED");
@@ -1150,6 +1155,52 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
                 ++context.persistent_weight_cache_hits;
             else
                 ++context.persistent_weight_cache_misses;
+        }
+
+        // If the next streamed MatMul cannot fit even its smallest legal tile,
+        // spill optional whole-tensor weights before copying them into the
+        // operation context. This is a session-level mode: repeatedly rebuilding
+        // the same oversized resident cache would otherwise recreate the OOM.
+        if (!context.weight_cache_pressure_mode &&
+            operation.operator_name.rfind("MatMul_", 0) == 0 &&
+            operation.inputs.size() == 1 && operation.weight_tensors.size() == 1) {
+            const std::string& streamed_weight_name = operation.weight_tensors.front();
+            const auto weight_binding = context.quantized_weights.find(streamed_weight_name);
+            const auto activation_binding = context.tensors.find(operation.inputs.front());
+            const GgufTensorInfo* weight_info = reader.find_tensor(streamed_weight_name);
+            if (weight_binding != context.quantized_weights.end() && !weight_binding->second.buffer &&
+                activation_binding != context.tensors.end() && weight_info &&
+                weight_info->dimensions.size() == 2 && weight_info->type.storage_size_known &&
+                weight_info->type.block_elements != 0 &&
+                weight_info->dimensions[0] % weight_info->type.block_elements == 0) {
+                const uint64_t inner_width = weight_info->dimensions[0];
+                const uint64_t row_count = activation_binding->second.element_count() / inner_width;
+                uint64_t weight_row_bytes = 0, output_channel_bytes = 0, minimum_tile_bytes = 0;
+                if (inner_width != 0 && activation_binding->second.element_count() % inner_width == 0 &&
+                    checked_product(inner_width / weight_info->type.block_elements,
+                                    weight_info->type.bytes_per_block, weight_row_bytes) &&
+                    checked_product(row_count, sizeof(float), output_channel_bytes) &&
+                    weight_row_bytes <= UINT64_MAX - output_channel_bytes &&
+                    weight_row_bytes + output_channel_bytes <= UINT64_MAX - 3) {
+                    minimum_tile_bytes = weight_row_bytes + output_channel_bytes + 3;
+                    if (memory.available_bytes() < minimum_tile_bytes) {
+                        for (auto& cached_weight : context.quantized_weights) {
+                            cached_weight.second.buffer.reset();
+                            cached_weight.second.chunks.clear();
+                        }
+                        for (const auto& cached_name : plan_weight_names)
+                            context.tensors.erase(cached_name);
+                        context.weight_leases.clear();
+                        // Keep the non-zero sentinel so an allocation failure can
+                        // still select streamed MatMul instead of failing model load.
+                        context.persistent_weight_cache_limit_bytes = 1;
+                        context.weight_cache_pressure_mode = true;
+                        if (context.weight_chunk_cache)
+                            context.weight_chunk_cache->evict_all();
+                        memory.reclaim_transient_pool();
+                    }
+                }
+            }
         }
 
         ModelExecutionContext operation_context;
