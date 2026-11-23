@@ -79,7 +79,7 @@ Status load_model_execution_weights(const GgufReader& reader,
             operation_name.rfind("MatMul_", 0) == 0 && tensor->type.name != "F32";
         const bool quantized_embedding = single_operation &&
             operation_name.rfind("Embedding_", 0) == 0 && tensor->type.name != "F32";
-        if (quantized_matmul || quantized_embedding) {
+        if (quantized_embedding || (quantized_matmul && tensor->byte_size > backend_limit)) {
             if (tensor->dimensions.size() != 2 || tensor->dimensions[0] == 0 ||
                 tensor->dimensions[1] == 0 || !tensor->type.storage_size_known ||
                 tensor->type.block_elements == 0 || tensor->type.bytes_per_block == 0 ||
@@ -93,18 +93,14 @@ Status load_model_execution_weights(const GgufReader& reader,
             if (row_bytes == 0 || row_bytes > backend_limit)
                 return {StatusCode::Unsupported,
                     "One complete quantized operator row exceeds the backend storage binding limit: " + name};
-            if (!quantized_embedding && tensor->byte_size <= backend_limit) {
-                // Small MatMul weights use the ordinary resident binding below.
-            } else {
-                // Keep only GGUF metadata. MatMul weights are streamed by output
-                // channel; Embedding weights are gathered by token ID at execution.
-                QuantizedWeightBinding binding;
-                binding.byte_size = tensor->byte_size;
-                binding.file_type_id = tensor->type_id;
-                binding.dimensions = tensor->dimensions;
-                pending_quantized.emplace(name, std::move(binding));
-                continue;
-            }
+            // Keep only GGUF metadata. MatMul weights are streamed by output
+            // channel; Embedding weights are gathered by token ID at execution.
+            QuantizedWeightBinding binding;
+            binding.byte_size = tensor->byte_size;
+            binding.file_type_id = tensor->type_id;
+            binding.dimensions = tensor->dimensions;
+            pending_quantized.emplace(name, std::move(binding));
+            continue;
         }
 
         if (tensor->byte_size > backend_limit)
