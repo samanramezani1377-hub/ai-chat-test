@@ -665,7 +665,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         if (alternate_status.ok() && engine_->active_backend() &&
             engine_->active_backend()->kind() == alternate_backend) {
             const std::string alternate_previous_error = last_error_;
-            alternate_status = validate_quantization_kernels_for_active_backend(true);
+            alternate_status = validate_quantization_kernels_for_active_backend();
             const std::string alternate_detail = alternate_status.ok()
                 ? "all_model_gguf_formats_passed"
                 : alternate_status.message;
