@@ -1379,6 +1379,7 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";gpu_memory_free=unknown"
            << ";runtime_quantization_parity_validation=" << (context_.enable_runtime_quantization_parity_validation ? "enabled" : "disabled")
            << ";weight_cache_limit_bytes=" << context_.persistent_weight_cache_limit_bytes
+           << ";weight_cache_pressure_mode=" << (context_.weight_cache_pressure_mode ? "true" : "false")
            << ";weight_cache_hits=" << context_.persistent_weight_cache_hits
            << ";weight_cache_misses=" << context_.persistent_weight_cache_misses
            << ";weight_chunk_cache_hits=" << (context_.weight_chunk_cache ? context_.weight_chunk_cache->stats().hits : 0)
