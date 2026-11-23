@@ -614,28 +614,6 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
             continue;
         }
 
-        bool chunked_q6_matmul = false;
-        status = execute_chunked_q6_k_matmul_if_needed(operation, backend, operators,
-            reader, memory, device, operation_context, chunked_q6_matmul);
-        if (!status.ok()) {
-            report.errors.push_back(operation.id + ":CHUNKED_Q6_K_MATMUL_FAILED:" + status.message);
-            for (const auto& name : operation.weight_tensors) {
-                operation_context.tensors.erase(name);
-                operation_context.quantized_weights.erase(name);
-            }
-            operation_context.weight_leases.clear();
-            return status;
-        }
-        if (chunked_q6_matmul) {
-            ++report.compiled_nodes;
-            for (const auto& name : operation.weight_tensors) {
-                operation_context.tensors.erase(name);
-                operation_context.quantized_weights.erase(name);
-            }
-            operation_context.weight_leases.clear();
-            continue;
-        }
-
         bool chunked_elementwise = false;
         status = execute_chunked_elementwise_if_needed(operation, backend, lowerings,
             operators, device, operation_context, chunked_elementwise);
