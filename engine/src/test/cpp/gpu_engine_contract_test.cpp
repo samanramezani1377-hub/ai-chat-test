@@ -4255,7 +4255,7 @@ void test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends
     assert(gles.glsl_source.find("OUTPUT_CHANNELS_TOTAL=4u") != std::string::npos);
     assert(gles.glsl_source.find("OUTPUT_CHANNEL_OFFSET=2u") != std::string::npos);
     assert(gles.glsl_source.find("INNER=256u") != std::string::npos);
-    assert(gles.workgroups_x==1&&gles.workgroups_y==1);
+    assert(gles.workgroups_x==1&&gles.workgroups_y==2);
     assert(gles.bindings.size() == 3 && gles.bindings[2].offset_bytes == 0 &&
            gles.bindings[2].size_bytes == output_desc.size_bytes);
 
@@ -4267,7 +4267,7 @@ void test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends
     assert(dawn.wgsl_source.find("OUTPUT_CHANNELS_TOTAL: u32 = 4u") != std::string::npos);
     assert(dawn.wgsl_source.find("OUTPUT_CHANNEL_OFFSET: u32 = 2u") != std::string::npos);
     assert(dawn.wgsl_source.find("INNER: u32 = 256u") != std::string::npos);
-    assert(dawn.workgroups_x==1&&dawn.workgroups_y==1);
+    assert(dawn.workgroups_x==1&&dawn.workgroups_y==2);
 }
 
 int main() {
