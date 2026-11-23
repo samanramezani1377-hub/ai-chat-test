@@ -56,8 +56,6 @@ Status load_model_execution_weights(const GgufReader& reader,
     std::unordered_map<std::string, Tensor> pending_tensors;
     std::unordered_map<std::string, QuantizedWeightBinding> pending_quantized;
     std::vector<MemoryLease> pending_leases;
-    std::vector<uint32_t> pending_token_ids;
-    bool remap_embedding_token_ids = false;
     const bool single_operation = plan.operations.size() == 1;
     const std::string operation_name = single_operation ? plan.operations.front().operator_name : std::string();
 
@@ -77,80 +75,36 @@ Status load_model_execution_weights(const GgufReader& reader,
         if (backend_limit == 0)
             return {StatusCode::Unsupported, "Backend did not report a usable model-weight storage limit"};
 
-        const bool q6k_matmul = single_operation && operation_name == "MatMul_Q6_K" &&
-                                tensor->type.name == "Q6_K" && tensor->type_id == 14;
-        const bool q6k_embedding = single_operation && operation_name == "Embedding_Q6_K" &&
-                                   tensor->type.name == "Q6_K" && tensor->type_id == 14;
-
-        if (q6k_matmul) {
+        const bool quantized_matmul = single_operation &&
+            operation_name.rfind("MatMul_", 0) == 0 && tensor->type.name != "F32";
+        const bool quantized_embedding = single_operation &&
+            operation_name.rfind("Embedding_", 0) == 0 && tensor->type.name != "F32";
+        if (quantized_matmul || quantized_embedding) {
             if (tensor->dimensions.size() != 2 || tensor->dimensions[0] == 0 ||
-                tensor->dimensions[0] % 256 != 0 || tensor->dimensions[1] == 0)
-                return {StatusCode::Unsupported, "Q6_K MatMul tensor dimensions are not channel-chunkable: " + name};
-            const uint64_t row_bytes = (tensor->dimensions[0] / 256) * 210;
+                tensor->dimensions[1] == 0 || !tensor->type.storage_size_known ||
+                tensor->type.block_elements == 0 || tensor->type.bytes_per_block == 0 ||
+                tensor->dimensions[0] % tensor->type.block_elements != 0)
+                return {StatusCode::Unsupported,
+                    "Quantized operator tensor has no valid GGUF block layout for streaming: " + name};
+            const uint64_t row_blocks = tensor->dimensions[0] / tensor->type.block_elements;
+            if (row_blocks > UINT64_MAX / tensor->type.bytes_per_block)
+                return {StatusCode::InvalidArgument, "Quantized GGUF row byte size overflows: " + name};
+            const uint64_t row_bytes = row_blocks * tensor->type.bytes_per_block;
             if (row_bytes == 0 || row_bytes > backend_limit)
-                return {StatusCode::Unsupported, "Q6_K MatMul one output-channel row exceeds the backend binding limit: " + name};
-            // Keep only metadata here. The execution path reads, uploads, dispatches,
-            // and releases one complete output-channel group at a time.
-            QuantizedWeightBinding binding;
-            binding.byte_size = tensor->byte_size;
-            binding.file_type_id = tensor->type_id;
-            binding.dimensions = tensor->dimensions;
-            pending_quantized.emplace(name, std::move(binding));
-            continue;
-        }
-
-        if (q6k_embedding) {
-            if (tensor->dimensions.size() != 2 || tensor->dimensions[0] == 0 ||
-                tensor->dimensions[0] % 256 != 0 || tensor->dimensions[1] == 0 ||
-                context.token_ids.empty())
-                return {StatusCode::Unsupported, "Q6_K Embedding metadata or token batch is invalid: " + name};
-            const uint64_t row_bytes = (tensor->dimensions[0] / 256) * 210;
-            if (row_bytes == 0 || row_bytes > backend_limit ||
-                context.token_ids.size() > UINT32_MAX ||
-                context.token_ids.size() > UINT64_MAX / row_bytes)
-                return {StatusCode::Unsupported, "Q6_K Embedding gathered rows exceed safe storage limits: " + name};
-            const uint64_t logical_bytes = context.token_ids.size() * row_bytes;
-            if (logical_bytes > backend_limit || logical_bytes > SIZE_MAX - 3)
-                return {StatusCode::Unsupported, "Q6_K Embedding token-row gather exceeds the backend binding limit"};
-            uint64_t allocated_bytes = 0;
-            if (!round_up(logical_bytes, 4, allocated_bytes))
-                return {StatusCode::InvalidArgument, "Q6_K Embedding gathered allocation size overflows"};
-
-            BufferDesc allocation;
-            allocation.size_bytes = allocated_bytes;
-            allocation.alignment = std::max<uint64_t>(4, device.limits.min_storage_buffer_offset_alignment);
-            allocation.memory = MemoryDomain::Device;
-            allocation.persistent = false;
-            allocation.label = "q6-k-embedding-gather:" + name;
-            MemoryLease lease;
-            Status status = memory.allocate(allocation, lease);
-            if (!status.ok()) return status;
-            if (!lease || !lease.buffer())
-                return {StatusCode::BackendFailure, "Q6_K Embedding gather allocation returned an empty buffer"};
-
-            std::vector<uint8_t> staging(static_cast<size_t>(allocated_bytes), 0);
-            pending_token_ids.resize(context.token_ids.size());
-            for (size_t index = 0; index < context.token_ids.size(); ++index) {
-                const uint32_t token_id = context.token_ids[index];
-                if (token_id >= tensor->dimensions[1])
-                    return {StatusCode::InvalidArgument, "Q6_K Embedding token ID is outside the GGUF vocabulary"};
-                status = reader.read_tensor_chunk(*tensor, static_cast<uint64_t>(token_id) * row_bytes,
-                    staging.data() + index * row_bytes, row_bytes);
-                if (!status.ok()) return status;
-                pending_token_ids[index] = static_cast<uint32_t>(index);
+                return {StatusCode::Unsupported,
+                    "One complete quantized operator row exceeds the backend storage binding limit: " + name};
+            if (quantized_matmul && tensor->byte_size <= backend_limit)
+                ; // Small MatMul weights use the ordinary resident binding below.
+            else {
+                // Keep only GGUF metadata. MatMul weights are streamed by output
+                // channel; Embedding weights are gathered by token ID at execution.
+                QuantizedWeightBinding binding;
+                binding.byte_size = tensor->byte_size;
+                binding.file_type_id = tensor->type_id;
+                binding.dimensions = tensor->dimensions;
+                pending_quantized.emplace(name, std::move(binding));
+                continue;
             }
-            status = backend.upload(lease.buffer(), 0, staging.data(), allocated_bytes);
-            if (!status.ok()) return status;
-
-            QuantizedWeightBinding binding;
-            binding.buffer = lease.buffer();
-            binding.byte_size = logical_bytes;
-            binding.file_type_id = tensor->type_id;
-            binding.dimensions = {tensor->dimensions[0], static_cast<uint64_t>(context.token_ids.size())};
-            pending_quantized.emplace(name, std::move(binding));
-            pending_leases.push_back(std::move(lease));
-            remap_embedding_token_ids = true;
-            continue;
         }
 
         if (tensor->byte_size > backend_limit)
@@ -212,7 +166,6 @@ Status load_model_execution_weights(const GgufReader& reader,
     context.weight_leases.insert(context.weight_leases.end(),
                                  std::make_move_iterator(pending_leases.begin()),
                                  std::make_move_iterator(pending_leases.end()));
-    if (remap_embedding_token_ids) context.token_ids = std::move(pending_token_ids);
     return Status::success();
 }
 

@@ -1274,8 +1274,8 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";gpu_memory_total=unknown"
            << ";gpu_memory_free=unknown"
            << ";weight_streaming=operation-aware-chunked"
-           << ";single_tensor_chunking=Q6_K_MATMUL_CHANNELS_AND_EMBEDDING_ROW_GATHER"
-           << ";chunked_operator_support=F32_ELEMENTWISE,Q6_K_MATMUL,Q6_K_EMBEDDING"
+           << ";single_tensor_chunking=GGUF_BLOCK_AWARE_MATMUL_CHANNELS_AND_EMBEDDING_TOKEN_ROWS"
+           << ";chunked_operator_support=F32_ELEMENTWISE,VALIDATED_QUANTIZED_MATMUL,VALIDATED_QUANTIZED_EMBEDDING"
            << ";backend_kernel_validation=runtime-numerical"
            << ";q6_backend_validation=" << q6_backend_validation_
            << ";model_reference_parity=UNVERIFIED"

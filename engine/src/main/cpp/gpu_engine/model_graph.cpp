@@ -6,8 +6,11 @@
 #include "quantization.h"
 
 #include <algorithm>
+#include <limits>
+#include <string>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace ai_chat::gpu_engine {
 
@@ -41,111 +44,360 @@ std::string describe_compile_failure(const ModelGraphCompileReport& report) {
 
 
 
-Status execute_chunked_q6_k_matmul_if_needed(
+
+uint64_t storage_binding_limit(const DeviceInfo& device) {
+    const uint64_t storage = device.limits.max_storage_buffer_binding_size;
+    const uint64_t buffer = device.limits.max_buffer_size;
+    if (storage == 0) return buffer;
+    if (buffer == 0) return storage;
+    return std::min(storage, buffer);
+}
+
+bool checked_product(uint64_t a, uint64_t b, uint64_t& result) {
+    if (a != 0 && b > std::numeric_limits<uint64_t>::max() / a) return false;
+    result = a * b;
+    return true;
+}
+
+Status allocate_chunk_buffer(MemoryManager& memory, const DeviceInfo& device,
+                             uint64_t bytes, const std::string& label,
+                             MemoryLease& lease) {
+    if (bytes == 0 || bytes > UINT64_MAX - 3)
+        return {StatusCode::InvalidArgument, "Chunk buffer size is zero or overflows"};
+    BufferDesc descriptor;
+    descriptor.size_bytes = (bytes + 3) & ~uint64_t{3};
+    descriptor.alignment = std::max<uint64_t>(4, device.limits.min_storage_buffer_offset_alignment);
+    descriptor.memory = MemoryDomain::Device;
+    descriptor.persistent = false;
+    descriptor.label = label;
+    return memory.allocate(descriptor, lease);
+}
+
+Status execute_chunked_quantized_matmul_if_needed(
         const ModelPlanOperation& operation, Backend& backend,
-        const OperatorRegistry& operators, const GgufReader& reader,
-        MemoryManager& memory, const DeviceInfo& device,
+        const ModelLoweringRegistry& lowerings, const OperatorRegistry& operators,
+        const GgufReader& reader, MemoryManager& memory, const DeviceInfo& device,
         ModelExecutionContext& context, bool& handled) {
     handled = false;
-    if (operation.operator_name != "MatMul_Q6_K") return Status::success();
-    if (operation.inputs.size() != 1 || operation.weight_tensors.size() != 1)
-        return {StatusCode::InvalidArgument, "Chunked Q6_K MatMul requires one activation and one packed weight"};
-    const auto weight = context.quantized_weights.find(operation.weight_tensors.front());
-    if (weight == context.quantized_weights.end() || weight->second.file_type_id != 14)
-        return {StatusCode::InvalidArgument, "Chunked Q6_K MatMul metadata binding is missing"};
-    if (weight->second.buffer) return Status::success();
+    if (operation.operator_name.rfind("MatMul_", 0) != 0 ||
+        operation.inputs.size() != 1 || operation.weight_tensors.size() != 1)
+        return Status::success();
+
+    const std::string& weight_name = operation.weight_tensors.front();
+    const auto weight_it = context.quantized_weights.find(weight_name);
+    if (weight_it == context.quantized_weights.end() || weight_it->second.buffer)
+        return Status::success();
     handled = true;
 
-    const Tensor* input = nullptr;
-    const Tensor* output = nullptr;
     const auto input_it = context.tensors.find(operation.inputs.front());
     const auto output_it = context.tensors.find(operation.output);
-    if (input_it == context.tensors.end() || output_it == context.tensors.end())
-        return {StatusCode::InvalidArgument, "Chunked Q6_K MatMul activation or output is unbound"};
-    input = &input_it->second;
-    output = &output_it->second;
-    if (input->descriptor().data_type != DataType::F32 ||
-        output->descriptor().data_type != DataType::F32 ||
-        input->descriptor().shape.size() != 2 ||
-        (output->descriptor().shape.size() != 2 && output->descriptor().shape.size() != 3) ||
-        weight->second.dimensions.size() != 2 ||
-        input->descriptor().shape[1] != weight->second.dimensions[0])
-        return {StatusCode::Unsupported, "Chunked Q6_K MatMul tensor shapes are incompatible"};
+    const GgufTensorInfo* source = reader.find_tensor(weight_name);
+    if (input_it == context.tensors.end() || output_it == context.tensors.end() ||
+        !source || !source->byte_size_known)
+        return {StatusCode::InvalidArgument, "Chunked MatMul requires bound activations, output and a known GGUF tensor"};
 
-    const GgufTensorInfo* source = reader.find_tensor(operation.weight_tensors.front());
-    if (!source || !source->byte_size_known || source->byte_size != weight->second.byte_size)
-        return {StatusCode::InvalidArgument, "Chunked Q6_K MatMul GGUF source metadata is invalid"};
-    const uint64_t inner = weight->second.dimensions[0];
-    const uint64_t total_channels = weight->second.dimensions[1];
-    if (inner == 0 || inner % 256 != 0 || total_channels == 0 ||
-        total_channels > UINT32_MAX || input->descriptor().shape[0] == 0 ||
-        output->element_count() / input->descriptor().shape[0] != total_channels)
-        return {StatusCode::InvalidArgument, "Chunked Q6_K MatMul dimensions are not block/channel aligned"};
-    const uint64_t row_bytes = (inner / 256) * 210;
-    const uint64_t binding_limit = std::min(device.limits.max_storage_buffer_binding_size,
-        device.limits.max_buffer_size == 0 ? device.limits.max_storage_buffer_binding_size
-                                           : device.limits.max_buffer_size);
-    if (row_bytes == 0 || binding_limit < row_bytes)
-        return {StatusCode::Unsupported, "One Q6_K output-channel weight row exceeds the backend storage binding limit"};
-    const uint64_t maximum_chunk_channels = binding_limit / row_bytes;
-    if (maximum_chunk_channels == 0)
-        return {StatusCode::Unsupported, "Backend cannot hold one complete Q6_K output-channel row"};
+    const Tensor& input = input_it->second;
+    const Tensor& output = output_it->second;
+    const auto& dimensions = weight_it->second.dimensions;
+    const auto& type = source->type;
+    if (input.descriptor().data_type != DataType::F32 ||
+        output.descriptor().data_type != DataType::F32 ||
+        input.descriptor().shape.size() != 2 ||
+        (output.descriptor().shape.size() != 2 && output.descriptor().shape.size() != 3) ||
+        dimensions.size() != 2 || source->dimensions != dimensions ||
+        source->type_id != weight_it->second.file_type_id ||
+        input.descriptor().shape[1] != dimensions[0] ||
+        input.descriptor().shape[0] == 0 || !input.buffer() || !output.buffer() ||
+        !type.storage_size_known || type.block_elements == 0 || type.bytes_per_block == 0)
+        return {StatusCode::Unsupported, "Chunked MatMul GGUF layout or activation/output shapes are incompatible"};
 
-    ChunkExecutionConfig config;
-    config.total_elements = total_channels;
-    config.maximum_chunk_elements = maximum_chunk_channels;
-    config.alignment_elements = 1;
-    config.element_size_bytes = sizeof(float);
-    config.output_base_offset_bytes = output->byte_offset();
-    config.output_binding = 2;
-    config.output_binding_is_chunk_slice = false;
-    config.output_buffer = output->buffer();
+    const uint64_t inner = dimensions[0];
+    const uint64_t total_channels = dimensions[1];
+    const uint64_t rows = input.descriptor().shape[0];
+    if (inner == 0 || total_channels == 0 || inner % type.block_elements != 0 ||
+        total_channels > UINT32_MAX || rows > UINT32_MAX ||
+        output.element_count() / rows != total_channels)
+        return {StatusCode::Unsupported, "Chunked MatMul dimensions are not aligned to the GGUF storage block"};
+    uint64_t row_bytes = 0, expected_weight_bytes = 0, output_bytes_per_channel = 0;
+    if (!checked_product(inner / type.block_elements, type.bytes_per_block, row_bytes) ||
+        !checked_product(row_bytes, total_channels, expected_weight_bytes) ||
+        !checked_product(rows, sizeof(float), output_bytes_per_channel) ||
+        !checked_product(output_bytes_per_channel, total_channels, output_bytes_per_channel) ||
+        row_bytes == 0 || expected_weight_bytes != source->byte_size ||
+        weight_it->second.byte_size != source->byte_size)
+        return {StatusCode::InvalidArgument, "Chunked MatMul GGUF row-byte calculation does not match tensor storage"};
 
-    MemoryLease current_weight_lease;
-    std::vector<uint8_t> staging;
-    const auto build_dispatch = [&](const ChunkExecutionRange& range, ComputeDispatch& dispatch) -> Status {
-        if (range.element_offset > UINT64_MAX / row_bytes ||
-            range.element_count > UINT64_MAX / row_bytes)
-            return {StatusCode::InvalidArgument, "Q6_K output-channel chunk byte range overflows"};
-        const uint64_t source_offset = range.element_offset * row_bytes;
-        const uint64_t chunk_bytes = range.element_count * row_bytes;
-        if (source_offset > source->byte_size || chunk_bytes > source->byte_size - source_offset)
-            return {StatusCode::InvalidArgument, "Q6_K output-channel chunk exceeds the GGUF tensor"};
-        if (chunk_bytes > binding_limit || chunk_bytes > UINT64_MAX - 3)
-            return {StatusCode::InvalidArgument, "Q6_K output-channel chunk exceeds backend binding capacity"};
-        const uint64_t allocation_bytes = (chunk_bytes + 3) & ~uint64_t{3};
+    const uint64_t binding_limit = storage_binding_limit(device);
+    if (binding_limit < row_bytes || binding_limit < rows * sizeof(float))
+        return {StatusCode::Unsupported, "Backend binding limit cannot hold one quantized weight row or one output channel"};
+    const uint64_t output_channel_bytes = rows * sizeof(float);
+    const uint64_t available = memory.available_bytes();
+    if (row_bytes > UINT64_MAX - output_channel_bytes)
+        return {StatusCode::InvalidArgument, "Chunked MatMul per-channel memory estimate overflows"};
+    const uint64_t bytes_per_channel = row_bytes + output_channel_bytes;
+    uint64_t maximum_channels = std::min(binding_limit / row_bytes,
+                                         binding_limit / output_channel_bytes);
+    maximum_channels = std::min(maximum_channels, available / bytes_per_channel);
+    maximum_channels = std::min<uint64_t>(maximum_channels, UINT32_MAX);
+    if (maximum_channels == 0)
+        return {StatusCode::OutOfMemory, "GPU budget cannot hold one quantized MatMul output-channel chunk"};
 
-        current_weight_lease = MemoryLease{};
-        BufferDesc allocation;
-        allocation.size_bytes = allocation_bytes;
-        allocation.alignment = std::max<uint64_t>(4, device.limits.min_storage_buffer_offset_alignment);
-        allocation.memory = MemoryDomain::Device;
-        allocation.persistent = false;
-        allocation.label = "q6-k-matmul-channel-chunk:" + source->name;
-        Status status = memory.allocate(allocation, current_weight_lease);
+    const auto* lowering = lowerings.find(backend.kind(), operation.operator_name);
+    if (!lowering)
+        return {StatusCode::Unsupported, "No validated lowering exists for chunked MatMul: " + operation.operator_name};
+
+    uint64_t channel_offset = 0;
+    while (channel_offset < total_channels) {
+        if (!backend.healthy())
+            return {StatusCode::DeviceLost, "GPU backend became unhealthy during quantized MatMul chunking"};
+        const uint64_t chunk_channels = std::min(maximum_channels, total_channels - channel_offset);
+        uint64_t source_offset = 0, weight_bytes = 0, output_chunk_bytes = 0;
+        if (!checked_product(channel_offset, row_bytes, source_offset) ||
+            !checked_product(chunk_channels, row_bytes, weight_bytes) ||
+            !checked_product(chunk_channels, output_channel_bytes, output_chunk_bytes) ||
+            source_offset > source->byte_size || weight_bytes > source->byte_size - source_offset)
+            return {StatusCode::InvalidArgument, "Quantized MatMul chunk byte range overflows GGUF tensor bounds"};
+
+        MemoryLease weight_lease, output_lease;
+        Status status = allocate_chunk_buffer(memory, device, weight_bytes,
+            "quantized-matmul-weight-chunk:" + weight_name, weight_lease);
         if (!status.ok()) return status;
-        if (!current_weight_lease || !current_weight_lease.buffer())
-            return {StatusCode::BackendFailure, "Q6_K channel-chunk allocation returned an empty buffer"};
+        status = allocate_chunk_buffer(memory, device, output_chunk_bytes,
+            "quantized-matmul-output-chunk:" + operation.id, output_lease);
+        if (!status.ok()) return status;
+        std::vector<uint8_t> staging(static_cast<size_t>((weight_bytes + 3) & ~uint64_t{3}), 0);
+        status = reader.read_tensor_chunk(*source, source_offset, staging.data(), weight_bytes);
+        if (!status.ok()) return status;
+        status = backend.upload(weight_lease.buffer(), 0, staging.data(), staging.size());
+        if (!status.ok()) return status;
 
-        staging.assign(static_cast<size_t>(allocation_bytes), 0);
-        status = reader.read_tensor_chunk(*source, source_offset, staging.data(), chunk_bytes);
-        if (!status.ok()) return status;
-        status = backend.upload(current_weight_lease.buffer(), 0, staging.data(), allocation_bytes);
+        TensorDesc output_descriptor;
+        output_descriptor.shape = {rows, chunk_channels};
+        output_descriptor.data_type = DataType::F32;
+        output_descriptor.layout = TensorLayout::Contiguous;
+        output_descriptor.memory = MemoryDomain::Device;
+        output_descriptor.alignment = 4;
+        Tensor output_chunk;
+        status = Tensor::create(output_descriptor, output_lease.buffer(), 0, output_chunk);
         if (!status.ok()) return status;
 
-        if (backend.kind() == BackendKind::OpenGles)
-            status = build_q6_k_matmul_chunk_gles_candidate(*input, current_weight_lease.buffer(),
-                chunk_bytes, *output, static_cast<uint32_t>(range.element_offset),
-                static_cast<uint32_t>(range.element_count), dispatch);
-        else
-            status = build_q6_k_matmul_chunk_candidate(*input, current_weight_lease.buffer(),
-                chunk_bytes, *output, static_cast<uint32_t>(range.element_offset),
-                static_cast<uint32_t>(range.element_count), dispatch);
+        ModelExecutionContext chunk_context = context;
+        QuantizedWeightBinding chunk_weight = weight_it->second;
+        chunk_weight.buffer = weight_lease.buffer();
+        chunk_weight.byte_size = weight_bytes;
+        chunk_weight.dimensions = {inner, chunk_channels};
+        chunk_weight.chunks.clear();
+        chunk_context.quantized_weights[weight_name] = std::move(chunk_weight);
+        chunk_context.tensors[operation.output] = std::move(output_chunk);
+
+        ComputeDispatch dispatch;
+        status = (*lowering)(operation, chunk_context, dispatch);
         if (!status.ok()) return status;
-        return operators.authorize_dispatch(dispatch.kernel_id, backend.kind(), dispatch);
-    };
-    return execute_chunked_compute(backend, config, build_dispatch, {});
+        status = operators.authorize_dispatch(dispatch.kernel_id, backend.kind(), dispatch);
+        if (!status.ok()) return status;
+        std::unique_ptr<CommandBatch> compute_commands;
+        status = backend.begin_commands(compute_commands);
+        if (!status.ok()) return status;
+        if (!compute_commands)
+            return {StatusCode::BackendFailure, "Backend returned an empty quantized MatMul command batch"};
+        status = compute_commands->dispatch_compute(dispatch);
+        if (!status.ok()) return status;
+        status = backend.submit(std::move(compute_commands));
+        if (!status.ok()) return status;
+        status = backend.synchronize();
+        if (!status.ok()) return status;
+
+        std::unique_ptr<CommandBatch> copy_commands;
+        status = backend.begin_commands(copy_commands);
+        if (!status.ok()) return status;
+        if (!copy_commands)
+            return {StatusCode::BackendFailure, "Backend returned an empty quantized MatMul aggregation batch"};
+        for (uint64_t row = 0; row < rows; ++row) {
+            uint64_t source_row_offset = 0, destination_row_offset = 0, channel_byte_offset = 0;
+            if (!checked_product(row, chunk_channels * sizeof(float), source_row_offset) ||
+                !checked_product(row, total_channels * sizeof(float), destination_row_offset) ||
+                !checked_product(channel_offset, sizeof(float), channel_byte_offset) ||
+                output.byte_offset() > UINT64_MAX - destination_row_offset ||
+                output.byte_offset() + destination_row_offset > UINT64_MAX - channel_byte_offset)
+                return {StatusCode::InvalidArgument, "Quantized MatMul output aggregation offset overflows"};
+            destination_row_offset += output.byte_offset() + channel_byte_offset;
+            status = copy_commands->copy_buffer(output_lease.buffer(), source_row_offset,
+                output.buffer(), destination_row_offset, chunk_channels * sizeof(float));
+            if (!status.ok()) return status;
+        }
+        status = backend.submit(std::move(copy_commands));
+        if (!status.ok()) return status;
+        status = backend.synchronize();
+        if (!status.ok()) return status;
+        channel_offset += chunk_channels;
+    }
+    return Status::success();
 }
+
+Status execute_chunked_quantized_embedding_if_needed(
+        const ModelPlanOperation& operation, Backend& backend,
+        const ModelLoweringRegistry& lowerings, const OperatorRegistry& operators,
+        const GgufReader& reader, MemoryManager& memory, const DeviceInfo& device,
+        ModelExecutionContext& context, bool& handled) {
+    handled = false;
+    if (operation.operator_name.rfind("Embedding_", 0) != 0 ||
+        operation.inputs.size() != 1 || operation.inputs.front() != "token_ids" ||
+        operation.weight_tensors.size() != 1)
+        return Status::success();
+
+    const std::string& weight_name = operation.weight_tensors.front();
+    const auto weight_it = context.quantized_weights.find(weight_name);
+    if (weight_it == context.quantized_weights.end() || weight_it->second.buffer)
+        return Status::success();
+    handled = true;
+
+    const GgufTensorInfo* source = reader.find_tensor(weight_name);
+    const auto output_it = context.tensors.find(operation.output);
+    if (!source || !source->byte_size_known || output_it == context.tensors.end())
+        return {StatusCode::InvalidArgument, "Chunked Embedding requires GGUF weight metadata and a bound output"};
+    const Tensor& output = output_it->second;
+    const auto& dimensions = weight_it->second.dimensions;
+    const auto& type = source->type;
+    if (dimensions.size() != 2 || source->dimensions != dimensions ||
+        source->type_id != weight_it->second.file_type_id ||
+        !type.storage_size_known || type.block_elements == 0 || type.bytes_per_block == 0 ||
+        output.descriptor().data_type != DataType::F32 ||
+        output.descriptor().shape.size() != 2 || !output.buffer() ||
+        output.descriptor().shape[0] != context.token_ids.size() ||
+        output.descriptor().shape[1] != dimensions[0] ||
+        context.token_ids.empty() || context.token_ids.size() > UINT32_MAX)
+        return {StatusCode::Unsupported, "Chunked Embedding GGUF dimensions, token IDs or output shape are incompatible"};
+
+    const uint64_t dimension = dimensions[0];
+    const uint64_t vocabulary = dimensions[1];
+    if (dimension == 0 || vocabulary == 0 || dimension % type.block_elements != 0)
+        return {StatusCode::Unsupported, "Embedding dimension is not aligned to the GGUF quantization block"};
+    uint64_t row_bytes = 0, expected_bytes = 0, output_bytes_per_token = 0;
+    if (!checked_product(dimension / type.block_elements, type.bytes_per_block, row_bytes) ||
+        !checked_product(row_bytes, vocabulary, expected_bytes) ||
+        !checked_product(dimension, sizeof(float), output_bytes_per_token) ||
+        expected_bytes != source->byte_size || weight_it->second.byte_size != source->byte_size)
+        return {StatusCode::InvalidArgument, "Embedding row-byte calculation does not match GGUF tensor storage"};
+
+    const uint64_t binding_limit = storage_binding_limit(device);
+    if (row_bytes == 0 || output_bytes_per_token == 0 ||
+        row_bytes > binding_limit || output_bytes_per_token > binding_limit)
+        return {StatusCode::Unsupported, "Backend binding limit cannot hold one gathered embedding row"};
+    const uint64_t bytes_per_token = row_bytes + output_bytes_per_token + sizeof(uint32_t);
+    const uint64_t available = memory.available_bytes();
+    uint64_t maximum_tokens = std::min(binding_limit / row_bytes,
+                                       binding_limit / output_bytes_per_token);
+    maximum_tokens = std::min(maximum_tokens, binding_limit / sizeof(uint32_t));
+    maximum_tokens = std::min(maximum_tokens, available / bytes_per_token);
+    maximum_tokens = std::min<uint64_t>(maximum_tokens, UINT32_MAX);
+    if (maximum_tokens == 0)
+        return {StatusCode::OutOfMemory, "GPU budget cannot hold one gathered embedding row and output"};
+
+    const auto* lowering = lowerings.find(backend.kind(), operation.operator_name);
+    if (!lowering)
+        return {StatusCode::Unsupported, "No validated lowering exists for chunked Embedding: " + operation.operator_name};
+
+    uint64_t token_offset = 0;
+    while (token_offset < context.token_ids.size()) {
+        if (!backend.healthy())
+            return {StatusCode::DeviceLost, "GPU backend became unhealthy during embedding row gathering"};
+        const uint64_t batch_tokens = std::min<uint64_t>(
+            maximum_tokens, context.token_ids.size() - token_offset);
+        uint64_t weight_bytes = 0, output_chunk_bytes = 0, token_bytes = 0;
+        if (!checked_product(batch_tokens, row_bytes, weight_bytes) ||
+            !checked_product(batch_tokens, output_bytes_per_token, output_chunk_bytes) ||
+            !checked_product(batch_tokens, sizeof(uint32_t), token_bytes))
+            return {StatusCode::InvalidArgument, "Embedding gather batch size overflows"};
+
+        MemoryLease weight_lease, token_lease, output_lease;
+        Status status = allocate_chunk_buffer(memory, device, weight_bytes,
+            "quantized-embedding-gather:" + weight_name, weight_lease);
+        if (!status.ok()) return status;
+        status = allocate_chunk_buffer(memory, device, token_bytes,
+            "quantized-embedding-token-ids:" + operation.id, token_lease);
+        if (!status.ok()) return status;
+        status = allocate_chunk_buffer(memory, device, output_chunk_bytes,
+            "quantized-embedding-output:" + operation.id, output_lease);
+        if (!status.ok()) return status;
+
+        std::vector<uint8_t> staging(static_cast<size_t>((weight_bytes + 3) & ~uint64_t{3}), 0);
+        std::vector<uint32_t> remapped_ids(static_cast<size_t>(batch_tokens));
+        for (uint64_t index = 0; index < batch_tokens; ++index) {
+            const uint32_t token_id = context.token_ids[static_cast<size_t>(token_offset + index)];
+            if (token_id >= vocabulary)
+                return {StatusCode::InvalidArgument, "Embedding token ID is outside the GGUF vocabulary"};
+            const uint64_t source_offset = static_cast<uint64_t>(token_id) * row_bytes;
+            status = reader.read_tensor_chunk(*source, source_offset,
+                staging.data() + index * row_bytes, row_bytes);
+            if (!status.ok()) return status;
+            remapped_ids[static_cast<size_t>(index)] = static_cast<uint32_t>(index);
+        }
+        status = backend.upload(weight_lease.buffer(), 0, staging.data(), staging.size());
+        if (!status.ok()) return status;
+        status = backend.upload(token_lease.buffer(), 0, remapped_ids.data(), token_bytes);
+        if (!status.ok()) return status;
+
+        TensorDesc output_descriptor;
+        output_descriptor.shape = {batch_tokens, dimension};
+        output_descriptor.data_type = DataType::F32;
+        output_descriptor.layout = TensorLayout::Contiguous;
+        output_descriptor.memory = MemoryDomain::Device;
+        output_descriptor.alignment = 4;
+        Tensor output_chunk;
+        status = Tensor::create(output_descriptor, output_lease.buffer(), 0, output_chunk);
+        if (!status.ok()) return status;
+
+        ModelExecutionContext chunk_context = context;
+        chunk_context.token_ids = std::move(remapped_ids);
+        QuantizedWeightBinding chunk_weight = weight_it->second;
+        chunk_weight.buffer = weight_lease.buffer();
+        chunk_weight.byte_size = weight_bytes;
+        chunk_weight.dimensions = {dimension, batch_tokens};
+        chunk_weight.chunks.clear();
+        chunk_context.quantized_weights[weight_name] = std::move(chunk_weight);
+        chunk_context.tensors[operation.output] = std::move(output_chunk);
+        // Embedding lowerings create their own token-ID buffer from token_ids.
+        // The gathered rows are indexed from zero, so no source vocabulary IDs
+        // are exposed to the backend kernel.
+
+        ComputeDispatch dispatch;
+        status = (*lowering)(operation, chunk_context, dispatch);
+        if (!status.ok()) return status;
+        status = operators.authorize_dispatch(dispatch.kernel_id, backend.kind(), dispatch);
+        if (!status.ok()) return status;
+        std::unique_ptr<CommandBatch> compute_commands;
+        status = backend.begin_commands(compute_commands);
+        if (!status.ok()) return status;
+        if (!compute_commands)
+            return {StatusCode::BackendFailure, "Backend returned an empty embedding command batch"};
+        status = compute_commands->dispatch_compute(dispatch);
+        if (!status.ok()) return status;
+        status = backend.submit(std::move(compute_commands));
+        if (!status.ok()) return status;
+        status = backend.synchronize();
+        if (!status.ok()) return status;
+
+        std::unique_ptr<CommandBatch> copy_commands;
+        status = backend.begin_commands(copy_commands);
+        if (!status.ok()) return status;
+        if (!copy_commands)
+            return {StatusCode::BackendFailure, "Backend returned an empty embedding aggregation batch"};
+        uint64_t destination_offset = 0;
+        if (!checked_product(token_offset, output_bytes_per_token, destination_offset) ||
+            output.byte_offset() > UINT64_MAX - destination_offset)
+            return {StatusCode::InvalidArgument, "Embedding output aggregation offset overflows"};
+        status = copy_commands->copy_buffer(output_lease.buffer(), 0,
+            output.buffer(), output.byte_offset() + destination_offset, output_chunk_bytes);
+        if (!status.ok()) return status;
+        status = backend.submit(std::move(copy_commands));
+        if (!status.ok()) return status;
+        status = backend.synchronize();
+        if (!status.ok()) return status;
+        token_offset += batch_tokens;
+    }
+    return Status::success();
+}
+
 
 bool is_chunkable_elementwise(const ModelPlanOperation& operation) {
     if (!operation.weight_tensors.empty() || operation.side_effect) return false;
@@ -592,11 +844,11 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
             }
         }
 
-        bool chunked_q6_matmul = false;
-        status = execute_chunked_q6_k_matmul_if_needed(operation, backend, operators,
-            reader, memory, device, operation_context, chunked_q6_matmul);
+        bool chunked_embedding = false;
+        status = execute_chunked_quantized_embedding_if_needed(operation, backend, lowerings,
+            operators, reader, memory, device, operation_context, chunked_embedding);
         if (!status.ok()) {
-            report.errors.push_back(operation.id + ":CHUNKED_Q6_K_MATMUL_FAILED:" + status.message);
+            report.errors.push_back(operation.id + ":CHUNKED_QUANTIZED_EMBEDDING_FAILED:" + status.message);
             for (const auto& name : operation.weight_tensors) {
                 operation_context.tensors.erase(name);
                 operation_context.quantized_weights.erase(name);
@@ -604,7 +856,29 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
             operation_context.weight_leases.clear();
             return status;
         }
-        if (chunked_q6_matmul) {
+        if (chunked_embedding) {
+            ++report.compiled_nodes;
+            for (const auto& name : operation.weight_tensors) {
+                operation_context.tensors.erase(name);
+                operation_context.quantized_weights.erase(name);
+            }
+            operation_context.weight_leases.clear();
+            continue;
+        }
+
+        bool chunked_matmul = false;
+        status = execute_chunked_quantized_matmul_if_needed(operation, backend, lowerings,
+            operators, reader, memory, device, operation_context, chunked_matmul);
+        if (!status.ok()) {
+            report.errors.push_back(operation.id + ":CHUNKED_QUANTIZED_MATMUL_FAILED:" + status.message);
+            for (const auto& name : operation.weight_tensors) {
+                operation_context.tensors.erase(name);
+                operation_context.quantized_weights.erase(name);
+            }
+            operation_context.weight_leases.clear();
+            return status;
+        }
+        if (chunked_matmul) {
             ++report.compiled_nodes;
             for (const auto& name : operation.weight_tensors) {
                 operation_context.tensors.erase(name);
