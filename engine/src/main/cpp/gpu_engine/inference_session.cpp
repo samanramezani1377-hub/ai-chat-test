@@ -969,7 +969,7 @@ Status GpuInferenceSession::run_model_step(uint64_t token_count) {
         return status;
     }
     last_model_graph_validation_ = report.compiled_nodes == plan_.operations.size() &&
-        report.errors.empty() ? "validated" : "partial";
+        report.errors.empty() ? "compiled_unverified" : "partial";
     return Status::success();
 }
 
@@ -1353,6 +1353,7 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";backend_kernel_validation=runtime-numerical"
            << ";cross_backend_quantization_validation=" << cross_backend_quantization_validation_
            << ";model_reference_parity=UNVERIFIED"
+            << ";architecture_validation=UNVERIFIED"
            << ";model_graph_validation=" << last_model_graph_validation_
            << ";context_length=" << (context_length_ != 0 ? context_length_ : last_attempt_context_length_)
            << ";tokenization_ms=" << last_tokenization_ms_
