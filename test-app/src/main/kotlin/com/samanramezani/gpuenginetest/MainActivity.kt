@@ -400,8 +400,11 @@ class MainActivity : Activity() {
             val (formattedPrompt, promptFormat) = preparePromptForModel(prompt)
             appendLog("GPU_PROMPT_FORMAT=$promptFormat")
             val startedAt = System.nanoTime()
+            // Keep the on-device correctness probe short: this engine currently
+            // streams large Q6_K weights during decode, so a long smoke test can
+            // occupy the device for many minutes before parity is established.
             val result = GpuEngineTestApi.generate(
-                formattedPrompt, maxTokens = 64, temperature = 0f,
+                formattedPrompt, maxTokens = 4, temperature = 0f,
                 topK = 1, topP = 1f, minP = 0f
             ) { token ->
                 runOnUiThread { generatedOutput.append(token) }
