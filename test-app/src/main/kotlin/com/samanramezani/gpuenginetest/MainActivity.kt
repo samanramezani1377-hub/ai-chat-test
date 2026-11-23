@@ -270,7 +270,7 @@ class MainActivity : Activity() {
         val templateKind = Regex("(?:^|;)chat_template_kind=([^;]+)")
             .find(diagnostics)?.groupValues?.getOrNull(1) ?: "none"
         return if (templateKind == "qwen_im_start") {
-            Pair("<|im_start|>user\\n$prompt<|im_end|>\\n<|im_start|>assistant\\n", templateKind)
+            Pair("<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n", templateKind)
         } else {
             Pair(prompt, "raw_prompt")
         }
