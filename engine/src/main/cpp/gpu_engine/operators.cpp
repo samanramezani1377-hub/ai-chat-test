@@ -1256,7 +1256,6 @@ Status build_rms_norm_f32_gles_candidate(const Tensor& input, const Tensor& weig
                                          ComputeDispatch& dispatch) {
     Status status = build_rms_norm_f32_candidate(input, weight, output, epsilon, dispatch);
     if (!status.ok()) return status;
-    const auto& shape = input.descriptor().shape;
     std::ostringstream epsilon_literal;
     epsilon_literal << std::setprecision(9) << epsilon;
     std::string epsilon_text = epsilon_literal.str();
