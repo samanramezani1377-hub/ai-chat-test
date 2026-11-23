@@ -242,7 +242,7 @@ Status MemoryManager::allocate(const BufferDesc& descriptor, MemoryLease& out) {
         state_->active_bytes.fetch_add(descriptor.size_bytes, std::memory_order_relaxed);
     } else {
         auto evict_transient_pool = [&]() {
-            std::vector<std::shared_ptr<Buffer>> retired;
+            std::vector<State::PooledBuffer> retired;
             uint64_t released_bytes = 0;
             {
                 std::lock_guard<std::mutex> lock(state_->pool_mutex);
