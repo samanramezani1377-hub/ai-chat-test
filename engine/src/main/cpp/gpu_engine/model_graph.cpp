@@ -383,8 +383,9 @@ Status execute_chunked_quantized_matmul_if_needed(
             continue;
         }
 
+        std::vector<uint8_t> staging;
         if (!chunk_cache_hit) {
-            std::vector<uint8_t> staging(static_cast<size_t>((weight_bytes + 3) & ~uint64_t{3}), 0);
+            staging.resize(static_cast<size_t>((weight_bytes + 3) & ~uint64_t{3}), 0);
             status = reader.read_tensor_chunk(*source, source_offset, staging.data(), weight_bytes);
             if (!status.ok()) return status;
             status = backend.upload(chunk.weight_lease.buffer(), 0, staging.data(), staging.size());
@@ -395,8 +396,15 @@ Status execute_chunked_quantized_matmul_if_needed(
         if (validate_q6_k) {
             const uint64_t sample_weight_bytes =
                 static_cast<uint64_t>(std::min<uint64_t>(4, chunk_channels)) * row_bytes;
-            chunk.sample_weights.assign(staging.begin(),
-                staging.begin() + static_cast<std::ptrdiff_t>(sample_weight_bytes));
+            if (chunk_cache_hit) {
+                chunk.sample_weights.resize(static_cast<size_t>(sample_weight_bytes));
+                status = reader.read_tensor_chunk(*source, source_offset,
+                    chunk.sample_weights.data(), sample_weight_bytes);
+                if (!status.ok()) return status;
+            } else {
+                chunk.sample_weights.assign(staging.begin(),
+                    staging.begin() + static_cast<std::ptrdiff_t>(sample_weight_bytes));
+            }
         }
 
         TensorDesc output_descriptor;
@@ -922,12 +930,6 @@ Status execute_model_execution_plan(ModelExecutionPlan& plan, Backend& backend,
         report.errors.push_back("GRAPH_EXECUTION_FAILED:" + status.message);
         return status;
     }
-    status = flush_pending_graphs();
-    if (!status.ok()) {
-        report.errors.push_back("STREAMED_BATCH_DISPATCH_FAILED:" + status.message);
-        return status;
-    }
-
     for (const auto& operation : plan.operations) {
         if (operation.operator_name != "KVCacheAppend") continue;
         if (!context.kv_cache) {
@@ -1290,6 +1292,12 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
         }
         context.weight_leases = operation_context.weight_leases;
         operation_context.weight_leases.clear();
+    }
+
+    status = flush_pending_graphs();
+    if (!status.ok()) {
+        report.errors.push_back("STREAMED_BATCH_DISPATCH_FAILED:" + status.message);
+        return status;
     }
 
     for (const auto& operation : plan.operations) {
