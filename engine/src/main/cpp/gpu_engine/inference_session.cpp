@@ -157,7 +157,7 @@ void GpuInferenceSession::unload_locked() noexcept {
     last_decode_timing_valid_ = false;
     last_generation_stage_ = "not_started";
     last_model_graph_validation_ = "not_run";
-    q6_backend_validation_ = "not_run";
+    cross_backend_quantization_validation_ = "not_run";
     last_prompt_tokens_ = 0;
     last_output_tokens_ = 0;
     last_decode_tokens_per_second_ = 0.0;
@@ -497,16 +497,25 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         }
     }
 
-    auto validate_quantization_kernels_for_active_backend = [&]() -> Status {
+    auto validate_quantization_kernels_for_active_backend =
+        [&](bool continue_after_failure = false) -> Status {
         const auto has_operator = [&](const std::string& name) {
             return std::any_of(plan_.operations.begin(), plan_.operations.end(),
                 [&](const ModelPlanOperation& operation) { return operation.operator_name == name; });
         };
+        std::vector<std::string> failures;
+        Status first_failure = Status::success();
+        const auto record_failure = [&](const std::string& type_name,
+                                        const std::string& stage,
+                                        const Status& failure) {
+            const std::string message = type_name + ":" + stage + ":" + failure.message;
+            failures.push_back(message);
+            if (first_failure.ok()) first_failure = failure;
+            last_error_ = "GPU quantization kernel validation failed on the active backend: " + message;
+        };
+
         for (uint32_t type_id : quantization_types) {
-            Status validation_status = Status::success();
-            std::string type_name;
-            std::string matmul_name;
-            std::string embedding_name;
+            std::string type_name, matmul_name, embedding_name;
             if (type_id == 2) { type_name="Q4_0"; matmul_name="MatMul_Q4_0"; embedding_name="Embedding_Q4_0"; }
             else if (type_id == 3) { type_name="Q4_1"; matmul_name="MatMul_Q4_1"; embedding_name="Embedding_Q4_1"; }
             else if (type_id == 6) { type_name="Q5_0"; matmul_name="MatMul_Q5_0"; embedding_name="Embedding_Q5_0"; }
@@ -514,14 +523,18 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             else if (type_id == 1) { type_name="F16"; matmul_name="MatMul_F16"; embedding_name="Embedding_F16"; }
             else if (type_id == 30) { type_name="BF16"; matmul_name="MatMul_BF16"; embedding_name="Embedding_BF16"; }
             else if (type_id == 14) { type_name="Q6_K"; matmul_name="MatMul_Q6_K"; embedding_name="Embedding_Q6_K"; }
-            else if (type_id == 12) { type_name="Q4_K"; matmul_name="MatMul_Q4_K"; embedding_name.clear(); }
-            else if (type_id == 13) { type_name="Q5_K"; matmul_name="MatMul_Q5_K"; embedding_name.clear(); }
-            else if (type_id == 10) { type_name="Q2_K"; matmul_name="MatMul_Q2_K"; embedding_name.clear(); }
-            else if (type_id == 11) { type_name="Q3_K"; matmul_name="MatMul_Q3_K"; embedding_name.clear(); }
+            else if (type_id == 12) { type_name="Q4_K"; matmul_name="MatMul_Q4_K"; }
+            else if (type_id == 13) { type_name="Q5_K"; matmul_name="MatMul_Q5_K"; }
+            else if (type_id == 10) { type_name="Q2_K"; matmul_name="MatMul_Q2_K"; }
+            else if (type_id == 11) { type_name="Q3_K"; matmul_name="MatMul_Q3_K"; }
             else if (type_id == 8) { type_name="Q8_0"; matmul_name="MatMul_Q8_0"; embedding_name="Embedding_Q8_0"; }
-            else return {StatusCode::Unsupported,"No GPU validation route exists for GGUF quantization type "+std::to_string(type_id)};
+            else return {StatusCode::Unsupported,
+                         "No GPU validation route exists for GGUF quantization type " + std::to_string(type_id)};
 
-            if (has_operator(matmul_name) || type_id == 2 || type_id == 3 || type_id == 8) {
+            const bool require_matmul = has_operator(matmul_name) ||
+                type_id == 2 || type_id == 3 || type_id == 8;
+            if (require_matmul) {
+                Status validation_status = Status::success();
                 if (type_id == 2) validation_status=validate_q4_0_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else if (type_id == 3) validation_status=validate_q4_1_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else if (type_id == 6) validation_status=validate_q5_0_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
@@ -534,8 +547,14 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
                 else if (type_id == 10) validation_status=validate_q2_k_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else if (type_id == 11) validation_status=validate_q3_k_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else validation_status=validate_q8_0_matmul_kernel(*engine_->active_backend(),*operators_,*quantizations_);
+                if (!validation_status.ok()) {
+                    record_failure(type_name, "matmul", validation_status);
+                    if (!continue_after_failure) return validation_status;
+                }
             }
-            if (validation_status.ok() && has_operator(embedding_name)) {
+
+            if (has_operator(embedding_name)) {
+                Status validation_status = Status::success();
                 if (type_id == 2) validation_status=validate_q4_0_embedding_kernel(*engine_->active_backend(),*operators_);
                 else if (type_id == 3) validation_status=validate_q4_1_embedding_kernel(*engine_->active_backend(),*operators_);
                 else if (type_id == 6) validation_status=validate_q5_0_embedding_kernel(*engine_->active_backend(),*operators_,*quantizations_);
@@ -543,13 +562,23 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
                 else if (type_id == 1) validation_status=validate_f16_embedding_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else if (type_id == 30) validation_status=validate_bf16_embedding_kernel(*engine_->active_backend(),*operators_,*quantizations_);
                 else if (type_id == 14) validation_status=validate_q6_k_embedding_kernel(*engine_->active_backend(),*operators_,*quantizations_);
-                else validation_status=validate_q8_0_embedding_kernel(*engine_->active_backend(),*operators_);
+                else if (type_id == 8) validation_status=validate_q8_0_embedding_kernel(*engine_->active_backend(),*operators_);
+                else validation_status={StatusCode::Unsupported,
+                    "No embedding kernel validation route exists for this GGUF format"};
+                if (!validation_status.ok()) {
+                    record_failure(type_name, "embedding", validation_status);
+                    if (!continue_after_failure) return validation_status;
+                }
             }
-            if (!validation_status.ok()) {
-                last_error_ = "Quantized GPU kernel validation failed for " + type_name +
-                              " on the active backend: " + validation_status.message;
-                return validation_status;
+        }
+        if (!failures.empty()) {
+            std::string message;
+            for (const auto& failure : failures) {
+                if (!message.empty()) message += " | ";
+                message += failure;
             }
+            last_error_ = "GPU quantization kernel validation failed on the active backend: " + message;
+            return {first_failure.code, message};
         }
         return Status::success();
     };
@@ -588,12 +617,10 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     }
 
 
-    if (quantization_types.find(14) != quantization_types.end()) {
-        const bool needs_q6_matmul = std::any_of(plan_.operations.begin(), plan_.operations.end(),
-            [](const ModelPlanOperation& operation) { return operation.operator_name == "MatMul_Q6_K"; });
-        const bool needs_q6_embedding = std::any_of(plan_.operations.begin(), plan_.operations.end(),
-            [](const ModelPlanOperation& operation) { return operation.operator_name == "Embedding_Q6_K"; });
-        q6_backend_validation_ = std::string("decode_reference=not_run;active_backend_kernel_validation=") +
+    if (!quantization_types.empty()) {
+        const std::string primary_error = last_error_;
+        cross_backend_quantization_validation_ =
+            std::string("decode_reference=not_run;active_backend_kernel_validation=") +
             backend_label(backend_kind) + ":passed";
         const BackendKind alternate_backend = backend_kind == BackendKind::DawnWebGpu
             ? BackendKind::OpenGles : BackendKind::DawnWebGpu;
@@ -602,37 +629,31 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         Status alternate_status = engine_->initialize(alternate_backend);
         if (alternate_status.ok() && engine_->active_backend() &&
             engine_->active_backend()->kind() == alternate_backend) {
-            std::string alternate_result = std::string(backend_label(alternate_backend)) + ":";
-            if (needs_q6_matmul) {
-                Status q6_status = validate_q6_k_matmul_kernel(
-                    *engine_->active_backend(), *operators_, *quantizations_);
-                alternate_result += "matmul=";
-                alternate_result += q6_status.ok() ? "passed" : "failed:" + q6_status.message;
-            } else {
-                alternate_result += "matmul=not_required";
-            }
-            if (needs_q6_embedding) {
-                Status q6_status = validate_q6_k_embedding_kernel(
-                    *engine_->active_backend(), *operators_, *quantizations_);
-                alternate_result += ";embedding=";
-                alternate_result += q6_status.ok() ? "passed" : "failed:" + q6_status.message;
-            } else {
-                alternate_result += ";embedding=not_required";
-            }
-            q6_backend_validation_ += ";" + alternate_result;
+            const std::string alternate_previous_error = last_error_;
+            alternate_status = validate_quantization_kernels_for_active_backend(true);
+            const std::string alternate_detail = alternate_status.ok()
+                ? "all_model_gguf_formats_passed"
+                : alternate_status.message;
+            last_error_ = alternate_previous_error;
+            cross_backend_quantization_validation_ += ";" +
+                std::string("alternate_backend=") + backend_label(alternate_backend) + ":" +
+                (alternate_status.ok() ? "passed:" : "failed:") + alternate_detail;
         } else {
-            q6_backend_validation_ += std::string(";") + backend_label(alternate_backend) +
-                ":unavailable:" + alternate_status.message;
+            cross_backend_quantization_validation_ += std::string(";alternate_backend=") +
+                backend_label(alternate_backend) + ":unavailable:" + alternate_status.message;
         }
 
         engine_->shutdown();
         Status restore_status = engine_->initialize(backend_kind);
         if (!restore_status.ok()) {
-            last_error_ = "Failed to restore the selected GPU backend after cross-backend Q6_K validation: " +
+            last_error_ = "Failed to restore the selected GPU backend after cross-backend GGUF validation: " +
                           restore_status.message;
             unload_locked();
             return {restore_status.code, last_error_};
         }
+        last_error_ = primary_error;
+    } else {
+        cross_backend_quantization_validation_ = "not_required_no_packed_gguf_weights";
     }
 
     auto quantization_report = evaluate_model_quantization_backend(model, *quantizations_, backend_kind);
@@ -1275,9 +1296,9 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";gpu_memory_free=unknown"
            << ";weight_streaming=operation-aware-chunked"
            << ";single_tensor_chunking=GGUF_BLOCK_AWARE_MATMUL_CHANNELS_AND_EMBEDDING_TOKEN_ROWS"
-           << ";chunked_operator_support=F32_ELEMENTWISE,VALIDATED_QUANTIZED_MATMUL,VALIDATED_QUANTIZED_EMBEDDING"
+           << ";chunked_operator_support=F32_ELEMENTWISE,GGUF_BLOCK_MATMUL,GGUF_BLOCK_EMBEDDING"
            << ";backend_kernel_validation=runtime-numerical"
-           << ";q6_backend_validation=" << q6_backend_validation_
+           << ";cross_backend_quantization_validation=" << cross_backend_quantization_validation_
            << ";model_reference_parity=UNVERIFIED"
            << ";model_graph_validation=" << last_model_graph_validation_
            << ";context_length=" << (context_length_ != 0 ? context_length_ : last_attempt_context_length_)
