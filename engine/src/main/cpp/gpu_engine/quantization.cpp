@@ -700,20 +700,38 @@ fn decode_weight(channel:u32,k:u32)->f32 {
     let d=unpack2x16float(read_u16(offset+208u)).x;
     return d*f32(scale)*f32(quantized);
 }
-@compute @workgroup_size(64,1)
-fn main(@builtin(global_invocation_id) gid:vec3<u32>){
-    let row=gid.y;let channel=gid.x;
-    if(row>=ROWS||channel>=OUTPUT_CHANNELS){return;}
+var<workgroup> partial_sums: array<f32,64>;
+@compute @workgroup_size(8,8)
+fn main(@builtin(workgroup_id) group:vec3<u32>,
+        @builtin(local_invocation_id) local:vec3<u32>){
+    let row=group.y;
+    let channel=group.x*8u+local.x;
     var sum=0.0;
-    for(var k=0u;k<INNER;k=k+1u){sum=sum+activations[row*INNER+k]*decode_weight(channel,k);}
-    output[row*OUTPUT_CHANNELS_TOTAL+OUTPUT_CHANNEL_OFFSET+channel]=sum;
+    if(row<ROWS && channel<OUTPUT_CHANNELS){
+        for(var k=local.y;k<INNER;k=k+8u){
+            sum=sum+activations[row*INNER+k]*decode_weight(channel,k);
+        }
+    }
+    let slot=local.y*8u+local.x;
+    partial_sums[slot]=sum;
+    workgroupBarrier();
+    for(var stride=4u;stride>0u;stride=stride/2u){
+        if(local.y<stride){
+            partial_sums[slot]=partial_sums[slot]+partial_sums[(local.y+stride)*8u+local.x];
+        }
+        workgroupBarrier();
+    }
+    if(local.y==0u && row<ROWS && channel<OUTPUT_CHANNELS){
+        output[row*OUTPUT_CHANNELS_TOTAL+OUTPUT_CHANNEL_OFFSET+channel]=partial_sums[local.x];
+    }
 }
 )wgsl";
 
 constexpr char kQ6_KMatMulGlsl[] = R"glsl(#version 310 es
 precision highp float;
 precision highp int;
-layout(local_size_x=64,local_size_y=1) in;
+layout(local_size_x=8,local_size_y=8) in;
+shared float partial_sums[64];
 layout(std430,binding=0) readonly buffer Activations{float activations[];};
 layout(std430,binding=1) readonly buffer Weights{uint weights[];};
 layout(std430,binding=2) writeonly buffer Output{float output_values[];};
@@ -742,11 +760,24 @@ float decode_weight(uint channel,uint k){
     return d*float(scale)*float(quantized);
 }
 void main(){
-    uint row=gl_GlobalInvocationID.y,channel=gl_GlobalInvocationID.x;
-    if(row>=ROWS||channel>=OUTPUT_CHANNELS)return;
+    uint row=gl_WorkGroupID.y;
+    uint channel=gl_WorkGroupID.x*8u+gl_LocalInvocationID.x;
+    uint lane_k=gl_LocalInvocationID.y;
     float sum=0.0;
-    for(uint k=0u;k<INNER;++k)sum+=activations[row*INNER+k]*decode_weight(channel,k);
-    output_values[row*OUTPUT_CHANNELS_TOTAL+OUTPUT_CHANNEL_OFFSET+channel]=sum;
+    if(row<ROWS&&channel<OUTPUT_CHANNELS){
+        for(uint k=lane_k;k<INNER;k+=8u)
+            sum+=activations[row*INNER+k]*decode_weight(channel,k);
+    }
+    uint slot=lane_k*8u+gl_LocalInvocationID.x;
+    partial_sums[slot]=sum;
+    barrier();
+    for(uint stride=4u;stride>0u;stride>>=1u){
+        if(lane_k<stride)
+            partial_sums[slot]+=partial_sums[(lane_k+stride)*8u+gl_LocalInvocationID.x];
+        barrier();
+    }
+    if(lane_k==0u&&row<ROWS&&channel<OUTPUT_CHANNELS)
+        output_values[row*OUTPUT_CHANNELS_TOTAL+OUTPUT_CHANNEL_OFFSET+channel]=partial_sums[gl_LocalInvocationID.x];
 }
 )glsl";
 
@@ -4994,8 +5025,8 @@ Status build_q6_k_matmul_candidate_impl(const Tensor& activations,
     dispatch.backend = gles ? BackendKind::OpenGles : BackendKind::DawnWebGpu;
     if (gles) dispatch.glsl_source = kQ6_KMatMulGlsl;
     else dispatch.wgsl_source = kQ6_KMatMulWgsl;
-    dispatch.workgroup_size_x = 64;
-    dispatch.workgroup_size_y = 1;
+    dispatch.workgroup_size_x = 8;
+    dispatch.workgroup_size_y = 8;
 
     const std::pair<std::string, std::string> wgsl_constants[] = {
         {"const ROWS: u32 = 1u;", "const ROWS: u32 = " + std::to_string(rows) + "u;"},
@@ -5029,7 +5060,7 @@ Status build_q6_k_matmul_candidate_impl(const Tensor& activations,
         : specialize(dispatch.wgsl_source, wgsl_constants, sizeof(wgsl_constants) / sizeof(wgsl_constants[0]));
     if (!status.ok()) return status;
 
-    dispatch.workgroups_x = static_cast<uint32_t>((chunk_channels + 63) / 64);
+    dispatch.workgroups_x = static_cast<uint32_t>((chunk_channels + 7) / 8);
     dispatch.workgroups_y = static_cast<uint32_t>(rows);
     dispatch.bindings = {
         {0, activations.buffer(), activations.byte_offset(), activations.byte_size()},
