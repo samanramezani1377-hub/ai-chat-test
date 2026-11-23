@@ -346,6 +346,23 @@ uint64_t MemoryManager::available_bytes() const noexcept {
     return used >= budget ? 0 : budget - used;
 }
 
+uint64_t MemoryManager::reclaim_transient_pool() noexcept {
+    std::vector<State::PooledBuffer> retired;
+    uint64_t released_bytes = 0;
+    {
+        std::lock_guard<std::mutex> lock(state_->pool_mutex);
+        released_bytes = state_->pooled_bytes;
+        retired.swap(state_->pool);
+        state_->pooled_bytes = 0;
+    }
+    // Destroy backend buffers before making their reservation available to a
+    // new operation; otherwise a planner could race physical reclamation.
+    retired.clear();
+    if (released_bytes != 0)
+        state_->reserved_bytes.fetch_sub(released_bytes, std::memory_order_acq_rel);
+    return released_bytes;
+}
+
 bool OperatorRegistry::has_validated_kernel(const std::string& operator_name,
                                                    BackendKind backend) const noexcept {
     return std::any_of(kernels_.begin(), kernels_.end(), [&](const KernelDefinition& kernel) {
