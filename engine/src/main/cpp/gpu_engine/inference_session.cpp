@@ -332,7 +332,9 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         if (value.empty()) return;
         if (value.find("<|im_start|>") != std::string::npos &&
             value.find("<|im_end|>") != std::string::npos) {
-            last_attempt_chat_template_kind_ = "qwen_im_start";
+            last_attempt_chat_template_kind_ =
+                model.architecture == "qwen35" && value.find("<think>") != std::string::npos
+                    ? "qwen35_thinking" : "qwen_im_start";
         } else {
             last_attempt_chat_template_kind_ = "present_unrecognized";
         }
