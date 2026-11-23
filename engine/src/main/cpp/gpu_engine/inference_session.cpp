@@ -1364,6 +1364,7 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";last_failed_storage_binding_limit_bytes=" << last_failed_storage_binding_limit_bytes_
            << ";gpu_memory_total=unknown"
            << ";gpu_memory_free=unknown"
+           << ";runtime_quantization_parity_validation=" << (context_.enable_runtime_quantization_parity_validation ? "enabled" : "disabled")
            << ";weight_cache_limit_bytes=" << context_.persistent_weight_cache_limit_bytes
            << ";weight_cache_hits=" << context_.persistent_weight_cache_hits
            << ";weight_cache_misses=" << context_.persistent_weight_cache_misses
