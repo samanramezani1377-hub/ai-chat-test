@@ -49,6 +49,9 @@ struct ModelExecutionContext {
     uint64_t persistent_weight_cache_limit_bytes = 0;
     uint64_t persistent_weight_cache_hits = 0;
     uint64_t persistent_weight_cache_misses = 0;
+    // Once optional resident weights cause a compute-allocation failure, spill
+    // them for the session instead of repeatedly rebuilding the same pressure.
+    bool weight_cache_pressure_mode = false;
     std::shared_ptr<QuantizedWeightChunkCache> weight_chunk_cache;
     std::vector<MemoryLease> activation_leases;
     // Recurrent and convolution state survives prefill/decode graph rebuilds.
