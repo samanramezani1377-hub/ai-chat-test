@@ -351,8 +351,14 @@ Status execute_chunked_quantized_matmul_if_needed(
     bool cache_evicted_for_pressure = false;
     const auto reclaim_optional_memory = [&]() {
         if (context.weight_chunk_cache && !cache_evicted_for_pressure) {
+            const bool had_cached_chunks =
+                context.weight_chunk_cache->stats().resident_bytes != 0;
             context.weight_chunk_cache->evict_all();
             cache_evicted_for_pressure = true;
+            if (had_cached_chunks) {
+                context.weight_cache_pressure_mode = true;
+                context.persistent_weight_cache_limit_bytes = 0;
+            }
         }
         memory.reclaim_transient_pool();
     };
@@ -1187,6 +1193,8 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
                     weight_row_bytes + output_channel_bytes <= UINT64_MAX - 3) {
                     minimum_tile_bytes = weight_row_bytes + output_channel_bytes + 3;
                     if (memory.available_bytes() < minimum_tile_bytes) {
+                        status = flush_pending_graphs();
+                        if (!status.ok()) return status;
                         for (auto& cached_weight : context.quantized_weights) {
                             cached_weight.second.buffer.reset();
                             cached_weight.second.chunks.clear();
@@ -1194,9 +1202,9 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
                         for (const auto& cached_name : plan_weight_names)
                             context.tensors.erase(cached_name);
                         context.weight_leases.clear();
-                        // Keep the non-zero sentinel so an allocation failure can
-                        // still select streamed MatMul instead of failing model load.
-                        context.persistent_weight_cache_limit_bytes = 1;
+                        // Disable whole-tensor cache admission while retaining the
+                        // explicit pressure-mode path to streamed MatMul weights.
+                        context.persistent_weight_cache_limit_bytes = 0;
                         context.weight_cache_pressure_mode = true;
                         if (context.weight_chunk_cache)
                             context.weight_chunk_cache->evict_all();
@@ -1315,6 +1323,10 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
         status = execute_chunked_quantized_matmul_if_needed(operation, backend, lowerings,
             operators, reader, memory, device, operation_context, chunked_matmul,
             parity_counter);
+        if (operation_context.weight_cache_pressure_mode) {
+            context.weight_cache_pressure_mode = true;
+            context.persistent_weight_cache_limit_bytes = 0;
+        }
         if (!status.ok()) {
             report.errors.push_back(operation.id + ":CHUNKED_QUANTIZED_MATMUL_FAILED:" + status.message);
             for (const auto& name : operation.weight_tensors) {
