@@ -269,10 +269,21 @@ class MainActivity : Activity() {
         val diagnostics = GpuEngineTestApi.diagnostics()
         val templateKind = Regex("(?:^|;)chat_template_kind=([^;]+)")
             .find(diagnostics)?.groupValues?.getOrNull(1) ?: "none"
-        return if (templateKind == "qwen_im_start") {
-            Pair("<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n", templateKind)
-        } else {
+        return when (templateKind) {
+            "qwen35_thinking" -> Pair(
+                "<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n<think>\n",
+                templateKind
+            )
+            "qwen_im_start" -> Pair(
+                "<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n",
+                templateKind
+            )
+            else -> Pair(prompt, "raw_prompt")
+        }.let { result ->
+            if (templateKind == "qwen35_thinking" || templateKind == "qwen_im_start") result
+            else {
             Pair(prompt, "raw_prompt")
+            }
         }
     }
 
