@@ -373,6 +373,8 @@ Status execute_chunked_quantized_matmul_if_needed(
             context.weight_chunk_cache->set_capacity(0);
             status = allocate_chunk_buffer(memory, device, output_chunk_bytes,
                 "quantized-matmul-output-chunk:" + operation.id, chunk.output_lease);
+            context.weight_chunk_cache->set_capacity(std::min<uint64_t>(
+                memory.budget_bytes() / 8, 128ull * 1024ull * 1024ull));
         }
         if (!status.ok()) {
             if (pending.empty()) return status;
