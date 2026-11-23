@@ -24,7 +24,8 @@ std::string normalize_kernel_specialization(const std::string& source) {
         "THETA", "NEOX_STYLE", "ROWS", "COLUMNS", "INNER", "EPSILON", "MODE",
         "INPUT_AXIS_DIM", "OUTPUT_AXIS_DIM", "INNER_SIZE", "OFFSET",
         "OUTPUT_CHANNELS", "OUTPUT_CHANNELS_TOTAL", "OUTPUT_CHANNEL_OFFSET", "WEIGHT_ROW_BYTES",
-        "CHANNELS", "KERNEL_SIZE", "WORKGROUPS_X", "STATE_SIZE", "VALUE_HEADS", "KEY_HEADS"
+        "CHANNELS", "KERNEL_SIZE", "WORKGROUPS_X", "STATE_SIZE", "GROUP_COUNT",
+        "TOTAL_GROUPS", "VALUE_HEADS", "KEY_HEADS"
     };
     std::string normalized;
     normalized.reserve(source.size());

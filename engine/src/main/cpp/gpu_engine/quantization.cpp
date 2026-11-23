@@ -775,12 +775,17 @@ fn decode_weight(token:u32,dimension:u32)->f32{
  return d*f32(scale)*f32(quantized);
 }
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid:vec3<u32>){
- if(gid.x>=TOTAL_ELEMENTS)return;
- let token_row=gid.x/EMBEDDING_DIMENSION;let dimension=gid.x%EMBEDDING_DIMENSION;
- if(token_row>=TOKEN_COUNT)return;let token=token_ids[token_row];
- if(token>=VOCABULARY_SIZE){output[gid.x]=bitcast<f32>(0x7fc00000u);return;}
- output[gid.x]=decode_weight(token,dimension);
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+ if (gid.x >= TOTAL_ELEMENTS) { return; }
+ let token_row = gid.x / EMBEDDING_DIMENSION;
+ let dimension = gid.x % EMBEDDING_DIMENSION;
+ if (token_row >= TOKEN_COUNT) { return; }
+ let token = token_ids[token_row];
+ if (token >= VOCABULARY_SIZE) {
+  output[gid.x] = bitcast<f32>(0x7fc00000u);
+  return;
+ }
+ output[gid.x] = decode_weight(token, dimension);
 }
 )wgsl";
 
