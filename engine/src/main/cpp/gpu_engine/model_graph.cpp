@@ -986,13 +986,8 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
                                            context.sequence_length, context);
         if (!status.ok()) return status;
     }
-    for (const auto& operation : plan.operations) {
-        for (const auto& weight : operation.weight_tensors) {
-            if (context.tensors.find(weight) != context.tensors.end() ||
-                context.quantized_weights.find(weight) != context.quantized_weights.end())
-                return {StatusCode::InvalidArgument, "Streamed execution requires model weights to be loaded on demand, not pre-bound"};
-        }
-    }
+    // The session may carry a bounded set of resident quantized MatMul weights
+    // across token steps. All other weights remain streamed on demand.
 
     ExecutionScheduler scheduler;
     for (const auto& original_operation : plan.operations) {
@@ -1015,8 +1010,19 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
         single.external_inputs = external_inputs;
         single.operations.push_back(operation);
 
+        for (const auto& name : operation.weight_tensors) {
+            const auto cached = context.quantized_weights.find(name);
+            if (cached != context.quantized_weights.end() && cached->second.buffer)
+                ++context.persistent_weight_cache_hits;
+            else
+                ++context.persistent_weight_cache_misses;
+        }
+
         ModelExecutionContext operation_context;
         operation_context.tensors = context.tensors;
+        operation_context.quantized_weights = context.quantized_weights;
+        operation_context.weight_leases = context.weight_leases;
+        operation_context.persistent_weight_cache_limit_bytes = context.persistent_weight_cache_limit_bytes;
         operation_context.backend = &backend;
         operation_context.token_ids = context.token_ids;
         operation_context.kv_cache = context.kv_cache;
@@ -1191,12 +1197,21 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
             ++report.compiled_nodes;
         }
 
-        // Drop every temporary weight reference before releasing its lease so
-        // MemoryManager can reclaim it without aliasing a still-live Tensor.
+        // Keep only admitted resident quantized weights in the long-lived
+        // session context. Metadata-only streamed bindings and temporary
+        // operation references are discarded before the next operation.
         for (const auto& name : operation.weight_tensors) {
             operation_context.tensors.erase(name);
-            operation_context.quantized_weights.erase(name);
+            const auto cached = operation_context.quantized_weights.find(name);
+            if (cached != operation_context.quantized_weights.end() &&
+                cached->second.buffer && context.persistent_weight_cache_limit_bytes != 0 &&
+                cached->second.byte_size <= context.persistent_weight_cache_limit_bytes) {
+                context.quantized_weights[name] = cached->second;
+            } else if (cached != operation_context.quantized_weights.end()) {
+                operation_context.quantized_weights.erase(cached);
+            }
         }
+        context.weight_leases = operation_context.weight_leases;
         operation_context.weight_leases.clear();
     }
 
