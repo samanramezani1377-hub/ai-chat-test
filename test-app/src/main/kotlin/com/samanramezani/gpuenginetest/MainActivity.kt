@@ -130,7 +130,7 @@ class MainActivity : Activity() {
         maxTokensInput = EditText(this).apply {
             hint = "Maximum output tokens (1-$contextLength)"
             inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            setText("128")
+            setText("32")
             setPadding(dp(10), dp(8), dp(10), dp(8))
         }
         root.addView(maxTokensInput, LinearLayout.LayoutParams(-1, -2))
@@ -280,8 +280,7 @@ class MainActivity : Activity() {
             .find(diagnostics)?.groupValues?.getOrNull(1) ?: "none"
         return when (templateKind) {
             "qwen35_thinking" -> Pair(
-                // Use the official enable_thinking=false template branch for this
-                // four-token correctness probe, so generated tokens are answer text.
+                // Use the official enable_thinking=false template branch so generated tokens are answer text.
                 "<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
                 "qwen35_no_thinking"
             )
