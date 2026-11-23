@@ -182,7 +182,8 @@ Status load_model_execution_weights(const GgufReader& reader,
         accumulate_cached_bytes(pending_quantized);
         const uint64_t cache_remaining = context.persistent_weight_cache_limit_bytes > cached_weight_bytes
             ? context.persistent_weight_cache_limit_bytes - cached_weight_bytes : 0;
-        const uint64_t runtime_reserve = std::max<uint64_t>(1, memory.budget_bytes() / 4);
+        const uint64_t runtime_reserve = std::max<uint64_t>(64ull * 1024ull * 1024ull,
+                                                            memory.budget_bytes() / 8);
         const uint64_t available = memory.available_bytes();
         const bool cache_resident_matmul = context.persistent_weight_cache_limit_bytes != 0 &&
             used_by_quantized_matmul && !used_by_quantized_embedding &&
