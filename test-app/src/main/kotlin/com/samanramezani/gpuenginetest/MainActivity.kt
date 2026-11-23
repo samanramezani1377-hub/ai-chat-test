@@ -279,11 +279,6 @@ class MainActivity : Activity() {
                 templateKind
             )
             else -> Pair(prompt, "raw_prompt")
-        }.let { result ->
-            if (templateKind == "qwen35_thinking" || templateKind == "qwen_im_start") result
-            else {
-            Pair(prompt, "raw_prompt")
-            }
         }
     }
 
