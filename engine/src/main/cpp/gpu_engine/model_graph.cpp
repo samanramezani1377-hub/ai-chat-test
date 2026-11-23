@@ -352,7 +352,16 @@ Status execute_chunked_quantized_matmul_if_needed(
         if (!backend.healthy())
             return {StatusCode::DeviceLost, "GPU backend became unhealthy during quantized MatMul chunking"};
 
-        const uint64_t available = memory.available_bytes();
+        uint64_t available = memory.available_bytes();
+        uint64_t reclaimed_pool_bytes = 0;
+        // The memory manager deliberately retains released transient buffers
+        // for fast reuse. They are not active tensors, however, and must not
+        // make the tile planner conclude that even one output channel cannot
+        // fit. Reclaim the idle pool only when the minimum legal tile is blocked.
+        if (available < bytes_per_channel) {
+            reclaimed_pool_bytes = memory.reclaim_transient_pool();
+            available = memory.available_bytes();
+        }
         const uint64_t available_for_chunks = available > 3 ? available - 3 : 0;
         uint64_t maximum_channels = std::min(padded_binding_limit / row_bytes,
                                              binding_limit / output_channel_bytes);
@@ -367,7 +376,13 @@ Status execute_chunked_quantized_matmul_if_needed(
         maximum_channels = std::min<uint64_t>(maximum_channels, UINT32_MAX);
         if (maximum_channels == 0) {
             if (pending.empty())
-                return {StatusCode::OutOfMemory, "GPU budget cannot hold one quantized MatMul output-channel chunk"};
+                return {StatusCode::OutOfMemory,
+                    "GPU budget cannot hold one quantized MatMul output-channel chunk: " +
+                    operation.id + " weight=" + weight_name +
+                    " required_min_bytes=" + std::to_string(bytes_per_channel + 3) +
+                    " available_bytes=" + std::to_string(available) +
+                    " reclaimed_transient_pool_bytes=" + std::to_string(reclaimed_pool_bytes) +
+                    " budget_bytes=" + std::to_string(memory.budget_bytes())};
             Status status = flush_batch();
             if (!status.ok()) return status;
             continue;
