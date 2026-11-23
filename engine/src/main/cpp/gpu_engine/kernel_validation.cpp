@@ -191,7 +191,24 @@ Status validate_multiply(Backend& backend, Validate&& build) {
     for (size_t i = 0; i < a3.size(); ++i) expected3[i] = a3[i] * b3[i % b3.size()];
     status = build(lhs3.tensor, rhs3.tensor, output3.tensor, dispatch);
     if (!status.ok()) return status;
-    return execute_and_compare(backend, dispatch, output3.tensor, expected3);
+    status = execute_and_compare(backend, dispatch, output3.tensor, expected3);
+    if (!status.ok()) return status;
+
+    // Also cover a rank-three activation with a last-dimension vector operand.
+    TensorFixture lhs4, rhs4, output4;
+    const std::vector<float> a4(2 * 3 * 4, 0.25f);
+    const std::vector<float> b4 = {1.0f, -2.0f, 0.5f, 4.0f};
+    status = make_f32_tensor(backend, {2, 3, 4}, a4, "validate-multiply-rank3-a", lhs4);
+    if (!status.ok()) return status;
+    status = make_f32_tensor(backend, {4}, b4, "validate-multiply-rank3-b", rhs4);
+    if (!status.ok()) return status;
+    status = make_f32_tensor(backend, {2, 3, 4}, {}, "validate-multiply-rank3-out", output4);
+    if (!status.ok()) return status;
+    std::vector<float> expected4(a4.size());
+    for (size_t i = 0; i < a4.size(); ++i) expected4[i] = a4[i] * b4[i % b4.size()];
+    status = build(lhs4.tensor, rhs4.tensor, output4.tensor, dispatch);
+    if (!status.ok()) return status;
+    return execute_and_compare(backend, dispatch, output4.tensor, expected4);
 }
 
 template <typename Validate>

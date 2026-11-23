@@ -216,7 +216,7 @@ constexpr char kAddF32Wgsl[] = R"wgsl(
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x < arrayLength(&output)) {
-        output[gid.x] = lhs[gid.x] + rhs[gid.x % arrayLength(&rhs)];
+        output[gid.x] = lhs[gid.x % arrayLength(&lhs)] + rhs[gid.x % arrayLength(&rhs)];
     }
 }
 )wgsl";
@@ -229,7 +229,7 @@ layout(std430, binding = 1) readonly buffer Rhs { float rhs[]; };
 layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
 void main() {
     uint index = gl_GlobalInvocationID.x;
-    if (index < uint(output_values.length())) output_values[index] = lhs[index] + rhs[index % uint(rhs.length())];
+    if (index < uint(output_values.length())) output_values[index] = lhs[index % uint(lhs.length())] + rhs[index % uint(rhs.length())];
 }
 )glsl";
 
@@ -379,7 +379,7 @@ layout(std430, binding = 1) readonly buffer Rhs { float rhs[]; };
 layout(std430, binding = 2) writeonly buffer Output { float output_values[]; };
 void main() {
     uint index = gl_GlobalInvocationID.x;
-    if (index < uint(output_values.length())) output_values[index] = lhs[index] * rhs[index % uint(rhs.length())];
+    if (index < uint(output_values.length())) output_values[index] = lhs[index % uint(lhs.length())] * rhs[index % uint(rhs.length())];
 }
 )glsl";
 
@@ -390,7 +390,7 @@ constexpr char kMultiplyF32Wgsl[] = R"wgsl(
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x < arrayLength(&output)) {
-        output[gid.x] = lhs[gid.x] * rhs[gid.x % arrayLength(&rhs)];
+        output[gid.x] = lhs[gid.x % arrayLength(&lhs)] * rhs[gid.x % arrayLength(&rhs)];
     }
 }
 )wgsl";
@@ -574,23 +574,55 @@ Status build_binary_f32_candidate(const Tensor& lhs, const Tensor& rhs,
     const auto& lhs_shape = lhs.descriptor().shape;
     const auto& rhs_shape = rhs.descriptor().shape;
     const auto& output_shape = output.descriptor().shape;
-    const bool same_shape = lhs_shape == rhs_shape && lhs_shape == output_shape;
-    uint64_t trailing_width = lhs_shape.empty() ? 0 : lhs_shape.back();
-    if (lhs_shape.size() == 3 && lhs_shape[1] <= UINT64_MAX / lhs_shape[2])
-        trailing_width = lhs_shape[1] * lhs_shape[2];
-    const bool trailing_vector_broadcast = allow_trailing_vector_broadcast &&
-        lhs_shape == output_shape && rhs_shape.size() == 1 && !lhs_shape.empty() &&
-        rhs.element_count() > 0 && rhs.element_count() == trailing_width;
-    if ((!same_shape && !trailing_vector_broadcast) ||
+    const bool lhs_matches_output = lhs_shape == output_shape;
+    const bool rhs_matches_output = rhs_shape == output_shape;
+    const auto is_suffix_vector_broadcast = [](const std::vector<uint64_t>& vector_shape,
+                                                const std::vector<uint64_t>& target_shape,
+                                                uint64_t vector_elements) {
+        if (vector_shape.size() != 1 || target_shape.empty() || vector_elements == 0)
+            return false;
+        if (vector_elements == 1) return true;
+        uint64_t suffix_elements = 1;
+        for (auto dimension = target_shape.rbegin(); dimension != target_shape.rend(); ++dimension) {
+            if (*dimension == 0 || suffix_elements > UINT64_MAX / *dimension) return false;
+            suffix_elements *= *dimension;
+            if (suffix_elements == vector_elements) return true;
+            if (suffix_elements > vector_elements) return false;
+        }
+        return false;
+    };
+    const bool broadcast_compatible = allow_trailing_vector_broadcast &&
+        ((lhs_matches_output && is_suffix_vector_broadcast(rhs_shape, output_shape, rhs.element_count())) ||
+         (rhs_matches_output && is_suffix_vector_broadcast(lhs_shape, output_shape, lhs.element_count())));
+    const bool same_shape = lhs_matches_output && rhs_matches_output;
+    const auto shape_text = [](const std::vector<uint64_t>& shape) {
+        std::ostringstream text;
+        text << "[";
+        for (size_t index = 0; index < shape.size(); ++index) {
+            if (index) text << ",";
+            text << shape[index];
+        }
+        text << "]";
+        return text.str();
+    };
+    if ((!same_shape && !broadcast_compatible) ||
         lhs.element_count() == 0 || lhs.element_count() > UINT32_MAX ||
         rhs.element_count() == 0 || rhs.element_count() > UINT32_MAX ||
-        lhs.element_count() != output.element_count())
-        return {StatusCode::InvalidArgument, "Binary F32 operator shapes are incompatible"};
+        output.element_count() == 0 || output.element_count() > UINT32_MAX ||
+        (lhs_matches_output && lhs.element_count() != output.element_count()) ||
+        (rhs_matches_output && rhs.element_count() != output.element_count()))
+        return {StatusCode::InvalidArgument, "Binary F32 shapes are incompatible: lhs=" +
+            shape_text(lhs_shape) + ",rhs=" + shape_text(rhs_shape) +
+            ",output=" + shape_text(output_shape) +
+            ",supported_broadcast=trailing_suffix_vector"};
     if (!lhs.buffer() || !rhs.buffer() || !output.buffer() ||
         output.buffer().get() == lhs.buffer().get() || output.buffer().get() == rhs.buffer().get())
         return {StatusCode::Unsupported, "Binary F32 output must use a distinct valid buffer"};
-    if (lhs.byte_size() != output.byte_size() || lhs.byte_size() != lhs.element_count() * sizeof(float) ||
-        rhs.byte_size() != rhs.element_count() * sizeof(float))
+    if ((lhs_matches_output && lhs.byte_size() != output.byte_size()) ||
+        (rhs_matches_output && rhs.byte_size() != output.byte_size()) ||
+        lhs.byte_size() != lhs.element_count() * sizeof(float) ||
+        rhs.byte_size() != rhs.element_count() * sizeof(float) ||
+        output.byte_size() != output.element_count() * sizeof(float))
         return {StatusCode::InvalidArgument, "Binary F32 tensor byte ranges are inconsistent"};
     dispatch.label = label;
     dispatch.kernel_id = kernel_id;
