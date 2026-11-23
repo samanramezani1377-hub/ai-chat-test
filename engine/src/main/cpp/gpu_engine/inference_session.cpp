@@ -888,6 +888,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     // Cache budgets are assigned after essential KV/recurrent state allocations,
     // from actual remaining application headroom (never a VRAM estimate).
     context_.persistent_weight_cache_limit_bytes = 0;
+    context_.weight_cache_pressure_mode = false;
     context_.weight_chunk_cache = std::make_shared<QuantizedWeightChunkCache>(0);
 
     std::unordered_set<std::string> persistent_state_names;
