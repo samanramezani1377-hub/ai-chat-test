@@ -128,7 +128,7 @@ Status execute_chunked_quantized_matmul_if_needed(
         return {StatusCode::InvalidArgument, "Chunked MatMul GGUF row-byte calculation does not match tensor storage"};
 
     const uint64_t binding_limit = storage_binding_limit(device);
-    if (binding_limit < row_bytes || binding_limit < rows * sizeof(float))
+    if (binding_limit <= 3 || binding_limit < row_bytes || binding_limit < rows * sizeof(float))
         return {StatusCode::Unsupported, "Backend binding limit cannot hold one quantized weight row or one output channel"};
     const uint64_t output_channel_bytes = rows * sizeof(float);
     const uint64_t available = memory.available_bytes();
@@ -303,18 +303,14 @@ Status execute_chunked_quantized_embedding_if_needed(
             return {StatusCode::DeviceLost, "GPU backend became unhealthy during embedding row gathering"};
         const uint64_t batch_tokens = std::min<uint64_t>(
             maximum_tokens, context.token_ids.size() - token_offset);
-        uint64_t weight_bytes = 0, output_chunk_bytes = 0, token_bytes = 0;
+        uint64_t weight_bytes = 0, output_chunk_bytes = 0;
         if (!checked_product(batch_tokens, row_bytes, weight_bytes) ||
-            !checked_product(batch_tokens, output_bytes_per_token, output_chunk_bytes) ||
-            !checked_product(batch_tokens, sizeof(uint32_t), token_bytes))
+            !checked_product(batch_tokens, output_bytes_per_token, output_chunk_bytes))
             return {StatusCode::InvalidArgument, "Embedding gather batch size overflows"};
 
-        MemoryLease weight_lease, token_lease, output_lease;
+        MemoryLease weight_lease, output_lease;
         Status status = allocate_chunk_buffer(memory, device, weight_bytes,
             "quantized-embedding-gather:" + weight_name, weight_lease);
-        if (!status.ok()) return status;
-        status = allocate_chunk_buffer(memory, device, token_bytes,
-            "quantized-embedding-token-ids:" + operation.id, token_lease);
         if (!status.ok()) return status;
         status = allocate_chunk_buffer(memory, device, output_chunk_bytes,
             "quantized-embedding-output:" + operation.id, output_lease);
@@ -334,9 +330,6 @@ Status execute_chunked_quantized_embedding_if_needed(
         }
         status = backend.upload(weight_lease.buffer(), 0, staging.data(), staging.size());
         if (!status.ok()) return status;
-        status = backend.upload(token_lease.buffer(), 0, remapped_ids.data(), token_bytes);
-        if (!status.ok()) return status;
-
         TensorDesc output_descriptor;
         output_descriptor.shape = {batch_tokens, dimension};
         output_descriptor.data_type = DataType::F32;

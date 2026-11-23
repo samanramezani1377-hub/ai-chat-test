@@ -93,9 +93,9 @@ Status load_model_execution_weights(const GgufReader& reader,
             if (row_bytes == 0 || row_bytes > backend_limit)
                 return {StatusCode::Unsupported,
                     "One complete quantized operator row exceeds the backend storage binding limit: " + name};
-            if (quantized_matmul && tensor->byte_size <= backend_limit)
-                ; // Small MatMul weights use the ordinary resident binding below.
-            else {
+            if (!quantized_embedding && tensor->byte_size <= backend_limit) {
+                // Small MatMul weights use the ordinary resident binding below.
+            } else {
                 // Keep only GGUF metadata. MatMul weights are streamed by output
                 // channel; Embedding weights are gathered by token ID at execution.
                 QuantizedWeightBinding binding;
