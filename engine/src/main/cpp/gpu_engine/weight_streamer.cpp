@@ -94,14 +94,18 @@ Status load_model_execution_weights(const GgufReader& reader,
         // retained by the owning inference session, but only inside its explicit
         // cache budget and while preserving a runtime allocation reserve.
         uint64_t cached_weight_bytes = 0;
-        for (const auto& cached : context.quantized_weights) {
-            if (!cached.second.buffer) continue;
-            if (cached.second.byte_size > UINT64_MAX - cached_weight_bytes) {
-                cached_weight_bytes = UINT64_MAX;
-                break;
+        const auto accumulate_cached_bytes = [&cached_weight_bytes](const auto& bindings) {
+            for (const auto& cached : bindings) {
+                if (!cached.second.buffer) continue;
+                if (cached.second.byte_size > UINT64_MAX - cached_weight_bytes) {
+                    cached_weight_bytes = UINT64_MAX;
+                    return;
+                }
+                cached_weight_bytes += cached.second.byte_size;
             }
-            cached_weight_bytes += cached.second.byte_size;
-        }
+        };
+        accumulate_cached_bytes(context.quantized_weights);
+        accumulate_cached_bytes(pending_quantized);
         const uint64_t cache_remaining = context.persistent_weight_cache_limit_bytes > cached_weight_bytes
             ? context.persistent_weight_cache_limit_bytes - cached_weight_bytes : 0;
         const uint64_t runtime_reserve = std::max<uint64_t>(64ull * 1024ull * 1024ull,
