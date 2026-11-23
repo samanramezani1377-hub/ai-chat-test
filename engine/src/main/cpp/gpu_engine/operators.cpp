@@ -1217,12 +1217,12 @@ Status build_rms_norm_f32_candidate(const Tensor& input, const Tensor& weight,
     const auto& x = input.descriptor().shape;
     const auto& w = weight.descriptor().shape;
     if ((x.size() != 2 && x.size() != 3) || w.size() != 1 ||
-        output.descriptor().shape != x || x.back() == 0 || w[0] != x.back() ||
-        input.element_count() == 0 || input.element_count() % x.back() != 0 ||
+        output.descriptor().shape != x || w[0] == 0 ||
+        input.element_count() == 0 || input.element_count() % w[0] != 0 ||
         input.element_count() > UINT32_MAX || output.element_count() > UINT32_MAX ||
-        input.element_count() / x.back() > UINT32_MAX)
-        return {StatusCode::InvalidArgument, "RMSNorm expects input/output [rows,columns] or [tokens,heads,dimension] and weight [dimension]"};
-    const uint64_t columns = x.back();
+        input.element_count() / w[0] > UINT32_MAX)
+        return {StatusCode::InvalidArgument, "RMSNorm expects input/output rank 2 or 3 and a nonzero weight width that evenly divides the input"};
+    const uint64_t columns = w[0];
     const uint64_t rows = input.element_count() / columns;
     if (!std::isfinite(epsilon) || epsilon <= 0.0f)
         return {StatusCode::InvalidArgument, "RMSNorm epsilon must be finite and positive"};
@@ -1266,10 +1266,12 @@ Status build_rms_norm_f32_gles_candidate(const Tensor& input, const Tensor& weig
     dispatch.label = "gles-rms-norm-f32-generic-unverified";
     dispatch.wgsl_source.clear();
     dispatch.glsl_source = kRmsNormF32Glsl;
+    const uint64_t columns = weight.descriptor().shape[0];
+    const uint64_t rows = input.element_count() / columns;
     dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const uint ROWS = 1u;",
-        "const uint ROWS = " + std::to_string(shape[0]) + "u;");
+        "const uint ROWS = " + std::to_string(rows) + "u;");
     dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const uint COLUMNS = 1u;",
-        "const uint COLUMNS = " + std::to_string(shape[1]) + "u;");
+        "const uint COLUMNS = " + std::to_string(columns) + "u;");
     dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const float EPSILON = 0.00001;",
         "const float EPSILON = " + epsilon_text + ";");
     return Status::success();
