@@ -89,13 +89,35 @@ Status load_model_execution_weights(const GgufReader& reader,
                     use.rfind("Embedding_", 0) == 0;
             }
         }
-        // A tied embedding/output tensor may be consumed by both Embedding and
-        // MatMul. Preserve one packed resident copy when it fits; otherwise
-        // keep GGUF metadata only and let each operation gather its own chunks.
+        // Large weights and embedding-only weights stay metadata-only and are
+        // streamed in operation-sized pieces. Small MatMul-only tensors may be
+        // retained by the owning inference session, but only inside its explicit
+        // cache budget and while preserving a runtime allocation reserve.
+        uint64_t cached_weight_bytes = 0;
+        for (const auto& cached : context.quantized_weights) {
+            if (!cached.second.buffer) continue;
+            if (cached.second.byte_size > UINT64_MAX - cached_weight_bytes) {
+                cached_weight_bytes = UINT64_MAX;
+                break;
+            }
+            cached_weight_bytes += cached.second.byte_size;
+        }
+        const uint64_t cache_remaining = context.persistent_weight_cache_limit_bytes > cached_weight_bytes
+            ? context.persistent_weight_cache_limit_bytes - cached_weight_bytes : 0;
+        const uint64_t runtime_reserve = std::max<uint64_t>(64ull * 1024ull * 1024ull,
+                                                            memory.budget_bytes() / 4);
+        const uint64_t available = memory.available_bytes();
+        const bool cache_resident_matmul = context.persistent_weight_cache_limit_bytes != 0 &&
+            used_by_quantized_matmul && !used_by_quantized_embedding &&
+            tensor->byte_size <= backend_limit && tensor->byte_size <= cache_remaining &&
+            available > runtime_reserve && tensor->byte_size <= available - runtime_reserve;
         const bool stream_quantized_weight =
             (used_by_quantized_embedding && !used_by_quantized_matmul) ||
             ((used_by_quantized_matmul || used_by_quantized_embedding) &&
-             tensor->byte_size > backend_limit);
+             tensor->byte_size > backend_limit) ||
+            (context.persistent_weight_cache_limit_bytes != 0 &&
+             used_by_quantized_matmul && !used_by_quantized_embedding &&
+             !cache_resident_matmul);
         if (stream_quantized_weight) {
             if (tensor->dimensions.size() != 2 || tensor->dimensions[0] == 0 ||
                 tensor->dimensions[1] == 0 || !tensor->type.storage_size_known ||
@@ -132,7 +154,21 @@ Status load_model_execution_weights(const GgufReader& reader,
         LoadedWeightTensor loaded;
         Status status = GgufWeightStreamer::load_tensor(reader, *tensor, backend, memory,
                                                         device, policy, loaded);
-        if (!status.ok()) return status;
+        if (!status.ok()) {
+            // Cache admission is opportunistic: memory pressure must fall back to
+            // streamed MatMul rather than turning a valid model into a load failure.
+            if (status.code == StatusCode::OutOfMemory &&
+                context.persistent_weight_cache_limit_bytes != 0 &&
+                used_by_quantized_matmul && !used_by_quantized_embedding) {
+                QuantizedWeightBinding binding;
+                binding.byte_size = tensor->byte_size;
+                binding.file_type_id = tensor->type_id;
+                binding.dimensions = tensor->dimensions;
+                pending_quantized.emplace(name, std::move(binding));
+                continue;
+            }
+            return status;
+        }
         if (loaded.resident_chunks.size() != 1 ||
             loaded.resident_chunks[0].logical_size_bytes != tensor->byte_size)
             return {StatusCode::Unsupported, "Model weight requires an operator-specific chunk lowering: " + name};
