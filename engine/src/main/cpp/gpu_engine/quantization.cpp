@@ -4978,7 +4978,7 @@ Status build_q6_k_matmul_candidate_impl(const Tensor& activations,
         {"const OUTPUT_CHANNELS: u32 = 1u;", "const OUTPUT_CHANNELS: u32 = " + std::to_string(chunk_channels) + "u;"},
         {"const OUTPUT_CHANNELS_TOTAL: u32 = 1u;", "const OUTPUT_CHANNELS_TOTAL: u32 = " + std::to_string(total_channels) + "u;"},
         {"const OUTPUT_CHANNEL_OFFSET: u32 = 0u;", "const OUTPUT_CHANNEL_OFFSET: u32 = " + std::to_string(channel_offset) + "u;"},
-        {"const INNER: u32 = 256u;", "const INNER: u32 = " + std::to_string(a[1]) + "u;"},
+        {"const INNER: u32 = 256u;", "const INNER: u32 = " + std::to_string(inner) + "u;"},
         {"const WEIGHT_ROW_BYTES: u32 = 210u;", "const WEIGHT_ROW_BYTES: u32 = " + std::to_string(blocks * 210) + "u;"}
     };
     const std::pair<std::string, std::string> glsl_constants[] = {
@@ -4986,7 +4986,7 @@ Status build_q6_k_matmul_candidate_impl(const Tensor& activations,
         {"const uint OUTPUT_CHANNELS=1u;", "const uint OUTPUT_CHANNELS=" + std::to_string(chunk_channels) + "u;"},
         {"const uint OUTPUT_CHANNELS_TOTAL=1u;", "const uint OUTPUT_CHANNELS_TOTAL=" + std::to_string(total_channels) + "u;"},
         {"const uint OUTPUT_CHANNEL_OFFSET=0u;", "const uint OUTPUT_CHANNEL_OFFSET=" + std::to_string(channel_offset) + "u;"},
-        {"const uint INNER=256u;", "const uint INNER=" + std::to_string(a[1]) + "u;"},
+        {"const uint INNER=256u;", "const uint INNER=" + std::to_string(inner) + "u;"},
         {"const uint WEIGHT_ROW_BYTES=210u;", "const uint WEIGHT_ROW_BYTES=" + std::to_string(blocks * 210) + "u;"}
     };
     auto specialize = [](std::string& source,
