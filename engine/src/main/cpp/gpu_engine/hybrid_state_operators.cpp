@@ -127,7 +127,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>,
                 k_values[token * KEY_HEADS * STATE_SIZE + key_head * STATE_SIZE + row] * delta;
             result = result + q_values[token * KEY_HEADS * STATE_SIZE + key_head * STATE_SIZE + row] * recurrent_state[index];
         }
-        output_values[token * VALUE_HEADS * STATE_SIZE + head * STATE_SIZE + column] = result;
+        output_values[token * VALUE_HEADS * STATE_SIZE + head * STATE_SIZE + column] = result * inverseSqrt(f32(STATE_SIZE));
     }
 }
 )wgsl";
@@ -172,7 +172,7 @@ void main() {
             recurrent_state[index] += k_values[token * KEY_HEADS * STATE_SIZE + key_head * STATE_SIZE + row] * delta;
             result += q_values[token * KEY_HEADS * STATE_SIZE + key_head * STATE_SIZE + row] * recurrent_state[index];
         }
-        output_values[token * VALUE_HEADS * STATE_SIZE + head * STATE_SIZE + column] = result;
+        output_values[token * VALUE_HEADS * STATE_SIZE + head * STATE_SIZE + column] = result * inversesqrt(float(STATE_SIZE));
     }
 }
 )glsl";
@@ -436,7 +436,8 @@ Status reference_gated_delta_net_f32(const float* q, const float* k, const float
                     result += q[(static_cast<size_t>(token) * key_heads + key_head) * state_size + row] *
                               head_state[state_index];
                 }
-                output[(static_cast<size_t>(token) * value_heads + head) * state_size + column] = result;
+                output[(static_cast<size_t>(token) * value_heads + head) * state_size + column] =
+                    result / std::sqrt(static_cast<float>(state_size));
             }
         }
     return Status::success();
