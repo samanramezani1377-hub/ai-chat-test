@@ -87,6 +87,11 @@ private:
     uint64_t last_output_tokens_ = 0;
     double last_decode_tokens_per_second_ = 0.0;
     bool last_generation_completed_ = false;
+    uint64_t last_prompt_utf8_bytes_ = 0;
+    std::string last_prompt_token_ids_ = "none";
+    std::string last_generated_token_ids_ = "none";
+    std::string last_first_step_top_logits_ = "none";
+    std::string last_sampling_config_ = "none";
 
     std::string last_attempt_model_path_;
     std::string last_attempt_architecture_;
