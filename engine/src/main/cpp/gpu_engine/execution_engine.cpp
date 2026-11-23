@@ -241,22 +241,58 @@ Status MemoryManager::allocate(const BufferDesc& descriptor, MemoryLease& out) {
     if (buffer) {
         state_->active_bytes.fetch_add(descriptor.size_bytes, std::memory_order_relaxed);
     } else {
-        uint64_t reserved = state_->reserved_bytes.load(std::memory_order_relaxed);
-        for (;;) {
-            if (descriptor.size_bytes > state_->budget ||
-                reserved > state_->budget - descriptor.size_bytes) {
-                return {StatusCode::OutOfMemory, "GPU engine memory budget would be exceeded"};
+        auto evict_transient_pool = [&]() {
+            std::vector<std::shared_ptr<Buffer>> retired;
+            uint64_t released_bytes = 0;
+            {
+                std::lock_guard<std::mutex> lock(state_->pool_mutex);
+                released_bytes = state_->pooled_bytes;
+                retired.swap(state_->pool);
+                state_->pooled_bytes = 0;
             }
-            if (state_->reserved_bytes.compare_exchange_weak(reserved,
-                    reserved + descriptor.size_bytes, std::memory_order_acq_rel,
-                    std::memory_order_relaxed)) break;
+            if (released_bytes != 0)
+                state_->reserved_bytes.fetch_sub(released_bytes, std::memory_order_acq_rel);
+            return !retired.empty();
+        };
+        auto reserve_budget = [&]() {
+            uint64_t reserved = state_->reserved_bytes.load(std::memory_order_acquire);
+            for (;;) {
+                if (descriptor.size_bytes > state_->budget ||
+                    reserved > state_->budget - descriptor.size_bytes)
+                    return false;
+                if (state_->reserved_bytes.compare_exchange_weak(reserved,
+                        reserved + descriptor.size_bytes, std::memory_order_acq_rel,
+                        std::memory_order_relaxed))
+                    return true;
+            }
+        };
+
+        if (!reserve_budget()) {
+            evict_transient_pool();
+            if (!reserve_budget())
+                return {StatusCode::OutOfMemory,
+                        "GPU engine allocation cap would be exceeded after transient-pool eviction"};
         }
         state_->active_bytes.fetch_add(descriptor.size_bytes, std::memory_order_relaxed);
         Status status = backend_.allocate(descriptor, buffer);
         if (!status.ok() || !buffer) {
             state_->active_bytes.fetch_sub(descriptor.size_bytes, std::memory_order_relaxed);
             state_->reserved_bytes.fetch_sub(descriptor.size_bytes, std::memory_order_relaxed);
-            return status.ok() ? Status{StatusCode::BackendFailure, "Backend returned success without a buffer"} : status;
+            if (status.code != StatusCode::OutOfMemory || !evict_transient_pool() ||
+                !reserve_budget()) {
+                return status.ok()
+                    ? Status{StatusCode::BackendFailure, "Backend returned success without a buffer"}
+                    : status;
+            }
+            state_->active_bytes.fetch_add(descriptor.size_bytes, std::memory_order_relaxed);
+            status = backend_.allocate(descriptor, buffer);
+            if (!status.ok() || !buffer) {
+                state_->active_bytes.fetch_sub(descriptor.size_bytes, std::memory_order_relaxed);
+                state_->reserved_bytes.fetch_sub(descriptor.size_bytes, std::memory_order_relaxed);
+                return status.ok()
+                    ? Status{StatusCode::BackendFailure, "Backend returned success without a buffer after pool eviction"}
+                    : status;
+            }
         }
     }
 
