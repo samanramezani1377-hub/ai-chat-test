@@ -593,7 +593,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             [](const ModelPlanOperation& operation) { return operation.operator_name == "MatMul_Q6_K"; });
         const bool needs_q6_embedding = std::any_of(plan_.operations.begin(), plan_.operations.end(),
             [](const ModelPlanOperation& operation) { return operation.operator_name == "Embedding_Q6_K"; });
-        q6_backend_validation_ = "decode_reference=validated;active_backend=" +
+        q6_backend_validation_ = std::string("decode_reference=validated;active_backend=") +
             backend_label(backend_kind) + ":passed";
         const BackendKind alternate_backend = backend_kind == BackendKind::DawnWebGpu
             ? BackendKind::OpenGles : BackendKind::DawnWebGpu;
@@ -602,7 +602,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         Status alternate_status = engine_->initialize(alternate_backend);
         if (alternate_status.ok() && engine_->active_backend() &&
             engine_->active_backend()->kind() == alternate_backend) {
-            std::string alternate_result = backend_label(alternate_backend) + ":";
+            std::string alternate_result = std::string(backend_label(alternate_backend)) + ":";
             if (needs_q6_matmul) {
                 Status q6_status = validate_q6_k_matmul_kernel(
                     *engine_->active_backend(), *operators_, *quantizations_);
@@ -621,7 +621,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             }
             q6_backend_validation_ += ";" + alternate_result;
         } else {
-            q6_backend_validation_ += ";" + backend_label(alternate_backend) +
+            q6_backend_validation_ += std::string(";") + backend_label(alternate_backend) +
                 ":unavailable:" + alternate_status.message;
         }
 
