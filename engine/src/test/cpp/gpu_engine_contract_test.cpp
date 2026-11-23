@@ -286,6 +286,21 @@ void test_quantized_weight_chunk_cache_lru_and_budget() {
     assert(stats.resident_bytes == 16);
     assert(stats.resident_chunks == 2);
 
+    // A cache sized for the complete immutable working set must retain the
+    // first pass instead of evicting early layers in a cyclic decode workload.
+    QuantizedWeightChunkCache full_working_set_cache(24);
+    full_working_set_cache.insert("layer-a", 8, a);
+    full_working_set_cache.insert("layer-b", 8, b);
+    full_working_set_cache.insert("layer-c", 8, c);
+    MemoryLease full_hit;
+    assert(full_working_set_cache.find("layer-a", full_hit));
+    assert(full_working_set_cache.find("layer-b", full_hit));
+    assert(full_working_set_cache.find("layer-c", full_hit));
+    const auto full_stats = full_working_set_cache.stats();
+    assert(full_stats.hits == 3);
+    assert(full_stats.evictions == 0);
+    assert(full_stats.resident_bytes == 24);
+
     // Pressure eviction drops cache ownership without disabling future use.
     MemoryManager pressure_memory(backend, 128);
     BufferDesc pressure_desc{64, 4, MemoryDomain::Device, false, "cache-pressure"};
