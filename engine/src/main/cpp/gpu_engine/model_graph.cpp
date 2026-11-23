@@ -73,6 +73,20 @@ Status allocate_chunk_buffer(MemoryManager& memory, const DeviceInfo& device,
     return memory.allocate(descriptor, lease);
 }
 
+Status verify_chunk_output_binding(const ComputeDispatch& dispatch, BackendKind backend,
+                                   const std::shared_ptr<Buffer>& expected_buffer,
+                                   uint64_t expected_bytes) {
+    if (dispatch.copy_only || dispatch.backend != backend || dispatch.kernel_id.empty() ||
+        dispatch.workgroups_x == 0 || dispatch.workgroups_y == 0 || dispatch.workgroups_z == 0)
+        return {StatusCode::Unsupported, "Chunk lowering returned an incomplete or incompatible compute dispatch"};
+    const auto binding = std::find_if(dispatch.bindings.begin(), dispatch.bindings.end(),
+        [](const BufferBinding& item) { return item.binding == 2; });
+    if (binding == dispatch.bindings.end() || binding->buffer.get() != expected_buffer.get() ||
+        binding->offset_bytes != 0 || binding->size_bytes < expected_bytes)
+        return {StatusCode::InvalidArgument, "Chunk lowering output binding does not target the allocated aggregation buffer"};
+    return Status::success();
+}
+
 Status execute_chunked_quantized_matmul_if_needed(
         const ModelPlanOperation& operation, Backend& backend,
         const ModelLoweringRegistry& lowerings, const OperatorRegistry& operators,
@@ -135,9 +149,11 @@ Status execute_chunked_quantized_matmul_if_needed(
     if (row_bytes > UINT64_MAX - output_channel_bytes)
         return {StatusCode::InvalidArgument, "Chunked MatMul per-channel memory estimate overflows"};
     const uint64_t bytes_per_channel = row_bytes + output_channel_bytes;
-    uint64_t maximum_channels = std::min(binding_limit / row_bytes,
+    const uint64_t padded_binding_limit = binding_limit - 3;
+    const uint64_t available_for_chunks = available > 3 ? available - 3 : 0;
+    uint64_t maximum_channels = std::min(padded_binding_limit / row_bytes,
                                          binding_limit / output_channel_bytes);
-    maximum_channels = std::min(maximum_channels, available / bytes_per_channel);
+    maximum_channels = std::min(maximum_channels, available_for_chunks / bytes_per_channel);
     maximum_channels = std::min<uint64_t>(maximum_channels, UINT32_MAX);
     if (maximum_channels == 0)
         return {StatusCode::OutOfMemory, "GPU budget cannot hold one quantized MatMul output-channel chunk"};
@@ -194,6 +210,9 @@ Status execute_chunked_quantized_matmul_if_needed(
         status = (*lowering)(operation, chunk_context, dispatch);
         if (!status.ok()) return status;
         status = operators.authorize_dispatch(dispatch.kernel_id, backend.kind(), dispatch);
+        if (!status.ok()) return status;
+        status = verify_chunk_output_binding(dispatch, backend.kind(), output_lease.buffer(),
+                                             output_chunk_bytes);
         if (!status.ok()) return status;
         std::unique_ptr<CommandBatch> compute_commands;
         status = backend.begin_commands(compute_commands);
@@ -283,12 +302,17 @@ Status execute_chunked_quantized_embedding_if_needed(
     if (row_bytes == 0 || output_bytes_per_token == 0 ||
         row_bytes > binding_limit || output_bytes_per_token > binding_limit)
         return {StatusCode::Unsupported, "Backend binding limit cannot hold one gathered embedding row"};
+    if (row_bytes > UINT64_MAX - output_bytes_per_token ||
+        row_bytes + output_bytes_per_token > UINT64_MAX - sizeof(uint32_t))
+        return {StatusCode::InvalidArgument, "Embedding per-token chunk memory estimate overflows"};
     const uint64_t bytes_per_token = row_bytes + output_bytes_per_token + sizeof(uint32_t);
     const uint64_t available = memory.available_bytes();
-    uint64_t maximum_tokens = std::min(binding_limit / row_bytes,
+    const uint64_t padded_binding_limit = binding_limit > 3 ? binding_limit - 3 : 0;
+    const uint64_t available_for_chunks = available > 3 ? available - 3 : 0;
+    uint64_t maximum_tokens = std::min(padded_binding_limit / row_bytes,
                                        binding_limit / output_bytes_per_token);
     maximum_tokens = std::min(maximum_tokens, binding_limit / sizeof(uint32_t));
-    maximum_tokens = std::min(maximum_tokens, available / bytes_per_token);
+    maximum_tokens = std::min(maximum_tokens, available_for_chunks / bytes_per_token);
     maximum_tokens = std::min<uint64_t>(maximum_tokens, UINT32_MAX);
     if (maximum_tokens == 0)
         return {StatusCode::OutOfMemory, "GPU budget cannot hold one gathered embedding row and output"};
@@ -357,6 +381,9 @@ Status execute_chunked_quantized_embedding_if_needed(
         status = (*lowering)(operation, chunk_context, dispatch);
         if (!status.ok()) return status;
         status = operators.authorize_dispatch(dispatch.kernel_id, backend.kind(), dispatch);
+        if (!status.ok()) return status;
+        status = verify_chunk_output_binding(dispatch, backend.kind(), output_lease.buffer(),
+                                             output_chunk_bytes);
         if (!status.ok()) return status;
         std::unique_ptr<CommandBatch> compute_commands;
         status = backend.begin_commands(compute_commands);
