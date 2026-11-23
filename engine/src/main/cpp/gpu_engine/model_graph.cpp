@@ -214,6 +214,15 @@ Status execute_chunked_quantized_matmul_if_needed(
     const auto& type = source->type;
     const auto& input_shape = input.descriptor().shape;
     const auto& output_shape = output.descriptor().shape;
+    const auto describe_shape = [](const std::vector<uint64_t>& shape) {
+        std::string value = "[";
+        for (size_t index = 0; index < shape.size(); ++index) {
+            if (index != 0) value += ",";
+            value += std::to_string(shape[index]);
+        }
+        value += "]";
+        return value;
+    };
     if (input.descriptor().data_type != DataType::F32 ||
         output.descriptor().data_type != DataType::F32 ||
         input_shape.size() < 2 || input_shape.size() > 4 ||
@@ -227,8 +236,10 @@ Status execute_chunked_quantized_matmul_if_needed(
         return {StatusCode::Unsupported,
             "Chunked MatMul metadata is incompatible: op=" + operation.id +
             " weight=" + weight_name + " quant_type=" + type.name +
-            " input_rank=" + std::to_string(input_shape.size()) +
-            " output_rank=" + std::to_string(output_shape.size())};
+            " input_shape=" + describe_shape(input_shape) +
+            " output_shape=" + describe_shape(output_shape) +
+            " gguf_dimensions=[" + std::to_string(dimensions[0]) + "," +
+            std::to_string(dimensions[1]) + "]"};
 
     const uint64_t inner = dimensions[0];
     const uint64_t total_channels = dimensions[1];
