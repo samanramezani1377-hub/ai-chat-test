@@ -5,10 +5,51 @@
 #include "model_graph.h"
 
 #include <functional>
+#include <list>
+#include <mutex>
+#include <memory>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
 namespace ai_chat::gpu_engine {
+
+
+struct QuantizedWeightChunkCacheStats {
+    uint64_t hits = 0;
+    uint64_t misses = 0;
+    uint64_t evictions = 0;
+    uint64_t resident_bytes = 0;
+    uint64_t resident_chunks = 0;
+};
+
+// GPU-resident, bounded LRU cache for immutable GGUF weight slices.
+// Leases are shared with in-flight dispatches, so eviction never invalidates
+// a buffer that is still referenced by a queued command batch.
+class QuantizedWeightChunkCache {
+public:
+    explicit QuantizedWeightChunkCache(uint64_t capacity_bytes = 0);
+    bool find(const std::string& key, MemoryLease& out);
+    void insert(const std::string& key, uint64_t bytes, const MemoryLease& lease);
+    void set_capacity(uint64_t capacity_bytes);
+    void clear();
+    QuantizedWeightChunkCacheStats stats() const;
+
+private:
+    struct Entry {
+        std::string key;
+        uint64_t bytes = 0;
+        MemoryLease lease;
+    };
+    mutable std::mutex mutex_;
+    uint64_t capacity_bytes_ = 0;
+    uint64_t resident_bytes_ = 0;
+    uint64_t hits_ = 0;
+    uint64_t misses_ = 0;
+    uint64_t evictions_ = 0;
+    std::list<Entry> lru_;
+    std::unordered_map<std::string, std::list<Entry>::iterator> index_;
+};
 
 struct WeightChunk {
     uint64_t tensor_offset_bytes = 0;
