@@ -375,7 +375,8 @@ Status execute_chunked_quantized_matmul_if_needed(
         uint64_t available = memory.available_bytes();
         uint64_t reclaimed_optional_bytes = 0;
         // Optional cached weights yield before the planner rejects a legal tile.
-        // Disable admissions for this operation so pressure cannot refill the cache.
+        // The cache may refill afterward, but only while live headroom preserves
+        // the runtime reserve; its model-sized capacity avoids cyclic LRU churn.
         if (available < bytes_per_channel) {
             const uint64_t before_reclaim = available;
             reclaim_optional_memory();
