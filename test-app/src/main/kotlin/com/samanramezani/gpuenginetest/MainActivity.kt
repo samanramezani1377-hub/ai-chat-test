@@ -271,8 +271,10 @@ class MainActivity : Activity() {
             .find(diagnostics)?.groupValues?.getOrNull(1) ?: "none"
         return when (templateKind) {
             "qwen35_thinking" -> Pair(
-                "<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n<think>\n",
-                templateKind
+                // Use the official enable_thinking=false template branch for this
+                // four-token correctness probe, so generated tokens are answer text.
+                "<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+                "qwen35_no_thinking"
             )
             "qwen_im_start" -> Pair(
                 "<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n",
