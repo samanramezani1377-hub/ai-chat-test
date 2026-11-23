@@ -988,6 +988,10 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
     }
     // The session may carry a bounded set of resident quantized MatMul weights
     // across token steps. All other weights remain streamed on demand.
+    // Real GGUF parity validation performs GPU readbacks and CPU reference work;
+    // keep it out of the normal hot path unless diagnostics explicitly request it.
+    uint64_t* parity_counter = context.enable_runtime_quantization_parity_validation
+        ? &report.real_q6_k_parity_checks : nullptr;
 
     ExecutionScheduler scheduler;
     for (const auto& original_operation : plan.operations) {
@@ -1081,7 +1085,7 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
         bool chunked_embedding = false;
         status = execute_chunked_quantized_embedding_if_needed(operation, backend, lowerings,
             operators, reader, memory, device, operation_context, chunked_embedding,
-            &report.real_q6_k_parity_checks);
+            parity_counter);
         if (!status.ok()) {
             report.errors.push_back(operation.id + ":CHUNKED_QUANTIZED_EMBEDDING_FAILED:" + status.message);
             for (const auto& name : operation.weight_tensors) {
