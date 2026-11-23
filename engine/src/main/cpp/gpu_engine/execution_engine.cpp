@@ -613,43 +613,60 @@ Status execute_chunked_compute(Backend& backend, const ChunkExecutionConfig& con
 
 Status ExecutionScheduler::execute(Backend& backend, const ComputeGraph& graph,
                                    const std::atomic<bool>* cancellation) const {
-    if (!backend.healthy()) return {StatusCode::DeviceLost, "Cannot schedule work on an unhealthy backend"};
-    std::vector<size_t> order;
-    Status status = graph.topological_order(order);
-    if (!status.ok()) return status;
-    for (size_t index : order) {
-        const auto& dispatch = graph.nodes_[index].dispatch;
-        if (dispatch.backend != backend.kind()) {
-            return {StatusCode::Unsupported, "Graph node backend does not match the active device backend"};
+    return execute_sequence(backend, std::vector<ComputeGraph>{graph}, cancellation);
+}
+
+Status ExecutionScheduler::execute_sequence(Backend& backend,
+        const std::vector<ComputeGraph>& graphs,
+        const std::atomic<bool>* cancellation) const {
+    if (!backend.healthy())
+        return {StatusCode::DeviceLost, "Cannot schedule work on an unhealthy backend"};
+    if (graphs.empty()) return Status::success();
+
+    std::vector<std::vector<size_t>> graph_orders;
+    graph_orders.reserve(graphs.size());
+    for (const auto& graph : graphs) {
+        std::vector<size_t> order;
+        Status status = graph.topological_order(order);
+        if (!status.ok()) return status;
+        for (size_t index : order) {
+            if (graph.nodes_[index].dispatch.backend != backend.kind())
+                return {StatusCode::Unsupported, "Graph node backend does not match the active device backend"};
         }
+        graph_orders.push_back(std::move(order));
     }
+
     std::unique_ptr<CommandBatch> batch;
-    status = backend.begin_commands(batch);
+    Status status = backend.begin_commands(batch);
     if (!status.ok()) return status;
     if (!batch) return {StatusCode::BackendFailure, "Backend returned an empty command batch"};
 
-    for (size_t index : order) {
-        if (cancellation && cancellation->load(std::memory_order_relaxed)) {
-            return {StatusCode::Cancelled, "Graph execution was cancelled before submission"};
-        }
-        const auto& dispatch = graph.nodes_[index].dispatch;
-        for (const auto& copy : dispatch.buffer_copies) {
-            status = batch->copy_buffer(copy.source, copy.source_offset,
-                                        copy.destination, copy.destination_offset,
-                                        copy.size_bytes);
-            if (!status.ok()) return status;
-        }
-        if (!dispatch.copy_only) {
-            status = batch->dispatch_compute(dispatch);
-            if (!status.ok()) return status;
+    // Fragments are appended in model-plan order. Backends must preserve command
+    // order within a submitted batch, allowing dependent operators to avoid an
+    // intermediate CPU-visible synchronization point.
+    for (size_t graph_index = 0; graph_index < graphs.size(); ++graph_index) {
+        const auto& graph = graphs[graph_index];
+        for (size_t index : graph_orders[graph_index]) {
+            if (cancellation && cancellation->load(std::memory_order_relaxed))
+                return {StatusCode::Cancelled, "Graph sequence was cancelled before submission"};
+            const auto& dispatch = graph.nodes_[index].dispatch;
+            for (const auto& copy : dispatch.buffer_copies) {
+                status = batch->copy_buffer(copy.source, copy.source_offset,
+                    copy.destination, copy.destination_offset, copy.size_bytes);
+                if (!status.ok()) return status;
+            }
+            if (!dispatch.copy_only) {
+                status = batch->dispatch_compute(dispatch);
+                if (!status.ok()) return status;
+            }
         }
     }
-    if (cancellation && cancellation->load(std::memory_order_relaxed)) {
-        return {StatusCode::Cancelled, "Graph execution was cancelled before submission"};
-    }
+    if (cancellation && cancellation->load(std::memory_order_relaxed))
+        return {StatusCode::Cancelled, "Graph sequence was cancelled before submission"};
     status = backend.submit(std::move(batch));
     if (!status.ok()) return status;
-    if (!backend.healthy()) return {StatusCode::DeviceLost, "Backend was lost after command submission"};
+    if (!backend.healthy())
+        return {StatusCode::DeviceLost, "Backend was lost after graph sequence submission"};
     return backend.synchronize();
 }
 
