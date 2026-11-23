@@ -146,8 +146,14 @@ void GpuInferenceSession::unload_locked() noexcept {
     peak_operation_weight_bytes_ = 0;
     kv_cache_bytes_ = 0;
     last_prefill_ms_ = 0;
+    last_prefill_readback_ms_ = 0;
     last_ttft_ms_ = 0;
     last_decode_ms_ = 0;
+    last_prefill_timing_valid_ = false;
+    last_prefill_readback_timing_valid_ = false;
+    last_ttft_timing_valid_ = false;
+    last_decode_timing_valid_ = false;
+    last_generation_stage_ = "not_started";
     last_prompt_tokens_ = 0;
     last_output_tokens_ = 0;
     last_decode_tokens_per_second_ = 0.0;
@@ -214,6 +220,13 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
                                        uint64_t memory_budget_bytes) {
     std::lock_guard<std::mutex> lock(mutex_);
     unload_locked();
+    last_failed_memory_budget_bytes_ = 0;
+    last_failed_memory_required_bytes_ = 0;
+    last_failed_memory_usable_bytes_ = 0;
+    last_failed_memory_kv_bytes_ = 0;
+    last_failed_memory_scratch_bytes_ = 0;
+    last_failed_tensor_bytes_ = 0;
+    last_failed_storage_binding_limit_bytes_ = 0;
     cancelled_.store(false, std::memory_order_relaxed);
     last_error_.clear();
 
@@ -611,7 +624,13 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     const uint64_t padded_largest_weight_bytes =
         largest_weight_tensor_bytes_ > UINT64_MAX - 3 ? UINT64_MAX : (largest_weight_tensor_bytes_ + 3) & ~uint64_t{3};
     if (padded_largest_weight_bytes > max_single_buffer) {
-        last_error_ = "A single model tensor exceeds the backend storage-buffer limit; multi-chunk operator execution is not implemented";
+        last_failed_tensor_bytes_ = padded_largest_weight_bytes;
+        last_failed_storage_binding_limit_bytes_ = max_single_buffer;
+        last_failed_memory_budget_bytes_ = memory_budget_bytes;
+        last_error_ = "A single model tensor exceeds the backend storage-buffer limit; " +
+            std::string("tensor_bytes=") + std::to_string(padded_largest_weight_bytes) +
+            " | max_storage_binding_bytes=" + std::to_string(max_single_buffer) +
+            " | multi_chunk_operator_execution=NOT_INTEGRATED";
         unload_locked();
         return {StatusCode::Unsupported, last_error_};
     }
@@ -645,7 +664,20 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         last_error_ = "GPU memory preflight rejected the model";
         for (const auto& blocker : memory_estimate_.blockers) last_error_ += " | " + blocker;
         for (const auto& blocker : memory_estimate_.plan.blockers) last_error_ += " | " + blocker;
+        const std::string failure = last_error_;
+        const auto failed_estimate = memory_estimate_;
+        last_failed_memory_budget_bytes_ = memory_budget_bytes_;
+        last_failed_memory_required_bytes_ = failed_estimate.plan.required_bytes;
+        last_failed_memory_usable_bytes_ = failed_estimate.plan.usable_budget_bytes;
+        last_failed_memory_kv_bytes_ = failed_estimate.estimated_kv_cache_bytes;
+        last_failed_memory_scratch_bytes_ = failed_estimate.estimated_scratch_bytes;
+        const uint64_t failed_budget = memory_budget_bytes_;
+        const uint32_t failed_context = context_length_;
         unload_locked();
+        memory_estimate_ = failed_estimate;
+        memory_budget_bytes_ = failed_budget;
+        context_length_ = failed_context;
+        last_error_ = failure;
         return {StatusCode::OutOfMemory, last_error_};
     }
 
@@ -884,26 +916,44 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
     context_.sequence_length = prompt_tokens.size();
     context_.prefill = true;
     last_prefill_ms_ = 0;
+    last_prefill_readback_ms_ = 0;
     last_ttft_ms_ = 0;
     last_decode_ms_ = 0;
+    last_prefill_timing_valid_ = false;
+    last_prefill_readback_timing_valid_ = false;
+    last_ttft_timing_valid_ = false;
+    last_decode_timing_valid_ = false;
+    last_generation_stage_ = "prefill";
     last_prompt_tokens_ = prompt_tokens.size();
     last_output_tokens_ = 0;
     last_decode_tokens_per_second_ = 0.0;
     last_generation_completed_ = false;
     const auto generation_started = std::chrono::steady_clock::now();
+    const auto prefill_dispatch_started = generation_started;
     status = run_model_step(prompt_tokens.size());
-    if (!status.ok()) return status;
+    const auto prefill_dispatch_finished = std::chrono::steady_clock::now();
+    last_prefill_ms_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        prefill_dispatch_finished - prefill_dispatch_started).count());
+    last_prefill_timing_valid_ = status.ok();
+    if (!status.ok()) {
+        last_generation_stage_ = "prefill_dispatch_failed";
+        last_error_ = "Prefill dispatch failed: " + status.message;
+        return status;
+    }
 
     std::vector<float> logits;
+    const auto prefill_readback_started = std::chrono::steady_clock::now();
     status = read_last_token_logits(logits);
+    const auto prefill_readback_finished = std::chrono::steady_clock::now();
+    last_prefill_readback_ms_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        prefill_readback_finished - prefill_readback_started).count());
+    last_prefill_readback_timing_valid_ = status.ok();
     if (!status.ok()) {
+        last_generation_stage_ = "prefill_logits_readback_failed";
         last_error_ = "Prefill logits readback failed: " + status.message;
         return status;
     }
-    const auto first_logits_ready = std::chrono::steady_clock::now();
-    last_ttft_ms_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-        first_logits_ready - generation_started).count());
-    last_prefill_ms_ = last_ttft_ms_; // Includes prefill dispatch and first-logits readback.
+    last_generation_stage_ = "first_token_sampling";
 
     Sampler sampler(sampling);
     std::vector<int32_t> history;
@@ -920,8 +970,8 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
     std::vector<uint32_t> generated;
     generated.reserve(max_new_tokens);
     std::string previous_text;
-    const auto decode_started = std::chrono::steady_clock::now();
-
+    std::chrono::nanoseconds decode_compute_elapsed{0};
+    bool first_token_ready = false;
     for (uint32_t index = 0; index < max_new_tokens; ++index) {
         if (cancelled_.load(std::memory_order_relaxed))
             return {StatusCode::Cancelled, "GPU generation was cancelled"};
@@ -929,16 +979,27 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
         status = sampler.sample(logits, history, sampled);
         if (!status.ok() || sampled < 0 ||
             static_cast<uint64_t>(sampled) >= plan_.vocabulary_size) {
+            last_generation_stage_ = "sampling_failed";
             last_error_ = status.ok() ? "Sampler returned a token outside the model vocabulary" : status.message;
             return {status.ok() ? StatusCode::InvalidArgument : status.code, last_error_};
         }
         history.push_back(sampled);
         generated.push_back(static_cast<uint32_t>(sampled));
+        last_output_tokens_ = generated.size();
+        if (!first_token_ready) {
+            const auto first_token_at = std::chrono::steady_clock::now();
+            last_ttft_ms_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                first_token_at - generation_started).count());
+            last_ttft_timing_valid_ = true;
+            first_token_ready = true;
+            last_generation_stage_ = "decode";
+        }
         const bool should_stop = stop.push(sampled);
 
         std::string decoded;
         status = tokenizer_engine.decode(loader_->reader()->info().tokenizer, generated, decoded);
         if (!status.ok()) {
+            last_generation_stage_ = "token_decode_failed";
             last_error_ = "Generated token decoding failed: " + status.message;
             return status;
         }
@@ -956,24 +1017,39 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
         context_.past_length = prompt_tokens.size() + generated.size() - 1;
         context_.sequence_length = 1;
         context_.prefill = false;
+        const auto decode_dispatch_started = std::chrono::steady_clock::now();
         status = run_model_step(1);
-        if (!status.ok()) return status;
-        status = read_last_token_logits(logits);
         if (!status.ok()) {
+            last_decode_ms_ = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(decode_compute_elapsed).count());
+            last_generation_stage_ = "decode_dispatch_failed";
+            last_error_ = "Decode dispatch failed: " + status.message;
+            return status;
+        }
+        status = read_last_token_logits(logits);
+        const auto decode_readback_finished = std::chrono::steady_clock::now();
+        if (!status.ok()) {
+            last_decode_ms_ = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(decode_compute_elapsed +
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - decode_dispatch_started)).count());
+            last_generation_stage_ = "decode_logits_readback_failed";
             last_error_ = "Decode logits readback failed: " + status.message;
             return status;
         }
+        decode_compute_elapsed += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            decode_readback_finished - decode_dispatch_started);
     }
 
-    const auto generation_finished = std::chrono::steady_clock::now();
-    const uint64_t decode_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-        generation_finished - decode_started).count());
+    last_decode_ms_ = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(decode_compute_elapsed).count());
     const uint64_t decode_tokens = generated.size() > 1 ? generated.size() - 1 : 0;
-    last_decode_ms_ = decode_ms;
+    last_decode_timing_valid_ = decode_tokens != 0;
     last_output_tokens_ = generated.size();
-    last_decode_tokens_per_second_ = decode_ms && decode_tokens
-        ? static_cast<double>(decode_tokens) * 1000.0 / static_cast<double>(decode_ms) : 0.0;
+    last_decode_tokens_per_second_ = last_decode_ms_ && decode_tokens
+        ? static_cast<double>(decode_tokens) * 1000.0 / static_cast<double>(last_decode_ms_) : 0.0;
     last_generation_completed_ = true;
+    last_generation_stage_ = "completed";
     last_error_.clear();
     return Status::success();
 }
@@ -1017,22 +1093,39 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";largest_weight_tensor_bytes=" << largest_weight_tensor_bytes_
            << ";peak_operation_weight_bytes=" << peak_operation_weight_bytes_
            << ";kv_cache_bytes=" << kv_cache_bytes_
-           << ";memory_budget_bytes=" << memory_budget_bytes_
+           << ";memory_budget_bytes=" << (memory_budget_bytes_ != 0
+                ? memory_budget_bytes_ : last_failed_memory_budget_bytes_)
            << ";memory_budget_kind=application_allocation_cap_not_vram"
            << ";memory_active_bytes=" << (memory_ ? memory_->allocated_bytes() : 0)
            << ";memory_available_bytes=" << (memory_ ? memory_->available_bytes() : 0)
-           << ";memory_required_bytes=" << memory_estimate_.plan.required_bytes
+           << ";memory_required_bytes=" << (memory_estimate_.plan.required_bytes != 0
+                ? memory_estimate_.plan.required_bytes : last_failed_memory_required_bytes_)
+           << ";memory_usable_budget_bytes=" << (memory_estimate_.plan.usable_budget_bytes != 0
+                ? memory_estimate_.plan.usable_budget_bytes : last_failed_memory_usable_bytes_)
+           << ";memory_estimated_kv_cache_bytes=" << (memory_estimate_.estimated_kv_cache_bytes != 0
+                ? memory_estimate_.estimated_kv_cache_bytes : last_failed_memory_kv_bytes_)
+           << ";memory_estimated_scratch_bytes=" << (memory_estimate_.estimated_scratch_bytes != 0
+                ? memory_estimate_.estimated_scratch_bytes : last_failed_memory_scratch_bytes_)
+           << ";last_failed_memory_budget_bytes=" << last_failed_memory_budget_bytes_
+           << ";last_failed_tensor_bytes=" << last_failed_tensor_bytes_
+           << ";last_failed_storage_binding_limit_bytes=" << last_failed_storage_binding_limit_bytes_
            << ";gpu_memory_total=unknown"
            << ";gpu_memory_free=unknown"
            << ";weight_streaming=per-operation"
-           << ";single_tensor_chunking=UNSUPPORTED"
+           << ";single_tensor_chunking=NOT_INTEGRATED"
            << ";backend_kernel_validation=runtime-numerical"
            << ";model_reference_parity=UNVERIFIED"
            << ";model_graph_validation=UNVERIFIED"
            << ";context_length=" << context_length_
            << ";prefill_ms=" << last_prefill_ms_
+           << ";prefill_timing_valid=" << (last_prefill_timing_valid_ ? "true" : "false")
+           << ";prefill_readback_ms=" << last_prefill_readback_ms_
+           << ";prefill_readback_timing_valid=" << (last_prefill_readback_timing_valid_ ? "true" : "false")
            << ";ttft_ms=" << last_ttft_ms_
+           << ";ttft_timing_valid=" << (last_ttft_timing_valid_ ? "true" : "false")
            << ";decode_ms=" << last_decode_ms_
+           << ";decode_timing_valid=" << (last_decode_timing_valid_ ? "true" : "false")
+           << ";generation_stage=" << last_generation_stage_
            << ";prompt_tokens=" << last_prompt_tokens_
            << ";output_tokens=" << last_output_tokens_
            << ";decode_tokens_per_second=" << last_decode_tokens_per_second_

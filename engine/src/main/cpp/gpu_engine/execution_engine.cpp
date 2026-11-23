@@ -21,7 +21,8 @@ std::string normalize_kernel_specialization(const std::string& source) {
         "VOCABULARY_SIZE", "EMBEDDING_DIMENSION", "TOKEN_COUNT", "TOTAL_ELEMENTS",
         "ELEMENT_COUNT", "TOKENS", "QUERY_HEADS", "KV_HEADS", "HEAD_DIM", "PAST_LENGTH",
         "SEQUENCE_LENGTH", "SCALE", "HEADS", "ROTARY_DIM", "START_POSITION",
-        "THETA", "NEOX_STYLE", "ROWS", "COLUMNS", "INNER", "EPSILON",
+        "THETA", "NEOX_STYLE", "ROWS", "COLUMNS", "INNER", "EPSILON", "MODE",
+        "INPUT_AXIS_DIM", "OUTPUT_AXIS_DIM", "INNER_SIZE", "OFFSET",
         "OUTPUT_CHANNELS", "WEIGHT_ROW_BYTES"
     };
     std::string normalized;
@@ -518,6 +519,89 @@ Status ComputeGraph::topological_order(std::vector<size_t>& out_order) const {
 }
 
 size_t ComputeGraph::node_count() const noexcept { return nodes_.size(); }
+
+
+Status execute_chunked_compute(Backend& backend, const ChunkExecutionConfig& config,
+                               const ChunkDispatchBuilder& build_dispatch,
+                               const ChunkAggregationCallback& aggregate,
+                               const std::atomic<bool>* cancellation) {
+    if (!backend.healthy())
+        return {StatusCode::DeviceLost, "Chunk execution requires a healthy backend"};
+    if (!build_dispatch || !config.output_buffer || config.total_elements == 0 ||
+        config.maximum_chunk_elements == 0 || config.alignment_elements == 0 ||
+        config.element_size_bytes == 0 ||
+        config.maximum_chunk_elements < config.alignment_elements)
+        return {StatusCode::InvalidArgument, "Chunk execution configuration is incomplete"};
+    if (config.total_elements > UINT64_MAX / config.element_size_bytes)
+        return {StatusCode::InvalidArgument, "Chunk execution byte size overflows"};
+    const uint64_t total_bytes = config.total_elements * config.element_size_bytes;
+    if (config.output_base_offset_bytes > config.output_buffer->size_bytes() ||
+        total_bytes > config.output_buffer->size_bytes() - config.output_base_offset_bytes)
+        return {StatusCode::InvalidArgument, "Chunk execution output range exceeds its backing buffer"};
+
+    const uint64_t chunk_capacity =
+        (config.maximum_chunk_elements / config.alignment_elements) * config.alignment_elements;
+    if (chunk_capacity == 0)
+        return {StatusCode::InvalidArgument, "Chunk capacity is smaller than the required alignment"};
+    uint64_t element_offset = 0;
+    uint64_t chunk_index = 0;
+    while (element_offset < config.total_elements) {
+        if (cancellation && cancellation->load(std::memory_order_relaxed))
+            return {StatusCode::Cancelled, "Chunk execution was cancelled"};
+        if (!backend.healthy())
+            return {StatusCode::DeviceLost, "GPU backend became unhealthy during chunk execution"};
+
+        const uint64_t remaining = config.total_elements - element_offset;
+        const uint64_t element_count = std::min(remaining, chunk_capacity);
+        if (element_count == 0 || (remaining > element_count &&
+            element_count % config.alignment_elements != 0))
+            return {StatusCode::InvalidArgument, "Chunk planner produced a misaligned non-final range"};
+        if (element_offset > UINT64_MAX / config.element_size_bytes ||
+            element_count > UINT64_MAX / config.element_size_bytes)
+            return {StatusCode::InvalidArgument, "Chunk range byte offset overflows"};
+        const uint64_t byte_offset = element_offset * config.element_size_bytes;
+        const uint64_t byte_size = element_count * config.element_size_bytes;
+        if (config.output_base_offset_bytes > UINT64_MAX - byte_offset)
+            return {StatusCode::InvalidArgument, "Chunk output base offset overflows"};
+
+        ChunkExecutionRange range{chunk_index, element_offset, element_count, byte_offset, byte_size};
+        ComputeDispatch dispatch;
+        Status status = build_dispatch(range, dispatch);
+        if (!status.ok()) return status;
+        if (dispatch.copy_only || dispatch.backend != backend.kind() ||
+            dispatch.validation != KernelValidation::Validated || dispatch.kernel_id.empty() ||
+            dispatch.workgroups_x == 0 || dispatch.workgroups_y == 0 || dispatch.workgroups_z == 0)
+            return {StatusCode::Unsupported, "Chunk builder returned an unvalidated or incompatible compute dispatch"};
+
+        const auto output = std::find_if(dispatch.bindings.begin(), dispatch.bindings.end(),
+            [&](const BufferBinding& binding) { return binding.binding == config.output_binding; });
+        const uint64_t expected_offset = config.output_base_offset_bytes + byte_offset;
+        if (output == dispatch.bindings.end() || output->buffer.get() != config.output_buffer.get() ||
+            output->offset_bytes != expected_offset || output->size_bytes < byte_size ||
+            output->offset_bytes > output->buffer->size_bytes() ||
+            output->size_bytes > output->buffer->size_bytes() - output->offset_bytes)
+            return {StatusCode::InvalidArgument, "Chunk dispatch output binding does not match the planned offset and byte range"};
+
+        std::unique_ptr<CommandBatch> commands;
+        status = backend.begin_commands(commands);
+        if (!status.ok()) return status;
+        if (!commands)
+            return {StatusCode::BackendFailure, "Backend returned an empty chunk command batch"};
+        status = commands->dispatch_compute(dispatch);
+        if (!status.ok()) return status;
+        status = backend.submit(std::move(commands));
+        if (!status.ok()) return status;
+        status = backend.synchronize();
+        if (!status.ok()) return status;
+        if (aggregate) {
+            status = aggregate(range, backend);
+            if (!status.ok()) return status;
+        }
+        element_offset += element_count;
+        ++chunk_index;
+    }
+    return Status::success();
+}
 
 Status ExecutionScheduler::execute(Backend& backend, const ComputeGraph& graph,
                                    const std::atomic<bool>* cancellation) const {

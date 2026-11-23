@@ -4000,7 +4000,89 @@ void test_sampler_min_p_filter() {
     assert(invalid_sampler.sample(logits, history, ignored).code == StatusCode::InvalidArgument);
 }
 
+
+void test_dispatch_authorization_accepts_only_declared_mode_specialization() {
+    OperatorRegistry registry;
+    KernelDefinition definition;
+    definition.operator_name = "Softplus";
+    definition.backend = BackendKind::OpenGles;
+    definition.input_type = DataType::F32;
+    definition.output_type = DataType::F32;
+    definition.min_input_count = 1;
+    definition.max_input_count = 1;
+    definition.min_rank = 1;
+    definition.max_rank = 8;
+    definition.validation = KernelValidation::Validated;
+    definition.kernel_id = "gles-softplus-f32-v1";
+    definition.glsl_source =
+        "#version 310 es\n"
+        "const uint ELEMENT_COUNT = 1u;\n"
+        "const uint MODE = 0u;\n"
+        "void main() {}\n";
+    assert(registry.register_kernel(definition).ok());
+
+    ComputeDispatch dispatch;
+    dispatch.kernel_id = definition.kernel_id;
+    dispatch.backend = BackendKind::OpenGles;
+    dispatch.glsl_source =
+        "#version 310 es\n"
+        "const uint ELEMENT_COUNT = 4096u;\n"
+        "const uint MODE = 1u;\n"
+        "void main() {}\n";
+    assert(registry.authorize_dispatch(definition.kernel_id, BackendKind::OpenGles, dispatch).ok());
+
+    dispatch.glsl_source += "// unapproved semantic mutation\n";
+    assert(registry.authorize_dispatch(definition.kernel_id, BackendKind::OpenGles, dispatch).code ==
+           StatusCode::InvalidArgument);
+}
+
+
+void test_generic_chunk_executor_preserves_offsets_and_aggregates() {
+    FakeBackend backend(BackendKind::OpenGles);
+    BufferDesc desc{40, 4, MemoryDomain::Device, false, "chunk-output"};
+    std::shared_ptr<Buffer> output;
+    assert(backend.allocate(desc, output).ok());
+    ChunkExecutionConfig config;
+    config.total_elements = 10;
+    config.maximum_chunk_elements = 4;
+    config.alignment_elements = 2;
+    config.element_size_bytes = sizeof(float);
+    config.output_buffer = output;
+    config.output_binding = 1;
+
+    std::vector<ChunkExecutionRange> observed;
+    const auto build = [&](const ChunkExecutionRange& range, ComputeDispatch& dispatch) {
+        observed.push_back(range);
+        dispatch.label = "chunk-" + std::to_string(range.index);
+        dispatch.kernel_id = "validated-chunk-test";
+        dispatch.backend = BackendKind::OpenGles;
+        dispatch.validation = KernelValidation::Validated;
+        dispatch.bindings.push_back({1, output, range.byte_offset, range.byte_size});
+        return Status::success();
+    };
+    uint64_t aggregated_elements = 0;
+    const auto aggregate = [&](const ChunkExecutionRange& range, Backend&) {
+        aggregated_elements += range.element_count;
+        return Status::success();
+    };
+    assert(execute_chunked_compute(backend, config, build, aggregate).ok());
+    assert(observed.size() == 3);
+    assert(observed[0].element_offset == 0 && observed[0].element_count == 4 &&
+           observed[0].byte_offset == 0 && observed[0].byte_size == 16);
+    assert(observed[1].element_offset == 4 && observed[1].element_count == 4 &&
+           observed[1].byte_offset == 16 && observed[1].byte_size == 16);
+    assert(observed[2].element_offset == 8 && observed[2].element_count == 2 &&
+           observed[2].byte_offset == 32 && observed[2].byte_size == 8);
+    assert(aggregated_elements == 10);
+    assert(backend.submit_count == 3 && backend.sync_count == 3);
+
+    config.output_base_offset_bytes = 4;
+    assert(execute_chunked_compute(backend, config, build).code == StatusCode::InvalidArgument);
+}
+
 int main() {
+    test_generic_chunk_executor_preserves_offsets_and_aggregates();
+    test_dispatch_authorization_accepts_only_declared_mode_specialization();
     test_sampler_min_p_filter();
     test_independent_gguf_reader();
     test_tensor_and_memory_lease();

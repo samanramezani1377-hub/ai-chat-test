@@ -3,6 +3,7 @@
 #include "gpu_engine.h"
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -157,6 +158,35 @@ private:
     std::vector<GraphNode> nodes_;
     friend class ExecutionScheduler;
 };
+
+
+struct ChunkExecutionRange {
+    uint64_t index = 0;
+    uint64_t element_offset = 0;
+    uint64_t element_count = 0;
+    uint64_t byte_offset = 0;
+    uint64_t byte_size = 0;
+};
+
+struct ChunkExecutionConfig {
+    uint64_t total_elements = 0;
+    uint64_t maximum_chunk_elements = 0;
+    uint64_t alignment_elements = 1;
+    uint64_t element_size_bytes = 0;
+    uint64_t output_base_offset_bytes = 0;
+    uint32_t output_binding = 1;
+    std::shared_ptr<Buffer> output_buffer;
+};
+
+using ChunkDispatchBuilder = std::function<Status(const ChunkExecutionRange&, ComputeDispatch&)>;
+using ChunkAggregationCallback = std::function<Status(const ChunkExecutionRange&, Backend&)>;
+
+// Reusable tiled-dispatch primitive. Builders specialize logical offsets;
+// the executor enforces exact output ranges, cancellation, submission and sync.
+Status execute_chunked_compute(Backend& backend, const ChunkExecutionConfig& config,
+                               const ChunkDispatchBuilder& build_dispatch,
+                               const ChunkAggregationCallback& aggregate = {},
+                               const std::atomic<bool>* cancellation = nullptr);
 
 class ExecutionScheduler {
 public:
