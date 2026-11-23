@@ -1106,6 +1106,9 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
         operation_context.quantized_weights = context.quantized_weights;
         operation_context.weight_leases = context.weight_leases;
         operation_context.persistent_weight_cache_limit_bytes = context.persistent_weight_cache_limit_bytes;
+        // Share the session-owned LRU across per-operation contexts. Without
+        // this assignment streamed MatMul silently bypasses the chunk cache.
+        operation_context.weight_chunk_cache = context.weight_chunk_cache;
         operation_context.backend = &backend;
         operation_context.token_ids = context.token_ids;
         operation_context.kv_cache = context.kv_cache;
