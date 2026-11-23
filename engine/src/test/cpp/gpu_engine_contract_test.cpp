@@ -465,6 +465,24 @@ void test_qwen35_hybrid_recipe_builds_generic_semantic_graph() {
     assert(text_mrope != plan.operations.end() && text_mrope->inputs.size() == 1);
     assert(text_mrope->string_attributes.at("position_encoding") ==
            "qwen35_text_only_mrope_equivalent");
+
+    GgufFileInfo implicit_tied = model;
+    implicit_tied.tensors.erase(std::remove_if(implicit_tied.tensors.begin(),
+        implicit_tied.tensors.end(),
+        [](const GgufTensorInfo& tensor) { return tensor.name == "output.weight"; }),
+        implicit_tied.tensors.end());
+    ModelExecutionPlan implicit_tied_plan;
+    assert(adapter->build_execution_plan(implicit_tied, implicit_tied_plan).ok());
+    const auto implicit_logits = std::find_if(implicit_tied_plan.operations.begin(),
+        implicit_tied_plan.operations.end(),
+        [](const ModelPlanOperation& operation) { return operation.id == "logits"; });
+    assert(implicit_logits != implicit_tied_plan.operations.end());
+    assert(implicit_logits->weight_tensors == std::vector<std::string>{"token_embd.weight"});
+    implicit_tied.metadata["qwen35.tie_word_embeddings"] = false;
+    ModelExecutionPlan explicitly_untied_plan;
+    assert(adapter->build_execution_plan(implicit_tied, explicitly_untied_plan).code ==
+           StatusCode::Unsupported);
+
     assert(!plan.gpu_ready && !plan.operator_coverage_validated);
 
     // Qwen3.5 uses attention head widths independent of hidden_size / heads,
@@ -3705,6 +3723,24 @@ void test_qwen3_dense_adapter_uses_tensor_derived_head_width_and_q6_embedding() 
         [](const ModelPlanOperation& operation) { return operation.id == "embedding"; });
     assert(embedding != plan.operations.end());
     assert(embedding->operator_name == "Embedding_Q6_K");
+
+    // GGUF omits output.weight for tied embeddings. The tensor inventory itself
+    // is the storage representation; the optional metadata flag may be absent.
+    GgufFileInfo implicit_tied = model;
+    implicit_tied.metadata.erase("qwen3.tie_word_embeddings");
+    ModelExecutionPlan implicit_tied_plan;
+    assert(adapter->build_execution_plan(implicit_tied, implicit_tied_plan).ok());
+    const auto implicit_logits = std::find_if(implicit_tied_plan.operations.begin(),
+        implicit_tied_plan.operations.end(),
+        [](const ModelPlanOperation& operation) { return operation.id == "logits"; });
+    assert(implicit_logits != implicit_tied_plan.operations.end());
+    assert(implicit_logits->weight_tensors == std::vector<std::string>{"token_embd.weight"});
+
+    GgufFileInfo explicitly_untied_missing_output = implicit_tied;
+    explicitly_untied_missing_output.metadata["qwen3.tie_word_embeddings"] = false;
+    ModelExecutionPlan explicitly_untied_plan;
+    assert(adapter->build_execution_plan(explicitly_untied_missing_output,
+        explicitly_untied_plan).code == StatusCode::Unsupported);
     const auto q_projection = std::find_if(plan.operations.begin(), plan.operations.end(),
         [](const ModelPlanOperation& operation) { return operation.id == "layer.0.q_proj"; });
     assert(q_projection != plan.operations.end());

@@ -325,10 +325,22 @@ public:
         if (!has("output.weight")) {
             const auto tie = model.metadata.find("qwen35.tie_word_embeddings");
             const bool* declared = tie == model.metadata.end() ? nullptr : std::get_if<bool>(&tie->second);
-            if (declared && *declared) tied_output = true;
-            else
+            const auto embedding_it = tensors.find("token_embd.weight");
+            const bool embedding_is_compatible = embedding_it != tensors.end() &&
+                !model.tokenizer.tokens.empty() &&
+                embedding_it->second->dimensions ==
+                    std::vector<uint64_t>{config.embedding, model.tokenizer.tokens.size()} &&
+                embedding_it->second->byte_size_known && embedding_it->second->byte_size > 0;
+            // GGUF represents tied output embeddings by omitting output.weight.
+            // An explicit false metadata value overrides that convention.
+            if (declared && !*declared) {
+                plan.blockers.emplace_back("OUTPUT_WEIGHT_MISSING_BUT_TIED_EMBEDDINGS_DISABLED");
+            } else if (embedding_is_compatible) {
+                tied_output = true;
+            } else {
                 plan.blockers.emplace_back(
-                    "OUTPUT_WEIGHT_MISSING_WITHOUT_EXPLICIT_TIED_EMBEDDINGS_METADATA");
+                    "OUTPUT_WEIGHT_MISSING_AND_TOKEN_EMBEDDING_CANNOT_BACK_OUTPUT_PROJECTION");
+            }
         }
         if (!tied_output && !model.tokenizer.tokens.empty())
             expect("output.weight", {config.embedding, model.tokenizer.tokens.size()});

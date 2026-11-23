@@ -136,10 +136,22 @@ public:
         bool tied_output = false;
         if (!has_tensor("output.weight")) {
             const auto tie = model.metadata.find(metadata_prefix + "tie_word_embeddings");
-            const bool* tied = tie == model.metadata.end() ? nullptr : std::get_if<bool>(&tie->second);
-            if (tied && *tied) tied_output = true;
-            else
-                plan.blockers.emplace_back("OUTPUT_WEIGHT_MISSING_WITHOUT_EXPLICIT_TIED_EMBEDDINGS_METADATA");
+            const bool* declared = tie == model.metadata.end() ? nullptr : std::get_if<bool>(&tie->second);
+            const auto embedding_it = std::find_if(model.tensors.begin(), model.tensors.end(),
+                [&](const GgufTensorInfo& tensor) { return tensor.name == embedding_weight; });
+            const bool embedding_is_compatible = embedding_it != model.tensors.end() &&
+                !model.tokenizer.tokens.empty() &&
+                embedding_it->dimensions == std::vector<uint64_t>{embedding, model.tokenizer.tokens.size()} &&
+                embedding_it->byte_size_known && embedding_it->byte_size > 0;
+            // GGUF represents tied output embeddings by omitting output.weight.
+            // An explicit false metadata value overrides that convention.
+            if (declared && !*declared) {
+                plan.blockers.emplace_back("OUTPUT_WEIGHT_MISSING_BUT_TIED_EMBEDDINGS_DISABLED");
+            } else if (embedding_is_compatible) {
+                tied_output = true;
+            } else {
+                plan.blockers.emplace_back("OUTPUT_WEIGHT_MISSING_AND_TOKEN_EMBEDDING_CANNOT_BACK_OUTPUT_PROJECTION");
+            }
         }
         if (!tied_output && !model.tokenizer.tokens.empty())
             expect_shape("output.weight", {embedding, model.tokenizer.tokens.size()});
