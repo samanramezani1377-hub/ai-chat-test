@@ -1454,7 +1454,12 @@ void test_q8_0_decoder_and_registry() {
     assert(build_q6_k_matmul_candidate(q6_a_tensor,q6_k_weights,420,q6_o_tensor,q6_k_dawn).ok());
     assert(build_q6_k_matmul_gles_candidate(q6_a_tensor,q6_k_weights,420,q6_o_tensor,q6_k_gles).ok());
     assert(q6_k_dawn.wgsl_source.find("WEIGHT_ROW_BYTES: u32 = 210u")!=std::string::npos);
+    assert(q6_k_dawn.workgroup_size_x==8&&q6_k_dawn.workgroup_size_y==8);
+    assert(q6_k_dawn.workgroups_x==1&&q6_k_dawn.workgroups_y==2);
     assert(q6_k_gles.backend==BackendKind::OpenGles&&q6_k_gles.glsl_source.find("#version 310 es")==0);
+    assert(q6_k_gles.workgroup_size_x==8&&q6_k_gles.workgroup_size_y==8);
+    assert(q6_k_gles.workgroups_x==1&&q6_k_gles.workgroups_y==2);
+    assert(q6_k_gles.glsl_source.find("shared float partial_sums[64]")!=std::string::npos);
     BufferDesc q4k_weights_desc{288,4,MemoryDomain::Device,true,"q4-k-weights"};
     BufferDesc q5k_weights_desc{352,4,MemoryDomain::Device,true,"q5-k-weights"};
     std::shared_ptr<Buffer> q4k_weights,q5k_weights;assert(backend.allocate(q4k_weights_desc,q4k_weights).ok());assert(backend.allocate(q5k_weights_desc,q5k_weights).ok());
@@ -4210,12 +4215,16 @@ void test_q6_k_matmul_flattens_attention_head_dimensions_for_rank_reduced_output
     assert(gles.glsl_source.find("const uint ROWS=2u;") != std::string::npos);
     assert(gles.glsl_source.find("const uint INNER=512u;") != std::string::npos);
     assert(gles.glsl_source.find("const uint OUTPUT_CHANNELS_TOTAL=256u;") != std::string::npos);
+    assert(gles.workgroup_size_x==8&&gles.workgroup_size_y==8);
+    assert(gles.workgroups_x==32&&gles.workgroups_y==2);
 
     ComputeDispatch dawn;
     assert(build_q6_k_matmul_candidate(activation, weights, weight_desc.size_bytes, output, dawn).ok());
     assert(dawn.wgsl_source.find("const ROWS: u32 = 2u;") != std::string::npos);
     assert(dawn.wgsl_source.find("const INNER: u32 = 512u;") != std::string::npos);
     assert(dawn.wgsl_source.find("const OUTPUT_CHANNELS_TOTAL: u32 = 256u;") != std::string::npos);
+    assert(dawn.workgroup_size_x==8&&dawn.workgroup_size_y==8);
+    assert(dawn.workgroups_x==32&&dawn.workgroups_y==2);
 }
 
 void test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends() {
@@ -4246,6 +4255,7 @@ void test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends
     assert(gles.glsl_source.find("OUTPUT_CHANNELS_TOTAL=4u") != std::string::npos);
     assert(gles.glsl_source.find("OUTPUT_CHANNEL_OFFSET=2u") != std::string::npos);
     assert(gles.glsl_source.find("INNER=256u") != std::string::npos);
+    assert(gles.workgroups_x==1&&gles.workgroups_y==1);
     assert(gles.bindings.size() == 3 && gles.bindings[2].offset_bytes == 0 &&
            gles.bindings[2].size_bytes == output_desc.size_bytes);
 
@@ -4257,6 +4267,7 @@ void test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends
     assert(dawn.wgsl_source.find("OUTPUT_CHANNELS_TOTAL: u32 = 4u") != std::string::npos);
     assert(dawn.wgsl_source.find("OUTPUT_CHANNEL_OFFSET: u32 = 2u") != std::string::npos);
     assert(dawn.wgsl_source.find("INNER: u32 = 256u") != std::string::npos);
+    assert(dawn.workgroups_x==1&&dawn.workgroups_y==1);
 }
 
 int main() {
