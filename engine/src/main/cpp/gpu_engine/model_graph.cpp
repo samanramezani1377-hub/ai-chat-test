@@ -350,15 +350,18 @@ Status execute_chunked_quantized_matmul_if_needed(
     bool cache_admission_enabled = !context.weight_cache_pressure_mode;
     bool cache_evicted_for_pressure = false;
     const auto reclaim_optional_memory = [&]() {
+        bool had_optional_cached_weights = std::any_of(
+            context.quantized_weights.begin(), context.quantized_weights.end(),
+            [](const auto& entry) { return static_cast<bool>(entry.second.buffer); });
         if (context.weight_chunk_cache && !cache_evicted_for_pressure) {
-            const bool had_cached_chunks =
+            had_optional_cached_weights = had_optional_cached_weights ||
                 context.weight_chunk_cache->stats().resident_bytes != 0;
             context.weight_chunk_cache->evict_all();
             cache_evicted_for_pressure = true;
-            if (had_cached_chunks) {
-                context.weight_cache_pressure_mode = true;
-                context.persistent_weight_cache_limit_bytes = 0;
-            }
+        }
+        if (had_optional_cached_weights) {
+            context.weight_cache_pressure_mode = true;
+            context.persistent_weight_cache_limit_bytes = 0;
         }
         memory.reclaim_transient_pool();
     };
@@ -1324,6 +1327,21 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
             operators, reader, memory, device, operation_context, chunked_matmul,
             parity_counter);
         if (operation_context.weight_cache_pressure_mode) {
+            if (!context.weight_cache_pressure_mode) {
+                // The operation-local copy can still own resident whole weights.
+                // Drop both copies only after the streamed operation has finished.
+                operation_context.quantized_weights.clear();
+                operation_context.weight_leases.clear();
+                for (const auto& cached_name : plan_weight_names)
+                    operation_context.tensors.erase(cached_name);
+                for (auto& cached_weight : context.quantized_weights) {
+                    cached_weight.second.buffer.reset();
+                    cached_weight.second.chunks.clear();
+                }
+                for (const auto& cached_name : plan_weight_names)
+                    context.tensors.erase(cached_name);
+                context.weight_leases.clear();
+            }
             context.weight_cache_pressure_mode = true;
             context.persistent_weight_cache_limit_bytes = 0;
         }
