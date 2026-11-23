@@ -92,6 +92,8 @@ private:
     std::string last_generated_token_ids_ = "none";
     std::string last_first_step_top_logits_ = "none";
     std::string last_sampling_config_ = "none";
+    std::string last_attempt_model_name_ = "unknown";
+    std::string last_attempt_chat_template_kind_ = "none";
 
     std::string last_attempt_model_path_;
     std::string last_attempt_architecture_;
