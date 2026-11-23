@@ -54,6 +54,9 @@ public:
     uint64_t budget_bytes() const noexcept;
     uint64_t allocated_bytes() const noexcept;
     uint64_t available_bytes() const noexcept;
+    // Immediately releases idle transient buffers so operation planners can
+    // reuse their budget before deciding that no legal tile fits.
+    uint64_t reclaim_transient_pool() noexcept;
 
 private:
     struct State;
