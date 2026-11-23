@@ -885,11 +885,13 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     context_.backend = engine_->active_backend();
     context_.kv_cache = kv_cache_.get();
     context_.context_length = context_length_;
-    // Cache budgets are assigned after essential KV/recurrent state allocations,
-    // from actual remaining application headroom (never a VRAM estimate).
-    context_.persistent_weight_cache_limit_bytes = 0;
+    // Cache capacities describe the model's reusable weight working set, not
+    // a fixed byte quota. Actual admission is bounded by live MemoryManager
+    // headroom and a runtime reserve, so smaller devices safely retain a subset.
+    context_.persistent_weight_cache_limit_bytes = total_weight_bytes_;
     context_.weight_cache_pressure_mode = false;
-    context_.weight_chunk_cache = std::make_shared<QuantizedWeightChunkCache>(0);
+    context_.weight_chunk_cache =
+        std::make_shared<QuantizedWeightChunkCache>(total_weight_bytes_);
 
     std::unordered_set<std::string> persistent_state_names;
     auto allocate_persistent_state = [&](const std::string& name,
@@ -956,10 +958,8 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
             return status;
         }
     }
-    const uint64_t optional_cache_budget = memory_->available_bytes() / 4;
-    context_.persistent_weight_cache_limit_bytes = optional_cache_budget / 2;
-    context_.weight_chunk_cache->set_capacity(
-        optional_cache_budget - context_.persistent_weight_cache_limit_bytes);
+    context_.persistent_weight_cache_limit_bytes = total_weight_bytes_;
+    context_.weight_chunk_cache->set_capacity(total_weight_bytes_);
 
     model_path_ = path;
     loaded_ = true;
@@ -1039,12 +1039,10 @@ Status GpuInferenceSession::update_memory_budget(uint64_t allocation_cap_bytes) 
         context_.weight_leases.clear();
     }
     context_.weight_cache_pressure_mode = false;
-    const uint64_t optional_cache_budget = memory_->available_bytes() / 4;
-    context_.persistent_weight_cache_limit_bytes = optional_cache_budget / 2;
+    context_.persistent_weight_cache_limit_bytes = total_weight_bytes_;
     if (!context_.weight_chunk_cache)
         context_.weight_chunk_cache = std::make_shared<QuantizedWeightChunkCache>();
-    context_.weight_chunk_cache->set_capacity(
-        optional_cache_budget - context_.persistent_weight_cache_limit_bytes);
+    context_.weight_chunk_cache->set_capacity(total_weight_bytes_);
     return Status::success();
 }
 
