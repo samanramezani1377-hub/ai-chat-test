@@ -230,6 +230,7 @@ Status execute_chunked_quantized_matmul_if_needed(
         total_channels > UINT32_MAX || rows > UINT32_MAX ||
         output.element_count() / rows != total_channels)
         return {StatusCode::Unsupported, "Chunked MatMul dimensions are not aligned to the GGUF storage block"};
+
     uint64_t row_bytes = 0, expected_weight_bytes = 0, output_bytes_per_channel = 0;
     if (!checked_product(inner / type.block_elements, type.bytes_per_block, row_bytes) ||
         !checked_product(row_bytes, total_channels, expected_weight_bytes) ||
@@ -243,27 +244,93 @@ Status execute_chunked_quantized_matmul_if_needed(
     if (binding_limit <= 3 || binding_limit < row_bytes || binding_limit < rows * sizeof(float))
         return {StatusCode::Unsupported, "Backend binding limit cannot hold one quantized weight row or one output channel"};
     const uint64_t output_channel_bytes = rows * sizeof(float);
-    const uint64_t available = memory.available_bytes();
     if (row_bytes > UINT64_MAX - output_channel_bytes)
         return {StatusCode::InvalidArgument, "Chunked MatMul per-channel memory estimate overflows"};
     const uint64_t bytes_per_channel = row_bytes + output_channel_bytes;
     const uint64_t padded_binding_limit = binding_limit - 3;
-    const uint64_t available_for_chunks = available > 3 ? available - 3 : 0;
-    uint64_t maximum_channels = std::min(padded_binding_limit / row_bytes,
-                                         binding_limit / output_channel_bytes);
-    maximum_channels = std::min(maximum_channels, available_for_chunks / bytes_per_channel);
-    maximum_channels = std::min<uint64_t>(maximum_channels, UINT32_MAX);
-    if (maximum_channels == 0)
-        return {StatusCode::OutOfMemory, "GPU budget cannot hold one quantized MatMul output-channel chunk"};
 
     const auto* lowering = lowerings.find(backend.kind(), operation.operator_name);
     if (!lowering)
         return {StatusCode::Unsupported, "No validated lowering exists for chunked MatMul: " + operation.operator_name};
 
+    const bool validate_q6_k = context.prefill && real_q6_k_parity_checks != nullptr &&
+        source->type.name == "Q6_K";
+    std::vector<float> sample_activations;
+    if (validate_q6_k) {
+        sample_activations.resize(static_cast<size_t>(inner));
+        Status status = backend.readback(input.buffer(), input.byte_offset(),
+            sample_activations.data(), sample_activations.size() * sizeof(float));
+        if (!status.ok()) return status;
+    }
+
+    struct PendingChunk {
+        uint64_t channel_offset = 0;
+        uint64_t chunk_channels = 0;
+        MemoryLease weight_lease;
+        MemoryLease output_lease;
+        std::vector<uint8_t> staging;
+    };
+    std::vector<PendingChunk> pending;
+    std::unique_ptr<CommandBatch> commands;
+
+    const auto flush_batch = [&]() -> Status {
+        if (pending.empty()) return Status::success();
+        if (!commands) return {StatusCode::BackendFailure, "Quantized MatMul batch lost its command buffer"};
+        Status status = backend.submit(std::move(commands));
+        if (!status.ok()) return status;
+        status = backend.synchronize();
+        if (!status.ok()) return status;
+
+        if (validate_q6_k) {
+            for (const auto& chunk : pending) {
+                const uint32_t sample_channels = static_cast<uint32_t>(
+                    std::min<uint64_t>(4, chunk.chunk_channels));
+                std::vector<float> expected(sample_channels), actual(sample_channels);
+                const uint64_t sample_weight_bytes = static_cast<uint64_t>(sample_channels) * row_bytes;
+                status = reference_q6_k_matmul(sample_activations.data(), chunk.staging.data(),
+                    sample_weight_bytes, expected.data(), 1, sample_channels,
+                    static_cast<uint32_t>(inner));
+                if (!status.ok()) return status;
+                status = backend.readback(chunk.output_lease.buffer(), 0,
+                    actual.data(), actual.size() * sizeof(float));
+                if (!status.ok()) return status;
+                for (size_t index = 0; index < actual.size(); ++index) {
+                    const float tolerance = 2.0e-3f +
+                        2.0e-3f * std::max(std::fabs(expected[index]), 1.0f);
+                    if (!std::isfinite(actual[index]) ||
+                        std::fabs(actual[index] - expected[index]) > tolerance) {
+                        return {StatusCode::NumericalFailure,
+                            "Real GGUF Q6_K MatMul parity failed for " + operation.id +
+                            " at channel_offset=" + std::to_string(chunk.channel_offset) +
+                            " sample_channel=" + std::to_string(index)};
+                    }
+                }
+                ++(*real_q6_k_parity_checks);
+            }
+        }
+        pending.clear();
+        return Status::success();
+    };
+
     uint64_t channel_offset = 0;
     while (channel_offset < total_channels) {
         if (!backend.healthy())
             return {StatusCode::DeviceLost, "GPU backend became unhealthy during quantized MatMul chunking"};
+
+        const uint64_t available = memory.available_bytes();
+        const uint64_t available_for_chunks = available > 3 ? available - 3 : 0;
+        uint64_t maximum_channels = std::min(padded_binding_limit / row_bytes,
+                                             binding_limit / output_channel_bytes);
+        maximum_channels = std::min(maximum_channels, available_for_chunks / bytes_per_channel);
+        maximum_channels = std::min<uint64_t>(maximum_channels, UINT32_MAX);
+        if (maximum_channels == 0) {
+            if (pending.empty())
+                return {StatusCode::OutOfMemory, "GPU budget cannot hold one quantized MatMul output-channel chunk"};
+            Status status = flush_batch();
+            if (!status.ok()) return status;
+            continue;
+        }
+
         const uint64_t chunk_channels = std::min(maximum_channels, total_channels - channel_offset);
         uint64_t source_offset = 0, weight_bytes = 0, output_chunk_bytes = 0;
         if (!checked_product(channel_offset, row_bytes, source_offset) ||
@@ -272,17 +339,30 @@ Status execute_chunked_quantized_matmul_if_needed(
             source_offset > source->byte_size || weight_bytes > source->byte_size - source_offset)
             return {StatusCode::InvalidArgument, "Quantized MatMul chunk byte range overflows GGUF tensor bounds"};
 
-        MemoryLease weight_lease, output_lease;
+        PendingChunk chunk;
+        chunk.channel_offset = channel_offset;
+        chunk.chunk_channels = chunk_channels;
         Status status = allocate_chunk_buffer(memory, device, weight_bytes,
-            "quantized-matmul-weight-chunk:" + weight_name, weight_lease);
-        if (!status.ok()) return status;
+            "quantized-matmul-weight-chunk:" + weight_name, chunk.weight_lease);
+        if (!status.ok()) {
+            if (pending.empty()) return status;
+            status = flush_batch();
+            if (!status.ok()) return status;
+            continue;
+        }
         status = allocate_chunk_buffer(memory, device, output_chunk_bytes,
-            "quantized-matmul-output-chunk:" + operation.id, output_lease);
+            "quantized-matmul-output-chunk:" + operation.id, chunk.output_lease);
+        if (!status.ok()) {
+            if (pending.empty()) return status;
+            status = flush_batch();
+            if (!status.ok()) return status;
+            continue;
+        }
+
+        chunk.staging.assign(static_cast<size_t>((weight_bytes + 3) & ~uint64_t{3}), 0);
+        status = reader.read_tensor_chunk(*source, source_offset, chunk.staging.data(), weight_bytes);
         if (!status.ok()) return status;
-        std::vector<uint8_t> staging(static_cast<size_t>((weight_bytes + 3) & ~uint64_t{3}), 0);
-        status = reader.read_tensor_chunk(*source, source_offset, staging.data(), weight_bytes);
-        if (!status.ok()) return status;
-        status = backend.upload(weight_lease.buffer(), 0, staging.data(), staging.size());
+        status = backend.upload(chunk.weight_lease.buffer(), 0, chunk.staging.data(), chunk.staging.size());
         if (!status.ok()) return status;
 
         TensorDesc output_descriptor;
@@ -292,12 +372,12 @@ Status execute_chunked_quantized_matmul_if_needed(
         output_descriptor.memory = MemoryDomain::Device;
         output_descriptor.alignment = 4;
         Tensor output_chunk;
-        status = Tensor::create(output_descriptor, output_lease.buffer(), 0, output_chunk);
+        status = Tensor::create(output_descriptor, chunk.output_lease.buffer(), 0, output_chunk);
         if (!status.ok()) return status;
 
         ModelExecutionContext chunk_context = context;
         QuantizedWeightBinding chunk_weight = weight_it->second;
-        chunk_weight.buffer = weight_lease.buffer();
+        chunk_weight.buffer = chunk.weight_lease.buffer();
         chunk_weight.byte_size = weight_bytes;
         chunk_weight.dimensions = {inner, chunk_channels};
         chunk_weight.chunks.clear();
@@ -309,80 +389,40 @@ Status execute_chunked_quantized_matmul_if_needed(
         if (!status.ok()) return status;
         status = operators.authorize_dispatch(dispatch.kernel_id, backend.kind(), dispatch);
         if (!status.ok()) return status;
-        status = verify_chunk_output_binding(dispatch, backend.kind(), output_lease.buffer(),
+        status = verify_chunk_output_binding(dispatch, backend.kind(), chunk.output_lease.buffer(),
                                              output_chunk_bytes);
         if (!status.ok()) return status;
-        std::unique_ptr<CommandBatch> compute_commands;
-        status = backend.begin_commands(compute_commands);
-        if (!status.ok()) return status;
-        if (!compute_commands)
-            return {StatusCode::BackendFailure, "Backend returned an empty quantized MatMul command batch"};
-        status = compute_commands->dispatch_compute(dispatch);
-        if (!status.ok()) return status;
-        status = backend.submit(std::move(compute_commands));
-        if (!status.ok()) return status;
-        status = backend.synchronize();
-        if (!status.ok()) return status;
 
-        // Validate a small sample against the independent host Q6_K decoder
-        // using the actual GGUF bytes and actual GPU activations. This catches
-        // data-layout/streaming errors that synthetic kernel fixtures cannot.
-        if (context.prefill && real_q6_k_parity_checks != nullptr &&
-            source->type.name == "Q6_K") {
-            const uint32_t sample_channels = static_cast<uint32_t>(
-                std::min<uint64_t>(4, chunk_channels));
-            std::vector<float> sample_activations(static_cast<size_t>(inner));
-            std::vector<float> expected(sample_channels), actual(sample_channels);
-            status = backend.readback(input.buffer(), input.byte_offset(),
-                sample_activations.data(), sample_activations.size() * sizeof(float));
+        if (!commands) {
+            status = backend.begin_commands(commands);
             if (!status.ok()) return status;
-            const uint64_t sample_weight_bytes = static_cast<uint64_t>(sample_channels) * row_bytes;
-            status = reference_q6_k_matmul(sample_activations.data(), staging.data(),
-                sample_weight_bytes, expected.data(), 1, sample_channels,
-                static_cast<uint32_t>(inner));
-            if (!status.ok()) return status;
-            status = backend.readback(output_lease.buffer(), 0, actual.data(),
-                actual.size() * sizeof(float));
-            if (!status.ok()) return status;
-            for (size_t index = 0; index < actual.size(); ++index) {
-                const float tolerance = 2.0e-3f +
-                    2.0e-3f * std::max(std::fabs(expected[index]), 1.0f);
-                if (!std::isfinite(actual[index]) ||
-                    std::fabs(actual[index] - expected[index]) > tolerance) {
-                    return {StatusCode::NumericalFailure,
-                        "Real GGUF Q6_K MatMul parity failed for " + operation.id +
-                        " at channel_offset=" + std::to_string(channel_offset) +
-                        " sample_channel=" + std::to_string(index)};
-                }
-            }
-            ++(*real_q6_k_parity_checks);
+            if (!commands)
+                return {StatusCode::BackendFailure, "Backend returned an empty quantized MatMul command batch"};
         }
-
-        std::unique_ptr<CommandBatch> copy_commands;
-        status = backend.begin_commands(copy_commands);
+        status = commands->dispatch_compute(dispatch);
         if (!status.ok()) return status;
-        if (!copy_commands)
-            return {StatusCode::BackendFailure, "Backend returned an empty quantized MatMul aggregation batch"};
+
+        // Queue output aggregation immediately after its producer dispatch.
+        // Both commands execute in-order on the same backend command stream.
         for (uint64_t row = 0; row < rows; ++row) {
             uint64_t source_row_offset = 0, destination_row_offset = 0, channel_byte_offset = 0;
             if (!checked_product(row, chunk_channels * sizeof(float), source_row_offset) ||
                 !checked_product(row, total_channels * sizeof(float), destination_row_offset) ||
-                !checked_product(channel_offset, sizeof(float), channel_byte_offset) ||
+                !checked_product(chunk.channel_offset, sizeof(float), channel_byte_offset) ||
                 output.byte_offset() > UINT64_MAX - destination_row_offset ||
                 output.byte_offset() + destination_row_offset > UINT64_MAX - channel_byte_offset)
                 return {StatusCode::InvalidArgument, "Quantized MatMul output aggregation offset overflows"};
             destination_row_offset += output.byte_offset() + channel_byte_offset;
-            status = copy_commands->copy_buffer(output_lease.buffer(), source_row_offset,
+            status = commands->copy_buffer(chunk.output_lease.buffer(), source_row_offset,
                 output.buffer(), destination_row_offset, chunk_channels * sizeof(float));
             if (!status.ok()) return status;
         }
-        status = backend.submit(std::move(copy_commands));
-        if (!status.ok()) return status;
-        status = backend.synchronize();
-        if (!status.ok()) return status;
+
+        pending.push_back(std::move(chunk));
         channel_offset += chunk_channels;
     }
-    return Status::success();
+
+    return flush_batch();
 }
 
 Status execute_chunked_quantized_embedding_if_needed(
