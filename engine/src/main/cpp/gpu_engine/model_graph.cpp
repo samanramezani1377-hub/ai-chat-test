@@ -1168,7 +1168,9 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
             const auto weight_binding = context.quantized_weights.find(streamed_weight_name);
             const auto activation_binding = context.tensors.find(operation.inputs.front());
             const GgufTensorInfo* weight_info = reader.find_tensor(streamed_weight_name);
-            if (weight_binding != context.quantized_weights.end() && !weight_binding->second.buffer &&
+            const bool target_weight_not_resident = weight_binding == context.quantized_weights.end() ||
+                !weight_binding->second.buffer;
+            if (target_weight_not_resident && !context.quantized_weights.empty() &&
                 activation_binding != context.tensors.end() && weight_info &&
                 weight_info->dimensions.size() == 2 && weight_info->type.storage_size_known &&
                 weight_info->type.block_elements != 0 && weight_info->type.bytes_per_block != 0 &&
