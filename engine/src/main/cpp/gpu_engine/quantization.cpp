@@ -5089,15 +5089,22 @@ Status validate_q6_k_matmul_kernel_impl(Backend&backend,OperatorRegistry&operato
     const std::string& registered=gles?kernel->glsl_source:kernel->wgsl_source;
     const std::string canonical=gles?std::string(kQ6_KMatMulGlsl):std::string(kQ6_KMatMulWgsl);
     if(registered.empty()||registered!=canonical)return {StatusCode::InvalidArgument,"Q6_K MatMul shader differs from canonical source"};
-    constexpr uint32_t rows=2,channels=2,inner=256;
-    const uint64_t bytes=static_cast<uint64_t>(channels)*210;
+    // Exercise multiple packed blocks per output channel. A one-block fixture
+    // cannot catch address-stride errors in real Q6_K projection matrices.
+    constexpr uint32_t rows=2,channels=2,inner=512,blocks=inner/256;
+    constexpr uint64_t block_bytes=210;
+    const uint64_t bytes=static_cast<uint64_t>(channels)*blocks*block_bytes;
     std::vector<uint8_t> encoded(static_cast<size_t>(bytes),0);
     for(uint32_t channel=0;channel<channels;++channel){
-        uint8_t*block=encoded.data()+channel*210;
-        std::fill(block,block+128,0x11);
-        for(uint32_t i=0;i<64;++i)block[128+i]=static_cast<uint8_t>(0x55u+i);
-        for(uint32_t i=0;i<16;++i)block[192+i]=static_cast<uint8_t>(1+(i%3));
-        block[208]=0x00;block[209]=0x3c;
+        for(uint32_t block_index=0;block_index<blocks;++block_index){
+            uint8_t*block=encoded.data()+(static_cast<uint64_t>(channel)*blocks+block_index)*block_bytes;
+            std::fill(block,block+128,static_cast<uint8_t>(0x11u+block_index*3u+channel));
+            for(uint32_t i=0;i<64;++i)
+                block[128+i]=static_cast<uint8_t>(0x35u+i+block_index*7u+channel*5u);
+            for(uint32_t i=0;i<16;++i)
+                block[192+i]=static_cast<uint8_t>(1+((i+block_index+channel)%5));
+            block[208]=0x00;block[209]=0x3c;
+        }
     }
     std::vector<float> activations(rows*inner);
     for(size_t i=0;i<activations.size();++i)activations[i]=(static_cast<int>(i%11)-5)*0.125f;
@@ -5160,16 +5167,22 @@ Status validate_q6_k_embedding_kernel(Backend&backend,OperatorRegistry&operators
     if(registered.empty()||registered!=canonical)
         return {StatusCode::InvalidArgument,"Q6_K Embedding registered shader differs from canonical source"};
 
-    constexpr uint32_t vocabulary=2,dimension=256;
-    constexpr uint64_t row_bytes=210,bytes=vocabulary*row_bytes;
+    // Validate a multi-block embedding row as used by wide model embeddings.
+    constexpr uint32_t vocabulary=2,dimension=512,blocks=dimension/256;
+    constexpr uint64_t block_bytes=210,row_bytes=blocks*block_bytes,bytes=vocabulary*row_bytes;
     const std::vector<uint32_t>token_ids={1,0};
     std::vector<uint8_t>encoded(static_cast<size_t>(bytes),0);
     for(uint32_t row=0;row<vocabulary;++row){
-        uint8_t*block=encoded.data()+row*row_bytes;
-        for(uint32_t i=0;i<128;++i)block[i]=static_cast<uint8_t>((i*13u+row*7u)&255u);
-        for(uint32_t i=0;i<64;++i)block[128+i]=static_cast<uint8_t>((i*29u+row*11u)&255u);
-        for(uint32_t i=0;i<16;++i)block[192+i]=static_cast<uint8_t>(static_cast<int8_t>(static_cast<int>(i%13)-6));
-        block[208]=0x00;block[209]=0x3c; // FP16 block scale = 1.0
+        for(uint32_t block_index=0;block_index<blocks;++block_index){
+            uint8_t*block=encoded.data()+row*row_bytes+block_index*block_bytes;
+            for(uint32_t i=0;i<128;++i)
+                block[i]=static_cast<uint8_t>((i*13u+row*7u+block_index*17u)&255u);
+            for(uint32_t i=0;i<64;++i)
+                block[128+i]=static_cast<uint8_t>((i*29u+row*11u+block_index*9u)&255u);
+            for(uint32_t i=0;i<16;++i)
+                block[192+i]=static_cast<uint8_t>(static_cast<int8_t>(static_cast<int>((i+block_index)%13)-6));
+            block[208]=0x00;block[209]=0x3c; // FP16 block scale = 1.0
+        }
     }
     std::vector<float>expected(token_ids.size()*dimension),actual(expected.size());
     Status status=reference_q6_k_embedding(encoded.data(),bytes,vocabulary,dimension,token_ids,expected.data());
