@@ -347,7 +347,8 @@ Status execute_chunked_quantized_matmul_if_needed(
         return Status::success();
     };
 
-    bool cache_admission_enabled = !context.weight_cache_pressure_mode;
+    // Pressure mode changes how weights are sourced, not whether reusable
+    // chunks may be retained. Admission remains opportunistic under live budget.
     bool cache_evicted_for_pressure = false;
     const auto reclaim_optional_memory = [&]() {
         bool had_optional_cached_weights = std::any_of(
@@ -376,7 +377,6 @@ Status execute_chunked_quantized_matmul_if_needed(
         // Optional cached weights yield before the planner rejects a legal tile.
         // Disable admissions for this operation so pressure cannot refill the cache.
         if (available < bytes_per_channel) {
-            cache_admission_enabled = false;
             const uint64_t before_reclaim = available;
             reclaim_optional_memory();
             available = memory.available_bytes();
@@ -435,7 +435,6 @@ Status execute_chunked_quantized_matmul_if_needed(
             status = allocate_chunk_buffer(memory, device, weight_bytes,
                 "quantized-matmul-weight-chunk:" + weight_name, chunk.weight_lease);
             if (!status.ok() && status.code == StatusCode::OutOfMemory) {
-                cache_admission_enabled = false;
                 reclaim_optional_memory();
                 status = allocate_chunk_buffer(memory, device, weight_bytes,
                     "quantized-matmul-weight-chunk:" + weight_name, chunk.weight_lease);
@@ -450,7 +449,6 @@ Status execute_chunked_quantized_matmul_if_needed(
         status = allocate_chunk_buffer(memory, device, output_chunk_bytes,
             "quantized-matmul-output-chunk:" + operation.id, chunk.output_lease);
         if (!status.ok() && status.code == StatusCode::OutOfMemory) {
-            cache_admission_enabled = false;
             reclaim_optional_memory();
             status = allocate_chunk_buffer(memory, device, output_chunk_bytes,
                 "quantized-matmul-output-chunk:" + operation.id, chunk.output_lease);
@@ -473,7 +471,7 @@ Status execute_chunked_quantized_matmul_if_needed(
             // compute allocations instead of pinning every streamed slice.
             const uint64_t cache_headroom = memory.available_bytes();
             const uint64_t cache_reserve = memory.budget_bytes() / 16;
-            if (cache_admission_enabled && context.weight_chunk_cache &&
+            if (context.weight_chunk_cache &&
                 cache_headroom >= std::max<uint64_t>(weight_bytes, cache_reserve))
                 context.weight_chunk_cache->insert(chunk_cache_key, weight_bytes, chunk.weight_lease);
         }
