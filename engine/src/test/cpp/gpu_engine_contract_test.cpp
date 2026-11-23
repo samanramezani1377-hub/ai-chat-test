@@ -356,6 +356,18 @@ void test_tensor_and_memory_lease() {
 
 void test_memory_manager_evicts_transient_pool_under_pressure() {
     FakeBackend backend;
+
+    // Operation planners can explicitly reclaim idle pooled buffers before
+    // deriving a tile size from the currently available allocation budget.
+    MemoryManager planned_memory(backend, 128);
+    BufferDesc planned_transient{64, 4, MemoryDomain::Device, false, "planner-transient"};
+    MemoryLease planned_lease;
+    assert(planned_memory.allocate(planned_transient, planned_lease).ok());
+    planned_lease = MemoryLease{};
+    assert(planned_memory.available_bytes() == 64);
+    assert(planned_memory.reclaim_transient_pool() == 64);
+    assert(planned_memory.available_bytes() == 128);
+
     MemoryManager memory(backend, 128);
 
     BufferDesc transient{64, 4, MemoryDomain::Device, false, "transient"};
