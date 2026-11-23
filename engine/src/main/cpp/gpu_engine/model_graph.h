@@ -42,6 +42,10 @@ struct ModelExecutionContext {
     uint64_t sequence_length = 0;
     uint64_t context_length = 0;
     bool prefill = false;
+    // Bounded session cache for quantized MatMul weights reused across token steps.
+    uint64_t persistent_weight_cache_limit_bytes = 0;
+    uint64_t persistent_weight_cache_hits = 0;
+    uint64_t persistent_weight_cache_misses = 0;
     std::vector<MemoryLease> activation_leases;
     // Recurrent and convolution state survives prefill/decode graph rebuilds.
     std::vector<MemoryLease> state_leases;
