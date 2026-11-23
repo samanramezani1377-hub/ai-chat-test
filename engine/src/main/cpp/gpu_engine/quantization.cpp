@@ -771,7 +771,7 @@ fn decode_weight(token:u32,dimension:u32)->f32{
  let nibble=select(ql&15u,ql>>4u,segment>=2u);let high=(qh>>(segment*2u))&3u;
  let quantized=i32(nibble|(high<<4u))-32;
  let scale=bitcast<i32>(read_u8(offset+scale_index)<<24u)>>24u;
- let d=unpack2x16float(vec2<u32>(read_u16(offset+208u),0u)).x;
+ let d=unpack2x16float(read_u16(offset+208u)).x;
  return d*f32(scale)*f32(quantized);
 }
 @compute @workgroup_size(64)
