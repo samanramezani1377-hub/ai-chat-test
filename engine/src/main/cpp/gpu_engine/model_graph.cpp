@@ -322,6 +322,13 @@ Status execute_chunked_quantized_matmul_if_needed(
         uint64_t maximum_channels = std::min(padded_binding_limit / row_bytes,
                                              binding_limit / output_channel_bytes);
         maximum_channels = std::min(maximum_channels, available_for_chunks / bytes_per_channel);
+        // Keep chunk geometry stable across decode steps so the LRU can reuse
+        // identical tensor slices. The cap is backend/format agnostic; a single
+        // quantized output row may exceed it and is still handled as one chunk.
+        constexpr uint64_t kPreferredWeightChunkBytes = 4ull * 1024ull * 1024ull;
+        const uint64_t preferred_channels = std::max<uint64_t>(1,
+            kPreferredWeightChunkBytes / row_bytes);
+        maximum_channels = std::min(maximum_channels, preferred_channels);
         maximum_channels = std::min<uint64_t>(maximum_channels, UINT32_MAX);
         if (maximum_channels == 0) {
             if (pending.empty())
@@ -342,16 +349,31 @@ Status execute_chunked_quantized_matmul_if_needed(
         PendingChunk chunk;
         chunk.channel_offset = channel_offset;
         chunk.chunk_channels = chunk_channels;
-        Status status = allocate_chunk_buffer(memory, device, weight_bytes,
-            "quantized-matmul-weight-chunk:" + weight_name, chunk.weight_lease);
-        if (!status.ok()) {
-            if (pending.empty()) return status;
-            status = flush_batch();
-            if (!status.ok()) return status;
-            continue;
+        const std::string chunk_cache_key = weight_name + "|" +
+            std::to_string(source->type_id) + "|" + std::to_string(source_offset) + "|" +
+            std::to_string(weight_bytes);
+        bool chunk_cache_hit = context.weight_chunk_cache &&
+            context.weight_chunk_cache->find(chunk_cache_key, chunk.weight_lease);
+        Status status = Status::success();
+        if (!chunk_cache_hit) {
+            status = allocate_chunk_buffer(memory, device, weight_bytes,
+                "quantized-matmul-weight-chunk:" + weight_name, chunk.weight_lease);
+            if (!status.ok()) {
+                if (pending.empty()) return status;
+                status = flush_batch();
+                if (!status.ok()) return status;
+                continue;
+            }
         }
         status = allocate_chunk_buffer(memory, device, output_chunk_bytes,
             "quantized-matmul-output-chunk:" + operation.id, chunk.output_lease);
+        if (!status.ok() && chunk_cache_hit && context.weight_chunk_cache) {
+            // Drop idle cache entries under pressure, while the active lease
+            // remains alive for this chunk; then retry the output allocation.
+            context.weight_chunk_cache->set_capacity(0);
+            status = allocate_chunk_buffer(memory, device, output_chunk_bytes,
+                "quantized-matmul-output-chunk:" + operation.id, chunk.output_lease);
+        }
         if (!status.ok()) {
             if (pending.empty()) return status;
             status = flush_batch();
@@ -359,11 +381,15 @@ Status execute_chunked_quantized_matmul_if_needed(
             continue;
         }
 
-        std::vector<uint8_t> staging(static_cast<size_t>((weight_bytes + 3) & ~uint64_t{3}), 0);
-        status = reader.read_tensor_chunk(*source, source_offset, staging.data(), weight_bytes);
-        if (!status.ok()) return status;
-        status = backend.upload(chunk.weight_lease.buffer(), 0, staging.data(), staging.size());
-        if (!status.ok()) return status;
+        if (!chunk_cache_hit) {
+            std::vector<uint8_t> staging(static_cast<size_t>((weight_bytes + 3) & ~uint64_t{3}), 0);
+            status = reader.read_tensor_chunk(*source, source_offset, staging.data(), weight_bytes);
+            if (!status.ok()) return status;
+            status = backend.upload(chunk.weight_lease.buffer(), 0, staging.data(), staging.size());
+            if (!status.ok()) return status;
+            if (context.weight_chunk_cache)
+                context.weight_chunk_cache->insert(chunk_cache_key, weight_bytes, chunk.weight_lease);
+        }
         if (validate_q6_k) {
             const uint64_t sample_weight_bytes =
                 static_cast<uint64_t>(std::min<uint64_t>(4, chunk_channels)) * row_bytes;
