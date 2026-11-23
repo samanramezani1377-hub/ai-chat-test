@@ -1300,6 +1300,22 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
         return status;
     }
 
+    // All transient streamed weights are safe to release after the batch has
+    // synchronized. Retain only leases backing explicitly admitted whole-tensor
+    // cache entries; chunk-cache leases are owned by the LRU itself.
+    std::unordered_set<const Buffer*> resident_weight_buffers;
+    for (const auto& entry : context.quantized_weights) {
+        if (entry.second.buffer) resident_weight_buffers.insert(entry.second.buffer.get());
+    }
+    context.weight_leases.erase(
+        std::remove_if(context.weight_leases.begin(), context.weight_leases.end(),
+            [&resident_weight_buffers](const MemoryLease& lease) {
+                const auto buffer = lease.buffer();
+                return !buffer || resident_weight_buffers.find(buffer.get()) ==
+                    resident_weight_buffers.end();
+            }),
+        context.weight_leases.end());
+
     for (const auto& operation : plan.operations) {
         if (operation.operator_name != "KVCacheAppend") continue;
         if (!context.kv_cache || operation.inputs.size() != 2) {
