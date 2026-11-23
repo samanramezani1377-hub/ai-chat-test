@@ -110,12 +110,60 @@ Status load_model_execution_weights(const GgufReader& reader,
             if (row_bytes == 0 || row_bytes > backend_limit)
                 return {StatusCode::Unsupported,
                     "One complete quantized operator row exceeds the backend storage binding limit: " + name};
-            // Keep only GGUF metadata. MatMul weights are streamed by output
-            // channel; Embedding weights are gathered by token ID at execution.
             QuantizedWeightBinding binding;
             binding.byte_size = tensor->byte_size;
             binding.file_type_id = tensor->type_id;
             binding.dimensions = tensor->dimensions;
+
+            // Opportunistically keep large MatMul-only tensors resident as
+            // multiple backend-sized buffers. This avoids re-reading and
+            // re-uploading the same weights for every generated token. Keep a
+            // dynamic runtime reserve; if the tensor does not fit, retain the
+            // metadata-only streaming path without failing model loading.
+            if (used_by_quantized_matmul && !used_by_quantized_embedding) {
+                constexpr uint64_t kMinimumRuntimeReserveBytes = 64ull * 1024ull * 1024ull;
+                const uint64_t runtime_reserve = std::max(
+                    kMinimumRuntimeReserveBytes, memory.budget_bytes() / 4);
+                const uint64_t available = memory.available_bytes();
+                if (available > runtime_reserve &&
+                    tensor->byte_size <= available - runtime_reserve) {
+                    WeightStreamingPolicy resident_policy;
+                    resident_policy.preferred_chunk_bytes = backend_limit;
+                    resident_policy.maximum_chunk_bytes = backend_limit;
+                    resident_policy.target_memory = MemoryDomain::Device;
+                    LoadedWeightTensor resident;
+                    Status resident_status = GgufWeightStreamer::load_tensor(
+                        reader, *tensor, backend, memory, device, resident_policy, resident);
+                    if (resident_status.ok()) {
+                        uint64_t expected_offset = 0;
+                        for (auto& chunk : resident.resident_chunks) {
+                            if (chunk.tensor_offset_bytes != expected_offset ||
+                                chunk.logical_size_bytes == 0 ||
+                                chunk.logical_size_bytes > tensor->byte_size - expected_offset ||
+                                !chunk.memory || !chunk.memory.buffer()) {
+                                return {StatusCode::BackendFailure,
+                                    "Resident quantized weight chunks are incomplete or invalid: " + name};
+                            }
+                            binding.chunks.push_back({
+                                chunk.tensor_offset_bytes, chunk.logical_size_bytes,
+                                chunk.memory.buffer()
+                            });
+                            expected_offset += chunk.logical_size_bytes;
+                            pending_leases.push_back(std::move(chunk.memory));
+                        }
+                        if (expected_offset != tensor->byte_size) {
+                            return {StatusCode::BackendFailure,
+                                "Resident quantized weight chunks do not cover the GGUF tensor: " + name};
+                        }
+                    } else if (resident_status.code != StatusCode::OutOfMemory) {
+                        return resident_status;
+                    }
+                }
+            }
+
+            // Empty chunks means the executor should stream this tensor from
+            // GGUF on demand. Resident chunks are consumed directly by the
+            // chunk-aware MatMul path when the memory reserve allowed caching.
             pending_quantized.emplace(name, std::move(binding));
             continue;
         }
