@@ -1031,6 +1031,7 @@ Status GpuInferenceSession::update_memory_budget(uint64_t allocation_cap_bytes) 
     memory_budget_bytes_ = allocation_cap_bytes;
     // Recompute optional cache budgets from currently free memory. The two
     // caches together may use at most one quarter of that headroom.
+    context_.weight_cache_pressure_mode = false;
     const uint64_t optional_cache_budget = memory_->available_bytes() / 4;
     context_.persistent_weight_cache_limit_bytes = optional_cache_budget / 2;
     if (!context_.weight_chunk_cache)
