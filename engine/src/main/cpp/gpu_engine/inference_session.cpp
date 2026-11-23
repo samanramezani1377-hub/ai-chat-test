@@ -249,6 +249,7 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     last_decode_timing_valid_ = false;
     last_generation_stage_ = "not_started";
     last_model_graph_validation_ = "not_run";
+    last_real_q6_k_parity_checks_ = 0;
     cross_backend_quantization_validation_ = "not_run";
     last_prompt_tokens_ = 0;
     last_output_tokens_ = 0;
@@ -963,13 +964,15 @@ Status GpuInferenceSession::run_model_step(uint64_t token_count) {
     Status status = execute_model_execution_plan_streamed(plan_, *engine_->active_backend(),
         *lowerings_, *operators_, plan_.external_inputs, *loader_->reader(),
         *memory_, *engine_->active_device(), token_count, &cancelled_, context_, report);
+    last_real_q6_k_parity_checks_ += report.real_q6_k_parity_checks;
     if (!status.ok()) {
         last_model_graph_validation_ = "failed:" + status.message;
         last_error_ = status.message;
         return status;
     }
     last_model_graph_validation_ = report.compiled_nodes == plan_.operations.size() &&
-        report.errors.empty() ? "compiled_unverified" : "partial";
+        report.errors.empty() ? "compiled_unverified:real_q6_k_parity_checks=" +
+            std::to_string(last_real_q6_k_parity_checks_) : "partial";
     return Status::success();
 }
 
