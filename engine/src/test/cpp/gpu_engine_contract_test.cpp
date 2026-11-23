@@ -4185,6 +4185,39 @@ void test_generic_chunk_executor_preserves_offsets_and_aggregates() {
 }
 
 
+void test_q6_k_matmul_flattens_attention_head_dimensions_for_rank_reduced_output() {
+    FakeBackend backend(BackendKind::OpenGles);
+    BufferDesc activation_desc{2u * 2u * 256u * sizeof(float), 4, MemoryDomain::Device, false, "q6-attention-activations"};
+    BufferDesc weight_desc{2u * 210u * 256u, 4, MemoryDomain::Device, true, "q6-attention-weights"};
+    BufferDesc output_desc{2u * 256u * sizeof(float), 4, MemoryDomain::Device, false, "q6-attention-output"};
+    std::shared_ptr<Buffer> activations, weights, output_buffer;
+    assert(backend.allocate(activation_desc, activations).ok());
+    assert(backend.allocate(weight_desc, weights).ok());
+    assert(backend.allocate(output_desc, output_buffer).ok());
+
+    TensorDesc activation_desc_tensor;
+    activation_desc_tensor.shape = {2, 2, 256};
+    activation_desc_tensor.data_type = DataType::F32;
+    TensorDesc output_desc_tensor;
+    output_desc_tensor.shape = {2, 256};
+    output_desc_tensor.data_type = DataType::F32;
+    Tensor activation, output;
+    assert(Tensor::create(activation_desc_tensor, activations, 0, activation).ok());
+    assert(Tensor::create(output_desc_tensor, output_buffer, 0, output).ok());
+
+    ComputeDispatch gles;
+    assert(build_q6_k_matmul_gles_candidate(activation, weights, weight_desc.size_bytes, output, gles).ok());
+    assert(gles.glsl_source.find("const uint ROWS=2u;") != std::string::npos);
+    assert(gles.glsl_source.find("const uint INNER=512u;") != std::string::npos);
+    assert(gles.glsl_source.find("const uint OUTPUT_CHANNELS_TOTAL=256u;") != std::string::npos);
+
+    ComputeDispatch dawn;
+    assert(build_q6_k_matmul_candidate(activation, weights, weight_desc.size_bytes, output, dawn).ok());
+    assert(dawn.wgsl_source.find("const ROWS: u32 = 2u;") != std::string::npos);
+    assert(dawn.wgsl_source.find("const INNER: u32 = 512u;") != std::string::npos);
+    assert(dawn.wgsl_source.find("const OUTPUT_CHANNELS_TOTAL: u32 = 256u;") != std::string::npos);
+}
+
 void test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends() {
     FakeBackend backend(BackendKind::OpenGles);
     BufferDesc activation_desc{2u * 256u * sizeof(float), 4, MemoryDomain::Device, false, "q6-chunk-activations"};
@@ -4227,6 +4260,7 @@ void test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends
 }
 
 int main() {
+    test_q6_k_matmul_flattens_attention_head_dimensions_for_rank_reduced_output();
     test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends();
     test_generic_chunk_executor_preserves_offsets_and_aggregates();
     test_dispatch_authorization_accepts_only_declared_mode_specialization();

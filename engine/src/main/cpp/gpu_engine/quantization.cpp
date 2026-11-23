@@ -4942,13 +4942,29 @@ Status build_q6_k_matmul_candidate_impl(const Tensor& activations,
         output.descriptor().shape.size() < 2)
         return {StatusCode::Unsupported, "Q6_K MatMul requires rank-2-or-higher F32 activations/output and packed Q6_K weights"};
     const auto& a = activations.descriptor().shape;
+    const auto& o = output.descriptor().shape;
+    // Preserve matching leading dimensions and flatten the remaining activation
+    // dimensions into K. This covers head-concatenating projections such as
+    // [tokens, heads, head_dim] -> [tokens, embedding], while retaining
+    // per-head projections such as [tokens, heads, head_dim] -> [tokens, heads, out].
+    size_t leading_rank = 0;
+    const size_t max_leading_rank = std::min(a.size(), o.size()) - 1;
+    while (leading_rank < max_leading_rank && a[leading_rank] == o[leading_rank])
+        ++leading_rank;
+    if (leading_rank == 0)
+        return {StatusCode::InvalidArgument, "Q6_K MatMul activation/output tensors have no matching leading dimensions"};
     uint64_t rows = 1;
-    for (size_t axis = 0; axis + 1 < a.size(); ++axis) {
+    for (size_t axis = 0; axis < leading_rank; ++axis) {
         if (a[axis] == 0 || rows > UINT64_MAX / a[axis])
             return {StatusCode::InvalidArgument, "Q6_K MatMul activation leading dimensions are invalid or overflow"};
         rows *= a[axis];
     }
-    const uint64_t inner = a.back();
+    uint64_t inner = 1;
+    for (size_t axis = leading_rank; axis < a.size(); ++axis) {
+        if (a[axis] == 0 || inner > UINT64_MAX / a[axis])
+            return {StatusCode::InvalidArgument, "Q6_K MatMul flattened activation dimensions are invalid or overflow"};
+        inner *= a[axis];
+    }
     if (inner == 0 || output.element_count() == 0 || output.element_count() % rows != 0)
         return {StatusCode::InvalidArgument, "Q6_K MatMul flattened activation/output dimensions are inconsistent"};
     const uint64_t total_channels = output.element_count() / rows;
