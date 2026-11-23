@@ -48,6 +48,8 @@ class MemoryManager {
 public:
     MemoryManager(Backend& backend, uint64_t budget_bytes);
     Status allocate(const BufferDesc& descriptor, MemoryLease& out);
+    // Updates the application allocation cap at runtime. This is not a VRAM query.
+    Status update_budget(uint64_t budget_bytes);
     uint64_t budget_bytes() const noexcept;
     uint64_t allocated_bytes() const noexcept;
     uint64_t available_bytes() const noexcept;

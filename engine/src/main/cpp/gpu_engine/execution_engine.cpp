@@ -156,7 +156,7 @@ struct MemoryManager::State {
     };
 
     explicit State(uint64_t maximum) : budget(maximum) {}
-    const uint64_t budget;
+    std::atomic<uint64_t> budget;
     std::atomic<uint64_t> active_bytes{0};
     std::atomic<uint64_t> reserved_bytes{0};
     std::mutex pool_mutex;
@@ -173,7 +173,7 @@ struct MemoryManager::State {
         }
         // Keep a bounded transient pool. Persistent model/KV allocations are
         // returned to the backend when their owner releases them.
-        const uint64_t pool_limit = budget / 2;
+        const uint64_t pool_limit = budget.load(std::memory_order_relaxed) / 2;
         if (!persistent && physical_bytes <= pool_limit) {
             std::lock_guard<std::mutex> lock(pool_mutex);
             if (physical_bytes <= pool_limit && pooled_bytes <= pool_limit - physical_bytes) {
@@ -257,13 +257,21 @@ Status MemoryManager::allocate(const BufferDesc& descriptor, MemoryLease& out) {
         auto reserve_budget = [&]() {
             uint64_t reserved = state_->reserved_bytes.load(std::memory_order_acquire);
             for (;;) {
-                if (descriptor.size_bytes > state_->budget ||
-                    reserved > state_->budget - descriptor.size_bytes)
+                const uint64_t current_budget = state_->budget.load(std::memory_order_acquire);
+                if (descriptor.size_bytes > current_budget ||
+                    reserved > current_budget - descriptor.size_bytes)
                     return false;
+                const uint64_t next_reserved = reserved + descriptor.size_bytes;
                 if (state_->reserved_bytes.compare_exchange_weak(reserved,
-                        reserved + descriptor.size_bytes, std::memory_order_acq_rel,
-                        std::memory_order_relaxed))
+                        next_reserved, std::memory_order_acq_rel,
+                        std::memory_order_relaxed)) {
+                    if (state_->budget.load(std::memory_order_acquire) < next_reserved) {
+                        state_->reserved_bytes.fetch_sub(descriptor.size_bytes,
+                                                         std::memory_order_acq_rel);
+                        return false;
+                    }
                     return true;
+                }
             }
         };
 
@@ -308,11 +316,31 @@ Status MemoryManager::allocate(const BufferDesc& descriptor, MemoryLease& out) {
     return Status::success();
 }
 
-uint64_t MemoryManager::budget_bytes() const noexcept { return state_->budget; }
+Status MemoryManager::update_budget(uint64_t budget_bytes) {
+    if (budget_bytes == 0)
+        return {StatusCode::InvalidArgument, "GPU engine allocation cap must be non-zero"};
+    state_->budget.store(budget_bytes, std::memory_order_release);
+    std::vector<State::PooledBuffer> retired;
+    uint64_t released_bytes = 0;
+    if (state_->reserved_bytes.load(std::memory_order_acquire) > budget_bytes) {
+        {
+            std::lock_guard<std::mutex> lock(state_->pool_mutex);
+            released_bytes = state_->pooled_bytes;
+            retired.swap(state_->pool);
+            state_->pooled_bytes = 0;
+        }
+        if (released_bytes != 0)
+            state_->reserved_bytes.fetch_sub(released_bytes, std::memory_order_acq_rel);
+    }
+    return Status::success();
+}
+
+uint64_t MemoryManager::budget_bytes() const noexcept { return state_->budget.load(std::memory_order_acquire); }
 uint64_t MemoryManager::allocated_bytes() const noexcept { return state_->active_bytes.load(std::memory_order_relaxed); }
 uint64_t MemoryManager::available_bytes() const noexcept {
     const uint64_t used = state_->reserved_bytes.load(std::memory_order_relaxed);
-    return used >= state_->budget ? 0 : state_->budget - used;
+    const uint64_t budget = state_->budget.load(std::memory_order_acquire);
+    return used >= budget ? 0 : budget - used;
 }
 
 bool OperatorRegistry::has_validated_kernel(const std::string& operator_name,

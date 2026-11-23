@@ -5,6 +5,7 @@ import android.app.ActivityManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -32,6 +33,35 @@ class MainActivity : Activity() {
     private val logBuffer = StringBuilder()
     private val requestImportModel = 4101
     private val contextLength = 2048
+
+    private fun updateAllocationCapForMemoryPressure(reason: String) {
+        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val memoryInfo = ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memoryInfo)
+        val capBytes = ((memoryInfo.availMem - memoryInfo.threshold).coerceAtLeast(0L) / 4L)
+            .coerceAtLeast(1L)
+        val result = GpuEngineTestApi.updateMemoryBudget(capBytes)
+        appendLog("memory_pressure_event=$reason")
+        appendLog("gpu_engine_allocation_cap_bytes=$capBytes")
+        appendLog("gpu_engine_allocation_cap_update_result=$result")
+        appendLog("gpu_engine_allocation_cap_source=dynamic_host_memory_safety_policy_not_gpu_vram")
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            thread(name = "gpu-memory-pressure") {
+                updateAllocationCapForMemoryPressure("trim-$level")
+            }
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        thread(name = "gpu-memory-pressure") {
+            updateAllocationCapForMemoryPressure("low-memory")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

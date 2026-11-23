@@ -791,6 +791,18 @@ Status GpuInferenceSession::read_last_token_logits(std::vector<float>& logits) {
     return engine_->active_backend()->readback(tensor.buffer(), offset, logits.data(), row_bytes);
 }
 
+Status GpuInferenceSession::update_memory_budget(uint64_t allocation_cap_bytes) {
+    if (allocation_cap_bytes == 0)
+        return {StatusCode::InvalidArgument, "GPU engine allocation cap must be non-zero"};
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (memory_) {
+        Status status = memory_->update_budget(allocation_cap_bytes);
+        if (!status.ok()) return status;
+    }
+    memory_budget_bytes_ = allocation_cap_bytes;
+    return Status::success();
+}
+
 Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new_tokens,
                                      SamplingConfig sampling, const TextCallback& on_text) {
     std::lock_guard<std::mutex> lock(mutex_);

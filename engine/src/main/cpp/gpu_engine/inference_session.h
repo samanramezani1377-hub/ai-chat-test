@@ -32,6 +32,7 @@ public:
 
     Status load_model(const std::string& path, uint32_t context_length,
                       uint64_t memory_budget_bytes);
+    Status update_memory_budget(uint64_t allocation_cap_bytes);
     Status generate(const std::string& prompt, uint32_t max_new_tokens,
                     SamplingConfig sampling, const TextCallback& on_text);
     Status count_tokens(const std::string& text, uint32_t& out_count) const;

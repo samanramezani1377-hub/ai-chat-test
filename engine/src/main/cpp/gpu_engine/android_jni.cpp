@@ -337,6 +337,20 @@ Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineLoadModel(
 }
 
 extern "C" JNIEXPORT jint JNICALL
+Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineUpdateMemoryBudget(
+        JNIEnv*, jclass, jlong allocation_cap_bytes) {
+    try {
+        if (allocation_cap_bytes <= 0)
+            return static_cast<jint>(ai_chat::gpu_engine::StatusCode::InvalidArgument);
+        const auto status = ai_chat::gpu_engine::gpu_inference_session().update_memory_budget(
+            static_cast<uint64_t>(allocation_cap_bytes));
+        return status.ok() ? 0 : static_cast<jint>(status.code);
+    } catch (...) {
+        return static_cast<jint>(ai_chat::gpu_engine::StatusCode::BackendFailure);
+    }
+}
+
+extern "C" JNIEXPORT jint JNICALL
 Java_com_samanramezani_gpuengine_NativeGpuEngine_nativeGpuEngineGenerate(
         JNIEnv* env, jclass, jstring prompt, jint max_tokens, jfloat temperature,
         jint top_k, jfloat top_p, jfloat min_p, jobject listener) {

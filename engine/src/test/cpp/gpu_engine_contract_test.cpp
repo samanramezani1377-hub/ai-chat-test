@@ -301,6 +301,30 @@ void test_memory_manager_evicts_transient_pool_under_pressure() {
     assert(memory.available_bytes() == 128);
 }
 
+
+void test_memory_manager_runtime_budget_update_reclaims_idle_pool() {
+    FakeBackend backend;
+    MemoryManager memory(backend, 128);
+    BufferDesc transient{64, 4, MemoryDomain::Device, false, "runtime-budget-transient"};
+    MemoryLease lease;
+    assert(memory.allocate(transient, lease).ok());
+    lease = MemoryLease{};
+    assert(memory.available_bytes() == 64);
+
+    assert(memory.update_budget(32).ok());
+    assert(memory.budget_bytes() == 32);
+    assert(memory.available_bytes() == 32);
+    BufferDesc too_large{64, 4, MemoryDomain::Device, true, "over-new-cap"};
+    MemoryLease rejected;
+    assert(memory.allocate(too_large, rejected).code == StatusCode::OutOfMemory);
+
+    assert(memory.update_budget(128).ok());
+    BufferDesc accepted{80, 4, MemoryDomain::Device, true, "after-cap-raise"};
+    MemoryLease restored;
+    assert(memory.allocate(accepted, restored).ok());
+    assert(memory.allocated_bytes() == 80);
+}
+
 class FakeArchitecture final : public ArchitectureAdapter {
 public:
     FakeArchitecture() {
@@ -3981,6 +4005,7 @@ int main() {
     test_independent_gguf_reader();
     test_tensor_and_memory_lease();
     test_memory_manager_evicts_transient_pool_under_pressure();
+    test_memory_manager_runtime_budget_update_reclaims_idle_pool();
     test_operator_registry_fail_closed();
     test_universal_gles_operator_candidate_is_fail_closed();
     test_model_plan_graph_compilation_is_fail_closed();

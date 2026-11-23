@@ -13,6 +13,7 @@ internal object NativeGpuEngine {
 
     @JvmStatic external fun nativeGpuEngineProbe(): String
     @JvmStatic external fun nativeGpuEngineLoadModel(path: String, contextLength: Int, memoryBudgetBytes: Long): Int
+    @JvmStatic external fun nativeGpuEngineUpdateMemoryBudget(allocationCapBytes: Long): Int
     @JvmStatic external fun nativeGpuEngineGenerate(
         prompt: String,
         maxTokens: Int,
@@ -35,6 +36,10 @@ object GpuEngineTestApi {
     @JvmStatic
     fun loadModel(path: String, contextLength: Int, memoryBudgetBytes: Long): Int =
         NativeGpuEngine.nativeGpuEngineLoadModel(path, contextLength, memoryBudgetBytes)
+
+    @JvmStatic
+    fun updateMemoryBudget(allocationCapBytes: Long): Int =
+        NativeGpuEngine.nativeGpuEngineUpdateMemoryBudget(allocationCapBytes)
 
     @JvmStatic
     fun generate(
