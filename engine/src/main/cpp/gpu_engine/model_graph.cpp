@@ -106,17 +106,48 @@ Status validate_resident_q6_k_matmul_sample(
 
     const Tensor& input = input_it->second;
     const Tensor& output = output_it->second;
+    const auto& input_shape = input.descriptor().shape;
+    const auto& output_shape = output.descriptor().shape;
     if (!source->byte_size_known || source->dimensions.size() != 2 ||
         input.descriptor().data_type != DataType::F32 ||
         output.descriptor().data_type != DataType::F32 ||
-        input.descriptor().shape.size() != 2 || input.descriptor().shape[0] == 0 ||
-        input.descriptor().shape[1] != source->dimensions[0] ||
-        output.element_count() / input.descriptor().shape[0] != source->dimensions[1] ||
+        input_shape.size() < 2 || output_shape.size() < 2 ||
         source->dimensions[0] > UINT32_MAX || source->dimensions[1] == 0 ||
         source->dimensions[0] % 256 != 0)
-        return {StatusCode::Unsupported, "Real Q6_K MatMul sample validation received incompatible tensor shapes"};
+        return {StatusCode::Unsupported, "Real Q6_K MatMul sample validation received incompatible tensor metadata"};
 
-    const uint64_t inner = source->dimensions[0];
+    // Keep parity validation consistent with the Q6_K lowering: preserve all
+    // matching leading dimensions as rows, then flatten the remaining input
+    // dimensions into K. This covers attention projections such as
+    // [tokens, heads, head_dim] -> [tokens, embedding] without weakening checks.
+    size_t leading_rank = 0;
+    const size_t max_leading_rank = std::min(input_shape.size(), output_shape.size()) - 1;
+    while (leading_rank < max_leading_rank &&
+           input_shape[leading_rank] == output_shape[leading_rank]) {
+        ++leading_rank;
+    }
+    if (leading_rank == 0)
+        return {StatusCode::Unsupported, "Real Q6_K MatMul sample validation found no matching leading dimensions"};
+
+    uint64_t rows = 1;
+    for (size_t axis = 0; axis < leading_rank; ++axis) {
+        if (input_shape[axis] == 0 ||
+            !checked_product(rows, input_shape[axis], rows))
+            return {StatusCode::Unsupported, "Real Q6_K MatMul sample validation found invalid or overflowing row dimensions"};
+    }
+
+    uint64_t inner = 1;
+    for (size_t axis = leading_rank; axis < input_shape.size(); ++axis) {
+        if (input_shape[axis] == 0 ||
+            !checked_product(inner, input_shape[axis], inner))
+            return {StatusCode::Unsupported, "Real Q6_K MatMul sample validation found invalid or overflowing flattened K dimensions"};
+    }
+
+    if (inner != source->dimensions[0] || rows == 0 ||
+        output.element_count() == 0 || output.element_count() % rows != 0 ||
+        output.element_count() / rows != source->dimensions[1])
+        return {StatusCode::Unsupported, "Real Q6_K MatMul sample validation found GGUF dimensions inconsistent with flattened activation/output shapes"};
+
     const uint64_t channels = source->dimensions[1];
     const uint64_t row_bytes = (inner / 256) * 210;
     const uint32_t sample_channels = static_cast<uint32_t>(std::min<uint64_t>(4, channels));
@@ -125,6 +156,8 @@ Status validate_resident_q6_k_matmul_sample(
     Status status = reader.read_tensor_chunk(*source, 0, sample_weights.data(), sample_weight_bytes);
     if (!status.ok()) return status;
 
+    // Tensor storage is contiguous, so the first flattened row starts at the
+    // tensor's byte offset even when its logical rank is greater than two.
     std::vector<float> activations(static_cast<size_t>(inner));
     std::vector<float> expected(sample_channels), actual(sample_channels);
     status = backend.readback(input.buffer(), input.byte_offset(), activations.data(),
