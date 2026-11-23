@@ -300,6 +300,11 @@ void test_quantized_weight_chunk_cache_lru_and_budget() {
     assert(pressure_memory.allocated_bytes() == 0);
     assert(pressure_memory.reclaim_transient_pool() == 64);
     assert(pressure_memory.available_bytes() == 128);
+    MemoryLease readmitted_lease, readmitted_hit;
+    assert(pressure_memory.allocate(pressure_desc, readmitted_lease).ok());
+    pressure_cache.insert("readmitted", 64, readmitted_lease);
+    readmitted_lease = MemoryLease{};
+    assert(pressure_cache.find("readmitted", readmitted_hit));
 
     cache.set_capacity(8);
     const auto trimmed = cache.stats();
