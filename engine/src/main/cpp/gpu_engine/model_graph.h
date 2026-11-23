@@ -105,6 +105,7 @@ struct ModelGraphCompileReport {
     bool compiled = false;
     bool executed = false;
     size_t compiled_nodes = 0;
+    uint64_t real_q6_k_parity_checks = 0;
     std::vector<std::string> missing_lowerings;
     std::vector<std::string> unresolved_inputs;
     std::vector<std::string> missing_weight_tensors;
