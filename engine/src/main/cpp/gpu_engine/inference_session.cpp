@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <iomanip>
 #include <sstream>
 #include <unordered_set>
 
@@ -38,6 +39,33 @@ std::string safe_diagnostic_atom(const std::string& value, size_t maximum = 256)
     }
     if (value.size() > out.size() && out.size() == maximum) out += "~";
     return out;
+}
+
+std::string format_token_ids(const std::vector<uint32_t>& ids, size_t limit = 64) {
+    std::ostringstream out;
+    const size_t count = std::min(ids.size(), limit);
+    for (size_t i = 0; i < count; ++i) {
+        if (i) out << ",";
+        out << ids[i];
+    }
+    if (ids.size() > count) out << ",...(" << ids.size() << " total)";
+    return out.str().empty() ? "none" : out.str();
+}
+
+std::string summarize_top_logits(const std::vector<float>& logits, size_t limit = 5) {
+    if (logits.empty()) return "none";
+    std::vector<size_t> indices(logits.size());
+    for (size_t i = 0; i < indices.size(); ++i) indices[i] = i;
+    const size_t count = std::min(limit, indices.size());
+    std::partial_sort(indices.begin(), indices.begin() + count, indices.end(),
+        [&logits](size_t a, size_t b) { return logits[a] > logits[b]; });
+    std::ostringstream out;
+    out << std::setprecision(8);
+    for (size_t i = 0; i < count; ++i) {
+        if (i) out << ",";
+        out << indices[i] << ":" << logits[indices[i]];
+    }
+    return out.str();
 }
 
 std::string metadata_value_summary(const GgufMetadataValue& value) {
@@ -162,6 +190,11 @@ void GpuInferenceSession::unload_locked() noexcept {
     last_output_tokens_ = 0;
     last_decode_tokens_per_second_ = 0.0;
     last_generation_completed_ = false;
+    last_prompt_utf8_bytes_ = 0;
+    last_prompt_token_ids_ = "none";
+    last_generated_token_ids_ = "none";
+    last_first_step_top_logits_ = "none";
+    last_sampling_config_ = "none";
     model_path_.clear();
     backend_fallback_reason_.clear();
     loaded_ = false;
@@ -980,6 +1013,21 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
     last_output_tokens_ = 0;
     last_decode_tokens_per_second_ = 0.0;
     last_generation_completed_ = false;
+    last_prompt_utf8_bytes_ = prompt.size();
+    last_prompt_token_ids_ = "none";
+    last_generated_token_ids_ = "none";
+    last_first_step_top_logits_ = "none";
+    {
+        std::ostringstream config;
+        config << std::setprecision(6)
+               << "temperature:" << sampling.temperature
+               << ",top_k:" << sampling.top_k
+               << ",top_p:" << sampling.top_p
+               << ",min_p:" << sampling.min_p
+               << ",repetition_penalty:" << sampling.repetition_penalty
+               << ",seed:" << sampling.seed;
+        last_sampling_config_ = config.str();
+    }
 
     TokenizerEngine tokenizer_engine(*tokenizers_);
     std::vector<uint32_t> prompt_tokens;
@@ -995,6 +1043,7 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
         return status;
     }
     last_prompt_tokens_ = prompt_tokens.size();
+    last_prompt_token_ids_ = format_token_ids(prompt_tokens);
     if (prompt_tokens.empty() || prompt_tokens.size() > context_length_ ||
         max_new_tokens > context_length_ - prompt_tokens.size()) {
         last_generation_stage_ = "prompt_context_validation_failed";
@@ -1087,6 +1136,7 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
         return status;
     }
     last_generation_stage_ = "first_token_sampling";
+    last_first_step_top_logits_ = summarize_top_logits(logits);
 
     Sampler sampler(sampling);
     std::vector<int32_t> history;
@@ -1119,6 +1169,7 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
         history.push_back(sampled);
         generated.push_back(static_cast<uint32_t>(sampled));
         last_output_tokens_ = generated.size();
+        last_generated_token_ids_ = format_token_ids(generated);
         if (!first_token_ready) {
             const auto first_token_at = std::chrono::steady_clock::now();
             last_ttft_ms_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1283,6 +1334,11 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";decode_timing_valid=" << (last_decode_timing_valid_ ? "true" : "false")
            << ";generation_stage=" << last_generation_stage_
            << ";prompt_tokens=" << last_prompt_tokens_
+           << ";prompt_utf8_bytes=" << last_prompt_utf8_bytes_
+           << ";prompt_token_ids=" << last_prompt_token_ids_
+           << ";generated_token_ids=" << last_generated_token_ids_
+           << ";first_step_top_logits=" << last_first_step_top_logits_
+           << ";sampling_config=" << last_sampling_config_
            << ";output_tokens=" << last_output_tokens_
            << ";decode_tokens_per_second=" << last_decode_tokens_per_second_
            << ";generation_result=" << (last_generation_completed_ ? "COMPLETED" : "NOT_COMPLETED")
