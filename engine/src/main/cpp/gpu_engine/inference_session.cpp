@@ -1030,8 +1030,8 @@ Status GpuInferenceSession::update_memory_budget(uint64_t allocation_cap_bytes) 
         if (!status.ok()) return status;
     }
     memory_budget_bytes_ = allocation_cap_bytes;
-    // Recompute optional cache budgets from currently free memory. The two
-    // caches together may use at most one quarter of that headroom.
+    // Reconsider model-sized cache capacity after a budget change. Actual
+    // allocations remain bounded by MemoryManager and the live runtime reserve.
     if (context_.weight_cache_pressure_mode) {
         // A new memory budget is a safe point to rebuild previously spilled
         // metadata-only bindings and reconsider resident whole-weight caching.
