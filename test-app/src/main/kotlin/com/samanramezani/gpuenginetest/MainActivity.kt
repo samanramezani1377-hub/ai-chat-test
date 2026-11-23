@@ -326,7 +326,10 @@ class MainActivity : Activity() {
                         val output = StringBuilder()
                         val prompt = "Reply with exactly GPU_OK and nothing else."
                         val generationStarted = System.nanoTime()
-                        val generationResult = GpuEngineTestApi.generate(prompt, maxTokens = 16) { token ->
+                        val generationResult = GpuEngineTestApi.generate(
+                            prompt, maxTokens = 16, temperature = 0f,
+                            topK = 1, topP = 1f, minP = 0f
+                        ) { token ->
                             output.append(token)
                         }
                         val generationMs = (System.nanoTime() - generationStarted) / 1_000_000L
@@ -382,7 +385,10 @@ class MainActivity : Activity() {
         appendLog("GPU_GENERATION_BEGIN")
         thread(name = "gpu-engine-generation") {
             val startedAt = System.nanoTime()
-            val result = GpuEngineTestApi.generate(prompt, maxTokens = 64) { token ->
+            val result = GpuEngineTestApi.generate(
+                prompt, maxTokens = 64, temperature = 0f,
+                topK = 1, topP = 1f, minP = 0f
+            ) { token ->
                 runOnUiThread { generatedOutput.append(token) }
             }
             val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L
