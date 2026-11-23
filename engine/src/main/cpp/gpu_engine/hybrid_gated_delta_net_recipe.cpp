@@ -22,15 +22,6 @@ bool metadata_u64_value(const GgufFileInfo& model, const std::string& key, uint6
     return false;
 }
 
-bool metadata_bool_value(const GgufFileInfo& model, const std::string& key, bool& value) {
-    const auto found = model.metadata.find(key);
-    if (found == model.metadata.end()) return false;
-    const auto* item = std::get_if<bool>(&found->second);
-    if (!item) return false;
-    value = *item;
-    return true;
-}
-
 bool metadata_f64_value(const GgufFileInfo& model, const std::string& key, double& value) {
     const auto found = model.metadata.find(key);
     if (found == model.metadata.end()) return false;
