@@ -60,7 +60,12 @@ class MainActivity : Activity() {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+        // TRIM_MEMORY_UI_HIDDEN (20) only means the activity UI became
+        // invisible; it is not a low-memory signal. Do not change the native
+        // GPU allocation budget merely because Android displayed another UI
+        // (for example, a system dialog) while inference is running.
+        if (level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+            level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
             thread(name = "gpu-memory-pressure") {
                 updateAllocationCapForMemoryPressure("trim-$level")
             }
