@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <unordered_set>
+#include <unordered_map>
 #include <iterator>
 #include <string>
 #include <utility>
@@ -49,16 +50,17 @@ Status load_model_execution_weights(const GgufReader& reader,
     if (!backend.healthy())
         return {StatusCode::DeviceLost, "Cannot load model weights to an unhealthy backend"};
     std::unordered_set<std::string> required;
+    std::unordered_map<std::string, std::vector<std::string>> weight_operation_uses;
     for (const auto& operation : plan.operations) {
-        for (const auto& name : operation.weight_tensors) required.insert(name);
+        for (const auto& name : operation.weight_tensors) {
+            required.insert(name);
+            weight_operation_uses[name].push_back(operation.operator_name);
+        }
     }
 
     std::unordered_map<std::string, Tensor> pending_tensors;
     std::unordered_map<std::string, QuantizedWeightBinding> pending_quantized;
     std::vector<MemoryLease> pending_leases;
-    const bool single_operation = plan.operations.size() == 1;
-    const std::string operation_name = single_operation ? plan.operations.front().operator_name : std::string();
-
     for (const auto& name : required) {
         if (context.tensors.find(name) != context.tensors.end() ||
             context.quantized_weights.find(name) != context.quantized_weights.end())
@@ -75,11 +77,26 @@ Status load_model_execution_weights(const GgufReader& reader,
         if (backend_limit == 0)
             return {StatusCode::Unsupported, "Backend did not report a usable model-weight storage limit"};
 
-        const bool quantized_matmul = single_operation &&
-            operation_name.rfind("MatMul_", 0) == 0 && tensor->type.name != "F32";
-        const bool quantized_embedding = single_operation &&
-            operation_name.rfind("Embedding_", 0) == 0 && tensor->type.name != "F32";
-        if (quantized_embedding || (quantized_matmul && tensor->byte_size > backend_limit)) {
+        const auto uses_it = weight_operation_uses.find(name);
+        const bool quantized_storage = tensor->type.name != "F32";
+        bool used_by_quantized_matmul = false;
+        bool used_by_quantized_embedding = false;
+        if (uses_it != weight_operation_uses.end() && quantized_storage) {
+            for (const auto& use : uses_it->second) {
+                used_by_quantized_matmul = used_by_quantized_matmul ||
+                    use.rfind("MatMul_", 0) == 0;
+                used_by_quantized_embedding = used_by_quantized_embedding ||
+                    use.rfind("Embedding_", 0) == 0;
+            }
+        }
+        // A tied embedding/output tensor may be consumed by both Embedding and
+        // MatMul. Preserve one packed resident copy when it fits; otherwise
+        // keep GGUF metadata only and let each operation gather its own chunks.
+        const bool stream_quantized_weight =
+            (used_by_quantized_embedding && !used_by_quantized_matmul) ||
+            ((used_by_quantized_matmul || used_by_quantized_embedding) &&
+             tensor->byte_size > backend_limit);
+        if (stream_quantized_weight) {
             if (tensor->dimensions.size() != 2 || tensor->dimensions[0] == 0 ||
                 tensor->dimensions[1] == 0 || !tensor->type.storage_size_known ||
                 tensor->type.block_elements == 0 || tensor->type.bytes_per_block == 0 ||
