@@ -265,6 +265,17 @@ class MainActivity : Activity() {
     }
 
 
+    private fun preparePromptForModel(prompt: String): Pair<String, String> {
+        val diagnostics = GpuEngineTestApi.diagnostics()
+        val templateKind = Regex("(?:^|;)chat_template_kind=([^;]+)")
+            .find(diagnostics)?.groupValues?.getOrNull(1) ?: "none"
+        return if (templateKind == "qwen_im_start") {
+            Pair("<|im_start|>user\\n$prompt<|im_end|>\\n<|im_start|>assistant\\n", templateKind)
+        } else {
+            Pair(prompt, "raw_prompt")
+        }
+    }
+
     private fun runOnDeviceModelMatrix() {
         val modelDirectory = File(filesDir, "models")
         val models = modelDirectory.listFiles()
@@ -324,7 +335,9 @@ class MainActivity : Activity() {
 
                     if (loadResult == 0) {
                         val output = StringBuilder()
-                        val prompt = "Reply with exactly GPU_OK and nothing else."
+                        val rawPrompt = "Reply with exactly GPU_OK and nothing else."
+                        val (prompt, promptFormat) = preparePromptForModel(rawPrompt)
+                        appendLog("MATRIX_PROMPT_FORMAT=$promptFormat")
                         val generationStarted = System.nanoTime()
                         val generationResult = GpuEngineTestApi.generate(
                             prompt, maxTokens = 16, temperature = 0f,
@@ -384,9 +397,11 @@ class MainActivity : Activity() {
         generatedOutput.text = ""
         appendLog("GPU_GENERATION_BEGIN")
         thread(name = "gpu-engine-generation") {
+            val (formattedPrompt, promptFormat) = preparePromptForModel(prompt)
+            appendLog("GPU_PROMPT_FORMAT=$promptFormat")
             val startedAt = System.nanoTime()
             val result = GpuEngineTestApi.generate(
-                prompt, maxTokens = 64, temperature = 0f,
+                formattedPrompt, maxTokens = 64, temperature = 0f,
                 topK = 1, topP = 1f, minP = 0f
             ) { token ->
                 runOnUiThread { generatedOutput.append(token) }
