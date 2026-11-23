@@ -48,7 +48,7 @@ class MainActivity : Activity() {
                     it == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
                 } == true)
         val headroom = (memoryInfo.availMem - memoryInfo.threshold).coerceAtLeast(0L)
-        val headroomPercent = if (criticalPressure) 25L else 85L
+        val headroomPercent = if (criticalPressure) 25L else 80L
         val totalMemoryDivisor = if (criticalPressure) 4L else 3L
         val capBytes = minOf(
             headroom * headroomPercent / 100L,
@@ -248,7 +248,7 @@ class MainActivity : Activity() {
         activityManager.getMemoryInfo(memoryInfo)
         // This is an application allocation safety cap derived from current host
         // memory headroom. Android does not expose total/free GPU VRAM here.
-        val initialHeadroomPercent = if (memoryInfo.lowMemory) 25L else 85L
+        val initialHeadroomPercent = if (memoryInfo.lowMemory) 25L else 80L
         val initialTotalMemoryDivisor = if (memoryInfo.lowMemory) 4L else 3L
         val allocationCapBytes = minOf(
             (memoryInfo.availMem - memoryInfo.threshold).coerceAtLeast(0L) *
