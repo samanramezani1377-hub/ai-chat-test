@@ -30,6 +30,7 @@ class MainActivity : Activity() {
     private lateinit var generateButton: Button
     private lateinit var matrixButton: Button
     private lateinit var promptInput: EditText
+    private lateinit var maxTokensInput: EditText
     private lateinit var generatedOutput: TextView
     private val logBuffer = StringBuilder()
     private val requestImportModel = 4101
@@ -125,6 +126,14 @@ class MainActivity : Activity() {
             setPadding(dp(10), dp(8), dp(10), dp(8))
         }
         root.addView(promptInput, LinearLayout.LayoutParams(-1, -2))
+
+        maxTokensInput = EditText(this).apply {
+            hint = "Maximum output tokens (1-$contextLength)"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setText("128")
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+        }
+        root.addView(maxTokensInput, LinearLayout.LayoutParams(-1, -2))
 
         generateButton = Button(this).apply {
             text = "Generate on GPU"
@@ -401,18 +410,21 @@ class MainActivity : Activity() {
             statusView.text = "Enter a prompt first"
             return
         }
+        val maxTokens = maxTokensInput.text.toString().toIntOrNull()
+        if (maxTokens == null || maxTokens !in 1..contextLength) {
+            statusView.text = "Maximum output tokens must be between 1 and $contextLength"
+            return
+        }
         generateButton.isEnabled = false
         generatedOutput.text = ""
         appendLog("GPU_GENERATION_BEGIN")
+        appendLog("requested_max_output_tokens=$maxTokens")
         thread(name = "gpu-engine-generation") {
             val (formattedPrompt, promptFormat) = preparePromptForModel(prompt)
             appendLog("GPU_PROMPT_FORMAT=$promptFormat")
             val startedAt = System.nanoTime()
-            // Keep the on-device correctness probe short: this engine currently
-            // streams large Q6_K weights during decode, so a long smoke test can
-            // occupy the device for many minutes before parity is established.
             val result = GpuEngineTestApi.generate(
-                formattedPrompt, maxTokens = 4, temperature = 0f,
+                formattedPrompt, maxTokens = maxTokens, temperature = 0f,
                 topK = 1, topP = 1f, minP = 0f
             ) { token ->
                 runOnUiThread { generatedOutput.append(token) }
