@@ -782,7 +782,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
  if (token_row >= TOKEN_COUNT) { return; }
  let token = token_ids[token_row];
  if (token >= VOCABULARY_SIZE) {
-  output[gid.x] = bitcast<f32>(0x7fc00000u);
+  // Token IDs are range-checked before dispatch. Keep this defensive
+  // shader branch WGSL-valid without relying on a NaN constant literal.
+  output[gid.x] = 0.0;
   return;
  }
  output[gid.x] = decode_weight(token, dimension);

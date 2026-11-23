@@ -1216,13 +1216,18 @@ Status build_rms_norm_f32_candidate(const Tensor& input, const Tensor& weight,
         return {StatusCode::Unsupported, "RMSNorm candidate requires contiguous device/shared F32 tensors"};
     const auto& x = input.descriptor().shape;
     const auto& w = weight.descriptor().shape;
+    // The normalization width is defined by the 1-D scale tensor, not
+    // necessarily by the complete trailing activation dimension. This also
+    // supports grouped RMSNorm (for example, one independent value head at a
+    // time in a flattened [tokens, heads * head_dimension] activation).
     if ((x.size() != 2 && x.size() != 3) || w.size() != 1 ||
-        output.descriptor().shape != x || x.back() == 0 || w[0] != x.back() ||
-        input.element_count() == 0 || input.element_count() % x.back() != 0 ||
+        output.descriptor().shape != x || x.back() == 0 || w[0] == 0 ||
+        x.back() % w[0] != 0 || input.element_count() == 0 ||
+        input.element_count() % w[0] != 0 ||
         input.element_count() > UINT32_MAX || output.element_count() > UINT32_MAX ||
-        input.element_count() / x.back() > UINT32_MAX)
-        return {StatusCode::InvalidArgument, "RMSNorm expects input/output [rows,columns] or [tokens,heads,dimension] and weight [dimension]"};
-    const uint64_t columns = x.back();
+        input.element_count() / w[0] > UINT32_MAX)
+        return {StatusCode::InvalidArgument, "RMSNorm expects rank-2/rank-3 contiguous activations with a trailing dimension divisible by the 1-D weight width, and a matching output"};
+    const uint64_t columns = w[0];
     const uint64_t rows = input.element_count() / columns;
     if (!std::isfinite(epsilon) || epsilon <= 0.0f)
         return {StatusCode::InvalidArgument, "RMSNorm epsilon must be finite and positive"};
@@ -1256,7 +1261,8 @@ Status build_rms_norm_f32_gles_candidate(const Tensor& input, const Tensor& weig
                                          ComputeDispatch& dispatch) {
     Status status = build_rms_norm_f32_candidate(input, weight, output, epsilon, dispatch);
     if (!status.ok()) return status;
-    const auto& shape = input.descriptor().shape;
+    const uint64_t rows = input.element_count() / weight.descriptor().shape[0];
+    const uint64_t columns = weight.descriptor().shape[0];
     std::ostringstream epsilon_literal;
     epsilon_literal << std::setprecision(9) << epsilon;
     std::string epsilon_text = epsilon_literal.str();
@@ -1267,9 +1273,9 @@ Status build_rms_norm_f32_gles_candidate(const Tensor& input, const Tensor& weig
     dispatch.wgsl_source.clear();
     dispatch.glsl_source = kRmsNormF32Glsl;
     dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const uint ROWS = 1u;",
-        "const uint ROWS = " + std::to_string(shape[0]) + "u;");
+        "const uint ROWS = " + std::to_string(rows) + "u;");
     dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const uint COLUMNS = 1u;",
-        "const uint COLUMNS = " + std::to_string(shape[1]) + "u;");
+        "const uint COLUMNS = " + std::to_string(columns) + "u;");
     dispatch.glsl_source = replace_once(std::move(dispatch.glsl_source), "const float EPSILON = 0.00001;",
         "const float EPSILON = " + epsilon_text + ";");
     return Status::success();

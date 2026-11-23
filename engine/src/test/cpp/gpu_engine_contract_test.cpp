@@ -1003,11 +1003,69 @@ void test_q6_k_embedding_reference_and_dispatch() {
     assert(dispatch.backend==BackendKind::DawnWebGpu);
     assert(dispatch.bindings.size()==3);
     assert(dispatch.wgsl_source.find("const VOCABULARY_SIZE:u32=2u;")!=std::string::npos);
+    assert(dispatch.wgsl_source.find("output[gid.x] = 0.0;") != std::string::npos);
+    assert(dispatch.wgsl_source.find("0x7fc00000u") == std::string::npos);
     ComputeDispatch gles_dispatch;
     assert(build_q6_k_embedding_gles_candidate(weights,bytes,vocabulary,dimension,token_buffer,ids,output,gles_dispatch).ok());
     assert(gles_dispatch.kernel_id=="gles-q6-k-embedding-f32-v1");
     assert(gles_dispatch.backend==BackendKind::OpenGles);
     assert(gles_dispatch.glsl_source.find("VOCABULARY_SIZE=2u")!=std::string::npos);
+}
+
+void test_grouped_rms_norm_candidates_use_weight_width() {
+    FakeBackend backend;
+    BufferDesc input_desc{3u * 8u * sizeof(float), 4, MemoryDomain::Device, false, "grouped-rms-input"};
+    BufferDesc weight_desc{2u * sizeof(float), 4, MemoryDomain::Device, true, "grouped-rms-weight"};
+    BufferDesc output_desc{3u * 8u * sizeof(float), 4, MemoryDomain::Device, false, "grouped-rms-output"};
+    std::shared_ptr<Buffer> input_buffer, weight_buffer, output_buffer;
+    assert(backend.allocate(input_desc, input_buffer).ok());
+    assert(backend.allocate(weight_desc, weight_buffer).ok());
+    assert(backend.allocate(output_desc, output_buffer).ok());
+
+    TensorDesc input_tensor_desc;
+    input_tensor_desc.shape = {3, 8};
+    input_tensor_desc.data_type = DataType::F32;
+    TensorDesc weight_tensor_desc;
+    weight_tensor_desc.shape = {2};
+    weight_tensor_desc.data_type = DataType::F32;
+    TensorDesc output_tensor_desc = input_tensor_desc;
+    Tensor input, weight, output;
+    assert(Tensor::create(input_tensor_desc, input_buffer, 0, input).ok());
+    assert(Tensor::create(weight_tensor_desc, weight_buffer, 0, weight).ok());
+    assert(Tensor::create(output_tensor_desc, output_buffer, 0, output).ok());
+
+    ComputeDispatch gles;
+    assert(build_rms_norm_f32_gles_candidate(input, weight, output, 1.0e-5f, gles).ok());
+    assert(gles.backend == BackendKind::OpenGles);
+    assert(gles.glsl_source.find("const uint ROWS = 12u;") != std::string::npos);
+    assert(gles.glsl_source.find("const uint COLUMNS = 2u;") != std::string::npos);
+
+    ComputeDispatch dawn;
+    assert(build_rms_norm_f32_candidate(input, weight, output, 1.0e-5f, dawn).ok());
+    assert(dawn.backend == BackendKind::DawnWebGpu);
+    assert(dawn.workgroups_x == 12);
+    assert(dawn.wgsl_source.find("const COLUMNS: u32 = 2u;") != std::string::npos);
+
+    const float values[24] = {
+        1, 2, 3, 4, 5, 6, 7, 8,
+        2, 4, 6, 8, 1, 3, 5, 7,
+        1, 3, 5, 7, 2, 4, 6, 8
+    };
+    const float scales[2] = {1.0f, 0.5f};
+    float normalized[24] = {};
+    assert(reference_rms_norm_f32(values, scales, normalized, 12, 2, 1.0e-5f).ok());
+    for (float value : normalized) assert(std::isfinite(value));
+
+    TensorDesc invalid_weight_desc;
+    invalid_weight_desc.shape = {3};
+    invalid_weight_desc.data_type = DataType::F32;
+    BufferDesc invalid_weight_buffer_desc{3u * sizeof(float), 4, MemoryDomain::Device, true, "invalid-rms-weight"};
+    std::shared_ptr<Buffer> invalid_weight_buffer;
+    assert(backend.allocate(invalid_weight_buffer_desc, invalid_weight_buffer).ok());
+    Tensor invalid_weight;
+    assert(Tensor::create(invalid_weight_desc, invalid_weight_buffer, 0, invalid_weight).ok());
+    assert(build_rms_norm_f32_gles_candidate(input, invalid_weight, output, 1.0e-5f, gles).code ==
+           StatusCode::InvalidArgument);
 }
 
 void test_q4_decoders() {
@@ -4223,6 +4281,7 @@ int main() {
     test_q5_decoders();
     test_q6_k_decoder_layout();
     test_q6_k_embedding_reference_and_dispatch();
+    test_grouped_rms_norm_candidates_use_weight_width();
     test_q4_k_q5_k_decoder_layouts();
     test_q2_k_q3_k_decoder_layouts();
     test_f16_bf16_reference_matmul_decoding();
