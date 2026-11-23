@@ -6,6 +6,7 @@
 #include "quantization.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <string>
 #include <unordered_set>
@@ -91,7 +92,7 @@ Status execute_chunked_quantized_matmul_if_needed(
         const ModelPlanOperation& operation, Backend& backend,
         const ModelLoweringRegistry& lowerings, const OperatorRegistry& operators,
         const GgufReader& reader, MemoryManager& memory, const DeviceInfo& device,
-        ModelExecutionContext& context, bool& handled) {
+        ModelExecutionContext& context, bool& handled, uint64_t* real_q6_k_parity_checks) {
     handled = false;
     if (operation.operator_name.rfind("MatMul_", 0) != 0 ||
         operation.inputs.size() != 1 || operation.weight_tensors.size() != 1)
@@ -226,6 +227,40 @@ Status execute_chunked_quantized_matmul_if_needed(
         status = backend.synchronize();
         if (!status.ok()) return status;
 
+        // Validate a small sample against the independent host Q6_K decoder
+        // using the actual GGUF bytes and actual GPU activations. This catches
+        // data-layout/streaming errors that synthetic kernel fixtures cannot.
+        if (context.prefill && real_q6_k_parity_checks != nullptr &&
+            source->type.name == "Q6_K") {
+            const uint32_t sample_channels = static_cast<uint32_t>(
+                std::min<uint64_t>(4, chunk_channels));
+            std::vector<float> sample_activations(static_cast<size_t>(inner));
+            std::vector<float> expected(sample_channels), actual(sample_channels);
+            status = backend.readback(input.buffer(), input.byte_offset(),
+                sample_activations.data(), sample_activations.size() * sizeof(float));
+            if (!status.ok()) return status;
+            const uint64_t sample_weight_bytes = static_cast<uint64_t>(sample_channels) * row_bytes;
+            status = reference_q6_k_matmul(sample_activations.data(), staging.data(),
+                sample_weight_bytes, expected.data(), 1, sample_channels,
+                static_cast<uint32_t>(inner));
+            if (!status.ok()) return status;
+            status = backend.readback(output_lease.buffer(), 0, actual.data(),
+                actual.size() * sizeof(float));
+            if (!status.ok()) return status;
+            for (size_t index = 0; index < actual.size(); ++index) {
+                const float tolerance = 2.0e-3f +
+                    2.0e-3f * std::max(std::fabs(expected[index]), 1.0f);
+                if (!std::isfinite(actual[index]) ||
+                    std::fabs(actual[index] - expected[index]) > tolerance) {
+                    return {StatusCode::NumericalFailure,
+                        "Real GGUF Q6_K MatMul parity failed for " + operation.id +
+                        " at channel_offset=" + std::to_string(channel_offset) +
+                        " sample_channel=" + std::to_string(index)};
+                }
+            }
+            ++(*real_q6_k_parity_checks);
+        }
+
         std::unique_ptr<CommandBatch> copy_commands;
         status = backend.begin_commands(copy_commands);
         if (!status.ok()) return status;
@@ -257,7 +292,7 @@ Status execute_chunked_quantized_embedding_if_needed(
         const ModelPlanOperation& operation, Backend& backend,
         const ModelLoweringRegistry& lowerings, const OperatorRegistry& operators,
         const GgufReader& reader, MemoryManager& memory, const DeviceInfo& device,
-        ModelExecutionContext& context, bool& handled) {
+        ModelExecutionContext& context, bool& handled, uint64_t* real_q6_k_parity_checks) {
     handled = false;
     if (operation.operator_name.rfind("Embedding_", 0) != 0 ||
         operation.inputs.size() != 1 || operation.inputs.front() != "token_ids" ||
@@ -396,6 +431,36 @@ Status execute_chunked_quantized_embedding_if_needed(
         if (!status.ok()) return status;
         status = backend.synchronize();
         if (!status.ok()) return status;
+
+        // Validate real prompt-token embedding rows against the independent
+        // Q6_K decoder before allowing the model graph to consume them.
+        if (context.prefill && real_q6_k_parity_checks != nullptr &&
+            source->type.name == "Q6_K") {
+            std::vector<uint32_t> reference_ids(static_cast<size_t>(batch_tokens));
+            for (uint32_t index = 0; index < reference_ids.size(); ++index)
+                reference_ids[index] = index;
+            std::vector<float> expected(static_cast<size_t>(batch_tokens * dimension));
+            std::vector<float> actual(expected.size());
+            status = reference_q6_k_embedding(staging.data(), weight_bytes,
+                static_cast<uint32_t>(batch_tokens), static_cast<uint32_t>(dimension),
+                reference_ids, expected.data());
+            if (!status.ok()) return status;
+            status = backend.readback(output_lease.buffer(), 0, actual.data(),
+                actual.size() * sizeof(float));
+            if (!status.ok()) return status;
+            for (size_t index = 0; index < actual.size(); ++index) {
+                const float tolerance = 2.0e-4f +
+                    2.0e-4f * std::max(std::fabs(expected[index]), 1.0f);
+                if (!std::isfinite(actual[index]) ||
+                    std::fabs(actual[index] - expected[index]) > tolerance) {
+                    return {StatusCode::NumericalFailure,
+                        "Real GGUF Q6_K Embedding parity failed for " + operation.id +
+                        " at token_offset=" + std::to_string(token_offset) +
+                        " element=" + std::to_string(index)};
+                }
+            }
+            ++(*real_q6_k_parity_checks);
+        }
 
         std::unique_ptr<CommandBatch> copy_commands;
         status = backend.begin_commands(copy_commands);
@@ -866,7 +931,8 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
 
         bool chunked_embedding = false;
         status = execute_chunked_quantized_embedding_if_needed(operation, backend, lowerings,
-            operators, reader, memory, device, operation_context, chunked_embedding);
+            operators, reader, memory, device, operation_context, chunked_embedding,
+            &report.real_q6_k_parity_checks);
         if (!status.ok()) {
             report.errors.push_back(operation.id + ":CHUNKED_QUANTIZED_EMBEDDING_FAILED:" + status.message);
             for (const auto& name : operation.weight_tensors) {
@@ -888,7 +954,8 @@ Status execute_model_execution_plan_streamed(ModelExecutionPlan& plan, Backend& 
 
         bool chunked_matmul = false;
         status = execute_chunked_quantized_matmul_if_needed(operation, backend, lowerings,
-            operators, reader, memory, device, operation_context, chunked_matmul);
+            operators, reader, memory, device, operation_context, chunked_matmul,
+            &report.real_q6_k_parity_checks);
         if (!status.ok()) {
             report.errors.push_back(operation.id + ":CHUNKED_QUANTIZED_MATMUL_FAILED:" + status.message);
             for (const auto& name : operation.weight_tensors) {
