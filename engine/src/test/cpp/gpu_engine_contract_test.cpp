@@ -223,6 +223,44 @@ void test_independent_gguf_reader() {
     std::remove(path.c_str());
 }
 
+void test_scheduler_batches_ordered_graph_fragments_once() {
+    FakeBackend backend;
+    BufferDesc desc{4, 4, MemoryDomain::Device, false, "sequence-test"};
+    std::shared_ptr<Buffer> source_a, source_b, destination_a, destination_b;
+    assert(backend.allocate(desc, source_a).ok());
+    assert(backend.allocate(desc, source_b).ok());
+    assert(backend.allocate(desc, destination_a).ok());
+    assert(backend.allocate(desc, destination_b).ok());
+    const uint32_t a = 0x12345678u, b = 0xabcdef01u;
+    assert(backend.upload(source_a, 0, &a, sizeof(a)).ok());
+    assert(backend.upload(source_b, 0, &b, sizeof(b)).ok());
+
+    OperatorRegistry registry;
+    ComputeGraph first, second;
+    GraphNode node_a;
+    node_a.name = "first-copy";
+    node_a.dispatch.backend = BackendKind::OpenGles;
+    node_a.dispatch.copy_only = true;
+    node_a.dispatch.buffer_copies.push_back({source_a, 0, destination_a, 0, 4});
+    GraphNode node_b;
+    node_b.name = "second-copy";
+    node_b.dispatch.backend = BackendKind::OpenGles;
+    node_b.dispatch.copy_only = true;
+    node_b.dispatch.buffer_copies.push_back({source_b, 0, destination_b, 0, 4});
+    size_t index = 0;
+    assert(first.add_node(std::move(node_a), registry, index).ok());
+    assert(second.add_node(std::move(node_b), registry, index).ok());
+
+    ExecutionScheduler scheduler;
+    assert(scheduler.execute_sequence(backend, {first, second}).ok());
+    assert(backend.submit_count == 1);
+    assert(backend.sync_count == 1);
+    uint32_t actual_a = 0, actual_b = 0;
+    assert(backend.readback(destination_a, 0, &actual_a, sizeof(actual_a)).ok());
+    assert(backend.readback(destination_b, 0, &actual_b, sizeof(actual_b)).ok());
+    assert(actual_a == a && actual_b == b);
+}
+
 void test_quantized_weight_chunk_cache_lru_and_budget() {
     FakeBackend backend;
     MemoryManager memory(backend, 128);
@@ -4314,6 +4352,7 @@ void test_q6_k_matmul_chunk_dispatch_uses_global_output_offsets_on_both_backends
 }
 
 int main() {
+    test_scheduler_batches_ordered_graph_fragments_once();
     test_quantized_weight_chunk_cache_lru_and_budget();
     test_runtime_quantization_parity_validation_is_opt_in();
     test_q6_k_matmul_flattens_attention_head_dimensions_for_rank_reduced_output();
