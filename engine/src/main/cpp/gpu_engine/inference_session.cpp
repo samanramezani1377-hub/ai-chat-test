@@ -145,15 +145,18 @@ void GpuInferenceSession::unload_locked() noexcept {
     largest_weight_tensor_bytes_ = 0;
     peak_operation_weight_bytes_ = 0;
     kv_cache_bytes_ = 0;
+    last_tokenization_ms_ = 0;
     last_prefill_ms_ = 0;
     last_prefill_readback_ms_ = 0;
     last_ttft_ms_ = 0;
     last_decode_ms_ = 0;
+    last_tokenization_timing_valid_ = false;
     last_prefill_timing_valid_ = false;
     last_prefill_readback_timing_valid_ = false;
     last_ttft_timing_valid_ = false;
     last_decode_timing_valid_ = false;
     last_generation_stage_ = "not_started";
+    last_model_graph_validation_ = "not_run";
     q6_backend_validation_ = "not_run";
     last_prompt_tokens_ = 0;
     last_output_tokens_ = 0;
@@ -228,6 +231,26 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     last_failed_memory_scratch_bytes_ = 0;
     last_failed_tensor_bytes_ = 0;
     last_failed_storage_binding_limit_bytes_ = 0;
+    last_attempt_model_path_ = path;
+    last_attempt_architecture_.clear();
+    last_attempt_backend_.clear();
+    last_attempt_gpu_vendor_.clear();
+    last_attempt_gpu_device_.clear();
+    last_attempt_gpu_architecture_.clear();
+    last_attempt_gpu_driver_.clear();
+    last_attempt_gpu_api_.clear();
+    last_attempt_gpu_features_.clear();
+    last_attempt_memory_budget_bytes_ = memory_budget_bytes;
+    last_attempt_weight_bytes_ = 0;
+    last_attempt_largest_weight_tensor_bytes_ = 0;
+    last_attempt_peak_operation_weight_bytes_ = 0;
+    last_attempt_kv_cache_bytes_ = 0;
+    last_attempt_gpu_max_buffer_bytes_ = 0;
+    last_attempt_gpu_max_storage_binding_bytes_ = 0;
+    last_attempt_context_length_ = context_length;
+    last_attempt_gpu_max_workgroup_invocations_ = 0;
+    last_attempt_gpu_compute_available_ = false;
+    last_attempt_gpu_self_test_passed_ = false;
     cancelled_.store(false, std::memory_order_relaxed);
     last_error_.clear();
 
@@ -687,6 +710,23 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
         unload_locked();
         return {StatusCode::Unsupported, last_error_};
     }
+    last_attempt_backend_ = backend_label(backend_kind);
+    last_attempt_gpu_vendor_ = device->vendor;
+    last_attempt_gpu_device_ = device->name;
+    last_attempt_gpu_architecture_ = device->architecture;
+    last_attempt_gpu_driver_ = device->driver;
+    last_attempt_gpu_api_ = device->api_version;
+    last_attempt_gpu_features_ = device->features;
+    last_attempt_gpu_max_buffer_bytes_ = device->limits.max_buffer_size;
+    last_attempt_gpu_max_storage_binding_bytes_ = device->limits.max_storage_buffer_binding_size;
+    last_attempt_gpu_max_workgroup_invocations_ = device->limits.max_compute_workgroup_invocations;
+    last_attempt_gpu_compute_available_ = device->compute_available;
+    last_attempt_gpu_self_test_passed_ = device->compute_self_test_passed;
+    last_attempt_architecture_ = plan_.architecture;
+    last_attempt_weight_bytes_ = total_weight_bytes_;
+    last_attempt_largest_weight_tensor_bytes_ = largest_weight_tensor_bytes_;
+    last_attempt_peak_operation_weight_bytes_ = peak_operation_weight_bytes_;
+    last_attempt_kv_cache_bytes_ = kv_cache_bytes_;
     const uint64_t max_single_buffer = std::min(device->limits.max_buffer_size,
                                                 device->limits.max_storage_buffer_binding_size);
     for (const auto& tensor : model.tensors) {
@@ -878,9 +918,12 @@ Status GpuInferenceSession::run_model_step(uint64_t token_count) {
         *lowerings_, *operators_, plan_.external_inputs, *loader_->reader(),
         *memory_, *engine_->active_device(), token_count, &cancelled_, context_, report);
     if (!status.ok()) {
+        last_model_graph_validation_ = "failed:" + status.message;
         last_error_ = status.message;
         return status;
     }
+    last_model_graph_validation_ = report.compiled_nodes == plan_.operations.size() &&
+        report.errors.empty() ? "validated" : "partial";
     return Status::success();
 }
 
@@ -932,15 +975,41 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
     if (cancelled_.load(std::memory_order_relaxed))
         return {StatusCode::Cancelled, "GPU generation was cancelled before it started"};
 
+    const auto request_started = std::chrono::steady_clock::now();
+    last_tokenization_ms_ = 0;
+    last_prefill_ms_ = 0;
+    last_prefill_readback_ms_ = 0;
+    last_ttft_ms_ = 0;
+    last_decode_ms_ = 0;
+    last_tokenization_timing_valid_ = false;
+    last_prefill_timing_valid_ = false;
+    last_prefill_readback_timing_valid_ = false;
+    last_ttft_timing_valid_ = false;
+    last_decode_timing_valid_ = false;
+    last_generation_stage_ = "tokenization";
+    last_model_graph_validation_ = "not_run";
+    last_prompt_tokens_ = 0;
+    last_output_tokens_ = 0;
+    last_decode_tokens_per_second_ = 0.0;
+    last_generation_completed_ = false;
+
     TokenizerEngine tokenizer_engine(*tokenizers_);
     std::vector<uint32_t> prompt_tokens;
+    const auto tokenization_started = std::chrono::steady_clock::now();
     Status status = tokenizer_engine.encode(loader_->reader()->info().tokenizer, prompt, prompt_tokens);
+    const auto tokenization_finished = std::chrono::steady_clock::now();
+    last_tokenization_ms_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        tokenization_finished - tokenization_started).count());
+    last_tokenization_timing_valid_ = status.ok();
     if (!status.ok()) {
+        last_generation_stage_ = "tokenization_failed";
         last_error_ = "Prompt tokenization failed: " + status.message;
         return status;
     }
+    last_prompt_tokens_ = prompt_tokens.size();
     if (prompt_tokens.empty() || prompt_tokens.size() > context_length_ ||
         max_new_tokens > context_length_ - prompt_tokens.size()) {
+        last_generation_stage_ = "prompt_context_validation_failed";
         last_error_ = "Prompt plus requested generation exceeds the validated context length";
         return {StatusCode::InvalidArgument, last_error_};
     }
@@ -960,6 +1029,7 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
     const auto prefill_estimate = estimate_model_gpu_memory(plan_, prefill_input);
     memory_estimate_ = prefill_estimate;
     if (!prefill_estimate.plan.fits) {
+        last_generation_stage_ = "prefill_memory_preflight_failed";
         last_error_ = "GPU prefill memory preflight rejected the actual prompt length";
         for (const auto& blocker : prefill_estimate.blockers) last_error_ += " | " + blocker;
         for (const auto& blocker : prefill_estimate.plan.blockers) last_error_ += " | " + blocker;
@@ -994,6 +1064,7 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
     for (uint32_t layer = 0; layer < plan_.layer_count; ++layer) {
         status = kv_cache_->reset_layer(layer);
         if (!status.ok()) {
+            last_generation_stage_ = "kv_cache_reset_failed";
             last_error_ = "KV cache reset failed: " + status.message;
             return status;
         }
@@ -1002,21 +1073,8 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
     context_.past_length = 0;
     context_.sequence_length = prompt_tokens.size();
     context_.prefill = true;
-    last_prefill_ms_ = 0;
-    last_prefill_readback_ms_ = 0;
-    last_ttft_ms_ = 0;
-    last_decode_ms_ = 0;
-    last_prefill_timing_valid_ = false;
-    last_prefill_readback_timing_valid_ = false;
-    last_ttft_timing_valid_ = false;
-    last_decode_timing_valid_ = false;
     last_generation_stage_ = "prefill";
-    last_prompt_tokens_ = prompt_tokens.size();
-    last_output_tokens_ = 0;
-    last_decode_tokens_per_second_ = 0.0;
-    last_generation_completed_ = false;
-    const auto generation_started = std::chrono::steady_clock::now();
-    const auto prefill_dispatch_started = generation_started;
+    const auto prefill_dispatch_started = std::chrono::steady_clock::now();
     status = run_model_step(prompt_tokens.size());
     const auto prefill_dispatch_finished = std::chrono::steady_clock::now();
     last_prefill_ms_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1076,7 +1134,7 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
         if (!first_token_ready) {
             const auto first_token_at = std::chrono::steady_clock::now();
             last_ttft_ms_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                first_token_at - generation_started).count());
+                first_token_at - request_started).count());
             last_ttft_timing_valid_ = true;
             first_token_ready = true;
             last_generation_stage_ = "decode";
@@ -1158,30 +1216,46 @@ std::string GpuInferenceSession::diagnostics() const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::ostringstream report;
     const DeviceInfo* device = engine_ ? engine_->active_device() : nullptr;
+    const std::string backend_display = device ? backend_name() :
+        (last_attempt_backend_.empty() ? "Unknown" : last_attempt_backend_);
+    const std::string gpu_vendor = device && !device->vendor.empty() ? device->vendor :
+        (last_attempt_gpu_vendor_.empty() ? "unknown" : last_attempt_gpu_vendor_);
+    const std::string gpu_device = device && !device->name.empty() ? device->name :
+        (last_attempt_gpu_device_.empty() ? "unknown" : last_attempt_gpu_device_);
+    const std::string gpu_architecture = device && !device->architecture.empty() ? device->architecture :
+        (last_attempt_gpu_architecture_.empty() ? "unknown" : last_attempt_gpu_architecture_);
+    const std::string gpu_driver = device && !device->driver.empty() ? device->driver :
+        (last_attempt_gpu_driver_.empty() ? "unknown" : last_attempt_gpu_driver_);
+    const std::string gpu_api = device && !device->api_version.empty() ? device->api_version :
+        (last_attempt_gpu_api_.empty() ? "unknown" : last_attempt_gpu_api_);
+    const auto& gpu_features = device ? device->features : last_attempt_gpu_features_;
     report << "runtime=AndroidGpuInferenceEngine"
            << ";status=" << (loaded_ ? "READY" : "UNLOADED")
            << ";runtime_version=0.1.0"
-           << ";backend=" << backend_name()
+           << ";backend=" << backend_display
            << ";backend_fallback_reason=" << (backend_fallback_reason_.empty() ? "none" : backend_fallback_reason_)
-           << ";gpu_vendor=" << (device && !device->vendor.empty() ? device->vendor : "unknown")
-           << ";gpu_device=" << (device && !device->name.empty() ? device->name : "unknown")
-           << ";gpu_architecture=" << (device && !device->architecture.empty() ? device->architecture : "unknown")
-           << ";gpu_driver=" << (device && !device->driver.empty() ? device->driver : "unknown")
-           << ";gpu_api=" << (device && !device->api_version.empty() ? device->api_version : "unknown")
-           << ";gpu_compute_available=" << (device && device->compute_available ? "true" : "false")
-           << ";gpu_self_test=" << (device && device->compute_self_test_passed ? "passed" : "unknown")
-           << ";gpu_max_buffer_bytes=" << (device ? device->limits.max_buffer_size : 0)
-           << ";gpu_max_storage_binding_bytes=" << (device ? device->limits.max_storage_buffer_binding_size : 0)
-           << ";gpu_max_workgroup_invocations=" << (device ? device->limits.max_compute_workgroup_invocations : 0)
-           << ";architecture=" << (plan_.architecture.empty() ? "unknown" : plan_.architecture)
-           << ";device=" << (device && !device->name.empty() ? device->name : "unknown")
-           << ";model=" << (model_path_.empty() ? "unknown" : model_path_)
-           << ";weight_bytes=" << total_weight_bytes_
-           << ";largest_weight_tensor_bytes=" << largest_weight_tensor_bytes_
-           << ";peak_operation_weight_bytes=" << peak_operation_weight_bytes_
-           << ";kv_cache_bytes=" << kv_cache_bytes_
+           << ";gpu_vendor=" << gpu_vendor
+           << ";gpu_device=" << gpu_device
+           << ";gpu_architecture=" << gpu_architecture
+           << ";gpu_driver=" << gpu_driver
+           << ";gpu_api=" << gpu_api
+           << ";gpu_compute_available=" << ((device ? device->compute_available : last_attempt_gpu_compute_available_) ? "true" : "false")
+           << ";gpu_self_test=" << ((device ? device->compute_self_test_passed : last_attempt_gpu_self_test_passed_) ? "passed" : "unknown")
+           << ";gpu_max_buffer_bytes=" << (device ? device->limits.max_buffer_size : last_attempt_gpu_max_buffer_bytes_)
+           << ";gpu_max_storage_binding_bytes=" << (device ? device->limits.max_storage_buffer_binding_size : last_attempt_gpu_max_storage_binding_bytes_)
+           << ";gpu_max_workgroup_invocations=" << (device ? device->limits.max_compute_workgroup_invocations : last_attempt_gpu_max_workgroup_invocations_)
+           << ";architecture=" << (!plan_.architecture.empty() ? plan_.architecture :
+                (last_attempt_architecture_.empty() ? "unknown" : last_attempt_architecture_))
+           << ";device=" << gpu_device
+           << ";model=" << (!model_path_.empty() ? model_path_ :
+                (last_attempt_model_path_.empty() ? "unknown" : last_attempt_model_path_))
+           << ";weight_bytes=" << (total_weight_bytes_ != 0 ? total_weight_bytes_ : last_attempt_weight_bytes_)
+           << ";largest_weight_tensor_bytes=" << (largest_weight_tensor_bytes_ != 0 ? largest_weight_tensor_bytes_ : last_attempt_largest_weight_tensor_bytes_)
+           << ";peak_operation_weight_bytes=" << (peak_operation_weight_bytes_ != 0 ? peak_operation_weight_bytes_ : last_attempt_peak_operation_weight_bytes_)
+           << ";kv_cache_bytes=" << (kv_cache_bytes_ != 0 ? kv_cache_bytes_ : last_attempt_kv_cache_bytes_)
            << ";memory_budget_bytes=" << (memory_budget_bytes_ != 0
-                ? memory_budget_bytes_ : last_failed_memory_budget_bytes_)
+                ? memory_budget_bytes_ : (last_failed_memory_budget_bytes_ != 0
+                    ? last_failed_memory_budget_bytes_ : last_attempt_memory_budget_bytes_))
            << ";memory_budget_kind=application_allocation_cap_not_vram"
            << ";memory_active_bytes=" << (memory_ ? std::to_string(memory_->allocated_bytes()) : "unknown")
            << ";memory_available_bytes=" << (memory_ ? std::to_string(memory_->available_bytes()) : "unknown")
@@ -1205,10 +1279,14 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";backend_kernel_validation=runtime-numerical"
            << ";q6_backend_validation=" << q6_backend_validation_
            << ";model_reference_parity=UNVERIFIED"
-           << ";model_graph_validation=UNVERIFIED"
-           << ";context_length=" << context_length_
-           << ";prefill_ms=" << last_prefill_ms_
-           << ";prefill_timing_valid=" << (last_prefill_timing_valid_ ? "true" : "false")
+           << ";model_graph_validation=" << last_model_graph_validation_
+           << ";context_length=" << (context_length_ != 0 ? context_length_ : last_attempt_context_length_)
+           << ";tokenization_ms=" << last_tokenization_ms_
+           << ";tokenization_timing_valid=" << (last_tokenization_timing_valid_ ? "true" : "false")
+           << ";prefill_ms=" << (last_prefill_ms_ + last_prefill_readback_ms_)
+           << ";prefill_timing_valid=" << (last_prefill_timing_valid_ && last_prefill_readback_timing_valid_ ? "true" : "false")
+           << ";prefill_compute_ms=" << last_prefill_ms_
+           << ";prefill_compute_timing_valid=" << (last_prefill_timing_valid_ ? "true" : "false")
            << ";prefill_readback_ms=" << last_prefill_readback_ms_
            << ";prefill_readback_timing_valid=" << (last_prefill_readback_timing_valid_ ? "true" : "false")
            << ";ttft_ms=" << last_ttft_ms_
@@ -1221,13 +1299,11 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";decode_tokens_per_second=" << last_decode_tokens_per_second_
            << ";generation_result=" << (last_generation_completed_ ? "COMPLETED" : "NOT_COMPLETED")
            << ";cpu_fallback_available=false"
-           << ";gpu_feature_count=" << (device ? device->features.size() : 0)
+           << ";gpu_feature_count=" << gpu_features.size()
            << ";gpu_features=";
-    if (device) {
-        for (size_t i = 0; i < device->features.size(); ++i) {
-            if (i != 0) report << ",";
-            report << device->features[i];
-        }
+    for (size_t i = 0; i < gpu_features.size(); ++i) {
+        if (i != 0) report << ",";
+        report << gpu_features[i];
     }
     report << ";last_error=" << (last_error_.empty() ? "none" : last_error_);
     return report.str();
