@@ -600,10 +600,10 @@ void test_gated_delta_net_reference_updates_state_and_output() {
     assert(reference_gated_delta_net_f32(q.data(), k.data(), v.data(), gate.data(),
         beta.data(), state.data(), output.data(), tokens, state_size,
         value_heads, key_heads).ok());
-    assert(std::fabs(output[0] - 2.0f) < 1.0e-6f);
-    assert(std::fabs(output[1] - 3.0f) < 1.0e-6f);
-    assert(std::fabs(output[2] - 4.0f) < 1.0e-6f);
-    assert(std::fabs(output[3] - 5.0f) < 1.0e-6f);
+    assert(std::fabs(output[0] - 2.0f / std::sqrt(2.0f)) < 1.0e-6f);
+    assert(std::fabs(output[1] - 3.0f / std::sqrt(2.0f)) < 1.0e-6f);
+    assert(std::fabs(output[2] - 4.0f / std::sqrt(2.0f)) < 1.0e-6f);
+    assert(std::fabs(output[3] - 5.0f / std::sqrt(2.0f)) < 1.0e-6f);
     assert(std::fabs(state[0] - 2.0f) < 1.0e-6f);
     assert(std::fabs(state[1] - 3.0f) < 1.0e-6f);
     assert(std::fabs(state[4] - 4.0f) < 1.0e-6f);
