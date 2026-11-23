@@ -652,6 +652,35 @@ void test_model_gpu_memory_estimate_includes_kv_and_scratch() {
     assert(overflow.blockers.front() == "MODEL_KV_CACHE_SIZE_OVERFLOW");
 }
 
+void test_model_gpu_memory_estimate_separates_decode_and_prefill() {
+    ModelExecutionPlan model;
+    model.structurally_validated = true;
+    model.layer_count = 1;
+    model.embedding_length = 8;
+    model.attention_heads = 2;
+    model.kv_heads = 1;
+    model.head_dimension = 4;
+    model.feed_forward_length = 16;
+
+    ModelGpuMemoryEstimateInput input;
+    input.total_weight_bytes = 1024;
+    input.streaming_chunk_bytes = 256;
+    input.token_count = 1;
+    input.context_length = 8;
+    input.bytes_per_element = 4;
+    input.safety_reserve_bytes = 128;
+    input.device_budget_bytes = 2048;
+    input.stream_weights = true;
+
+    const auto decode = estimate_model_gpu_memory(model, input);
+    assert(decode.plan.fits);
+
+    input.token_count = 8;
+    const auto full_prefill = estimate_model_gpu_memory(model, input);
+    assert(!full_prefill.plan.fits);
+    assert(full_prefill.plan.required_bytes > decode.plan.required_bytes);
+}
+
 void test_gpu_backend_fallback_order() {
     GpuEngine engine;
     assert(engine.register_backend(std::make_shared<FakeBackend>(BackendKind::DawnWebGpu, false)).ok());
@@ -3952,6 +3981,7 @@ int main() {
     test_kv_cache_memory_and_sequential_append();
     test_kv_cache_device_append_avoids_host_roundtrip();
     test_model_gpu_memory_estimate_includes_kv_and_scratch();
+    test_model_gpu_memory_estimate_separates_decode_and_prefill();
     test_gpu_backend_fallback_order();
     test_gguf_structure_analyzer_is_evidence_only();
     test_qwen35_hybrid_recipe_builds_generic_semantic_graph();

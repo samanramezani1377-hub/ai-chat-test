@@ -627,7 +627,9 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
     ModelGpuMemoryEstimateInput estimate_input;
     estimate_input.total_weight_bytes = total_weight_bytes_;
     estimate_input.streaming_chunk_bytes = peak_operation_weight_bytes_;
-    estimate_input.token_count = context_length_;
+    // Loading budgets for steady-state decode (one token). Prefill scratch
+    // depends on the actual prompt length and is checked after tokenization.
+    estimate_input.token_count = 1;
     estimate_input.context_length = context_length_;
     estimate_input.bytes_per_element = sizeof(float);
     estimate_input.safety_reserve_bytes = memory_budget_bytes_ / kGpuMemorySafetyReserveDivisor;
@@ -806,6 +808,28 @@ Status GpuInferenceSession::generate(const std::string& prompt, uint32_t max_new
         last_error_ = "Prompt plus requested generation exceeds the validated context length";
         return {StatusCode::InvalidArgument, last_error_};
     }
+
+    // Re-check peak memory for the actual prefill length. This avoids rejecting
+    // a model based on a hypothetical full-context prompt while still refusing
+    // a real prompt whose peak activation memory exceeds the explicit budget.
+    ModelGpuMemoryEstimateInput prefill_input;
+    prefill_input.total_weight_bytes = total_weight_bytes_;
+    prefill_input.streaming_chunk_bytes = peak_operation_weight_bytes_;
+    prefill_input.token_count = prompt_tokens.size();
+    prefill_input.context_length = context_length_;
+    prefill_input.bytes_per_element = sizeof(float);
+    prefill_input.safety_reserve_bytes = memory_budget_bytes_ / kGpuMemorySafetyReserveDivisor;
+    prefill_input.device_budget_bytes = memory_budget_bytes_;
+    prefill_input.stream_weights = true;
+    const auto prefill_estimate = estimate_model_gpu_memory(plan_, prefill_input);
+    memory_estimate_ = prefill_estimate;
+    if (!prefill_estimate.plan.fits) {
+        last_error_ = "GPU prefill memory preflight rejected the actual prompt length";
+        for (const auto& blocker : prefill_estimate.blockers) last_error_ += " | " + blocker;
+        for (const auto& blocker : prefill_estimate.plan.blockers) last_error_ += " | " + blocker;
+        return {StatusCode::OutOfMemory, last_error_};
+    }
+    last_error_.clear();
 
     for (const auto& name : plan_.external_inputs) {
         const bool recurrent = name.size() >= 15 &&
