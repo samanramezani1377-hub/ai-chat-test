@@ -470,7 +470,8 @@ Status execute_chunked_quantized_matmul_if_needed(
             // Admission is opportunistic: keep a safety margin for subsequent
             // compute allocations instead of pinning every streamed slice.
             const uint64_t cache_headroom = memory.available_bytes();
-            const uint64_t cache_reserve = memory.budget_bytes() / 16;
+            const uint64_t cache_reserve = std::max<uint64_t>(
+                64ull * 1024ull * 1024ull, memory.budget_bytes() / 8);
             if (context.weight_chunk_cache &&
                 cache_headroom >= std::max<uint64_t>(weight_bytes, cache_reserve))
                 context.weight_chunk_cache->insert(chunk_cache_key, weight_bytes, chunk.weight_lease);
