@@ -15,6 +15,7 @@ namespace ai_chat::gpu_engine {
 class OperatorRegistry;
 class ComputeGraph;
 class KvCache;
+class QuantizedWeightChunkCache;
 using ModelTensorBindings = std::unordered_map<std::string, Tensor>;
 
 struct QuantizedWeightChunkBinding {
@@ -48,6 +49,7 @@ struct ModelExecutionContext {
     uint64_t persistent_weight_cache_limit_bytes = 0;
     uint64_t persistent_weight_cache_hits = 0;
     uint64_t persistent_weight_cache_misses = 0;
+    std::shared_ptr<QuantizedWeightChunkCache> weight_chunk_cache;
     std::vector<MemoryLease> activation_leases;
     // Recurrent and convolution state survives prefill/decode graph rebuilds.
     std::vector<MemoryLease> state_leases;
