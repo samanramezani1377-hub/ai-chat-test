@@ -3436,6 +3436,13 @@ void test_model_plan_graph_compilation_is_fail_closed() {
     assert(compile_model_execution_plan(missing_input, BackendKind::OpenGles, lowerings, operators,
         {"input_a", "input_b"}, incomplete_context, incomplete_graph, report).code == StatusCode::Unsupported);
     assert(!report.unresolved_inputs.empty());
+    assert(report.compiled_nodes == 0);
+    const Status missing_input_status = compile_model_execution_plan(
+        missing_input, BackendKind::OpenGles, lowerings, operators,
+        {"input_a", "input_b"}, incomplete_context, incomplete_graph, report);
+    assert(missing_input_status.code == StatusCode::Unsupported);
+    assert(missing_input_status.message.find("unresolved_input:") != std::string::npos);
+    assert(missing_input_status.message.find("UNBOUND:input_c") != std::string::npos);
     assert(incomplete_graph.node_count() == 0); // partial graphs are never published
 }
 

@@ -10,6 +10,35 @@
 
 namespace ai_chat::gpu_engine {
 
+namespace {
+
+void append_report_items(std::string& message, const char* label,
+                         const std::vector<std::string>& items) {
+    constexpr size_t kMaximumItems = 12;
+    for (size_t index = 0; index < items.size() && index < kMaximumItems; ++index) {
+        message += " | ";
+        message += label;
+        message += ":";
+        message += items[index];
+    }
+    if (items.size() > kMaximumItems) {
+        message += " | ";
+        message += label;
+        message += ":...(" + std::to_string(items.size() - kMaximumItems) + " more)";
+    }
+}
+
+std::string describe_compile_failure(const ModelGraphCompileReport& report) {
+    std::string message = "Model execution plan could not be fully lowered into a validated compute graph";
+    message += " | compiled_nodes=" + std::to_string(report.compiled_nodes);
+    append_report_items(message, "missing_lowering", report.missing_lowerings);
+    append_report_items(message, "unresolved_input", report.unresolved_inputs);
+    append_report_items(message, "missing_weight", report.missing_weight_tensors);
+    append_report_items(message, "error", report.errors);
+    return message;
+}
+
+} // namespace
 
 std::string ModelLoweringRegistry::make_key(BackendKind backend, const std::string& name) {
     return std::to_string(static_cast<unsigned>(backend)) + ":" + name;
@@ -145,7 +174,7 @@ Status compile_model_execution_plan(ModelExecutionPlan& plan, BackendKind backen
         !report.unresolved_inputs.empty() || !report.missing_weight_tensors.empty() ||
         candidate.node_count() != plan.operations.size()) {
         report.compiled_nodes = candidate.node_count();
-        return {StatusCode::Unsupported, "Model execution plan could not be fully lowered into a validated compute graph"};
+        return {StatusCode::Unsupported, describe_compile_failure(report)};
     }
     graph = std::move(candidate);
     report.compiled = true;
