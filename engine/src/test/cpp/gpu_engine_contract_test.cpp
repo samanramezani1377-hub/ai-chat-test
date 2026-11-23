@@ -276,6 +276,31 @@ void test_tensor_and_memory_lease() {
 }
 
 
+void test_memory_manager_evicts_transient_pool_under_pressure() {
+    FakeBackend backend;
+    MemoryManager memory(backend, 128);
+
+    BufferDesc transient{64, 4, MemoryDomain::Device, false, "transient"};
+    MemoryLease first;
+    assert(memory.allocate(transient, first).ok());
+    first = MemoryLease{};
+    assert(memory.allocated_bytes() == 0);
+    assert(memory.available_bytes() == 64);
+
+    // The pooled 64-byte buffer plus this 80-byte request would exceed the
+    // 128-byte reservation ceiling. The unused pool must be reclaimed first.
+    BufferDesc persistent{80, 4, MemoryDomain::Device, true, "persistent-under-pressure"};
+    MemoryLease second;
+    assert(memory.allocate(persistent, second).ok());
+    assert(second && second.buffer()->size_bytes() == 80);
+    assert(memory.allocated_bytes() == 80);
+    assert(memory.available_bytes() == 48);
+
+    second = MemoryLease{};
+    assert(memory.allocated_bytes() == 0);
+    assert(memory.available_bytes() == 128);
+}
+
 class FakeArchitecture final : public ArchitectureAdapter {
 public:
     FakeArchitecture() {
@@ -3929,6 +3954,7 @@ int main() {
     test_sampler_min_p_filter();
     test_independent_gguf_reader();
     test_tensor_and_memory_lease();
+    test_memory_manager_evicts_transient_pool_under_pressure();
     test_operator_registry_fail_closed();
     test_universal_gles_operator_candidate_is_fail_closed();
     test_model_plan_graph_compilation_is_fail_closed();
