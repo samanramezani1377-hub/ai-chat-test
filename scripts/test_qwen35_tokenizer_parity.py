@@ -117,7 +117,7 @@ def main():
     config=download_json(BASE+"/tokenizer_config.json")
     corpus=[
         "Hello, world!","  leading and trailing   ","1234567890",
-        "we're testing Qwen3.5's tokenizer.","سلام دنیا، این یک آزمایش است.",
+        "we're testing Qwen3.5's tokenizer.","سلام", " سلام ", "سلام دنیا، این یک آزمایش است.",
         "می‌خواهم ۱۲۳ عدد و emoji 🧠🚀 را تست کنم.","e\u0301 cafe\u0301",
         "line one\r\nline two\n\t  "," punctuation!!! ... ???","   ",
         "emoji 🧑🏽‍💻 and symbols ©™","<|im_start|>assistant\nHello<|im_end|>",
