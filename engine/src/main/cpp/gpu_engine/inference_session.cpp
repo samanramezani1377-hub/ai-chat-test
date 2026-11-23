@@ -154,6 +154,7 @@ void GpuInferenceSession::unload_locked() noexcept {
     last_ttft_timing_valid_ = false;
     last_decode_timing_valid_ = false;
     last_generation_stage_ = "not_started";
+    q6_backend_validation_ = "not_run";
     last_prompt_tokens_ = 0;
     last_output_tokens_ = 0;
     last_decode_tokens_per_second_ = 0.0;
@@ -560,6 +561,54 @@ Status GpuInferenceSession::load_model(const std::string& path, uint32_t context
                           first_backend_failure.message + "; alternate backend: " + status.message;
             unload_locked();
             return {status.code, last_error_};
+        }
+    }
+
+
+    if (quantization_types.find(14) != quantization_types.end()) {
+        const bool needs_q6_matmul = std::any_of(plan_.operations.begin(), plan_.operations.end(),
+            [](const ModelPlanOperation& operation) { return operation.operator_name == "MatMul_Q6_K"; });
+        const bool needs_q6_embedding = std::any_of(plan_.operations.begin(), plan_.operations.end(),
+            [](const ModelPlanOperation& operation) { return operation.operator_name == "Embedding_Q6_K"; });
+        q6_backend_validation_ = "decode_reference=validated;active_backend=" +
+            backend_label(backend_kind) + ":passed";
+        const BackendKind alternate_backend = backend_kind == BackendKind::DawnWebGpu
+            ? BackendKind::OpenGles : BackendKind::DawnWebGpu;
+
+        engine_->shutdown();
+        Status alternate_status = engine_->initialize(alternate_backend);
+        if (alternate_status.ok() && engine_->active_backend() &&
+            engine_->active_backend()->kind() == alternate_backend) {
+            std::string alternate_result = backend_label(alternate_backend) + ":";
+            if (needs_q6_matmul) {
+                Status q6_status = validate_q6_k_matmul_kernel(
+                    *engine_->active_backend(), *operators_, *quantizations_);
+                alternate_result += "matmul=";
+                alternate_result += q6_status.ok() ? "passed" : "failed:" + q6_status.message;
+            } else {
+                alternate_result += "matmul=not_required";
+            }
+            if (needs_q6_embedding) {
+                Status q6_status = validate_q6_k_embedding_kernel(
+                    *engine_->active_backend(), *operators_, *quantizations_);
+                alternate_result += ";embedding=";
+                alternate_result += q6_status.ok() ? "passed" : "failed:" + q6_status.message;
+            } else {
+                alternate_result += ";embedding=not_required";
+            }
+            q6_backend_validation_ += ";" + alternate_result;
+        } else {
+            q6_backend_validation_ += ";" + backend_label(alternate_backend) +
+                ":unavailable:" + alternate_status.message;
+        }
+
+        engine_->shutdown();
+        Status restore_status = engine_->initialize(backend_kind);
+        if (!restore_status.ok()) {
+            last_error_ = "Failed to restore the selected GPU backend after cross-backend Q6_K validation: " +
+                          restore_status.message;
+            unload_locked();
+            return {restore_status.code, last_error_};
         }
     }
 
@@ -1154,6 +1203,7 @@ std::string GpuInferenceSession::diagnostics() const {
            << ";single_tensor_chunking=Q6_K_MATMUL_CHANNELS_AND_EMBEDDING_ROW_GATHER"
            << ";chunked_operator_support=F32_ELEMENTWISE,Q6_K_MATMUL,Q6_K_EMBEDDING"
            << ";backend_kernel_validation=runtime-numerical"
+           << ";q6_backend_validation=" << q6_backend_validation_
            << ";model_reference_parity=UNVERIFIED"
            << ";model_graph_validation=UNVERIFIED"
            << ";context_length=" << context_length_

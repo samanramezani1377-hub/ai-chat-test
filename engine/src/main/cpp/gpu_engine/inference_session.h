@@ -79,6 +79,7 @@ private:
     bool last_ttft_timing_valid_ = false;
     bool last_decode_timing_valid_ = false;
     std::string last_generation_stage_ = "not_started";
+    std::string q6_backend_validation_ = "not_run";
     uint64_t last_prompt_tokens_ = 0;
     uint64_t last_output_tokens_ = 0;
     double last_decode_tokens_per_second_ = 0.0;

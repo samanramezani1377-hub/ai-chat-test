@@ -28,6 +28,7 @@ class MainActivity : Activity() {
     private lateinit var statusView: TextView
     private lateinit var importButton: Button
     private lateinit var generateButton: Button
+    private lateinit var matrixButton: Button
     private lateinit var promptInput: EditText
     private lateinit var generatedOutput: TextView
     private val logBuffer = StringBuilder()
@@ -110,6 +111,12 @@ class MainActivity : Activity() {
             setOnClickListener { openModelPicker() }
         }
         root.addView(importButton, LinearLayout.LayoutParams(-1, -2))
+
+        matrixButton = Button(this).apply {
+            text = "Run on-device model / quantization matrix"
+            setOnClickListener { runOnDeviceModelMatrix() }
+        }
+        root.addView(matrixButton, LinearLayout.LayoutParams(-1, -2))
 
         promptInput = EditText(this).apply {
             hint = "Enter a prompt to test GPU inference"
@@ -254,6 +261,113 @@ class MainActivity : Activity() {
             statusView.text = if (result == 0) "GPU model activation succeeded" else "GPU model activation failed (code $result)"
             generateButton.isEnabled = result == 0
             importButton.isEnabled = true
+        }
+    }
+
+
+    private fun runOnDeviceModelMatrix() {
+        val modelDirectory = File(filesDir, "models")
+        val models = modelDirectory.listFiles()
+            ?.filter { it.isFile && it.extension.equals("gguf", ignoreCase = true) }
+            ?.sortedBy { it.name }
+            .orEmpty()
+        if (models.isEmpty()) {
+            statusView.text = "Import at least one GGUF model first"
+            return
+        }
+
+        importButton.isEnabled = false
+        generateButton.isEnabled = false
+        matrixButton.isEnabled = false
+        statusView.text = "Running " + models.size + " model(s)…"
+        appendLog("GPU_MODEL_MATRIX_BEGIN")
+        appendLog("matrix_model_count=" + models.size)
+        appendLog("matrix_context_length=$contextLength")
+        appendLog("matrix_backend_policy=GPU_ONLY_VULKAN_DISABLED")
+
+        thread(name = "gpu-engine-model-matrix") {
+            val report = StringBuilder()
+            report.append("GPU Engine on-device model matrix\n")
+            report.append("device=" + Build.MANUFACTURER + " " + Build.MODEL + "\n")
+            report.append("android_sdk=" + Build.VERSION.SDK_INT + "\n")
+            report.append("context_length=" + contextLength + "\n")
+            report.append("vulkan=disabled\n\n")
+
+            for ((index, modelFile) in models.withIndex()) {
+                appendLog("MATRIX_MODEL_BEGIN=" + (index + 1) + "/" + models.size + ":" + modelFile.name)
+                report.append("MODEL," + modelFile.name + "\n")
+                report.append("model_size_bytes=" + modelFile.length() + "\n")
+
+                runCatching {
+                    GpuEngineTestApi.stop()
+                    GpuEngineTestApi.unload()
+
+                    val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                    val memoryInfo = ActivityManager.MemoryInfo()
+                    activityManager.getMemoryInfo(memoryInfo)
+                    val divisor = if (memoryInfo.lowMemory) 4L else 2L
+                    val capBytes = minOf(
+                        (memoryInfo.availMem - memoryInfo.threshold).coerceAtLeast(0L) / divisor,
+                        memoryInfo.totalMem / 4L
+                    ).coerceAtLeast(1L)
+
+                    val loadStarted = System.nanoTime()
+                    val loadResult = GpuEngineTestApi.loadModel(modelFile.absolutePath, contextLength, capBytes)
+                    val loadMs = (System.nanoTime() - loadStarted) / 1_000_000L
+                    val loadDiagnostics = GpuEngineTestApi.diagnostics()
+                    appendLog("MATRIX_LOAD_RESULT=$loadResult")
+                    appendLog("MATRIX_LOAD_MS=$loadMs")
+                    appendLog(loadDiagnostics)
+                    report.append("load_result=" + loadResult + "\n")
+                    report.append("load_ms=" + loadMs + "\n")
+                    report.append("load_diagnostics=" + loadDiagnostics + "\n")
+
+                    if (loadResult == 0) {
+                        val output = StringBuilder()
+                        val prompt = "Reply with exactly GPU_OK and nothing else."
+                        val generationStarted = System.nanoTime()
+                        val generationResult = GpuEngineTestApi.generate(prompt, maxTokens = 16) { token ->
+                            output.append(token)
+                        }
+                        val generationMs = (System.nanoTime() - generationStarted) / 1_000_000L
+                        val generationDiagnostics = GpuEngineTestApi.diagnostics()
+                        val exactMatch = output.toString().trim() == "GPU_OK"
+                        appendLog("MATRIX_GENERATION_RESULT=$generationResult")
+                        appendLog("MATRIX_GENERATION_MS=$generationMs")
+                        appendLog("MATRIX_OUTPUT_EXACT_MATCH=$exactMatch")
+                        appendLog("MATRIX_OUTPUT=" + output.toString())
+                        appendLog(generationDiagnostics)
+                        report.append("generation_result=" + generationResult + "\n")
+                        report.append("generation_ms=" + generationMs + "\n")
+                        report.append("output_exact_match=" + exactMatch + "\n")
+                        report.append("output=" + output.toString().replace("\n", " ") + "\n")
+                        report.append("generation_diagnostics=" + generationDiagnostics + "\n")
+                    } else {
+                        report.append("generation_result=SKIPPED_LOAD_FAILED\n")
+                    }
+                }.onFailure { error ->
+                    appendLog("MATRIX_MODEL_EXCEPTION=" + modelFile.name + ":" +
+                        error::class.java.name + ":" + error.message)
+                    report.append("exception=" + error::class.java.name + ":" + error.message + "\n")
+                }
+
+                GpuEngineTestApi.stop()
+                GpuEngineTestApi.unload()
+                report.append("\n")
+                appendLog("MATRIX_MODEL_END=" + modelFile.name)
+            }
+
+            val reportFile = File(filesDir, "gpu-engine-matrix-report.txt")
+            runCatching { reportFile.writeText(report.toString()) }
+                .onSuccess { appendLog("GPU_MODEL_MATRIX_REPORT_PATH=" + reportFile.absolutePath) }
+                .onFailure { appendLog("GPU_MODEL_MATRIX_REPORT_WRITE_FAILED=" + it.message) }
+            appendLog("GPU_MODEL_MATRIX_END")
+            runOnUiThread {
+                statusView.text = "Model matrix completed (" + models.size + " model(s)); see full log"
+                importButton.isEnabled = true
+                generateButton.isEnabled = false
+                matrixButton.isEnabled = true
+            }
         }
     }
 
