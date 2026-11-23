@@ -41,6 +41,72 @@ bool lcm_checked(uint64_t a, uint64_t b, uint64_t& out) {
 
 } // namespace
 
+QuantizedWeightChunkCache::QuantizedWeightChunkCache(uint64_t capacity_bytes)
+    : capacity_bytes_(capacity_bytes) {}
+
+bool QuantizedWeightChunkCache::find(const std::string& key, MemoryLease& out) {
+    out = MemoryLease{};
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto found = index_.find(key);
+    if (found == index_.end()) {
+        ++misses_;
+        return false;
+    }
+    lru_.splice(lru_.begin(), lru_, found->second);
+    out = found->second->lease;
+    ++hits_;
+    return static_cast<bool>(out) && static_cast<bool>(out.buffer());
+}
+
+void QuantizedWeightChunkCache::insert(const std::string& key, uint64_t bytes,
+                                       const MemoryLease& lease) {
+    if (key.empty() || bytes == 0 || !lease || !lease.buffer() ||
+        lease.buffer()->size_bytes() < bytes) return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (bytes > capacity_bytes_) return;
+    const auto existing = index_.find(key);
+    if (existing != index_.end()) {
+        resident_bytes_ -= existing->second->bytes;
+        lru_.erase(existing->second);
+        index_.erase(existing);
+    }
+    while (!lru_.empty() && resident_bytes_ > capacity_bytes_ - bytes) {
+        auto last = std::prev(lru_.end());
+        resident_bytes_ -= last->bytes;
+        index_.erase(last->key);
+        lru_.erase(last);
+        ++evictions_;
+    }
+    lru_.push_front(Entry{key, bytes, lease});
+    index_[key] = lru_.begin();
+    resident_bytes_ += bytes;
+}
+
+void QuantizedWeightChunkCache::set_capacity(uint64_t capacity_bytes) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    capacity_bytes_ = capacity_bytes;
+    while (!lru_.empty() && resident_bytes_ > capacity_bytes_) {
+        auto last = std::prev(lru_.end());
+        resident_bytes_ -= last->bytes;
+        index_.erase(last->key);
+        lru_.erase(last);
+        ++evictions_;
+    }
+}
+
+void QuantizedWeightChunkCache::clear() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    index_.clear();
+    lru_.clear();
+    resident_bytes_ = 0;
+}
+
+QuantizedWeightChunkCacheStats QuantizedWeightChunkCache::stats() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return {hits_, misses_, evictions_, resident_bytes_,
+            static_cast<uint64_t>(lru_.size())};
+}
+
 
 Status load_model_execution_weights(const GgufReader& reader,
                                     const ModelExecutionPlan& plan,
