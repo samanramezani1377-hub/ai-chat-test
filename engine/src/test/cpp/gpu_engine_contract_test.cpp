@@ -589,25 +589,28 @@ void test_ssm_conv1d_reference_preserves_causal_history() {
 }
 
 void test_gated_delta_net_reference_updates_state_and_output() {
-    constexpr uint32_t tokens = 1, state_size = 2, value_heads = 2, key_heads = 1;
-    const std::vector<float> q{1.0f, 0.0f};
-    const std::vector<float> k{1.0f, 0.0f};
-    const std::vector<float> v{2.0f, 3.0f, 4.0f, 5.0f};
-    const std::vector<float> gate{0.0f, 0.0f};
-    const std::vector<float> beta{1.0f, 1.0f};
+    constexpr uint32_t tokens = 1, state_size = 2, value_heads = 4, key_heads = 2;
+    // GGUF Qwen3.5 V heads are tiled: K0, K1, K0, K1.
+    const std::vector<float> q{1.0f, 0.0f, 0.0f, 1.0f};
+    const std::vector<float> k{1.0f, 0.0f, 0.0f, 1.0f};
+    const std::vector<float> v{2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
+    const std::vector<float> gate(value_heads, 0.0f);
+    const std::vector<float> beta(value_heads, 1.0f);
     std::vector<float> state(value_heads * state_size * state_size, 0.0f);
     std::vector<float> output(v.size(), 0.0f);
     assert(reference_gated_delta_net_f32(q.data(), k.data(), v.data(), gate.data(),
         beta.data(), state.data(), output.data(), tokens, state_size,
         value_heads, key_heads).ok());
-    assert(std::fabs(output[0] - 2.0f / std::sqrt(2.0f)) < 1.0e-6f);
-    assert(std::fabs(output[1] - 3.0f / std::sqrt(2.0f)) < 1.0e-6f);
-    assert(std::fabs(output[2] - 4.0f / std::sqrt(2.0f)) < 1.0e-6f);
-    assert(std::fabs(output[3] - 5.0f / std::sqrt(2.0f)) < 1.0e-6f);
+    for (size_t i = 0; i < output.size(); ++i)
+        assert(std::fabs(output[i] - v[i] / std::sqrt(2.0f)) < 1.0e-6f);
     assert(std::fabs(state[0] - 2.0f) < 1.0e-6f);
     assert(std::fabs(state[1] - 3.0f) < 1.0e-6f);
-    assert(std::fabs(state[4] - 4.0f) < 1.0e-6f);
-    assert(std::fabs(state[5] - 5.0f) < 1.0e-6f);
+    assert(std::fabs(state[6] - 4.0f) < 1.0e-6f);
+    assert(std::fabs(state[7] - 5.0f) < 1.0e-6f);
+    assert(std::fabs(state[8] - 6.0f) < 1.0e-6f);
+    assert(std::fabs(state[9] - 7.0f) < 1.0e-6f);
+    assert(std::fabs(state[14] - 8.0f) < 1.0e-6f);
+    assert(std::fabs(state[15] - 9.0f) < 1.0e-6f);
 }
 
 void test_gdn_l2_norm_reference() {
