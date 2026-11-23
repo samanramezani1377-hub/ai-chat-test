@@ -4171,8 +4171,7 @@ Status build_q5_matmul_candidate_impl(const Tensor& activations, const std::shar
     dispatch.kernel_id = "dawn-" + suffix + "-matmul-f32-activation-v1";
     dispatch.backend = BackendKind::DawnWebGpu;
     dispatch.wgsl_source = q5_1 ? kQ5_1MatMulWgsl : kQ5_0MatMulWgsl;
-    dispatch.workgroup_size_x = 64;
-    dispatch.workgroup_size_y = 1;
+    dispatch.workgroup_size_x = dispatch.workgroup_size_y = 8;
     const std::pair<std::string,std::string> constants[] = {
         {"const ROWS: u32 = 1u;", "const ROWS: u32 = "+std::to_string(a[0])+"u;"},
         {"const OUTPUT_CHANNELS: u32 = 1u;", "const OUTPUT_CHANNELS: u32 = "+std::to_string(channels)+"u;"},
@@ -4995,7 +4994,8 @@ Status build_q6_k_matmul_candidate_impl(const Tensor& activations,
     dispatch.backend = gles ? BackendKind::OpenGles : BackendKind::DawnWebGpu;
     if (gles) dispatch.glsl_source = kQ6_KMatMulGlsl;
     else dispatch.wgsl_source = kQ6_KMatMulWgsl;
-    dispatch.workgroup_size_x = dispatch.workgroup_size_y = 8;
+    dispatch.workgroup_size_x = 64;
+    dispatch.workgroup_size_y = 1;
 
     const std::pair<std::string, std::string> wgsl_constants[] = {
         {"const ROWS: u32 = 1u;", "const ROWS: u32 = " + std::to_string(rows) + "u;"},
@@ -5029,8 +5029,8 @@ Status build_q6_k_matmul_candidate_impl(const Tensor& activations,
         : specialize(dispatch.wgsl_source, wgsl_constants, sizeof(wgsl_constants) / sizeof(wgsl_constants[0]));
     if (!status.ok()) return status;
 
-    dispatch.workgroups_x = static_cast<uint32_t>((chunk_channels + 7) / 8);
-    dispatch.workgroups_y = static_cast<uint32_t>((rows + 7) / 8);
+    dispatch.workgroups_x = static_cast<uint32_t>((chunk_channels + 63) / 64);
+    dispatch.workgroups_y = static_cast<uint32_t>(rows);
     dispatch.bindings = {
         {0, activations.buffer(), activations.byte_offset(), activations.byte_size()},
         {1, weights, 0, padded},
