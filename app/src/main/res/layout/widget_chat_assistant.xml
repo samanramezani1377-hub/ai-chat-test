@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_chat_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="14dp"
+    android:background="@drawable/widget_surface">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="دستیار هوشمند"
+        android:textStyle="bold"
+        android:textSize="15sp"
+        android:textColor="#18212B" />
+
+    <TextView
+        android:id="@+id/widget_chat_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="3dp"
+        android:text="آماده"
+        android:textSize="11sp"
+        android:textColor="#687684" />
+
+    <TextView
+        android:id="@+id/widget_chat_reply"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="10dp"
+        android:padding="10dp"
+        android:background="@drawable/widget_message_surface"
+        android:text="پیامت را از همین ویجت بفرست و پاسخ را همین‌جا بگیر."
+        android:textSize="13sp"
+        android:textColor="#18212B"
+        android:gravity="top|start"
+        android:maxLines="7"
+        android:ellipsize="end" />
+
+    <Button
+        android:id="@+id/widget_chat_compose"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_marginTop="9dp"
+        android:text="نوشتن پیام"
+        android:textAllCaps="false"
+        android:backgroundTint="#245C8A"
+        android:textColor="#FFFFFF" />
+</LinearLayout>

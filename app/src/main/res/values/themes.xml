@@ -7,4 +7,13 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
+    <style name="Theme.WidgetComposeDialog" parent="android:style/Theme.Material.Light.Dialog.NoActionBar">
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:windowMinWidthMajor">94%</item>
+        <item name="android:windowMinWidthMinor">94%</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
+        <item name="android:colorAccent">#245C8A</item>
+    </style>
 </resources>
